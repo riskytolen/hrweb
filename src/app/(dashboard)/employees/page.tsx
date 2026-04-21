@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Users,
   Plus,
@@ -33,7 +33,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import { employees, type Employee } from "@/lib/mock-data";
-import { cn, getInitials, formatShortDate } from "@/lib/utils";
+import { cn, formatShortDate } from "@/lib/utils";
 
 // ─── Status helpers ───
 const statusVariant: Record<string, "success" | "warning" | "muted"> = {
@@ -181,6 +181,16 @@ export default function EmployeesPage() {
   const [csvFileName, setCsvFileName] = useState("");
   const [csvImportSuccess, setCsvImportSuccess] = useState(false);
 
+  // Lock body scroll saat panel/modal terbuka
+  useEffect(() => {
+    if (selectedEmployee || showAddForm || showImportCsv) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [selectedEmployee, showAddForm, showImportCsv]);
+
   const handleOpenDetail = (emp: Employee) => {
     setSelectedEmployee(emp);
     setIsEditing(false);
@@ -191,6 +201,8 @@ export default function EmployeesPage() {
     if (!selectedEmployee) return;
     setEditData({
       nama: selectedEmployee.nama,
+      jenisKelamin: selectedEmployee.jenisKelamin,
+      agama: selectedEmployee.agama,
       noKtp: selectedEmployee.noKtp,
       tempatLahir: selectedEmployee.tempatLahir,
       tanggalLahir: selectedEmployee.tanggalLahir,
@@ -237,7 +249,7 @@ export default function EmployeesPage() {
 
   // ─── CSV Import handlers ───
   const csvExpectedHeaders = [
-    "ID", "NAMA", "STATUS", "NO_KTP", "TEMPAT_LAHIR", "TANGGAL_LAHIR",
+    "ID", "NAMA", "JENIS_KELAMIN", "AGAMA", "STATUS", "NO_KTP", "TEMPAT_LAHIR", "TANGGAL_LAHIR",
     "ALAMAT_KTP", "ALAMAT_DOMISILI", "NO_TELP", "TANGGAL_BERGABUNG",
     "JABATAN", "STATUS_PERNIKAHAN", "NAMA_PASANGAN", "JUMLAH_ANAK",
     "NO_BPJS_KESEHATAN", "NO_BPJS_KETENAGAKERJAAN", "NO_REKENING",
@@ -431,8 +443,12 @@ export default function EmployeesPage() {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                          {getInitials(emp.nama)}
+                        <div className="relative w-9 h-9 rounded-full bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 flex items-center justify-center flex-shrink-0 group-hover:border-primary/40">
+                          <User className="w-4 h-4 text-primary/70" />
+                          <div className={cn(
+                            "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-card",
+                            emp.status === "Aktif" ? "bg-emerald-400" : emp.status === "Cuti" ? "bg-amber-400" : "bg-slate-300"
+                          )} />
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-foreground">{emp.nama}</p>
@@ -472,8 +488,12 @@ export default function EmployeesPage() {
             {/* Header */}
             <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-sm font-bold">
-                  {getInitials(isEditing ? (editData.nama as string) || selectedEmployee.nama : selectedEmployee.nama)}
+                <div className="relative w-11 h-11 rounded-full bg-gradient-to-br from-primary/10 to-accent/10 border-2 border-primary/20 flex items-center justify-center">
+                  <User className="w-5 h-5 text-primary/70" />
+                  <div className={cn(
+                    "absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-card",
+                    selectedEmployee.status === "Aktif" ? "bg-emerald-400" : selectedEmployee.status === "Cuti" ? "bg-amber-400" : "bg-slate-300"
+                  )} />
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-foreground">
@@ -519,6 +539,8 @@ export default function EmployeesPage() {
                   <Section title="Data Pribadi" icon={User}>
                     <EditField label="Nama Lengkap" value={selectedEmployee.nama} field="nama" editData={editData} setEditData={setEditData} />
                     <EditField label="No. KTP (NIK)" value={selectedEmployee.noKtp} field="noKtp" editData={editData} setEditData={setEditData} />
+                    <EditField label="Jenis Kelamin" value={selectedEmployee.jenisKelamin} field="jenisKelamin" editData={editData} setEditData={setEditData} type="select" options={["Laki-laki", "Perempuan"]} />
+                    <EditField label="Agama" value={selectedEmployee.agama} field="agama" editData={editData} setEditData={setEditData} type="select" options={["Islam", "Kristen", "Katolik", "Hindu", "Buddha", "Konghucu"]} />
                     <EditField label="Tempat Lahir" value={selectedEmployee.tempatLahir} field="tempatLahir" editData={editData} setEditData={setEditData} />
                     <EditField label="Tanggal Lahir" value={selectedEmployee.tanggalLahir} field="tanggalLahir" editData={editData} setEditData={setEditData} type="date" />
                     <EditField label="Alamat KTP" value={selectedEmployee.alamatKtp} field="alamatKtp" editData={editData} setEditData={setEditData} type="textarea" full />
@@ -583,6 +605,8 @@ export default function EmployeesPage() {
                   <Section title="Data Pribadi" icon={User}>
                     <Field label="Nama Lengkap" value={selectedEmployee.nama} copyable />
                     <Field label="No. KTP (NIK)" value={selectedEmployee.noKtp} copyable />
+                    <Field label="Jenis Kelamin" value={selectedEmployee.jenisKelamin} />
+                    <Field label="Agama" value={selectedEmployee.agama} />
                     <Field label="Tempat Lahir" value={selectedEmployee.tempatLahir} />
                     <Field label="Tanggal Lahir" value={formatShortDate(selectedEmployee.tanggalLahir)} />
                     <Field label="Alamat KTP" value={selectedEmployee.alamatKtp} full copyable />
@@ -676,6 +700,24 @@ export default function EmployeesPage() {
                   </FormField>
                   <FormField label="No. KTP (NIK)" required>
                     <input type="text" placeholder="16 digit NIK" maxLength={16} className={inputClass} />
+                  </FormField>
+                  <FormField label="Jenis Kelamin" required>
+                    <select className={selectClass}>
+                      <option value="">Pilih jenis kelamin</option>
+                      <option value="Laki-laki">Laki-laki</option>
+                      <option value="Perempuan">Perempuan</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Agama" required>
+                    <select className={selectClass}>
+                      <option value="">Pilih agama</option>
+                      <option value="Islam">Islam</option>
+                      <option value="Kristen">Kristen</option>
+                      <option value="Katolik">Katolik</option>
+                      <option value="Hindu">Hindu</option>
+                      <option value="Buddha">Buddha</option>
+                      <option value="Konghucu">Konghucu</option>
+                    </select>
                   </FormField>
                   <FormField label="Tempat Lahir" required>
                     <input type="text" placeholder="Kota kelahiran" className={inputClass} />

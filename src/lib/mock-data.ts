@@ -6,6 +6,8 @@
 export interface Employee {
   id: string;
   nama: string;
+  jenisKelamin: "Laki-laki" | "Perempuan";
+  agama: "Islam" | "Kristen" | "Katolik" | "Hindu" | "Buddha" | "Konghucu";
   status: "Aktif" | "Tidak Aktif" | "Cuti";
   noKtp: string;
   tempatLahir: string;
@@ -35,6 +37,8 @@ export const employees: Employee[] = [
   {
     id: "ID57201",
     nama: "Budi Santoso",
+    jenisKelamin: "Laki-laki",
+    agama: "Islam",
     status: "Aktif",
     noKtp: "3201011234560001",
     tempatLahir: "Jakarta",
@@ -62,6 +66,8 @@ export const employees: Employee[] = [
   {
     id: "ID57202",
     nama: "Siti Nurhaliza",
+    jenisKelamin: "Perempuan",
+    agama: "Islam",
     status: "Aktif",
     noKtp: "3201021234560002",
     tempatLahir: "Bandung",
@@ -89,6 +95,8 @@ export const employees: Employee[] = [
   {
     id: "ID57203",
     nama: "Ahmad Fauzi",
+    jenisKelamin: "Laki-laki",
+    agama: "Islam",
     status: "Aktif",
     noKtp: "3201031234560003",
     tempatLahir: "Surabaya",
@@ -116,6 +124,8 @@ export const employees: Employee[] = [
   {
     id: "ID57204",
     nama: "Dewi Lestari",
+    jenisKelamin: "Perempuan",
+    agama: "Hindu",
     status: "Aktif",
     noKtp: "3201041234560004",
     tempatLahir: "Yogyakarta",
@@ -143,6 +153,8 @@ export const employees: Employee[] = [
   {
     id: "ID57205",
     nama: "Rizky Pratama",
+    jenisKelamin: "Laki-laki",
+    agama: "Islam",
     status: "Aktif",
     noKtp: "3201051234560005",
     tempatLahir: "Semarang",
@@ -170,6 +182,8 @@ export const employees: Employee[] = [
   {
     id: "ID57206",
     nama: "Maya Anggraini",
+    jenisKelamin: "Perempuan",
+    agama: "Kristen",
     status: "Aktif",
     noKtp: "3201061234560006",
     tempatLahir: "Medan",
@@ -197,6 +211,8 @@ export const employees: Employee[] = [
   {
     id: "ID57207",
     nama: "Hendra Wijaya",
+    jenisKelamin: "Laki-laki",
+    agama: "Buddha",
     status: "Aktif",
     noKtp: "3201071234560007",
     tempatLahir: "Makassar",
@@ -224,6 +240,8 @@ export const employees: Employee[] = [
   {
     id: "ID57208",
     nama: "Putri Rahayu",
+    jenisKelamin: "Perempuan",
+    agama: "Hindu",
     status: "Cuti",
     noKtp: "3201081234560008",
     tempatLahir: "Denpasar",
@@ -251,6 +269,8 @@ export const employees: Employee[] = [
   {
     id: "ID57209",
     nama: "Andi Setiawan",
+    jenisKelamin: "Laki-laki",
+    agama: "Islam",
     status: "Aktif",
     noKtp: "3201091234560009",
     tempatLahir: "Palembang",
@@ -278,6 +298,8 @@ export const employees: Employee[] = [
   {
     id: "ID57210",
     nama: "Rina Wulandari",
+    jenisKelamin: "Perempuan",
+    agama: "Katolik",
     status: "Aktif",
     noKtp: "3201101234560010",
     tempatLahir: "Bogor",
@@ -305,6 +327,8 @@ export const employees: Employee[] = [
   {
     id: "ID57211",
     nama: "Fajar Nugroho",
+    jenisKelamin: "Laki-laki",
+    agama: "Islam",
     status: "Aktif",
     noKtp: "3201111234560011",
     tempatLahir: "Solo",
@@ -332,6 +356,8 @@ export const employees: Employee[] = [
   {
     id: "ID57212",
     nama: "Lina Marlina",
+    jenisKelamin: "Perempuan",
+    agama: "Islam",
     status: "Tidak Aktif",
     noKtp: "3201121234560012",
     tempatLahir: "Cirebon",
