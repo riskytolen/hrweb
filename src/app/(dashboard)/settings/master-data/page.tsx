@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Database,
   Plus,
@@ -17,48 +17,11 @@ import {
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
+import { supabase, type DbLevel, type DbJabatan } from "@/lib/supabase";
 
 // ─── Types ───
-interface Level {
-  id: number;
-  nama: string;
-  urutan: number;
-  status: "Aktif" | "Tidak Aktif";
-}
-
-interface Jabatan {
-  id: number;
-  nama: string;
-  deskripsi: string;
-  level: string;
-  status: "Aktif" | "Tidak Aktif";
-}
-
-// ─── Initial Data ───
-const initialLevels: Level[] = [
-  { id: 1, nama: "Intern", urutan: 1, status: "Aktif" },
-  { id: 2, nama: "Junior", urutan: 2, status: "Aktif" },
-  { id: 3, nama: "Staff", urutan: 3, status: "Aktif" },
-  { id: 4, nama: "Senior", urutan: 4, status: "Aktif" },
-  { id: 5, nama: "Lead", urutan: 5, status: "Aktif" },
-  { id: 6, nama: "Manager", urutan: 6, status: "Aktif" },
-  { id: 7, nama: "Director", urutan: 7, status: "Aktif" },
-];
-
-const initialJabatan: Jabatan[] = [
-  { id: 1, nama: "Senior Software Engineer", deskripsi: "Pengembang perangkat lunak senior", level: "Senior", status: "Aktif" },
-  { id: 2, nama: "Marketing Manager", deskripsi: "Manajer divisi pemasaran", level: "Manager", status: "Aktif" },
-  { id: 3, nama: "Sales Executive", deskripsi: "Eksekutif penjualan", level: "Staff", status: "Aktif" },
-  { id: 4, nama: "HR Specialist", deskripsi: "Spesialis sumber daya manusia", level: "Staff", status: "Aktif" },
-  { id: 5, nama: "Frontend Developer", deskripsi: "Pengembang antarmuka pengguna", level: "Junior", status: "Aktif" },
-  { id: 6, nama: "Financial Analyst", deskripsi: "Analis keuangan perusahaan", level: "Staff", status: "Aktif" },
-  { id: 7, nama: "Operations Manager", deskripsi: "Manajer operasional", level: "Manager", status: "Aktif" },
-  { id: 8, nama: "UI/UX Designer", deskripsi: "Desainer antarmuka dan pengalaman pengguna", level: "Staff", status: "Aktif" },
-  { id: 9, nama: "Backend Developer", deskripsi: "Pengembang sisi server", level: "Junior", status: "Aktif" },
-  { id: 10, nama: "Content Strategist", deskripsi: "Perencana strategi konten", level: "Staff", status: "Aktif" },
-  { id: 11, nama: "Account Manager", deskripsi: "Pengelola akun klien", level: "Staff", status: "Aktif" },
-  { id: 12, nama: "Recruitment Lead", deskripsi: "Pimpinan tim rekrutmen", level: "Lead", status: "Tidak Aktif" },
-];
+type Level = DbLevel;
+type Jabatan = DbJabatan & { levelNama?: string };
 
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const selectClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 appearance-none text-foreground";
@@ -75,7 +38,7 @@ export default function MasterDataPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("level");
 
   // ─── Level State ───
-  const [levelList, setLevelList] = useState<Level[]>(initialLevels);
+  const [levelList, setLevelList] = useState<Level[]>([]);
   const [levelSearch, setLevelSearch] = useState("");
   const [showLevelForm, setShowLevelForm] = useState(false);
   const [editingLevelId, setEditingLevelId] = useState<number | null>(null);
@@ -83,14 +46,32 @@ export default function MasterDataPage() {
   const [deleteLevelConfirm, setDeleteLevelConfirm] = useState<number | null>(null);
 
   // ─── Jabatan State ───
-  const [jabatanList, setJabatanList] = useState<Jabatan[]>(initialJabatan);
+  const [jabatanList, setJabatanList] = useState<Jabatan[]>([]);
   const [jabatanSearch, setJabatanSearch] = useState("");
   const [showJabatanForm, setShowJabatanForm] = useState(false);
   const [editingJabatanId, setEditingJabatanId] = useState<number | null>(null);
-  const [jabatanForm, setJabatanForm] = useState({ nama: "", deskripsi: "", level: "Staff", status: "Aktif" });
+  const [jabatanForm, setJabatanForm] = useState({ nama: "", deskripsi: "", level_id: 0, status: "Aktif" });
   const [deleteJabatanConfirm, setDeleteJabatanConfirm] = useState<number | null>(null);
 
   const [successMsg, setSuccessMsg] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  // ─── Fetch data from Supabase ───
+  const fetchLevels = async () => {
+    const { data } = await supabase.from("levels").select("*").order("urutan");
+    if (data) setLevelList(data);
+  };
+
+  const fetchJabatan = async () => {
+    const { data } = await supabase.from("jabatan").select("*, levels(nama)").order("nama");
+    if (data) {
+      setJabatanList(data.map((j) => ({ ...j, levelNama: j.levels?.nama || "-" })));
+    }
+  };
+
+  useEffect(() => {
+    Promise.all([fetchLevels(), fetchJabatan()]).then(() => setLoading(false));
+  }, []);
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -113,51 +94,74 @@ export default function MasterDataPage() {
     setEditingLevelId(l.id);
     setShowLevelForm(true);
   };
-  const handleSaveLevel = () => {
+  const handleSaveLevel = async () => {
     if (!levelForm.nama.trim()) return;
     if (editingLevelId !== null) {
-      setLevelList((p) => p.map((l) => l.id === editingLevelId ? { ...l, nama: levelForm.nama, urutan: levelForm.urutan, status: levelForm.status as Level["status"] } : l));
+      await supabase.from("levels").update({ nama: levelForm.nama, urutan: levelForm.urutan, status: levelForm.status }).eq("id", editingLevelId);
       showSuccess("Level berhasil diperbarui");
     } else {
-      const newId = Math.max(0, ...levelList.map((l) => l.id)) + 1;
-      setLevelList((p) => [...p, { id: newId, nama: levelForm.nama, urutan: levelForm.urutan, status: levelForm.status as Level["status"] }]);
+      await supabase.from("levels").insert({ nama: levelForm.nama, urutan: levelForm.urutan, status: levelForm.status });
       showSuccess("Level baru berhasil ditambahkan");
     }
     setShowLevelForm(false);
+    fetchLevels();
+    fetchJabatan();
   };
-  const handleDeleteLevel = (id: number) => { setLevelList((p) => p.filter((l) => l.id !== id)); setDeleteLevelConfirm(null); showSuccess("Level berhasil dihapus"); };
-  const handleToggleLevelStatus = (id: number) => { setLevelList((p) => p.map((l) => l.id === id ? { ...l, status: l.status === "Aktif" ? "Tidak Aktif" : "Aktif" } : l)); };
+  const handleDeleteLevel = async (id: number) => {
+    await supabase.from("levels").delete().eq("id", id);
+    setDeleteLevelConfirm(null);
+    showSuccess("Level berhasil dihapus");
+    fetchLevels();
+  };
+  const handleToggleLevelStatus = async (id: number) => {
+    const level = levelList.find((l) => l.id === id);
+    if (!level) return;
+    const newStatus = level.status === "Aktif" ? "Tidak Aktif" : "Aktif";
+    await supabase.from("levels").update({ status: newStatus }).eq("id", id);
+    fetchLevels();
+  };
 
   // ─── Jabatan Handlers ───
   const filteredJabatan = jabatanList.filter((j) =>
-    j.nama.toLowerCase().includes(jabatanSearch.toLowerCase()) || j.level.toLowerCase().includes(jabatanSearch.toLowerCase())
+    j.nama.toLowerCase().includes(jabatanSearch.toLowerCase()) || (j.levelNama || "").toLowerCase().includes(jabatanSearch.toLowerCase())
   );
-  const activeLevelNames = levelList.filter((l) => l.status === "Aktif").sort((a, b) => a.urutan - b.urutan).map((l) => l.nama);
+  const activeLevels = levelList.filter((l) => l.status === "Aktif").sort((a, b) => a.urutan - b.urutan);
 
   const handleOpenAddJabatan = () => {
-    setJabatanForm({ nama: "", deskripsi: "", level: activeLevelNames[0] || "Staff", status: "Aktif" });
+    setJabatanForm({ nama: "", deskripsi: "", level_id: activeLevels[0]?.id || 0, status: "Aktif" });
     setEditingJabatanId(null);
     setShowJabatanForm(true);
   };
   const handleOpenEditJabatan = (j: Jabatan) => {
-    setJabatanForm({ nama: j.nama, deskripsi: j.deskripsi, level: j.level, status: j.status });
+    setJabatanForm({ nama: j.nama, deskripsi: j.deskripsi || "", level_id: j.level_id || 0, status: j.status });
     setEditingJabatanId(j.id);
     setShowJabatanForm(true);
   };
-  const handleSaveJabatan = () => {
-    if (!jabatanForm.nama.trim()) return;
+  const handleSaveJabatan = async () => {
+    if (!jabatanForm.nama.trim() || !jabatanForm.level_id) return;
     if (editingJabatanId !== null) {
-      setJabatanList((p) => p.map((j) => j.id === editingJabatanId ? { ...j, nama: jabatanForm.nama, deskripsi: jabatanForm.deskripsi, level: jabatanForm.level, status: jabatanForm.status as Jabatan["status"] } : j));
+      await supabase.from("jabatan").update({ nama: jabatanForm.nama, deskripsi: jabatanForm.deskripsi || null, level_id: jabatanForm.level_id, status: jabatanForm.status }).eq("id", editingJabatanId);
       showSuccess("Jabatan berhasil diperbarui");
     } else {
-      const newId = Math.max(0, ...jabatanList.map((j) => j.id)) + 1;
-      setJabatanList((p) => [...p, { id: newId, nama: jabatanForm.nama, deskripsi: jabatanForm.deskripsi, level: jabatanForm.level, status: jabatanForm.status as Jabatan["status"] }]);
+      await supabase.from("jabatan").insert({ nama: jabatanForm.nama, deskripsi: jabatanForm.deskripsi || null, level_id: jabatanForm.level_id, status: jabatanForm.status });
       showSuccess("Jabatan baru berhasil ditambahkan");
     }
     setShowJabatanForm(false);
+    fetchJabatan();
   };
-  const handleDeleteJabatan = (id: number) => { setJabatanList((p) => p.filter((j) => j.id !== id)); setDeleteJabatanConfirm(null); showSuccess("Jabatan berhasil dihapus"); };
-  const handleToggleJabatanStatus = (id: number) => { setJabatanList((p) => p.map((j) => j.id === id ? { ...j, status: j.status === "Aktif" ? "Tidak Aktif" : "Aktif" } : j)); };
+  const handleDeleteJabatan = async (id: number) => {
+    await supabase.from("jabatan").delete().eq("id", id);
+    setDeleteJabatanConfirm(null);
+    showSuccess("Jabatan berhasil dihapus");
+    fetchJabatan();
+  };
+  const handleToggleJabatanStatus = async (id: number) => {
+    const jabatan = jabatanList.find((j) => j.id === id);
+    if (!jabatan) return;
+    const newStatus = jabatan.status === "Aktif" ? "Tidak Aktif" : "Aktif";
+    await supabase.from("jabatan").update({ status: newStatus }).eq("id", id);
+    fetchJabatan();
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -301,7 +305,7 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{jabatan.nama}</p></td>
                       <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{jabatan.deskripsi || <span className="italic">-</span>}</td>
-                      <td className="px-5 py-3.5"><span className="text-xs font-medium text-accent bg-accent-light px-2 py-1 rounded-md">{jabatan.level}</span></td>
+                      <td className="px-5 py-3.5"><span className="text-xs font-medium text-accent bg-accent-light px-2 py-1 rounded-md">{jabatan.levelNama}</span></td>
                       <td className="px-5 py-3.5">
                         <button onClick={() => handleToggleJabatanStatus(jabatan.id)}
                           className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
@@ -405,8 +409,9 @@ export default function MasterDataPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Level <span className="text-danger">*</span></label>
-                  <select value={jabatanForm.level} onChange={(e) => setJabatanForm({ ...jabatanForm, level: e.target.value })} className={selectClass}>
-                    {activeLevelNames.map((l) => (<option key={l} value={l}>{l}</option>))}
+                  <select value={jabatanForm.level_id} onChange={(e) => setJabatanForm({ ...jabatanForm, level_id: parseInt(e.target.value) })} className={selectClass}>
+                    <option value={0} disabled>Pilih level</option>
+                    {activeLevels.map((l) => (<option key={l.id} value={l.id}>{l.nama}</option>))}
                   </select>
                 </div>
                 <div>
@@ -420,7 +425,7 @@ export default function MasterDataPage() {
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
               <Button variant="outline" size="sm" onClick={() => setShowJabatanForm(false)}>Batal</Button>
-              <Button size="sm" icon={editingJabatanId ? Check : Plus} onClick={handleSaveJabatan} disabled={!jabatanForm.nama.trim()}>
+              <Button size="sm" icon={editingJabatanId ? Check : Plus} onClick={handleSaveJabatan} disabled={!jabatanForm.nama.trim() || !jabatanForm.level_id}>
                 {editingJabatanId ? "Simpan" : "Tambah Jabatan"}
               </Button>
             </div>

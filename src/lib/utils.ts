@@ -42,6 +42,25 @@ export function getInitials(name: string): string {
     .slice(0, 2);
 }
 
+/**
+ * Title Case - huruf pertama setiap kata kapital, sisanya kecil.
+ * "risky yanto" -> "Risky Yanto"
+ * "RISKY YANTO" -> "Risky Yanto"
+ */
+export function toTitleCase(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/(?:^|\s|[-'/])\S/g, (char) => char.toUpperCase());
+}
+
+/**
+ * Upper Case seluruh teks.
+ * Untuk field seperti No. KTP, BPJS, No. Rekening.
+ */
+export function toUpperTrim(str: string): string {
+  return str.toUpperCase().trim();
+}
+
 export function getStatusColor(status: string): string {
   const colors: Record<string, string> = {
     active: "bg-success-light text-success",
