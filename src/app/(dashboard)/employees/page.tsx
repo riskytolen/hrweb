@@ -27,6 +27,7 @@ import {
   Upload,
   FileSpreadsheet,
   Table,
+  Wand2,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -174,6 +175,7 @@ export default function EmployeesPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Record<string, string | null>>({});
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [newId, setNewId] = useState("");
   const [showImportCsv, setShowImportCsv] = useState(false);
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [csvFileName, setCsvFileName] = useState("");
@@ -222,6 +224,15 @@ export default function EmployeesPage() {
     setIsEditing(false);
     setShowSaveSuccess(true);
     setTimeout(() => setShowSaveSuccess(false), 2500);
+  };
+
+  const generateId = () => {
+    const existingNums = employees.map((e) => {
+      const num = parseInt(e.id.replace(/\D/g, ""), 10);
+      return isNaN(num) ? 0 : num;
+    });
+    const nextNum = Math.max(...existingNums) + 1;
+    setNewId(`ID${nextNum}`);
   };
 
   // ─── CSV Import handlers ───
@@ -323,7 +334,7 @@ export default function EmployeesPage() {
             <div className="flex items-center gap-2">
               <Button variant="outline" icon={Upload} size="sm" onClick={() => setShowImportCsv(true)}>Import CSV</Button>
               <Button variant="outline" icon={Download} size="sm">Export</Button>
-              <Button icon={Plus} size="sm" onClick={() => setShowAddForm(true)}>Tambah Pegawai</Button>
+              <Button icon={Plus} size="sm" onClick={() => { setNewId(""); setShowAddForm(true); }}>Tambah Pegawai</Button>
             </div>
           }
         />
@@ -408,15 +419,13 @@ export default function EmployeesPage() {
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Nama Pegawai</th>
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Jabatan</th>
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">No. Telepon</th>
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Tgl Bergabung</th>
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">PKWT</th>
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
                   <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
                 {filtered.map((emp) => (
-                  <tr key={emp.id} className="hover:bg-muted/30 cursor-pointer" onClick={() => handleOpenDetail(emp)}>
+                  <tr key={emp.id} className="hover:bg-muted/30">
                     <td className="px-5 py-4">
                       <span className="text-xs font-mono text-muted-foreground">{emp.id}</span>
                     </td>
@@ -433,20 +442,12 @@ export default function EmployeesPage() {
                     </td>
                     <td className="px-5 py-4 text-sm text-foreground">{emp.jabatan}</td>
                     <td className="px-5 py-4 text-sm text-muted-foreground">{emp.noTelp}</td>
-                    <td className="px-5 py-4 text-sm text-muted-foreground">{formatShortDate(emp.tanggalBergabung)}</td>
-                    <td className="px-5 py-4">
-                      {emp.tanggalBerakhirPkwt ? (
-                        <span className="text-xs text-muted-foreground">s/d {formatShortDate(emp.tanggalBerakhirPkwt)}</span>
-                      ) : (
-                        <span className="text-xs text-success font-medium">Tetap</span>
-                      )}
-                    </td>
                     <td className="px-5 py-4">
                       <Badge variant={statusVariant[emp.status] || "muted"}>{emp.status}</Badge>
                     </td>
                     <td className="px-5 py-4 text-center">
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleOpenDetail(emp); }}
+                        onClick={() => handleOpenDetail(emp)}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-primary hover:bg-primary-light"
                       >
                         <Eye className="w-3.5 h-3.5" /> Detail
@@ -702,7 +703,24 @@ export default function EmployeesPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField label="ID Pegawai" required>
-                    <input type="text" placeholder="Contoh: EMP-013" className={inputClass} />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Contoh: ID57213"
+                        value={newId}
+                        onChange={(e) => setNewId(e.target.value)}
+                        className={cn(inputClass, "flex-1")}
+                      />
+                      <button
+                        type="button"
+                        onClick={generateId}
+                        className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-primary-light text-primary text-xs font-semibold hover:bg-primary hover:text-white whitespace-nowrap"
+                        title="Generate ID otomatis"
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                        Auto
+                      </button>
+                    </div>
                   </FormField>
                   <FormField label="Jabatan" required>
                     <input type="text" placeholder="Jabatan / posisi" className={inputClass} />

@@ -33,7 +33,7 @@ export interface Employee {
 
 export const employees: Employee[] = [
   {
-    id: "EMP-001",
+    id: "ID57201",
     nama: "Budi Santoso",
     status: "Aktif",
     noKtp: "3201011234560001",
@@ -60,7 +60,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: null,
   },
   {
-    id: "EMP-002",
+    id: "ID57202",
     nama: "Siti Nurhaliza",
     status: "Aktif",
     noKtp: "3201021234560002",
@@ -87,7 +87,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: null,
   },
   {
-    id: "EMP-003",
+    id: "ID57203",
     nama: "Ahmad Fauzi",
     status: "Aktif",
     noKtp: "3201031234560003",
@@ -114,7 +114,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: "2025-01-10",
   },
   {
-    id: "EMP-004",
+    id: "ID57204",
     nama: "Dewi Lestari",
     status: "Aktif",
     noKtp: "3201041234560004",
@@ -141,7 +141,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: null,
   },
   {
-    id: "EMP-005",
+    id: "ID57205",
     nama: "Rizky Pratama",
     status: "Aktif",
     noKtp: "3201051234560005",
@@ -168,7 +168,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: "2025-02-14",
   },
   {
-    id: "EMP-006",
+    id: "ID57206",
     nama: "Maya Anggraini",
     status: "Aktif",
     noKtp: "3201061234560006",
@@ -195,7 +195,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: "2025-06-01",
   },
   {
-    id: "EMP-007",
+    id: "ID57207",
     nama: "Hendra Wijaya",
     status: "Aktif",
     noKtp: "3201071234560007",
@@ -222,7 +222,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: null,
   },
   {
-    id: "EMP-008",
+    id: "ID57208",
     nama: "Putri Rahayu",
     status: "Cuti",
     noKtp: "3201081234560008",
@@ -249,7 +249,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: "2025-08-15",
   },
   {
-    id: "EMP-009",
+    id: "ID57209",
     nama: "Andi Setiawan",
     status: "Aktif",
     noKtp: "3201091234560009",
@@ -276,7 +276,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: "2025-04-01",
   },
   {
-    id: "EMP-010",
+    id: "ID57210",
     nama: "Rina Wulandari",
     status: "Aktif",
     noKtp: "3201101234560010",
@@ -303,7 +303,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: "2025-01-20",
   },
   {
-    id: "EMP-011",
+    id: "ID57211",
     nama: "Fajar Nugroho",
     status: "Aktif",
     noKtp: "3201111234560011",
@@ -330,7 +330,7 @@ export const employees: Employee[] = [
     tanggalBerakhirPkwt: null,
   },
   {
-    id: "EMP-012",
+    id: "ID57212",
     nama: "Lina Marlina",
     status: "Tidak Aktif",
     noKtp: "3201121234560012",

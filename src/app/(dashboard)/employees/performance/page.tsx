@@ -33,7 +33,7 @@ interface PerformanceRecord {
 
 const performanceData: PerformanceRecord[] = [
   {
-    id: "EMP-001",
+    id: "ID57201",
     name: "Budi Santoso",
     department: "Engineering",
     position: "Senior Software Engineer",
@@ -46,7 +46,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Excellent",
   },
   {
-    id: "EMP-002",
+    id: "ID57202",
     name: "Siti Nurhaliza",
     department: "Marketing",
     position: "Marketing Manager",
@@ -59,7 +59,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Excellent",
   },
   {
-    id: "EMP-003",
+    id: "ID57203",
     name: "Ahmad Fauzi",
     department: "Sales",
     position: "Sales Executive",
@@ -72,7 +72,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Good",
   },
   {
-    id: "EMP-005",
+    id: "ID57205",
     name: "Rizky Pratama",
     department: "Engineering",
     position: "Frontend Developer",
@@ -85,7 +85,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Very Good",
   },
   {
-    id: "EMP-006",
+    id: "ID57206",
     name: "Maya Anggraini",
     department: "Finance",
     position: "Financial Analyst",
@@ -98,7 +98,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Very Good",
   },
   {
-    id: "EMP-007",
+    id: "ID57207",
     name: "Hendra Wijaya",
     department: "Operations",
     position: "Operations Manager",
@@ -111,7 +111,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Excellent",
   },
   {
-    id: "EMP-009",
+    id: "ID57209",
     name: "Andi Setiawan",
     department: "Engineering",
     position: "Backend Developer",
@@ -124,7 +124,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Good",
   },
   {
-    id: "EMP-010",
+    id: "ID57210",
     name: "Rina Wulandari",
     department: "Marketing",
     position: "Content Strategist",
@@ -137,7 +137,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Needs Improvement",
   },
   {
-    id: "EMP-011",
+    id: "ID57211",
     name: "Fajar Nugroho",
     department: "Sales",
     position: "Account Manager",
@@ -150,7 +150,7 @@ const performanceData: PerformanceRecord[] = [
     status: "Very Good",
   },
   {
-    id: "EMP-004",
+    id: "ID57204",
     name: "Dewi Lestari",
     department: "HR",
     position: "HR Specialist",
