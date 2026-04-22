@@ -33,7 +33,7 @@ export interface DbDivisionSchedule {
   id: number;
   division_id: number;
   jam_masuk: string;
-  jam_pulang: string;
+  jam_pulang: string | null;
   toleransi_menit: number;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;

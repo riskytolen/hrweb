@@ -37,6 +37,7 @@ import Badge from "@/components/ui/Badge";
 import DatePicker from "@/components/ui/DatePicker";
 import Select from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
+import Pagination from "@/components/ui/Pagination";
 import { supabase, type DbPegawai } from "@/lib/supabase";
 import { cn, formatShortDate, toTitleCase } from "@/lib/utils";
 
@@ -197,6 +198,8 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -915,6 +918,9 @@ export default function EmployeesPage() {
     );
   });
 
+  // Paginate filtered data
+  const paginatedEmployees = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   const activeCount = employees.filter((e) => e.status === "Aktif").length;
   const cutiCount = employees.filter((e) => e.status === "Cuti").length;
   const inactiveCount = employees.filter((e) => e.status === "Tidak Aktif").length;
@@ -1046,7 +1052,7 @@ export default function EmployeesPage() {
                 type="text"
                 placeholder="Cari nama, ID, jabatan, atau no. telepon..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
                 className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60"
               />
             </div>
@@ -1102,7 +1108,7 @@ export default function EmployeesPage() {
                     </tr>
                   ))
                 ) : (
-                  filtered.map((emp) => (
+                  paginatedEmployees.map((emp) => (
                     <tr key={emp.id} className="hover:bg-muted/30">
                       <td className="px-5 py-4">
                         <span className="text-xs font-mono text-muted-foreground">{emp.id}</span>
@@ -1141,9 +1147,13 @@ export default function EmployeesPage() {
               </tbody>
             </table>
           </div>
-          <div className="px-5 py-3 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-            Menampilkan {filtered.length} dari {employees.length} pegawai
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filtered.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
         </div>
       </div>
 

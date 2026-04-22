@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
+import Select from "@/components/ui/Select";
+import Pagination from "@/components/ui/Pagination";
 import { cn } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
@@ -49,8 +51,11 @@ const tabs = [
 
 type TabKey = (typeof tabs)[number]["key"];
 
+const MASTER_PAGE_SIZE = 10;
+
 export default function MasterDataPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("level");
+  const [masterPage, setMasterPage] = useState(1);
 
   // ─── Level State ───
   const [levelList, setLevelList] = useState<Level[]>([]);
@@ -92,6 +97,7 @@ export default function MasterDataPage() {
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
   const [scheduleForm, setScheduleForm] = useState({ division_id: 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", status: "Aktif" });
+  const [scheduleErrors, setScheduleErrors] = useState<Set<string>>(new Set());
 
   // ─── Delete Confirm Dialog ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "bank"; id: number; nama: string } | null>(null);
@@ -123,7 +129,7 @@ export default function MasterDataPage() {
   };
 
   const fetchLocations = async () => {
-    const { data } = await supabase.from("division_locations").select("*, divisions(nama)").order("nama");
+    const { data } = await supabase.from("division_locations").select("*, divisions(nama)").order("division_id");
     if (data) setLocationList(data.map((l) => ({ ...l, divisionNama: l.divisions?.nama || "-" })));
   };
 
@@ -332,17 +338,27 @@ export default function MasterDataPage() {
 
   const handleOpenAddSchedule = () => {
     setScheduleForm({ division_id: divisionsWithoutSchedule[0]?.id || 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", status: "Aktif" });
+    setScheduleErrors(new Set());
     setEditingScheduleId(null);
     setShowScheduleForm(true);
   };
   const handleOpenEditSchedule = (s: DivisionSchedule) => {
-    setScheduleForm({ division_id: s.division_id, jam_masuk: s.jam_masuk.slice(0, 5), jam_pulang: s.jam_pulang.slice(0, 5), toleransi_menit: String(s.toleransi_menit), status: s.status });
+    setScheduleForm({ division_id: s.division_id, jam_masuk: s.jam_masuk.slice(0, 5), jam_pulang: s.jam_pulang ? s.jam_pulang.slice(0, 5) : "", toleransi_menit: String(s.toleransi_menit), status: s.status });
+    setScheduleErrors(new Set());
     setEditingScheduleId(s.id);
     setShowScheduleForm(true);
   };
   const handleSaveSchedule = async () => {
-    if (!scheduleForm.division_id) return;
-    const payload = { division_id: scheduleForm.division_id, jam_masuk: scheduleForm.jam_masuk, jam_pulang: scheduleForm.jam_pulang, toleransi_menit: parseInt(scheduleForm.toleransi_menit) || 0, status: scheduleForm.status };
+    // Validasi mandatory
+    const errs = new Set<string>();
+    if (!scheduleForm.division_id) errs.add("division_id");
+    if (!scheduleForm.jam_masuk) errs.add("jam_masuk");
+    if (errs.size > 0) {
+      setScheduleErrors(errs);
+      return;
+    }
+    setScheduleErrors(new Set());
+    const payload = { division_id: scheduleForm.division_id, jam_masuk: scheduleForm.jam_masuk, jam_pulang: scheduleForm.jam_pulang || null, toleransi_menit: parseInt(scheduleForm.toleransi_menit) || 0, status: scheduleForm.status };
     if (editingScheduleId !== null) {
       await supabase.from("division_schedules").update(payload).eq("id", editingScheduleId);
       showSuccess("Waktu Kerja Diperbarui", "Jadwal kerja telah disimpan.");
@@ -447,7 +463,7 @@ export default function MasterDataPage() {
             return (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => { setActiveTab(tab.key); setMasterPage(1); }}
                 className={cn(
                   "flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 -mb-px",
                   isActive
@@ -475,7 +491,7 @@ export default function MasterDataPage() {
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input type="text" placeholder="Cari level..." value={levelSearch} onChange={(e) => setLevelSearch(e.target.value)}
+                <input type="text" placeholder="Cari level..." value={levelSearch} onChange={(e) => { setLevelSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
               <Button icon={Plus} size="sm" onClick={handleOpenAddLevel}>Tambah Level</Button>
@@ -498,7 +514,7 @@ export default function MasterDataPage() {
                     <SkeletonTable rows={5} cols={4} />
                   ) : filteredLevels.length === 0 ? (
                     <tr><td colSpan={4} className="text-center py-10 text-sm text-muted-foreground">Tidak ada level ditemukan</td></tr>
-                  ) : filteredLevels.map((level) => (
+                  ) : filteredLevels.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((level) => (
                     <tr key={level.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-1.5">
@@ -526,9 +542,7 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-5 py-2.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-              {filteredLevels.length} level &middot; Diurutkan berdasarkan hierarki
-            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredLevels.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -538,7 +552,7 @@ export default function MasterDataPage() {
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input type="text" placeholder="Cari jabatan atau level..." value={jabatanSearch} onChange={(e) => setJabatanSearch(e.target.value)}
+                <input type="text" placeholder="Cari jabatan atau level..." value={jabatanSearch} onChange={(e) => { setJabatanSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
               <Button icon={Plus} size="sm" onClick={handleOpenAddJabatan}>Tambah Jabatan</Button>
@@ -560,7 +574,7 @@ export default function MasterDataPage() {
                     <SkeletonTable rows={5} cols={6} />
                   ) : filteredJabatan.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-10 text-sm text-muted-foreground">Tidak ada jabatan ditemukan</td></tr>
-                  ) : filteredJabatan.map((jabatan, idx) => (
+                  ) : filteredJabatan.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((jabatan, idx) => (
                     <tr key={jabatan.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{jabatan.nama}</p></td>
@@ -585,9 +599,7 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-5 py-2.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-              Menampilkan {filteredJabatan.length} dari {jabatanList.length} jabatan
-            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredJabatan.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -597,7 +609,7 @@ export default function MasterDataPage() {
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input type="text" placeholder="Cari divisi..." value={divisionSearch} onChange={(e) => setDivisionSearch(e.target.value)}
+                <input type="text" placeholder="Cari divisi..." value={divisionSearch} onChange={(e) => { setDivisionSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
               <Button icon={Plus} size="sm" onClick={handleOpenAddDivision}>Tambah Divisi</Button>
@@ -618,7 +630,7 @@ export default function MasterDataPage() {
                     <SkeletonTable rows={5} cols={5} />
                   ) : filteredDivisions.length === 0 ? (
                     <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada divisi ditemukan</td></tr>
-                  ) : filteredDivisions.map((division, idx) => (
+                  ) : filteredDivisions.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((division, idx) => (
                     <tr key={division.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{division.nama}</p></td>
@@ -642,9 +654,7 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-5 py-2.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-              Menampilkan {filteredDivisions.length} dari {divisionList.length} divisi
-            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredDivisions.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -654,7 +664,7 @@ export default function MasterDataPage() {
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input type="text" placeholder="Cari lokasi atau divisi..." value={locationSearch} onChange={(e) => setLocationSearch(e.target.value)}
+                <input type="text" placeholder="Cari lokasi atau divisi..." value={locationSearch} onChange={(e) => { setLocationSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
               <Button icon={Plus} size="sm" onClick={handleOpenAddLocation} disabled={divisionsWithoutLocation.length === 0}>
@@ -678,7 +688,7 @@ export default function MasterDataPage() {
                     <SkeletonTable rows={5} cols={6} />
                   ) : filteredLocations.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-10 text-sm text-muted-foreground">Tidak ada titik absen ditemukan</td></tr>
-                  ) : filteredLocations.map((loc, idx) => (
+                  ) : filteredLocations.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((loc, idx) => (
                     <tr key={loc.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{loc.divisionNama}</p></td>
@@ -703,9 +713,7 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-5 py-2.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-              Menampilkan {filteredLocations.length} dari {locationList.length} titik absen
-            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredLocations.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -715,7 +723,7 @@ export default function MasterDataPage() {
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input type="text" placeholder="Cari divisi..." value={scheduleSearch} onChange={(e) => setScheduleSearch(e.target.value)}
+                <input type="text" placeholder="Cari divisi..." value={scheduleSearch} onChange={(e) => { setScheduleSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
               <Button icon={Plus} size="sm" onClick={handleOpenAddSchedule} disabled={divisionsWithoutSchedule.length === 0}>
@@ -740,12 +748,12 @@ export default function MasterDataPage() {
                     <SkeletonTable rows={5} cols={7} />
                   ) : filteredSchedules.length === 0 ? (
                     <tr><td colSpan={7} className="text-center py-10 text-sm text-muted-foreground">Tidak ada jadwal kerja ditemukan</td></tr>
-                  ) : filteredSchedules.map((sch, idx) => (
+                  ) : filteredSchedules.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((sch, idx) => (
                     <tr key={sch.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-5 py-3.5"><span className="text-sm font-semibold text-foreground">{sch.divisionNama}</span></td>
                       <td className="px-5 py-3.5"><span className="text-xs font-mono bg-primary-light text-primary px-2 py-1 rounded-md">{sch.jam_masuk.slice(0, 5)}</span></td>
-                      <td className="px-5 py-3.5"><span className="text-xs font-mono bg-muted text-muted-foreground px-2 py-1 rounded-md">{sch.jam_pulang.slice(0, 5)}</span></td>
+                      <td className="px-5 py-3.5">{sch.jam_pulang ? <span className="text-xs font-mono bg-muted text-muted-foreground px-2 py-1 rounded-md">{sch.jam_pulang.slice(0, 5)}</span> : <span className="text-xs text-muted-foreground italic">-</span>}</td>
                       <td className="px-5 py-3.5"><span className="text-xs text-muted-foreground">{sch.toleransi_menit} menit</span></td>
                       <td className="px-5 py-3.5">
                         <button onClick={() => handleToggleScheduleStatus(sch.id)}
@@ -766,9 +774,7 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-5 py-2.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-              Menampilkan {filteredSchedules.length} dari {scheduleList.length} jadwal kerja
-            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredSchedules.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -778,7 +784,7 @@ export default function MasterDataPage() {
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input type="text" placeholder="Cari bank atau kode..." value={bankSearch} onChange={(e) => setBankSearch(e.target.value)}
+                <input type="text" placeholder="Cari bank atau kode..." value={bankSearch} onChange={(e) => { setBankSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
               <Button icon={Plus} size="sm" onClick={handleOpenAddBank}>Tambah Bank</Button>
@@ -799,7 +805,7 @@ export default function MasterDataPage() {
                     <SkeletonTable rows={5} cols={5} />
                   ) : filteredBanks.length === 0 ? (
                     <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada bank ditemukan</td></tr>
-                  ) : filteredBanks.map((bank, idx) => (
+                  ) : filteredBanks.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((bank, idx) => (
                     <tr key={bank.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{bank.nama}</p></td>
@@ -823,9 +829,7 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-5 py-2.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-              Menampilkan {filteredBanks.length} dari {bankList.length} bank
-            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredBanks.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
       </div>
@@ -858,10 +862,11 @@ export default function MasterDataPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
-                  <select value={levelForm.status} onChange={(e) => setLevelForm({ ...levelForm, status: e.target.value })} className={selectClass}>
-                    <option value="Aktif">Aktif</option>
-                    <option value="Tidak Aktif">Tidak Aktif</option>
-                  </select>
+                  <Select
+                    value={levelForm.status}
+                    onChange={(val) => setLevelForm({ ...levelForm, status: val })}
+                    options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                  />
                 </div>
               </div>
             </div>
@@ -903,17 +908,20 @@ export default function MasterDataPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Level <span className="text-danger">*</span></label>
-                  <select value={jabatanForm.level_id} onChange={(e) => setJabatanForm({ ...jabatanForm, level_id: parseInt(e.target.value) })} className={selectClass}>
-                    <option value={0} disabled>Pilih level</option>
-                    {activeLevels.map((l) => (<option key={l.id} value={l.id}>{l.nama}</option>))}
-                  </select>
+                  <Select
+                    value={String(jabatanForm.level_id)}
+                    onChange={(val) => setJabatanForm({ ...jabatanForm, level_id: parseInt(val) })}
+                    options={activeLevels.map((l) => ({ value: String(l.id), label: l.nama }))}
+                    placeholder="Pilih level"
+                  />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
-                  <select value={jabatanForm.status} onChange={(e) => setJabatanForm({ ...jabatanForm, status: e.target.value })} className={selectClass}>
-                    <option value="Aktif">Aktif</option>
-                    <option value="Tidak Aktif">Tidak Aktif</option>
-                  </select>
+                  <Select
+                    value={jabatanForm.status}
+                    onChange={(val) => setJabatanForm({ ...jabatanForm, status: val })}
+                    options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                  />
                 </div>
               </div>
             </div>
@@ -954,10 +962,11 @@ export default function MasterDataPage() {
               </div>
               <div>
                 <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
-                <select value={divisionForm.status} onChange={(e) => setDivisionForm({ ...divisionForm, status: e.target.value })} className={selectClass}>
-                  <option value="Aktif">Aktif</option>
-                  <option value="Tidak Aktif">Tidak Aktif</option>
-                </select>
+                <Select
+                  value={divisionForm.status}
+                  onChange={(val) => setDivisionForm({ ...divisionForm, status: val })}
+                  options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                />
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
@@ -989,10 +998,18 @@ export default function MasterDataPage() {
             <div className="p-5 space-y-4">
               <div>
                 <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi <span className="text-danger">*</span></label>
-                <select value={locationForm.division_id} onChange={(e) => setLocationForm({ ...locationForm, division_id: parseInt(e.target.value) })} className={selectClass} disabled={editingLocationId !== null}>
-                  <option value={0} disabled>Pilih divisi</option>
-                  {(editingLocationId !== null ? activeDivisions : divisionsWithoutLocation).map((d) => (<option key={d.id} value={d.id}>{d.nama}</option>))}
-                </select>
+                {editingLocationId !== null ? (
+                  <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">
+                    {activeDivisions.find((d) => d.id === locationForm.division_id)?.nama || "-"}
+                  </div>
+                ) : (
+                  <Select
+                    value={String(locationForm.division_id)}
+                    onChange={(val) => setLocationForm({ ...locationForm, division_id: parseInt(val) })}
+                    options={divisionsWithoutLocation.map((d) => ({ value: String(d.id), label: d.nama }))}
+                    placeholder="Pilih divisi"
+                  />
+                )}
                 {editingLocationId !== null && <p className="text-[10px] text-muted-foreground mt-1">Divisi tidak dapat diubah saat edit</p>}
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1013,10 +1030,11 @@ export default function MasterDataPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
-                  <select value={locationForm.status} onChange={(e) => setLocationForm({ ...locationForm, status: e.target.value })} className={selectClass}>
-                    <option value="Aktif">Aktif</option>
-                    <option value="Tidak Aktif">Tidak Aktif</option>
-                  </select>
+                  <Select
+                    value={locationForm.status}
+                    onChange={(val) => setLocationForm({ ...locationForm, status: val })}
+                    options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                  />
                 </div>
               </div>
             </div>
@@ -1047,22 +1065,40 @@ export default function MasterDataPage() {
               <button onClick={() => setShowScheduleForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">
+              {scheduleErrors.size > 0 && (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
+                  <X className="w-3.5 h-3.5 flex-shrink-0" />
+                  Harap lengkapi field yang wajib diisi
+                </div>
+              )}
               <div>
-                <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi <span className="text-danger">*</span></label>
-                <select value={scheduleForm.division_id} onChange={(e) => setScheduleForm({ ...scheduleForm, division_id: parseInt(e.target.value) })} className={selectClass} disabled={editingScheduleId !== null}>
-                  <option value={0} disabled>Pilih divisi</option>
-                  {(editingScheduleId !== null ? activeDivisions : divisionsWithoutSchedule).map((d) => (<option key={d.id} value={d.id}>{d.nama}</option>))}
-                </select>
+                <label className={cn("text-xs font-semibold mb-1.5 block", scheduleErrors.has("division_id") ? "text-danger" : "text-foreground")}>Divisi <span className="text-danger">*</span></label>
+                {editingScheduleId !== null ? (
+                  <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">
+                    {activeDivisions.find((d) => d.id === scheduleForm.division_id)?.nama || "-"}
+                  </div>
+                ) : (
+                  <Select
+                    value={String(scheduleForm.division_id)}
+                    onChange={(val) => { setScheduleForm({ ...scheduleForm, division_id: parseInt(val) }); setScheduleErrors((prev) => { const n = new Set(prev); n.delete("division_id"); return n; }); }}
+                    options={divisionsWithoutSchedule.map((d) => ({ value: String(d.id), label: d.nama }))}
+                    placeholder="Pilih divisi"
+                    hasError={scheduleErrors.has("division_id")}
+                  />
+                )}
                 {editingScheduleId !== null && <p className="text-[10px] text-muted-foreground mt-1">Divisi tidak dapat diubah saat edit</p>}
+                {scheduleErrors.has("division_id") && <p className="text-[10px] text-danger mt-1">Divisi wajib dipilih</p>}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Jam Masuk <span className="text-danger">*</span></label>
-                  <input type="time" value={scheduleForm.jam_masuk} onChange={(e) => setScheduleForm({ ...scheduleForm, jam_masuk: e.target.value })} className={inputClass} />
+                  <label className={cn("text-xs font-semibold mb-1.5 block", scheduleErrors.has("jam_masuk") ? "text-danger" : "text-foreground")}>Jam Masuk <span className="text-danger">*</span></label>
+                  <input type="time" value={scheduleForm.jam_masuk} onChange={(e) => { setScheduleForm({ ...scheduleForm, jam_masuk: e.target.value }); setScheduleErrors((prev) => { const n = new Set(prev); n.delete("jam_masuk"); return n; }); }} className={cn(inputClass, scheduleErrors.has("jam_masuk") && "border-danger ring-2 ring-danger/20")} />
+                  {scheduleErrors.has("jam_masuk") && <p className="text-[10px] text-danger mt-1">Jam masuk wajib diisi</p>}
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Jam Pulang <span className="text-danger">*</span></label>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Jam Pulang</label>
                   <input type="time" value={scheduleForm.jam_pulang} onChange={(e) => setScheduleForm({ ...scheduleForm, jam_pulang: e.target.value })} className={inputClass} />
+                  <p className="text-[10px] text-muted-foreground mt-1">Opsional</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1075,16 +1111,17 @@ export default function MasterDataPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
-                  <select value={scheduleForm.status} onChange={(e) => setScheduleForm({ ...scheduleForm, status: e.target.value })} className={selectClass}>
-                    <option value="Aktif">Aktif</option>
-                    <option value="Tidak Aktif">Tidak Aktif</option>
-                  </select>
+                  <Select
+                    value={scheduleForm.status}
+                    onChange={(val) => setScheduleForm({ ...scheduleForm, status: val })}
+                    options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                  />
                 </div>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
               <Button variant="outline" size="sm" onClick={() => setShowScheduleForm(false)}>Batal</Button>
-              <Button size="sm" icon={editingScheduleId ? Check : Plus} onClick={handleSaveSchedule} disabled={!scheduleForm.division_id}>
+              <Button size="sm" icon={editingScheduleId ? Check : Plus} onClick={handleSaveSchedule}>
                 {editingScheduleId ? "Simpan" : "Tambah Jadwal"}
               </Button>
             </div>
@@ -1120,10 +1157,11 @@ export default function MasterDataPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
-                  <select value={bankForm.status} onChange={(e) => setBankForm({ ...bankForm, status: e.target.value })} className={selectClass}>
-                    <option value="Aktif">Aktif</option>
-                    <option value="Tidak Aktif">Tidak Aktif</option>
-                  </select>
+                  <Select
+                    value={bankForm.status}
+                    onChange={(val) => setBankForm({ ...bankForm, status: val })}
+                    options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                  />
                 </div>
               </div>
             </div>
