@@ -211,6 +211,9 @@ export default function EmployeesPage() {
   const [csvData, setCsvData] = useState<string[][]>([]);
   const [csvFileName, setCsvFileName] = useState("");
   const [csvImportSuccess, setCsvImportSuccess] = useState(false);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvErrors, setCsvErrors] = useState<string[]>([]);
+  const [csvImportedCount, setCsvImportedCount] = useState(0);
 
   // ─── Fetch pegawai dari Supabase ───
   const fetchEmployees = async () => {
@@ -368,8 +371,20 @@ export default function EmployeesPage() {
     "BANK", "NAMA_REKENING", "TANGGAL_MULAI_PKWT", "TANGGAL_BERAKHIR_PKWT",
   ];
 
+  const csvSampleRows = [
+    ["ID57201", "Budi Santoso", "Laki-laki", "Islam", "Aktif", "3201012345670001", "Jakarta", "1990-05-15", "Jl. Merdeka No. 10 RT 01/02 Kel. Menteng Kec. Menteng Jakarta Pusat", "Jl. Sudirman No. 25 Jakarta Selatan", "081234567890", "2024-01-15", "Staff", "Menikah", "Siti Aminah", "2", "0001234567890", "JKT2024001234", "1234567890", "BCA", "Budi Santoso", "2024-01-15", "2026-01-14"],
+    ["ID57202", "Dewi Lestari", "Perempuan", "Kristen", "Aktif", "3201019876540002", "Bandung", "1995-11-20", "Jl. Asia Afrika No. 5 Bandung", "Jl. Dago No. 88 Bandung", "085298765432", "2025-03-01", "Supervisor", "Belum Menikah", "", "0", "", "", "9876543210", "Mandiri", "Dewi Lestari", "", ""],
+  ];
+
+  const csvTemplateContent = [
+    csvExpectedHeaders.join(","),
+    ...csvSampleRows.map((row) => row.map((cell) => cell.includes(",") ? `"${cell}"` : cell).join(",")),
+  ].join("\n");
+
   const parseCsv = (text: string): string[][] => {
-    const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+    // Strip BOM if present
+    const clean = text.replace(/^\uFEFF/, "");
+    const lines = clean.split(/\r?\n/).filter((line) => line.trim() !== "");
     return lines.map((line) => {
       const result: string[] = [];
       let current = "";
@@ -377,7 +392,13 @@ export default function EmployeesPage() {
       for (let i = 0; i < line.length; i++) {
         const char = line[i];
         if (char === '"') {
-          inQuotes = !inQuotes;
+          if (inQuotes && line[i + 1] === '"') {
+            // Escaped quote ("") -> literal "
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
         } else if ((char === "," || char === ";") && !inQuotes) {
           result.push(current.trim());
           current = "";
@@ -392,6 +413,7 @@ export default function EmployeesPage() {
 
   const handleCsvFile = (file: File) => {
     setCsvFileName(file.name);
+    setCsvErrors([]);
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
@@ -415,13 +437,161 @@ export default function EmployeesPage() {
   };
 
   const handleImportConfirm = async () => {
-    // TODO: parse CSV rows and insert to Supabase
+    if (csvData.length < 2) return;
+    setCsvErrors([]);
+    setCsvImporting(true);
+
+    const headers = csvData[0].map((h) => h.toUpperCase().trim());
+    const rows = csvData.slice(1);
+
+    // ── Validate headers ──
+    const missingHeaders = csvExpectedHeaders.filter((h) => !headers.includes(h));
+    if (missingHeaders.length > 0) {
+      setCsvErrors([`Kolom tidak ditemukan: ${missingHeaders.join(", ")}`]);
+      setCsvImporting(false);
+      return;
+    }
+
+    // ── Build column index map ──
+    const col = (name: string) => headers.indexOf(name);
+
+    // ── Fetch jabatan lookup (nama -> id) ──
+    const { data: jabatanData } = await supabase.from("jabatan").select("id, nama");
+    const jabatanMap = new Map<string, number>();
+    jabatanData?.forEach((j) => jabatanMap.set(j.nama.toLowerCase(), j.id));
+
+    // ── Fetch existing employee IDs to detect duplicates ──
+    const { data: existingData } = await supabase.from("pegawai").select("id");
+    const existingIds = new Set(existingData?.map((e) => e.id) || []);
+
+    // ── Valid enum values ──
+    const validJk = new Set(["Laki-laki", "Perempuan"]);
+    const validAgama = new Set(["Islam", "Kristen", "Katolik", "Hindu", "Buddha", "Konghucu"]);
+    const validStatus = new Set(["Aktif", "Tidak Aktif", "Cuti"]);
+    const validPernikahan = new Set(["Belum Menikah", "Menikah", "Cerai"]);
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+    // ── Validate & map each row ──
+    const errors: string[] = [];
+    const validRows: Record<string, unknown>[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const rowNum = i + 2; // 1-indexed + header
+      const rowErrors: string[] = [];
+
+      const id = r[col("ID")]?.trim();
+      const nama = r[col("NAMA")]?.trim();
+      const jk = r[col("JENIS_KELAMIN")]?.trim();
+      const agama = r[col("AGAMA")]?.trim();
+      const status = r[col("STATUS")]?.trim() || "Aktif";
+      const noKtp = r[col("NO_KTP")]?.trim();
+      const tempatLahir = r[col("TEMPAT_LAHIR")]?.trim();
+      const tglLahir = r[col("TANGGAL_LAHIR")]?.trim();
+      const alamatKtp = r[col("ALAMAT_KTP")]?.trim();
+      const alamatDomisili = r[col("ALAMAT_DOMISILI")]?.trim();
+      const noTelp = r[col("NO_TELP")]?.trim();
+      const tglBergabung = r[col("TANGGAL_BERGABUNG")]?.trim();
+      const jabatanNama = r[col("JABATAN")]?.trim();
+      const statusPernikahan = r[col("STATUS_PERNIKAHAN")]?.trim() || "Belum Menikah";
+      const namaPasangan = r[col("NAMA_PASANGAN")]?.trim();
+      const jumlahAnak = r[col("JUMLAH_ANAK")]?.trim();
+      const noBpjsKes = r[col("NO_BPJS_KESEHATAN")]?.trim();
+      const noBpjsKet = r[col("NO_BPJS_KETENAGAKERJAAN")]?.trim();
+      const noRek = r[col("NO_REKENING")]?.trim();
+      const bank = r[col("BANK")]?.trim();
+      const namaRek = r[col("NAMA_REKENING")]?.trim();
+      const tglMulaiPkwt = r[col("TANGGAL_MULAI_PKWT")]?.trim();
+      const tglAkhirPkwt = r[col("TANGGAL_BERAKHIR_PKWT")]?.trim();
+
+      // Required fields
+      if (!id) rowErrors.push("ID kosong");
+      if (id && existingIds.has(id)) rowErrors.push(`ID "${id}" sudah ada`);
+      if (!nama) rowErrors.push("NAMA kosong");
+      if (!jk) rowErrors.push("JENIS_KELAMIN kosong");
+      else if (!validJk.has(jk)) rowErrors.push(`JENIS_KELAMIN "${jk}" tidak valid`);
+      if (!agama) rowErrors.push("AGAMA kosong");
+      else if (!validAgama.has(agama)) rowErrors.push(`AGAMA "${agama}" tidak valid`);
+      if (!validStatus.has(status)) rowErrors.push(`STATUS "${status}" tidak valid`);
+      if (!noKtp) rowErrors.push("NO_KTP kosong");
+      if (!tempatLahir) rowErrors.push("TEMPAT_LAHIR kosong");
+      if (!tglLahir) rowErrors.push("TANGGAL_LAHIR kosong");
+      else if (!dateRegex.test(tglLahir)) rowErrors.push("TANGGAL_LAHIR harus format YYYY-MM-DD");
+      if (!noTelp) rowErrors.push("NO_TELP kosong");
+      if (!tglBergabung) rowErrors.push("TANGGAL_BERGABUNG kosong");
+      else if (!dateRegex.test(tglBergabung)) rowErrors.push("TANGGAL_BERGABUNG harus format YYYY-MM-DD");
+      if (!validPernikahan.has(statusPernikahan)) rowErrors.push(`STATUS_PERNIKAHAN "${statusPernikahan}" tidak valid`);
+      if (!noRek) rowErrors.push("NO_REKENING kosong");
+      if (!bank) rowErrors.push("BANK kosong");
+      if (!namaRek) rowErrors.push("NAMA_REKENING kosong");
+      if (tglMulaiPkwt && !dateRegex.test(tglMulaiPkwt)) rowErrors.push("TANGGAL_MULAI_PKWT harus format YYYY-MM-DD");
+      if (tglAkhirPkwt && !dateRegex.test(tglAkhirPkwt)) rowErrors.push("TANGGAL_BERAKHIR_PKWT harus format YYYY-MM-DD");
+
+      // Resolve jabatan
+      let jabatanId: number | null = null;
+      if (jabatanNama) {
+        jabatanId = jabatanMap.get(jabatanNama.toLowerCase()) ?? null;
+        if (!jabatanId) rowErrors.push(`JABATAN "${jabatanNama}" tidak ditemukan di data master`);
+      }
+
+      if (rowErrors.length > 0) {
+        errors.push(`Baris ${rowNum}: ${rowErrors.join(", ")}`);
+      } else {
+        existingIds.add(id); // Prevent duplicate within same CSV
+        validRows.push({
+          id,
+          nama,
+          jenis_kelamin: jk,
+          agama,
+          status,
+          no_ktp: noKtp,
+          tempat_lahir: tempatLahir,
+          tanggal_lahir: tglLahir,
+          alamat_ktp: alamatKtp || "-",
+          alamat_domisili: alamatDomisili || "-",
+          no_telp: noTelp,
+          tanggal_bergabung: tglBergabung,
+          jabatan_id: jabatanId,
+          status_pernikahan: statusPernikahan,
+          nama_pasangan: namaPasangan || null,
+          jumlah_anak: parseInt(jumlahAnak || "0") || 0,
+          no_bpjs_kesehatan: noBpjsKes || null,
+          no_bpjs_ketenagakerjaan: noBpjsKet || null,
+          no_rekening: noRek,
+          bank,
+          nama_rekening: namaRek,
+          tanggal_mulai_pkwt: tglMulaiPkwt || null,
+          tanggal_berakhir_pkwt: tglAkhirPkwt || null,
+        });
+      }
+    }
+
+    // ── If there are validation errors, show them ──
+    if (errors.length > 0) {
+      setCsvErrors(errors);
+      setCsvImporting(false);
+      return;
+    }
+
+    // ── Batch insert to Supabase ──
+    const { error } = await supabase.from("pegawai").insert(validRows);
+
+    if (error) {
+      setCsvErrors([`Gagal menyimpan ke database: ${error.message}`]);
+      setCsvImporting(false);
+      return;
+    }
+
+    setCsvImportedCount(validRows.length);
+    setCsvImporting(false);
     setCsvImportSuccess(true);
     setTimeout(() => {
       setCsvImportSuccess(false);
       setShowImportCsv(false);
       setCsvData([]);
       setCsvFileName("");
+      setCsvErrors([]);
+      setCsvImportedCount(0);
       fetchEmployees();
     }, 2500);
   };
@@ -431,6 +601,9 @@ export default function EmployeesPage() {
     setCsvData([]);
     setCsvFileName("");
     setCsvImportSuccess(false);
+    setCsvImporting(false);
+    setCsvErrors([]);
+    setCsvImportedCount(0);
   };
 
   // ─── Add Employee Form State ───
@@ -1273,7 +1446,22 @@ export default function EmployeesPage() {
               {csvImportSuccess && (
                 <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-success-light border border-success/20 text-success text-sm font-medium animate-fade-in">
                   <Check className="w-4 h-4" />
-                  {csvData.length - 1} data pegawai berhasil diimport!
+                  {csvImportedCount} data pegawai berhasil diimport!
+                </div>
+              )}
+
+              {/* Error Messages */}
+              {csvErrors.length > 0 && (
+                <div className="rounded-xl border border-danger/20 bg-danger-light/50 overflow-hidden animate-fade-in">
+                  <div className="flex items-center gap-2 px-4 py-3 border-b border-danger/10">
+                    <X className="w-4 h-4 text-danger" />
+                    <p className="text-sm font-semibold text-danger">Ditemukan {csvErrors.length} error</p>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto px-4 py-2 space-y-1">
+                    {csvErrors.map((err, i) => (
+                      <p key={i} className="text-xs text-danger/80">{err}</p>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1310,7 +1498,7 @@ export default function EmployeesPage() {
                   {/* Download Template */}
                   <div className="flex items-center justify-center">
                     <a
-                      href={`data:text/csv;charset=utf-8,${encodeURIComponent(csvExpectedHeaders.join(",") + "\n")}`}
+                      href={`data:text/csv;charset=utf-8,${encodeURIComponent(csvTemplateContent)}`}
                       download="template_data_pegawai.csv"
                       className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-border hover:bg-muted hover:border-primary/30 text-sm font-medium text-foreground"
                     >
@@ -1391,15 +1579,18 @@ export default function EmployeesPage() {
                   </div>
 
                   {/* Validation Summary */}
-                  <div className="bg-success-light/50 border border-success/20 rounded-xl px-4 py-3 flex items-center gap-3">
-                    <Check className="w-5 h-5 text-success flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-foreground">File siap diimport</p>
-                      <p className="text-xs text-muted-foreground">
-                        {csvData.length - 1} data pegawai akan ditambahkan ke sistem
-                      </p>
+                  {csvErrors.length === 0 && (
+                    <div className="bg-success-light/50 border border-success/20 rounded-xl px-4 py-3 flex items-center gap-3">
+                      <Check className="w-5 h-5 text-success flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">File siap diimport</p>
+                        <p className="text-xs text-muted-foreground">
+                          {csvData.length - 1} data pegawai akan ditambahkan ke sistem.
+                          Kolom JABATAN akan dicocokkan otomatis dengan data master.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </>
               )}
             </div>
@@ -1412,8 +1603,8 @@ export default function EmployeesPage() {
               <div className="flex items-center gap-3">
                 <Button variant="outline" onClick={handleCloseImport}>Batal</Button>
                 {csvData.length > 0 && !csvImportSuccess && (
-                  <Button icon={Upload} onClick={handleImportConfirm}>
-                    Import {csvData.length - 1} Pegawai
+                  <Button icon={Upload} onClick={handleImportConfirm} disabled={csvImporting}>
+                    {csvImporting ? "Mengimport..." : `Import ${csvData.length - 1} Pegawai`}
                   </Button>
                 )}
               </div>
