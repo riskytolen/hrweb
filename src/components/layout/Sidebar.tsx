@@ -19,6 +19,7 @@ import {
   Database,
   Settings,
   UsersRound,
+  Shield,
   type LucideIcon,
 } from "lucide-react";
 
@@ -67,6 +68,7 @@ const menuGroups: MenuGroup[] = [
     basePath: "/settings",
     items: [
       { name: "Data Master", href: "/settings/master-data", icon: Database },
+      { name: "Keamanan", href: "/settings/security", icon: Shield },
     ],
   },
 ];

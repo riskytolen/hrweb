@@ -105,3 +105,28 @@ export interface DbPegawai {
   // joined
   jabatan?: DbJabatan;
 }
+
+export interface DbEmployeeDevice {
+  id: number;
+  employee_id: string;
+  device_id: string;
+  status: "Aktif" | "Tidak Aktif";
+  registered_at: string;
+  last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  pegawai?: DbPegawai;
+}
+
+export interface DbEmployeeFaceProfile {
+  id: number;
+  employee_id: string;
+  face_data_ref: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  enrolled_at: string;
+  created_at: string;
+  updated_at: string;
+  // joined
+  pegawai?: DbPegawai;
+}
