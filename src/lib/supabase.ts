@@ -7,6 +7,41 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // ─── Database Types ───
 
+export interface DbDivision {
+  id: number;
+  nama: string;
+  deskripsi: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbDivisionLocation {
+  id: number;
+  division_id: number;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+  // joined
+  divisions?: DbDivision;
+}
+
+export interface DbDivisionSchedule {
+  id: number;
+  division_id: number;
+  jam_masuk: string;
+  jam_pulang: string;
+  toleransi_menit: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+  // joined
+  divisions?: DbDivision;
+}
+
 export interface DbBank {
   id: number;
   nama: string;
