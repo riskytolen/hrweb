@@ -16,17 +16,25 @@ export interface DbDivision {
   updated_at: string;
 }
 
-export interface DbDivisionLocation {
+export interface DbAttendanceLocation {
   id: number;
-  division_id: number;
+  nama: string;
   latitude: number;
   longitude: number;
   radius: number;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;
   updated_at: string;
+}
+
+export interface DbDivisionLocationAssignment {
+  id: number;
+  division_id: number;
+  location_id: number;
+  created_at: string;
   // joined
   divisions?: DbDivision;
+  attendance_locations?: DbAttendanceLocation;
 }
 
 export interface DbDivisionSchedule {

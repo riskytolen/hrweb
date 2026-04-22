@@ -26,14 +26,14 @@ import Pagination from "@/components/ui/Pagination";
 import { cn } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbDivisionLocation, type DbDivisionSchedule } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
 type Jabatan = DbJabatan & { levelNama?: string };
 type Bank = DbBank;
 type Division = DbDivision;
-type DivisionLocation = DbDivisionLocation & { divisionNama?: string };
+type AttendanceLocation = DbAttendanceLocation & { divisionNames?: string[] };
 type DivisionSchedule = DbDivisionSchedule & { divisionNama?: string };
 
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -85,11 +85,12 @@ export default function MasterDataPage() {
   const [divisionForm, setDivisionForm] = useState({ nama: "", deskripsi: "", status: "Aktif" });
 
   // ─── Titik Absen State ───
-  const [locationList, setLocationList] = useState<DivisionLocation[]>([]);
+  const [locationList, setLocationList] = useState<AttendanceLocation[]>([]);
   const [locationSearch, setLocationSearch] = useState("");
   const [showLocationForm, setShowLocationForm] = useState(false);
   const [editingLocationId, setEditingLocationId] = useState<number | null>(null);
-  const [locationForm, setLocationForm] = useState({ division_id: 0, latitude: "", longitude: "", radius: "100", status: "Aktif" });
+  const [locationForm, setLocationForm] = useState({ nama: "", latitude: "", longitude: "", radius: "100", division_ids: [] as number[], status: "Aktif" });
+  const [locationDivSearch, setLocationDivSearch] = useState("");
 
   // ─── Waktu Kerja State ───
   const [scheduleList, setScheduleList] = useState<DivisionSchedule[]>([]);
@@ -129,8 +130,14 @@ export default function MasterDataPage() {
   };
 
   const fetchLocations = async () => {
-    const { data } = await supabase.from("division_locations").select("*, divisions(nama)").order("division_id");
-    if (data) setLocationList(data.map((l) => ({ ...l, divisionNama: l.divisions?.nama || "-" })));
+    const { data: locs } = await supabase.from("attendance_locations").select("*").order("nama");
+    const { data: assigns } = await supabase.from("division_location_assignments").select("*, divisions(nama)");
+    if (locs) {
+      setLocationList(locs.map((l) => ({
+        ...l,
+        divisionNames: (assigns || []).filter((a) => a.location_id === l.id).map((a) => a.divisions?.nama || "-"),
+      })));
+    }
   };
 
   const fetchSchedules = async () => {
@@ -287,37 +294,52 @@ export default function MasterDataPage() {
 
   // ─── Titik Absen Handlers ───
   const filteredLocations = locationList.filter((l) =>
-    (l.divisionNama || "").toLowerCase().includes(locationSearch.toLowerCase())
+    l.nama.toLowerCase().includes(locationSearch.toLowerCase()) ||
+    (l.divisionNames || []).some((d) => d.toLowerCase().includes(locationSearch.toLowerCase()))
   );
   const activeDivisions = divisionList.filter((d) => d.status === "Aktif");
-  const divisionsWithoutLocation = activeDivisions.filter((d) => !locationList.some((l) => l.division_id === d.id));
 
   const handleOpenAddLocation = () => {
-    setLocationForm({ division_id: divisionsWithoutLocation[0]?.id || 0, latitude: "", longitude: "", radius: "100", status: "Aktif" });
+    setLocationForm({ nama: "", latitude: "", longitude: "", radius: "100", division_ids: [], status: "Aktif" });
+    setLocationDivSearch("");
     setEditingLocationId(null);
     setShowLocationForm(true);
   };
-  const handleOpenEditLocation = (l: DivisionLocation) => {
-    setLocationForm({ division_id: l.division_id, latitude: String(l.latitude), longitude: String(l.longitude), radius: String(l.radius), status: l.status });
+  const handleOpenEditLocation = async (l: AttendanceLocation) => {
+    const { data: assigns } = await supabase.from("division_location_assignments").select("division_id").eq("location_id", l.id);
+    setLocationForm({ nama: l.nama, latitude: String(l.latitude), longitude: String(l.longitude), radius: String(l.radius), division_ids: assigns?.map((a) => a.division_id) || [], status: l.status });
+    setLocationDivSearch("");
     setEditingLocationId(l.id);
     setShowLocationForm(true);
   };
   const handleSaveLocation = async () => {
-    if (!locationForm.division_id || !locationForm.latitude || !locationForm.longitude) return;
-    const divNama = divisionList.find((d) => d.id === locationForm.division_id)?.nama || "";
-    const payload = { division_id: locationForm.division_id, latitude: parseFloat(locationForm.latitude), longitude: parseFloat(locationForm.longitude), radius: parseInt(locationForm.radius) || 100, status: locationForm.status };
+    if (!locationForm.nama.trim() || !locationForm.latitude || !locationForm.longitude) return;
+    const locPayload = { nama: locationForm.nama, latitude: parseFloat(locationForm.latitude), longitude: parseFloat(locationForm.longitude), radius: parseInt(locationForm.radius) || 100, status: locationForm.status };
+
+    let locationId = editingLocationId;
     if (editingLocationId !== null) {
-      await supabase.from("division_locations").update(payload).eq("id", editingLocationId);
-      showSuccess("Titik Absen Diperbarui", `Koordinat divisi "${divNama}" telah disimpan.`);
+      await supabase.from("attendance_locations").update(locPayload).eq("id", editingLocationId);
     } else {
-      await supabase.from("division_locations").insert(payload);
-      showSuccess("Titik Absen Ditambahkan", `Koordinat divisi "${divNama}" berhasil ditambahkan.`);
+      const { data } = await supabase.from("attendance_locations").insert(locPayload).select("id").single();
+      locationId = data?.id || null;
     }
+
+    if (locationId) {
+      // Sync division assignments: hapus semua lalu insert ulang
+      await supabase.from("division_location_assignments").delete().eq("location_id", locationId);
+      if (locationForm.division_ids.length > 0) {
+        await supabase.from("division_location_assignments").insert(
+          locationForm.division_ids.map((did) => ({ division_id: did, location_id: locationId }))
+        );
+      }
+    }
+
+    showSuccess(editingLocationId ? "Titik Absen Diperbarui" : "Titik Absen Ditambahkan", `Lokasi "${locationForm.nama}" telah disimpan.`);
     setShowLocationForm(false);
     fetchLocations();
   };
   const handleDeleteLocation = async (id: number) => {
-    await supabase.from("division_locations").delete().eq("id", id);
+    await supabase.from("attendance_locations").delete().eq("id", id);
     setDeleteConfirm(null);
     showSuccess("Titik Absen Dihapus", "Data lokasi telah dihapus dari sistem.");
     fetchLocations();
@@ -325,7 +347,7 @@ export default function MasterDataPage() {
   const handleToggleLocationStatus = async (id: number) => {
     const loc = locationList.find((l) => l.id === id);
     if (!loc) return;
-    await supabase.from("division_locations").update({ status: loc.status === "Aktif" ? "Tidak Aktif" : "Aktif" }).eq("id", id);
+    await supabase.from("attendance_locations").update({ status: loc.status === "Aktif" ? "Tidak Aktif" : "Aktif" }).eq("id", id);
     fetchLocations();
   };
 
@@ -667,15 +689,14 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari lokasi atau divisi..." value={locationSearch} onChange={(e) => { setLocationSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddLocation} disabled={divisionsWithoutLocation.length === 0}>
-                {divisionsWithoutLocation.length === 0 ? "Semua Divisi Sudah Ada" : "Tambah Titik Absen"}
-              </Button>
+              <Button icon={Plus} size="sm" onClick={handleOpenAddLocation}>Tambah Lokasi</Button>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="bg-muted/30 border-b border-border">
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Lokasi</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Divisi</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Koordinat</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Radius</th>
@@ -685,13 +706,20 @@ export default function MasterDataPage() {
                 </thead>
                 <tbody className="divide-y divide-border/50">
                   {loading ? (
-                    <SkeletonTable rows={5} cols={6} />
+                    <SkeletonTable rows={5} cols={7} />
                   ) : filteredLocations.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-10 text-sm text-muted-foreground">Tidak ada titik absen ditemukan</td></tr>
+                    <tr><td colSpan={7} className="text-center py-10 text-sm text-muted-foreground">Tidak ada titik absen ditemukan</td></tr>
                   ) : filteredLocations.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((loc, idx) => (
                     <tr key={loc.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
-                      <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{loc.divisionNama}</p></td>
+                      <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{loc.nama}</p></td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex flex-wrap gap-1">
+                          {(loc.divisionNames || []).length > 0 ? loc.divisionNames!.map((d, i) => (
+                            <span key={i} className="text-[11px] font-medium text-accent bg-accent-light px-2 py-0.5 rounded-md">{d}</span>
+                          )) : <span className="text-xs text-muted-foreground italic">-</span>}
+                        </div>
+                      </td>
                       <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground">{loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)}</span></td>
                       <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground">{loc.radius}m</span></td>
                       <td className="px-5 py-3.5">
@@ -705,7 +733,7 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
                           <button onClick={() => handleOpenEditLocation(loc)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "titik-absen", id: loc.id, nama: loc.divisionNama || "" })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => setDeleteConfirm({ type: "titik-absen", id: loc.id, nama: loc.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
                     </tr>
@@ -997,20 +1025,8 @@ export default function MasterDataPage() {
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi <span className="text-danger">*</span></label>
-                {editingLocationId !== null ? (
-                  <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">
-                    {activeDivisions.find((d) => d.id === locationForm.division_id)?.nama || "-"}
-                  </div>
-                ) : (
-                  <Select
-                    value={String(locationForm.division_id)}
-                    onChange={(val) => setLocationForm({ ...locationForm, division_id: parseInt(val) })}
-                    options={divisionsWithoutLocation.map((d) => ({ value: String(d.id), label: d.nama }))}
-                    placeholder="Pilih divisi"
-                  />
-                )}
-                {editingLocationId !== null && <p className="text-[10px] text-muted-foreground mt-1">Divisi tidak dapat diubah saat edit</p>}
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Lokasi <span className="text-danger">*</span></label>
+                <input type="text" placeholder="Contoh: Kantor Pusat Jakarta" value={locationForm.nama} onChange={(e) => setLocationForm({ ...locationForm, nama: e.target.value })} className={inputClass} autoFocus />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1037,11 +1053,68 @@ export default function MasterDataPage() {
                   />
                 </div>
               </div>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-foreground">Divisi yang Menggunakan Lokasi Ini</label>
+                  {locationForm.division_ids.length > 0 && (
+                    <span className="text-[10px] font-bold text-primary bg-primary-light px-2 py-0.5 rounded-md">{locationForm.division_ids.length} dipilih</span>
+                  )}
+                </div>
+                <div className="border border-border rounded-xl overflow-hidden">
+                  {activeDivisions.length > 5 && (
+                    <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                      <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                      <input type="text" placeholder="Cari divisi..." value={locationDivSearch} onChange={(e) => setLocationDivSearch(e.target.value)}
+                        className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
+                    </div>
+                  )}
+                  {activeDivisions.length > 1 && (
+                    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border/50">
+                      <button type="button" onClick={() => setLocationForm((prev) => ({ ...prev, division_ids: activeDivisions.map((d) => d.id) }))} className="text-[10px] font-medium text-primary hover:underline">Pilih Semua</button>
+                      <button type="button" onClick={() => setLocationForm((prev) => ({ ...prev, division_ids: [] }))} className="text-[10px] font-medium text-muted-foreground hover:underline">Hapus Semua</button>
+                    </div>
+                  )}
+                  <div className="max-h-44 overflow-y-auto overscroll-contain p-1.5 space-y-0.5">
+                    {activeDivisions.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic px-2 py-3 text-center">Tidak ada divisi aktif</p>
+                    ) : (() => {
+                      const filtered = activeDivisions.filter((d) => d.nama.toLowerCase().includes(locationDivSearch.toLowerCase()));
+                      // Tampilkan yang tercentang di atas
+                      const sorted = [...filtered].sort((a, b) => {
+                        const aChecked = locationForm.division_ids.includes(a.id) ? 0 : 1;
+                        const bChecked = locationForm.division_ids.includes(b.id) ? 0 : 1;
+                        return aChecked - bChecked;
+                      });
+                      return sorted.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic px-2 py-3 text-center">Tidak ditemukan</p>
+                      ) : sorted.map((d) => (
+                        <label key={d.id} className={cn("flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors", locationForm.division_ids.includes(d.id) ? "bg-primary-light/50" : "hover:bg-muted/50")}>
+                          <input
+                            type="checkbox"
+                            checked={locationForm.division_ids.includes(d.id)}
+                            onChange={(e) => {
+                              setLocationForm((prev) => ({
+                                ...prev,
+                                division_ids: e.target.checked
+                                  ? [...prev.division_ids, d.id]
+                                  : prev.division_ids.filter((id) => id !== d.id),
+                              }));
+                            }}
+                            className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 accent-primary"
+                          />
+                          <span className={cn("text-sm", locationForm.division_ids.includes(d.id) ? "text-primary font-medium" : "text-foreground")}>{d.nama}</span>
+                        </label>
+                      ));
+                    })()}
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">Satu lokasi bisa dipakai banyak divisi.</p>
+              </div>
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
               <Button variant="outline" size="sm" onClick={() => setShowLocationForm(false)}>Batal</Button>
-              <Button size="sm" icon={editingLocationId ? Check : Plus} onClick={handleSaveLocation} disabled={!locationForm.division_id || !locationForm.latitude || !locationForm.longitude}>
-                {editingLocationId ? "Simpan" : "Tambah Titik Absen"}
+              <Button size="sm" icon={editingLocationId ? Check : Plus} onClick={handleSaveLocation} disabled={!locationForm.nama.trim() || !locationForm.latitude || !locationForm.longitude}>
+                {editingLocationId ? "Simpan" : "Tambah Lokasi"}
               </Button>
             </div>
           </div>
