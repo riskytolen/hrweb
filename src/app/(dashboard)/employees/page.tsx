@@ -277,6 +277,7 @@ export default function EmployeesPage() {
       nama_rekening: selectedEmployee.nama_rekening,
       no_bpjs_kesehatan: selectedEmployee.no_bpjs_kesehatan,
       no_bpjs_ketenagakerjaan: selectedEmployee.no_bpjs_ketenagakerjaan,
+      jabatan_id: selectedEmployee.jabatan_id ? String(selectedEmployee.jabatan_id) : "",
     });
     setEditFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null });
     setIsEditing(true);
@@ -333,6 +334,7 @@ export default function EmployeesPage() {
         nama_rekening: editData.nama_rekening,
         no_bpjs_kesehatan: editData.no_bpjs_kesehatan || null,
         no_bpjs_ketenagakerjaan: editData.no_bpjs_ketenagakerjaan || null,
+        jabatan_id: editData.jabatan_id ? parseInt(editData.jabatan_id) : null,
         ...fileUpdates,
       })
       .eq("id", selectedEmployee.id);
@@ -852,7 +854,19 @@ export default function EmployeesPage() {
 
                   <Section title="Kepegawaian" icon={Briefcase}>
                     <Field label="ID Pegawai" value={selectedEmployee.id} copyable />
-                    <EditField label="Jabatan" value={selectedEmployee.jabatanNama || null} field="jabatan" editData={editData} setEditData={setEditData} />
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Jabatan</label>
+                      <select
+                        value={editData.jabatan_id ?? (selectedEmployee.jabatan_id ? String(selectedEmployee.jabatan_id) : "")}
+                        onChange={(e) => setEditData({ ...editData, jabatan_id: e.target.value })}
+                        className={selectClass}
+                      >
+                        <option value="">Pilih jabatan</option>
+                        {jabatanOptions.map((j) => (
+                          <option key={j.id} value={String(j.id)}>{j.nama}</option>
+                        ))}
+                      </select>
+                    </div>
                     <EditField label="Tanggal Bergabung" value={selectedEmployee.tanggal_bergabung} field="tanggal_bergabung" editData={editData} setEditData={setEditData} type="date" />
                     <EditField label="Status" value={selectedEmployee.status} field="status" editData={editData} setEditData={setEditData} type="select" options={["Aktif", "Cuti", "Tidak Aktif"]} />
                     <EditField label="Tanggal Mulai PKWT" value={selectedEmployee.tanggal_mulai_pkwt} field="tanggal_mulai_pkwt" editData={editData} setEditData={setEditData} type="date" />
