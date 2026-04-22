@@ -89,6 +89,18 @@ export default function MasterDataPage() {
     Promise.all([fetchLevels(), fetchJabatan(), fetchBanks()]).then(() => setLoading(false));
   }, []);
 
+  // Lock body scroll when any modal is open
+  useEffect(() => {
+    if (showLevelForm || showJabatanForm || showBankForm) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [showLevelForm, showJabatanForm, showBankForm]);
+
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(""), 2500);
