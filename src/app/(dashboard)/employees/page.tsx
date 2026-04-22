@@ -452,11 +452,15 @@ export default function EmployeesPage() {
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
   const [editFiles, setEditFiles] = useState<Record<string, File | null>>({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null });
   const [jabatanOptions, setJabatanOptions] = useState<{ id: number; nama: string }[]>([]);
+  const [bankOptions, setBankOptions] = useState<{ id: number; nama: string }[]>([]);
 
-  // Fetch jabatan options for form dropdown
+  // Fetch jabatan & bank options for form dropdowns
   useEffect(() => {
     supabase.from("jabatan").select("id, nama").eq("status", "Aktif").order("nama").then(({ data }) => {
       if (data) setJabatanOptions(data);
+    });
+    supabase.from("banks").select("id, nama").eq("status", "Aktif").order("nama").then(({ data }) => {
+      if (data) setBankOptions(data);
     });
   }, []);
 
@@ -884,7 +888,19 @@ export default function EmployeesPage() {
                   <hr className="border-border" />
 
                   <Section title="Rekening & Keuangan" icon={CreditCard}>
-                    <EditField label="Bank" value={selectedEmployee.bank} field="bank" editData={editData} setEditData={setEditData} type="select" options={["BCA", "Mandiri", "BNI", "BRI", "CIMB Niaga", "Danamon", "BSI"]} />
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Bank</label>
+                      <select
+                        value={editData.bank ?? selectedEmployee.bank ?? ""}
+                        onChange={(e) => setEditData({ ...editData, bank: e.target.value })}
+                        className={selectClass}
+                      >
+                        <option value="">Pilih bank</option>
+                        {bankOptions.map((b) => (
+                          <option key={b.id} value={b.nama}>{b.nama}</option>
+                        ))}
+                      </select>
+                    </div>
                     <EditField label="No. Rekening" value={selectedEmployee.no_rekening} field="no_rekening" editData={editData} setEditData={setEditData} />
                     <EditField label="Nama Rekening" value={selectedEmployee.nama_rekening} field="nama_rekening" editData={editData} setEditData={setEditData} />
                   </Section>
@@ -1141,8 +1157,9 @@ export default function EmployeesPage() {
                   <FormField label="Bank" required hasError={addErrors.has("bank")}>
                     <select value={addForm.bank} onChange={(e) => updateAddForm("bank", e.target.value)} className={selectClass}>
                       <option value="">Pilih bank</option>
-                      <option value="BCA">BCA</option><option value="Mandiri">Mandiri</option><option value="BNI">BNI</option>
-                      <option value="BRI">BRI</option><option value="CIMB Niaga">CIMB Niaga</option><option value="Danamon">Danamon</option><option value="BSI">BSI</option>
+                      {bankOptions.map((b) => (
+                        <option key={b.id} value={b.nama}>{b.nama}</option>
+                      ))}
                     </select>
                   </FormField>
                   <FormField label="No. Rekening" required hasError={addErrors.has("no_rekening")}>

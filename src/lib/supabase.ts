@@ -7,6 +7,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // ─── Database Types ───
 
+export interface DbBank {
+  id: number;
+  nama: string;
+  kode: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DbLevel {
   id: number;
   nama: string;
