@@ -35,6 +35,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import DatePicker from "@/components/ui/DatePicker";
+import Select from "@/components/ui/Select";
 import { supabase, type DbPegawai } from "@/lib/supabase";
 import { cn, formatShortDate, toTitleCase } from "@/lib/utils";
 
@@ -169,15 +170,11 @@ function EditField({ label, value, field, editData, setEditData, full, type = "t
           className={cn(inputClass, "resize-none")}
         />
       ) : type === "select" && options ? (
-        <select
+        <Select
           value={currentValue}
-          onChange={(e) => handleChange(e.target.value)}
-          className={selectClass}
-        >
-          {options.map((opt) => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
+          onChange={(val) => handleChange(val)}
+          options={options.map((opt) => ({ value: opt, label: opt }))}
+        />
       ) : type === "date" ? (
         <DatePicker value={currentValue} onChange={(val) => handleChange(val)} />
       ) : (
@@ -860,16 +857,12 @@ export default function EmployeesPage() {
                     <Field label="ID Pegawai" value={selectedEmployee.id} copyable />
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Jabatan</label>
-                      <select
+                      <Select
                         value={editData.jabatan_id ?? (selectedEmployee.jabatan_id ? String(selectedEmployee.jabatan_id) : "")}
-                        onChange={(e) => setEditData({ ...editData, jabatan_id: e.target.value })}
-                        className={selectClass}
-                      >
-                        <option value="">Pilih jabatan</option>
-                        {jabatanOptions.map((j) => (
-                          <option key={j.id} value={String(j.id)}>{j.nama}</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setEditData({ ...editData, jabatan_id: val })}
+                        options={jabatanOptions.map((j) => ({ value: String(j.id), label: j.nama }))}
+                        placeholder="Pilih jabatan"
+                      />
                     </div>
                     <EditField label="Tanggal Bergabung" value={selectedEmployee.tanggal_bergabung} field="tanggal_bergabung" editData={editData} setEditData={setEditData} type="date" />
                     <EditField label="Status" value={selectedEmployee.status} field="status" editData={editData} setEditData={setEditData} type="select" options={["Aktif", "Cuti", "Tidak Aktif"]} />
@@ -890,16 +883,12 @@ export default function EmployeesPage() {
                   <Section title="Rekening & Keuangan" icon={CreditCard}>
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Bank</label>
-                      <select
+                      <Select
                         value={editData.bank ?? selectedEmployee.bank ?? ""}
-                        onChange={(e) => setEditData({ ...editData, bank: e.target.value })}
-                        className={selectClass}
-                      >
-                        <option value="">Pilih bank</option>
-                        {bankOptions.map((b) => (
-                          <option key={b.id} value={b.nama}>{b.nama}</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setEditData({ ...editData, bank: val })}
+                        options={bankOptions.map((b) => ({ value: b.nama, label: b.nama }))}
+                        placeholder="Pilih bank"
+                      />
                     </div>
                     <EditField label="No. Rekening" value={selectedEmployee.no_rekening} field="no_rekening" editData={editData} setEditData={setEditData} />
                     <EditField label="Nama Rekening" value={selectedEmployee.nama_rekening} field="nama_rekening" editData={editData} setEditData={setEditData} />
@@ -1067,16 +1056,23 @@ export default function EmployeesPage() {
                     <input type="text" placeholder="16 digit NIK" maxLength={16} value={addForm.no_ktp} onChange={(e) => updateAddForm("no_ktp", e.target.value)} className={inputClass} />
                   </FormField>
                   <FormField label="Jenis Kelamin" required>
-                    <select value={addForm.jenis_kelamin} onChange={(e) => updateAddForm("jenis_kelamin", e.target.value)} className={selectClass}>
-                      <option value="Laki-laki">Laki-laki</option>
-                      <option value="Perempuan">Perempuan</option>
-                    </select>
+                    <Select
+                      value={addForm.jenis_kelamin}
+                      onChange={(val) => updateAddForm("jenis_kelamin", val)}
+                      options={[{ value: "Laki-laki", label: "Laki-laki" }, { value: "Perempuan", label: "Perempuan" }]}
+                      placeholder="Pilih jenis kelamin"
+                    />
                   </FormField>
                   <FormField label="Agama" required>
-                    <select value={addForm.agama} onChange={(e) => updateAddForm("agama", e.target.value)} className={selectClass}>
-                      <option value="Islam">Islam</option><option value="Kristen">Kristen</option><option value="Katolik">Katolik</option>
-                      <option value="Hindu">Hindu</option><option value="Buddha">Buddha</option><option value="Konghucu">Konghucu</option>
-                    </select>
+                    <Select
+                      value={addForm.agama}
+                      onChange={(val) => updateAddForm("agama", val)}
+                      options={[
+                        { value: "Islam", label: "Islam" }, { value: "Kristen", label: "Kristen" }, { value: "Katolik", label: "Katolik" },
+                        { value: "Hindu", label: "Hindu" }, { value: "Buddha", label: "Buddha" }, { value: "Konghucu", label: "Konghucu" },
+                      ]}
+                      placeholder="Pilih agama"
+                    />
                   </FormField>
                   <FormField label="Tempat Lahir" required hasError={addErrors.has("tempat_lahir")}>
                     <input type="text" placeholder="Kota kelahiran" value={addForm.tempat_lahir} onChange={(e) => updateAddForm("tempat_lahir", e.target.value)} className={inputClass} />
@@ -1109,18 +1105,25 @@ export default function EmployeesPage() {
                     </div>
                   </FormField>
                   <FormField label="Jabatan">
-                    <select value={addForm.jabatan_id} onChange={(e) => updateAddForm("jabatan_id", e.target.value)} className={selectClass}>
-                      <option value="">Pilih jabatan</option>
-                      {jabatanOptions.map((j) => (<option key={j.id} value={j.id}>{j.nama}</option>))}
-                    </select>
+                    <Select
+                      value={addForm.jabatan_id}
+                      onChange={(val) => updateAddForm("jabatan_id", val)}
+                      options={jabatanOptions.map((j) => ({ value: String(j.id), label: j.nama }))}
+                      placeholder="Pilih jabatan"
+                    />
                   </FormField>
                   <FormField label="Tanggal Bergabung" required hasError={addErrors.has("tanggal_bergabung")}>
                     <DatePicker value={addForm.tanggal_bergabung} onChange={(val) => updateAddForm("tanggal_bergabung", val)} placeholder="Pilih tanggal bergabung" />
                   </FormField>
                   <FormField label="Status Pegawai" required>
-                    <select value={addForm.status} onChange={(e) => updateAddForm("status", e.target.value)} className={selectClass}>
-                      <option value="Aktif">Aktif</option><option value="Cuti">Cuti</option><option value="Tidak Aktif">Tidak Aktif</option>
-                    </select>
+                    <Select
+                      value={addForm.status}
+                      onChange={(val) => updateAddForm("status", val)}
+                      options={[
+                        { value: "Aktif", label: "Aktif" }, { value: "Cuti", label: "Cuti" }, { value: "Tidak Aktif", label: "Tidak Aktif" },
+                      ]}
+                      placeholder="Pilih status"
+                    />
                   </FormField>
                   <FormField label="Tanggal Mulai PKWT">
                     <DatePicker value={addForm.tanggal_mulai_pkwt} onChange={(val) => updateAddForm("tanggal_mulai_pkwt", val)} placeholder="Pilih tanggal mulai" />
@@ -1137,9 +1140,14 @@ export default function EmployeesPage() {
                 <div className="flex items-center gap-2 mb-4"><Heart className="w-4 h-4 text-primary" /><h3 className="text-sm font-bold text-foreground">Data Keluarga</h3></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField label="Status Pernikahan" required>
-                    <select value={addForm.status_pernikahan} onChange={(e) => updateAddForm("status_pernikahan", e.target.value)} className={selectClass}>
-                      <option value="Belum Menikah">Belum Menikah</option><option value="Menikah">Menikah</option><option value="Cerai">Cerai</option>
-                    </select>
+                    <Select
+                      value={addForm.status_pernikahan}
+                      onChange={(val) => updateAddForm("status_pernikahan", val)}
+                      options={[
+                        { value: "Belum Menikah", label: "Belum Menikah" }, { value: "Menikah", label: "Menikah" }, { value: "Cerai", label: "Cerai" },
+                      ]}
+                      placeholder="Pilih status pernikahan"
+                    />
                   </FormField>
                   <FormField label="Nama Pasangan">
                     <input type="text" placeholder="Nama suami/istri" value={addForm.nama_pasangan} onChange={(e) => updateAddForm("nama_pasangan", e.target.value)} className={inputClass} />
@@ -1155,12 +1163,13 @@ export default function EmployeesPage() {
                 <div className="flex items-center gap-2 mb-4"><CreditCard className="w-4 h-4 text-primary" /><h3 className="text-sm font-bold text-foreground">Rekening & Keuangan</h3></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField label="Bank" required hasError={addErrors.has("bank")}>
-                    <select value={addForm.bank} onChange={(e) => updateAddForm("bank", e.target.value)} className={selectClass}>
-                      <option value="">Pilih bank</option>
-                      {bankOptions.map((b) => (
-                        <option key={b.id} value={b.nama}>{b.nama}</option>
-                      ))}
-                    </select>
+                    <Select
+                      value={addForm.bank}
+                      onChange={(val) => updateAddForm("bank", val)}
+                      options={bankOptions.map((b) => ({ value: b.nama, label: b.nama }))}
+                      placeholder="Pilih bank"
+                      hasError={addErrors.has("bank")}
+                    />
                   </FormField>
                   <FormField label="No. Rekening" required hasError={addErrors.has("no_rekening")}>
                     <input type="text" placeholder="Nomor rekening" value={addForm.no_rekening} onChange={(e) => updateAddForm("no_rekening", e.target.value)} className={inputClass} />
