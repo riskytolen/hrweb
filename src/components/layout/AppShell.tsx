@@ -16,7 +16,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       />
       <div
         className={cn(
-          "transition-all duration-300 ease-in-out",
+          "transition-[margin-left] duration-300 ease-in-out",
           sidebarCollapsed ? "lg:ml-[60px]" : "lg:ml-[230px]"
         )}
       >

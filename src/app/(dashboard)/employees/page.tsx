@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Users,
   Plus,
@@ -36,6 +36,7 @@ import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import DatePicker from "@/components/ui/DatePicker";
 import Select from "@/components/ui/Select";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, type DbPegawai } from "@/lib/supabase";
 import { cn, formatShortDate, toTitleCase } from "@/lib/utils";
 
@@ -606,6 +607,132 @@ export default function EmployeesPage() {
     setCsvImportedCount(0);
   };
 
+  // ─── Export handlers ───
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close export menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const getExportData = () => {
+    const data = filtered.length > 0 ? filtered : employees;
+    return data.map((emp) => ({
+      ID: emp.id,
+      NAMA: emp.nama,
+      JENIS_KELAMIN: emp.jenis_kelamin,
+      AGAMA: emp.agama,
+      STATUS: emp.status,
+      NO_KTP: emp.no_ktp,
+      TEMPAT_LAHIR: emp.tempat_lahir,
+      TANGGAL_LAHIR: emp.tanggal_lahir,
+      ALAMAT_KTP: emp.alamat_ktp,
+      ALAMAT_DOMISILI: emp.alamat_domisili,
+      NO_TELP: emp.no_telp,
+      TANGGAL_BERGABUNG: emp.tanggal_bergabung,
+      JABATAN: emp.jabatanNama || "-",
+      STATUS_PERNIKAHAN: emp.status_pernikahan,
+      NAMA_PASANGAN: emp.nama_pasangan || "",
+      JUMLAH_ANAK: String(emp.jumlah_anak),
+      NO_BPJS_KESEHATAN: emp.no_bpjs_kesehatan || "",
+      NO_BPJS_KETENAGAKERJAAN: emp.no_bpjs_ketenagakerjaan || "",
+      NO_REKENING: emp.no_rekening,
+      BANK: emp.bank,
+      NAMA_REKENING: emp.nama_rekening,
+      TANGGAL_MULAI_PKWT: emp.tanggal_mulai_pkwt || "",
+      TANGGAL_BERAKHIR_PKWT: emp.tanggal_berakhir_pkwt || "",
+    }));
+  };
+
+  const handleExportCsv = () => {
+    setShowExportMenu(false);
+    const data = getExportData();
+    if (data.length === 0) return;
+
+    const headers = csvExpectedHeaders;
+    const rows = data.map((row) =>
+      headers.map((h) => {
+        const val = row[h as keyof typeof row] || "";
+        return val.includes(",") || val.includes('"') || val.includes("\n")
+          ? `"${val.replace(/"/g, '""')}"`
+          : val;
+      }).join(",")
+    );
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `data_pegawai_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showSuccessToast("Export Berhasil", `${data.length} data pegawai berhasil diexport ke CSV.`);
+  };
+
+  const handleExportPdf = async () => {
+    setShowExportMenu(false);
+    const data = getExportData();
+    if (data.length === 0) return;
+
+    const { default: jsPDF } = await import("jspdf");
+    const { default: autoTable } = await import("jspdf-autotable");
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+
+    // Title
+    doc.setFontSize(16);
+    doc.text("Data Pegawai", 14, 15);
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text(`Diekspor pada ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })} - ${data.length} pegawai`, 14, 21);
+
+    // Table
+    const pdfHeaders = ["ID", "Nama", "Jenis Kelamin", "Jabatan", "Status", "No. KTP", "No. Telp", "Bank", "No. Rekening", "Tgl Bergabung"];
+    const pdfRows = data.map((row) => [
+      row.ID,
+      row.NAMA,
+      row.JENIS_KELAMIN,
+      row.JABATAN,
+      row.STATUS,
+      row.NO_KTP,
+      row.NO_TELP,
+      row.BANK,
+      row.NO_REKENING,
+      row.TANGGAL_BERGABUNG,
+    ]);
+
+    autoTable(doc, {
+      head: [pdfHeaders],
+      body: pdfRows,
+      startY: 26,
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold", fontSize: 7 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      margin: { left: 14, right: 14 },
+    });
+
+    // Footer
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(150);
+      doc.text(`Halaman ${i} dari ${pageCount}`, doc.internal.pageSize.getWidth() - 14, doc.internal.pageSize.getHeight() - 8, { align: "right" });
+      doc.text("HRM System", 14, doc.internal.pageSize.getHeight() - 8);
+    }
+
+    doc.save(`data_pegawai_${new Date().toISOString().slice(0, 10)}.pdf`);
+    showSuccessToast("Export Berhasil", `${data.length} data pegawai berhasil diexport ke PDF.`);
+  };
+
   // ─── Add Employee Form State ───
   const emptyForm = {
     id: "", nama: "", jenis_kelamin: "Laki-laki", agama: "Islam", status: "Aktif",
@@ -827,7 +954,28 @@ export default function EmployeesPage() {
           actions={
             <div className="flex items-center gap-2">
               <Button variant="outline" icon={Upload} size="sm" onClick={() => setShowImportCsv(true)}>Import CSV</Button>
-              <Button variant="outline" icon={Download} size="sm">Export</Button>
+              <div ref={exportMenuRef} className="relative">
+                <Button variant="outline" icon={Download} size="sm" onClick={() => setShowExportMenu(!showExportMenu)}>Export</Button>
+                {showExportMenu && (
+                  <div className="absolute right-0 mt-1.5 w-48 rounded-xl border border-border bg-card shadow-xl shadow-black/8 overflow-hidden z-50 animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-150">
+                    <button onClick={handleExportCsv} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors">
+                      <FileSpreadsheet className="w-4 h-4 text-success" />
+                      <div className="text-left">
+                        <p className="font-medium">Export CSV</p>
+                        <p className="text-[10px] text-muted-foreground">Spreadsheet format</p>
+                      </div>
+                    </button>
+                    <div className="border-t border-border" />
+                    <button onClick={handleExportPdf} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors">
+                      <FileText className="w-4 h-4 text-danger" />
+                      <div className="text-left">
+                        <p className="font-medium">Export PDF</p>
+                        <p className="text-[10px] text-muted-foreground">Dokumen cetak</p>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
               <Button icon={Plus} size="sm" onClick={() => { setNewId(""); setAddForm(emptyForm); setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null }); setAddError(""); setAddErrors(new Set()); setShowAddForm(true); }}>Tambah Pegawai</Button>
             </div>
           }
@@ -835,42 +983,58 @@ export default function EmployeesPage() {
 
         {/* Summary */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center">
-              <Users className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">Total</p>
-              <p className="text-lg font-bold text-foreground">{employees.length}</p>
-            </div>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-success-light flex items-center justify-center">
-              <span className="text-sm font-bold text-success">{activeCount}</span>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">Aktif</p>
-              <p className="text-xs text-muted-foreground">pegawai</p>
-            </div>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-warning-light flex items-center justify-center">
-              <span className="text-sm font-bold text-warning">{cutiCount}</span>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">Cuti</p>
-              <p className="text-xs text-muted-foreground">pegawai</p>
-            </div>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
-              <span className="text-sm font-bold text-muted-foreground">{inactiveCount}</span>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">Tidak Aktif</p>
-              <p className="text-xs text-muted-foreground">pegawai</p>
-            </div>
-          </div>
+          {loading ? (
+            <>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
+                  <Skeleton className="w-10 h-10 rounded-xl" />
+                  <div className="space-y-2">
+                    <Skeleton className="h-3 w-14 rounded-md" />
+                    <Skeleton className="h-5 w-8 rounded-md" />
+                  </div>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center">
+                  <Users className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Total</p>
+                  <p className="text-lg font-bold text-foreground">{employees.length}</p>
+                </div>
+              </div>
+              <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-success-light flex items-center justify-center">
+                  <span className="text-sm font-bold text-success">{activeCount}</span>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Aktif</p>
+                  <p className="text-xs text-muted-foreground">pegawai</p>
+                </div>
+              </div>
+              <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-warning-light flex items-center justify-center">
+                  <span className="text-sm font-bold text-warning">{cutiCount}</span>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Cuti</p>
+                  <p className="text-xs text-muted-foreground">pegawai</p>
+                </div>
+              </div>
+              <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
+                  <span className="text-sm font-bold text-muted-foreground">{inactiveCount}</span>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Tidak Aktif</p>
+                  <p className="text-xs text-muted-foreground">pegawai</p>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Filters */}
@@ -918,41 +1082,62 @@ export default function EmployeesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
-                {filtered.map((emp) => (
-                  <tr key={emp.id} className="hover:bg-muted/30">
-                    <td className="px-5 py-4">
-                      <span className="text-xs font-mono text-muted-foreground">{emp.id}</span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="relative w-9 h-9 rounded-full bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 flex items-center justify-center flex-shrink-0 group-hover:border-primary/40">
-                          <User className="w-4 h-4 text-primary/70" />
-                          <div className={cn(
-                            "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-card",
-                            emp.status === "Aktif" ? "bg-emerald-400" : emp.status === "Cuti" ? "bg-amber-400" : "bg-slate-300"
-                          )} />
+                {loading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <tr key={i}>
+                      <td className="px-5 py-4"><Skeleton className="h-4 w-16 rounded-md" /></td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <Skeleton className="w-9 h-9 rounded-full" />
+                          <div className="space-y-1.5">
+                            <Skeleton className="h-4 w-28 rounded-md" />
+                            <Skeleton className="h-3 w-16 rounded-md" />
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">{emp.nama}</p>
-                          <p className="text-[11px] text-muted-foreground">{emp.tempat_lahir}</p>
+                      </td>
+                      <td className="px-5 py-4"><Skeleton className="h-4 w-20 rounded-md" /></td>
+                      <td className="px-5 py-4"><Skeleton className="h-4 w-24 rounded-md" /></td>
+                      <td className="px-5 py-4"><Skeleton className="h-6 w-14 rounded-lg" /></td>
+                      <td className="px-5 py-4 text-center"><Skeleton className="h-6 w-14 rounded-lg mx-auto" /></td>
+                    </tr>
+                  ))
+                ) : (
+                  filtered.map((emp) => (
+                    <tr key={emp.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-4">
+                        <span className="text-xs font-mono text-muted-foreground">{emp.id}</span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="relative w-9 h-9 rounded-full bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 flex items-center justify-center flex-shrink-0 group-hover:border-primary/40">
+                            <User className="w-4 h-4 text-primary/70" />
+                            <div className={cn(
+                              "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-card",
+                              emp.status === "Aktif" ? "bg-emerald-400" : emp.status === "Cuti" ? "bg-amber-400" : "bg-slate-300"
+                            )} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">{emp.nama}</p>
+                            <p className="text-[11px] text-muted-foreground">{emp.tempat_lahir}</p>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-sm text-foreground">{emp.jabatanNama}</td>
-                    <td className="px-5 py-4 text-sm text-muted-foreground">{emp.no_telp}</td>
-                    <td className="px-5 py-4">
-                      <Badge variant={statusVariant[emp.status] || "muted"}>{emp.status}</Badge>
-                    </td>
-                    <td className="px-5 py-4 text-center">
-                      <button
-                        onClick={() => handleOpenDetail(emp)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-primary hover:bg-primary-light"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> Detail
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-5 py-4 text-sm text-foreground">{emp.jabatanNama}</td>
+                      <td className="px-5 py-4 text-sm text-muted-foreground">{emp.no_telp}</td>
+                      <td className="px-5 py-4">
+                        <Badge variant={statusVariant[emp.status] || "muted"}>{emp.status}</Badge>
+                      </td>
+                      <td className="px-5 py-4 text-center">
+                        <button
+                          onClick={() => handleOpenDetail(emp)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-primary hover:bg-primary-light"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Detail
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

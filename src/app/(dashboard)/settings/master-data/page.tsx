@@ -14,10 +14,13 @@ import {
   Landmark,
   ArrowUpDown,
   GripVertical,
+  CircleCheckBig,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
+import Portal from "@/components/ui/Portal";
+import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { supabase, type DbLevel, type DbJabatan, type DbBank } from "@/lib/supabase";
 
 // ─── Types ───
@@ -46,15 +49,12 @@ export default function MasterDataPage() {
   const [showLevelForm, setShowLevelForm] = useState(false);
   const [editingLevelId, setEditingLevelId] = useState<number | null>(null);
   const [levelForm, setLevelForm] = useState({ nama: "", urutan: 1, status: "Aktif" });
-  const [deleteLevelConfirm, setDeleteLevelConfirm] = useState<number | null>(null);
-
   // ─── Jabatan State ───
   const [jabatanList, setJabatanList] = useState<Jabatan[]>([]);
   const [jabatanSearch, setJabatanSearch] = useState("");
   const [showJabatanForm, setShowJabatanForm] = useState(false);
   const [editingJabatanId, setEditingJabatanId] = useState<number | null>(null);
   const [jabatanForm, setJabatanForm] = useState({ nama: "", deskripsi: "", level_id: 0, status: "Aktif" });
-  const [deleteJabatanConfirm, setDeleteJabatanConfirm] = useState<number | null>(null);
 
   // ─── Bank State ───
   const [bankList, setBankList] = useState<Bank[]>([]);
@@ -62,9 +62,11 @@ export default function MasterDataPage() {
   const [showBankForm, setShowBankForm] = useState(false);
   const [editingBankId, setEditingBankId] = useState<number | null>(null);
   const [bankForm, setBankForm] = useState({ nama: "", kode: "", status: "Aktif" });
-  const [deleteBankConfirm, setDeleteBankConfirm] = useState<number | null>(null);
 
-  const [successMsg, setSuccessMsg] = useState("");
+  // ─── Delete Confirm Dialog ───
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "bank"; id: number; nama: string } | null>(null);
+
+  const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
   const [loading, setLoading] = useState(true);
 
   // ─── Fetch data from Supabase ───
@@ -101,9 +103,9 @@ export default function MasterDataPage() {
     };
   }, [showLevelForm, showJabatanForm, showBankForm]);
 
-  const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(""), 2500);
+  const showSuccess = (title: string, message?: string) => {
+    setToast({ show: true, title, message: message || "" });
+    setTimeout(() => setToast({ show: false, title: "", message: "" }), 3500);
   };
 
   // ─── Level Handlers ───
@@ -126,10 +128,10 @@ export default function MasterDataPage() {
     if (!levelForm.nama.trim()) return;
     if (editingLevelId !== null) {
       await supabase.from("levels").update({ nama: levelForm.nama, urutan: levelForm.urutan, status: levelForm.status }).eq("id", editingLevelId);
-      showSuccess("Level berhasil diperbarui");
+      showSuccess("Level Diperbarui", `Data level "${levelForm.nama}" telah disimpan.`);
     } else {
       await supabase.from("levels").insert({ nama: levelForm.nama, urutan: levelForm.urutan, status: levelForm.status });
-      showSuccess("Level baru berhasil ditambahkan");
+      showSuccess("Level Ditambahkan", `Level "${levelForm.nama}" berhasil ditambahkan ke sistem.`);
     }
     setShowLevelForm(false);
     fetchLevels();
@@ -137,8 +139,8 @@ export default function MasterDataPage() {
   };
   const handleDeleteLevel = async (id: number) => {
     await supabase.from("levels").delete().eq("id", id);
-    setDeleteLevelConfirm(null);
-    showSuccess("Level berhasil dihapus");
+    setDeleteConfirm(null);
+    showSuccess("Level Dihapus", "Data level telah dihapus dari sistem.");
     fetchLevels();
   };
   const handleToggleLevelStatus = async (id: number) => {
@@ -169,18 +171,18 @@ export default function MasterDataPage() {
     if (!jabatanForm.nama.trim() || !jabatanForm.level_id) return;
     if (editingJabatanId !== null) {
       await supabase.from("jabatan").update({ nama: jabatanForm.nama, deskripsi: jabatanForm.deskripsi || null, level_id: jabatanForm.level_id, status: jabatanForm.status }).eq("id", editingJabatanId);
-      showSuccess("Jabatan berhasil diperbarui");
+      showSuccess("Jabatan Diperbarui", `Data jabatan "${jabatanForm.nama}" telah disimpan.`);
     } else {
       await supabase.from("jabatan").insert({ nama: jabatanForm.nama, deskripsi: jabatanForm.deskripsi || null, level_id: jabatanForm.level_id, status: jabatanForm.status });
-      showSuccess("Jabatan baru berhasil ditambahkan");
+      showSuccess("Jabatan Ditambahkan", `Jabatan "${jabatanForm.nama}" berhasil ditambahkan ke sistem.`);
     }
     setShowJabatanForm(false);
     fetchJabatan();
   };
   const handleDeleteJabatan = async (id: number) => {
     await supabase.from("jabatan").delete().eq("id", id);
-    setDeleteJabatanConfirm(null);
-    showSuccess("Jabatan berhasil dihapus");
+    setDeleteConfirm(null);
+    showSuccess("Jabatan Dihapus", "Data jabatan telah dihapus dari sistem.");
     fetchJabatan();
   };
   const handleToggleJabatanStatus = async (id: number) => {
@@ -210,18 +212,18 @@ export default function MasterDataPage() {
     if (!bankForm.nama.trim()) return;
     if (editingBankId !== null) {
       await supabase.from("banks").update({ nama: bankForm.nama, kode: bankForm.kode || null, status: bankForm.status }).eq("id", editingBankId);
-      showSuccess("Bank berhasil diperbarui");
+      showSuccess("Bank Diperbarui", `Data bank "${bankForm.nama}" telah disimpan.`);
     } else {
       await supabase.from("banks").insert({ nama: bankForm.nama, kode: bankForm.kode || null, status: bankForm.status });
-      showSuccess("Bank baru berhasil ditambahkan");
+      showSuccess("Bank Ditambahkan", `Bank "${bankForm.nama}" berhasil ditambahkan ke sistem.`);
     }
     setShowBankForm(false);
     fetchBanks();
   };
   const handleDeleteBank = async (id: number) => {
     await supabase.from("banks").delete().eq("id", id);
-    setDeleteBankConfirm(null);
-    showSuccess("Bank berhasil dihapus");
+    setDeleteConfirm(null);
+    showSuccess("Bank Dihapus", "Data bank telah dihapus dari sistem.");
     fetchBanks();
   };
   const handleToggleBankStatus = async (id: number) => {
@@ -236,10 +238,29 @@ export default function MasterDataPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader title="Data Master" description="Kelola data referensi Level, Jabatan, dan Bank" icon={Database} />
 
-      {successMsg && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-success-light border border-success/20 text-success text-sm font-medium animate-fade-in">
-          <Check className="w-4 h-4" />{successMsg}
-        </div>
+      {toast.show && (
+        <Portal>
+          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
+            <div className="flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border border-success/20 min-w-[360px] max-w-[480px]">
+              <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
+                <CircleCheckBig className="w-5 h-5 text-success" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-foreground">{toast.title}</p>
+                {toast.message && <p className="text-xs text-muted-foreground mt-0.5">{toast.message}</p>}
+              </div>
+              <button
+                onClick={() => setToast({ show: false, title: "", message: "" })}
+                className="p-1 rounded-lg hover:bg-muted text-muted-foreground flex-shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="mt-1 mx-2 h-[2px] bg-border rounded-full overflow-hidden">
+              <div className="h-full bg-success rounded-full" style={{ animation: "shrink 3.5s linear forwards" }} />
+            </div>
+          </div>
+        </Portal>
       )}
 
       {/* ═══ MAIN CARD WITH TABS ═══ */}
@@ -300,7 +321,9 @@ export default function MasterDataPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {filteredLevels.length === 0 ? (
+                  {loading ? (
+                    <SkeletonTable rows={5} cols={4} />
+                  ) : filteredLevels.length === 0 ? (
                     <tr><td colSpan={4} className="text-center py-10 text-sm text-muted-foreground">Tidak ada level ditemukan</td></tr>
                   ) : filteredLevels.map((level) => (
                     <tr key={level.id} className="hover:bg-muted/30">
@@ -322,14 +345,7 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3">
                         <div className="flex items-center justify-center gap-1">
                           <button onClick={() => handleOpenEditLevel(level)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          {deleteLevelConfirm === level.id ? (
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => handleDeleteLevel(level.id)} className="p-1.5 rounded-lg bg-danger text-white text-[10px] font-semibold px-2">Hapus</button>
-                              <button onClick={() => setDeleteLevelConfirm(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                            </div>
-                          ) : (
-                            <button onClick={() => setDeleteLevelConfirm(level.id)} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
-                          )}
+                          <button onClick={() => setDeleteConfirm({ type: "level", id: level.id, nama: level.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
                     </tr>
@@ -367,7 +383,9 @@ export default function MasterDataPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {filteredJabatan.length === 0 ? (
+                  {loading ? (
+                    <SkeletonTable rows={5} cols={6} />
+                  ) : filteredJabatan.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-10 text-sm text-muted-foreground">Tidak ada jabatan ditemukan</td></tr>
                   ) : filteredJabatan.map((jabatan, idx) => (
                     <tr key={jabatan.id} className="hover:bg-muted/30">
@@ -386,14 +404,7 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
                           <button onClick={() => handleOpenEditJabatan(jabatan)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          {deleteJabatanConfirm === jabatan.id ? (
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => handleDeleteJabatan(jabatan.id)} className="p-1.5 rounded-lg bg-danger text-white text-[10px] font-semibold px-2">Hapus</button>
-                              <button onClick={() => setDeleteJabatanConfirm(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                            </div>
-                          ) : (
-                            <button onClick={() => setDeleteJabatanConfirm(jabatan.id)} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
-                          )}
+                          <button onClick={() => setDeleteConfirm({ type: "jabatan", id: jabatan.id, nama: jabatan.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
                     </tr>
@@ -430,7 +441,9 @@ export default function MasterDataPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {filteredBanks.length === 0 ? (
+                  {loading ? (
+                    <SkeletonTable rows={5} cols={5} />
+                  ) : filteredBanks.length === 0 ? (
                     <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada bank ditemukan</td></tr>
                   ) : filteredBanks.map((bank, idx) => (
                     <tr key={bank.id} className="hover:bg-muted/30">
@@ -448,14 +461,7 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
                           <button onClick={() => handleOpenEditBank(bank)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          {deleteBankConfirm === bank.id ? (
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => handleDeleteBank(bank.id)} className="p-1.5 rounded-lg bg-danger text-white text-[10px] font-semibold px-2">Hapus</button>
-                              <button onClick={() => setDeleteBankConfirm(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                            </div>
-                          ) : (
-                            <button onClick={() => setDeleteBankConfirm(bank.id)} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
-                          )}
+                          <button onClick={() => setDeleteConfirm({ type: "bank", id: bank.id, nama: bank.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
                     </tr>
@@ -472,6 +478,7 @@ export default function MasterDataPage() {
 
       {/* ═══ LEVEL FORM MODAL ═══ */}
       {showLevelForm && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLevelForm(false)} />
           <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
@@ -512,10 +519,12 @@ export default function MasterDataPage() {
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
       {/* ═══ JABATAN FORM MODAL ═══ */}
       {showJabatanForm && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowJabatanForm(false)} />
           <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
@@ -562,10 +571,12 @@ export default function MasterDataPage() {
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
       {/* ═══ BANK FORM MODAL ═══ */}
       {showBankForm && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBankForm(false)} />
           <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
@@ -605,6 +616,35 @@ export default function MasterDataPage() {
             </div>
           </div>
         </div>
+        </Portal>
+      )}
+
+      {/* ═══ DELETE CONFIRM DIALOG ═══ */}
+      {deleteConfirm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+            <div className="p-6 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-7 h-7 text-danger" />
+              </div>
+              <h3 className="text-base font-bold text-foreground">Hapus {deleteConfirm.type === "level" ? "Level" : deleteConfirm.type === "jabatan" ? "Jabatan" : "Bank"}?</h3>
+              <p className="text-sm text-muted-foreground mt-2">
+                <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen dan tidak dapat dikembalikan.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 px-6 pb-6">
+              <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)}>Batal</Button>
+              <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={() => {
+                if (deleteConfirm.type === "level") handleDeleteLevel(deleteConfirm.id);
+                else if (deleteConfirm.type === "jabatan") handleDeleteJabatan(deleteConfirm.id);
+                else handleDeleteBank(deleteConfirm.id);
+              }}>Hapus</Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
       )}
     </div>
   );
