@@ -16,6 +16,7 @@ import {
   MapPin,
   Clock,
   CircleDollarSign,
+  Tag,
   ArrowUpDown,
   GripVertical,
   CircleCheckBig,
@@ -27,7 +28,7 @@ import Pagination from "@/components/ui/Pagination";
 import { cn, generateDivisionColor } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -37,6 +38,7 @@ type Division = DbDivision;
 type AttendanceLocation = DbAttendanceLocation & { divisionNames?: string[] };
 type DivisionSchedule = DbDivisionSchedule & { divisionNama?: string };
 type PointRate = DbPointRate & { divisionNama?: string };
+type DeliveryStatus = DbDeliveryStatus;
 
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const selectClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 appearance-none text-foreground";
@@ -49,6 +51,7 @@ const tabs = [
   { key: "titik-absen", label: "Titik Absen", icon: MapPin },
   { key: "waktu-kerja", label: "Waktu Kerja", icon: Clock },
   { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
+  { key: "status-titik", label: "Status Titik", icon: Tag },
   { key: "bank", label: "Bank", icon: Landmark },
 ] as const;
 
@@ -111,8 +114,15 @@ export default function MasterDataPage() {
   const [editingRateDivId, setEditingRateDivId] = useState<number | null>(null);
   const [rateForm, setRateForm] = useState({ division_id: 0, driver_rate: "", helper_rate: "" });
 
+  // ─── Status Titik State ───
+  const [dStatusList, setDStatusList] = useState<DeliveryStatus[]>([]);
+  const [dStatusSearch, setDStatusSearch] = useState("");
+  const [showDStatusForm, setShowDStatusForm] = useState(false);
+  const [editingDStatusId, setEditingDStatusId] = useState<number | null>(null);
+  const [dStatusForm, setDStatusForm] = useState({ nama: "", kode: "", color: "#6b7280", status: "Aktif" });
+
   // ─── Delete Confirm Dialog ───
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "harga-titik" | "bank"; id: number; nama: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
   const [loading, setLoading] = useState(true);
@@ -173,13 +183,18 @@ export default function MasterDataPage() {
     }
   };
 
+  const fetchDStatuses = async () => {
+    const { data } = await supabase.from("delivery_statuses").select("*").order("nama");
+    if (data) setDStatusList(data);
+  };
+
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates(), fetchDStatuses()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm) {
+    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm || showDStatusForm) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -187,7 +202,7 @@ export default function MasterDataPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showRateForm]);
+  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showRateForm, showDStatusForm]);
 
   const showSuccess = (title: string, message?: string) => {
     setToast({ show: true, title, message: message || "" });
@@ -487,6 +502,45 @@ export default function MasterDataPage() {
     fetchRates();
   };
 
+  // ─── Status Titik Handlers ───
+  const filteredDStatuses = dStatusList.filter((s) => s.nama.toLowerCase().includes(dStatusSearch.toLowerCase()) || s.kode.toLowerCase().includes(dStatusSearch.toLowerCase()));
+
+  const handleOpenAddDStatus = () => {
+    setDStatusForm({ nama: "", kode: "", color: "#6b7280", status: "Aktif" });
+    setEditingDStatusId(null);
+    setShowDStatusForm(true);
+  };
+  const handleOpenEditDStatus = (s: DeliveryStatus) => {
+    setDStatusForm({ nama: s.nama, kode: s.kode, color: s.color || "#6b7280", status: s.status });
+    setEditingDStatusId(s.id);
+    setShowDStatusForm(true);
+  };
+  const handleSaveDStatus = async () => {
+    if (!dStatusForm.nama.trim() || !dStatusForm.kode.trim()) return;
+    const payload = { nama: dStatusForm.nama, kode: dStatusForm.kode.toUpperCase(), color: dStatusForm.color, status: dStatusForm.status };
+    if (editingDStatusId !== null) {
+      await supabase.from("delivery_statuses").update(payload).eq("id", editingDStatusId);
+      showSuccess("Status Diperbarui", `Status "${dStatusForm.nama}" telah disimpan.`);
+    } else {
+      await supabase.from("delivery_statuses").insert(payload);
+      showSuccess("Status Ditambahkan", `Status "${dStatusForm.nama}" berhasil ditambahkan.`);
+    }
+    setShowDStatusForm(false);
+    fetchDStatuses();
+  };
+  const handleDeleteDStatus = async (id: number) => {
+    await supabase.from("delivery_statuses").delete().eq("id", id);
+    setDeleteConfirm(null);
+    showSuccess("Status Dihapus", "Data status telah dihapus.");
+    fetchDStatuses();
+  };
+  const handleToggleDStatusStatus = async (id: number) => {
+    const s = dStatusList.find((s) => s.id === id);
+    if (!s) return;
+    await supabase.from("delivery_statuses").update({ status: s.status === "Aktif" ? "Tidak Aktif" : "Aktif" }).eq("id", id);
+    fetchDStatuses();
+  };
+
   // ─── Bank Handlers ───
   const filteredBanks = bankList.filter((b) =>
     b.nama.toLowerCase().includes(bankSearch.toLowerCase()) || (b.kode || "").toLowerCase().includes(bankSearch.toLowerCase())
@@ -564,7 +618,7 @@ export default function MasterDataPage() {
           {tabs.map((tab) => {
             const isActive = activeTab === tab.key;
             const Icon = tab.icon;
-            const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "harga-titik" ? rateRows.length : bankList.length;
+            const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : bankList.length;
             return (
               <button
                 key={tab.key}
@@ -953,6 +1007,66 @@ export default function MasterDataPage() {
               </table>
             </div>
             <Pagination currentPage={masterPage} totalItems={filteredRateRows.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
+          </>
+        )}
+
+        {/* ─── TAB: STATUS TITIK ─── */}
+        {activeTab === "status-titik" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input type="text" placeholder="Cari status..." value={dStatusSearch} onChange={(e) => { setDStatusSearch(e.target.value); setMasterPage(1); }}
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+              </div>
+              <Button icon={Plus} size="sm" onClick={handleOpenAddDStatus}>Tambah Status</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Status</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-24">Kode</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aktif</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <SkeletonTable rows={3} cols={5} />
+                  ) : filteredDStatuses.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada status ditemukan</td></tr>
+                  ) : filteredDStatuses.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((s, idx) => (
+                    <tr key={s.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                          <span className="text-sm font-semibold text-foreground">{s.nama}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">{s.kode}</span></td>
+                      <td className="px-5 py-3.5">
+                        <button onClick={() => handleToggleDStatusStatus(s.id)}
+                          className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
+                            s.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                          <div className={cn("w-1.5 h-1.5 rounded-full", s.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
+                          {s.status}
+                        </button>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-center gap-1">
+                          <button onClick={() => handleOpenEditDStatus(s)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => setDeleteConfirm({ type: "status-titik", id: s.id, nama: s.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredDStatuses.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -1430,6 +1544,55 @@ export default function MasterDataPage() {
         </Portal>
       )}
 
+      {/* ═══ STATUS TITIK FORM MODAL ═══ */}
+      {showDStatusForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDStatusForm(false)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                  {editingDStatusId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
+                </div>
+                <h2 className="text-sm font-bold text-foreground">{editingDStatusId ? "Edit Status" : "Tambah Status Baru"}</h2>
+              </div>
+              <button onClick={() => setShowDStatusForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Status <span className="text-danger">*</span></label>
+                  <input type="text" placeholder="Contoh: Standby" value={dStatusForm.nama} onChange={(e) => setDStatusForm({ ...dStatusForm, nama: e.target.value })} className={inputClass} autoFocus />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Warna</label>
+                  <input type="color" value={dStatusForm.color} onChange={(e) => setDStatusForm({ ...dStatusForm, color: e.target.value })}
+                    className="w-10 h-10 rounded-xl border border-border cursor-pointer appearance-none bg-transparent [&::-webkit-color-swatch-wrapper]:p-0.5 [&::-webkit-color-swatch]:rounded-lg [&::-webkit-color-swatch]:border-0" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Kode <span className="text-danger">*</span></label>
+                  <input type="text" placeholder="Contoh: STB" maxLength={10} value={dStatusForm.kode} onChange={(e) => setDStatusForm({ ...dStatusForm, kode: e.target.value })} className={inputClass} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
+                  <Select value={dStatusForm.status} onChange={(val) => setDStatusForm({ ...dStatusForm, status: val })} options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]} />
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <Button variant="outline" size="sm" onClick={() => setShowDStatusForm(false)}>Batal</Button>
+              <Button size="sm" icon={editingDStatusId ? Check : Plus} onClick={handleSaveDStatus} disabled={!dStatusForm.nama.trim() || !dStatusForm.kode.trim()}>
+                {editingDStatusId ? "Simpan" : "Tambah Status"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
       {/* ═══ BANK FORM MODAL ═══ */}
       {showBankForm && (
         <Portal>
@@ -1486,7 +1649,7 @@ export default function MasterDataPage() {
               <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
                 <Trash2 className="w-7 h-7 text-danger" />
               </div>
-              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "harga-titik": "Harga Titik", bank: "Bank" }[deleteConfirm.type]}?</h3>
+              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "harga-titik": "Harga Titik", "status-titik": "Status Titik", bank: "Bank" }[deleteConfirm.type]}?</h3>
               <p className="text-sm text-muted-foreground mt-2">
                 <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen dan tidak dapat dikembalikan.
               </p>
@@ -1500,6 +1663,7 @@ export default function MasterDataPage() {
                 else if (deleteConfirm.type === "titik-absen") handleDeleteLocation(deleteConfirm.id);
                 else if (deleteConfirm.type === "waktu-kerja") handleDeleteSchedule(deleteConfirm.id);
                 else if (deleteConfirm.type === "harga-titik") handleDeleteRate(deleteConfirm.id);
+                else if (deleteConfirm.type === "status-titik") handleDeleteDStatus(deleteConfirm.id);
                 else handleDeleteBank(deleteConfirm.id);
               }}>Hapus</Button>
             </div>

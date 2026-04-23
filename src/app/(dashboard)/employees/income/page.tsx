@@ -31,11 +31,12 @@ import Portal from "@/components/ui/Portal";
 import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
-import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
+import { supabase, type DbDeliveryPoint, type DbDeliveryStatus } from "@/lib/supabase";
 
 type EmployeeLite = { id: string; nama: string };
 type DivisionLite = { id: number; nama: string; color: string };
-type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: string; divisionColor?: string };
+type StatusLite = { id: number; nama: string; kode: string; color: string };
+type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: string; divisionColor?: string; statusNama?: string; statusColor?: string };
 
 // Batch form row
 type BatchRow = {
@@ -46,6 +47,7 @@ type BatchRow = {
   role: "Driver" | "Helper" | "";
   jumlah_titik: string;
   catatan: string;
+  status_id: number;
 };
 
 let rowKeyCounter = 0;
@@ -62,6 +64,7 @@ export default function IncomePage() {
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [divisions, setDivisions] = useState<DivisionLite[]>([]);
+  const [dStatuses, setDStatuses] = useState<StatusLite[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
 
   // ─── Calendar Mode ───
@@ -86,7 +89,7 @@ export default function IncomePage() {
   // ─── Edit single row ───
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ division_id: 0, role: "Driver", jumlah_titik: "" });
+  const [editForm, setEditForm] = useState({ division_id: 0, role: "Driver", jumlah_titik: "", status_id: 0 });
   const [editError, setEditError] = useState("");
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -107,13 +110,18 @@ export default function IncomePage() {
     if (data) setDivisions(data);
   };
 
+  const fetchDStatuses = async () => {
+    const { data } = await supabase.from("delivery_statuses").select("id, nama, kode, color").eq("status", "Aktif").order("nama");
+    if (data) setDStatuses(data);
+  };
+
   const fetchDeliveries = async () => {
     // Hitung hari terakhir bulan yang benar
     const [year, month] = filterDate.split("-").map(Number);
     const lastDay = new Date(year, month, 0).getDate();
     const { data } = await supabase
       .from("delivery_points")
-      .select("*, pegawai(nama), divisions(nama, color)")
+      .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
       .gte("tanggal", `${filterDate}-01`)
       .lte("tanggal", `${filterDate}-${String(lastDay).padStart(2, "0")}`)
       .order("tanggal", { ascending: false });
@@ -123,12 +131,14 @@ export default function IncomePage() {
         employeeNama: d.pegawai?.nama || d.employee_id,
         divisionNama: d.divisions?.nama || "-",
         divisionColor: d.divisions?.color || "#3b82f6",
+        statusNama: d.delivery_statuses?.nama || null,
+        statusColor: d.delivery_statuses?.color || null,
       })) as DeliveryRow[]);
     }
   };
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchDivisions(), fetchDeliveries()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchDivisions(), fetchDStatuses(), fetchDeliveries()]).then(() => setLoading(false));
   }, []);
 
   useEffect(() => { fetchDeliveries(); }, [filterDate]);
@@ -158,7 +168,7 @@ export default function IncomePage() {
   const openBatch = () => {
     setBatchDate(new Date().toISOString().slice(0, 10));
     const ordered = getOrderedEmployees(employees);
-    setBatchRows(ordered.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
+    setBatchRows(ordered.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "", status_id: 0 })));
     setBatchSearch("");
     setDragIdx(null);
     setDragOverIdx(null);
@@ -166,7 +176,7 @@ export default function IncomePage() {
     setShowBatch(true);
   };
 
-  const handleBatchRowChange = (rowKey: string, field: "division_id" | "role" | "jumlah_titik" | "catatan", value: string | number) => {
+  const handleBatchRowChange = (rowKey: string, field: "division_id" | "role" | "jumlah_titik" | "catatan" | "status_id", value: string | number) => {
     setBatchRows((prev) => prev.map((r) => r.rowKey === rowKey ? { ...r, [field]: value } : r));
     // Reset tanda duplikat DB saat user ubah divisi atau posisi
     if ((field === "division_id" || field === "role") && dbDuplicateRowKeys.has(rowKey)) {
@@ -179,7 +189,7 @@ export default function IncomePage() {
       const idx = prev.findIndex((r) => r.rowKey === afterRowKey);
       if (idx === -1) return prev;
       const source = prev[idx];
-      const newRow: BatchRow = { rowKey: nextRowKey(), employee_id: source.employee_id, nama: source.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" };
+      const newRow: BatchRow = { rowKey: nextRowKey(), employee_id: source.employee_id, nama: source.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "", status_id: 0 };
       const arr = [...prev];
       arr.splice(idx + 1, 0, newRow);
       return arr;
@@ -241,7 +251,7 @@ export default function IncomePage() {
 
   const resetTemplate = () => {
     localStorage.removeItem(TEMPLATE_KEY);
-    setBatchRows(employees.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
+    setBatchRows(employees.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "", status_id: 0 })));
     showSuccess("Template Direset", "Urutan pegawai kembali ke default (A-Z).");
   };
 
@@ -289,11 +299,12 @@ export default function IncomePage() {
         jumlah_titik: parseInt(r.jumlah_titik),
         rate_per_point: rate,
         catatan: r.catatan || null,
+        status_id: r.status_id || null,
       };
 
       const existingId = existingMap.get(key);
       if (existingId) {
-        updateRows.push({ id: existingId, data: { jumlah_titik: payload.jumlah_titik, rate_per_point: payload.rate_per_point, catatan: payload.catatan } });
+        updateRows.push({ id: existingId, data: { jumlah_titik: payload.jumlah_titik, rate_per_point: payload.rate_per_point, catatan: payload.catatan, status_id: payload.status_id } });
         dupRowKeys.push(r.rowKey);
       } else {
         newRows.push(payload);
@@ -351,7 +362,7 @@ export default function IncomePage() {
 
   // ─── Edit single ───
   const openEdit = (row: DeliveryRow) => {
-    setEditForm({ division_id: row.division_id, role: row.role, jumlah_titik: String(row.jumlah_titik) });
+    setEditForm({ division_id: row.division_id, role: row.role, jumlah_titik: String(row.jumlah_titik), status_id: row.status_id || 0 });
     setEditError("");
     setEditingId(row.id);
     setShowEditForm(true);
@@ -387,6 +398,7 @@ export default function IncomePage() {
       role: editForm.role,
       jumlah_titik: parseInt(editForm.jumlah_titik),
       rate_per_point: rateData?.rate_per_point || row.rate_per_point,
+      status_id: editForm.status_id || null,
     }).eq("id", editingId);
 
     showSuccess("Data Diperbarui", "Input titik telah disimpan.");
@@ -491,7 +503,7 @@ export default function IncomePage() {
       const lastDay = new Date(calYear, calMon, 0).getDate();
       const { data } = await supabase
         .from("delivery_points")
-        .select("*, pegawai(nama), divisions(nama, color)")
+      .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
         .gte("tanggal", `${calMonth}-01`)
         .lte("tanggal", `${calMonth}-${String(lastDay).padStart(2, "0")}`)
         .order("tanggal");
@@ -503,7 +515,9 @@ export default function IncomePage() {
             ...d,
             employeeNama: d.pegawai?.nama || d.employee_id,
             divisionNama: d.divisions?.nama || "-",
-            divisionColor: d.divisions?.color || "#3b82f6",
+        divisionColor: d.divisions?.color || "#3b82f6",
+        statusNama: d.delivery_statuses?.nama || null,
+        statusColor: d.delivery_statuses?.color || null,
           })) as DeliveryRow[];
           return [...others, ...calRows];
         });
@@ -596,15 +610,16 @@ export default function IncomePage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Divisi</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Posisi</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Titik</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Catatan</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {loading ? (
-                <SkeletonTable rows={6} cols={8} />
+                <SkeletonTable rows={6} cols={9} />
               ) : paged.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data ditemukan</td></tr>
+                <tr><td colSpan={9} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data ditemukan</td></tr>
               ) : paged.map((row, idx) => (
                 <tr key={row.id} className="hover:bg-muted/30">
                   <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
@@ -618,6 +633,11 @@ export default function IncomePage() {
                   </td>
                   <td className="px-5 py-3.5"><span className={cn("text-xs font-semibold px-2.5 py-1 rounded-lg", row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400")}>{row.role}</span></td>
                   <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground">{row.jumlah_titik}</td>
+                  <td className="px-5 py-3.5">
+                    {row.statusNama ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: `${row.statusColor}20`, color: row.statusColor }}>{row.statusNama}</span>
+                    ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                  </td>
                   <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[200px] truncate">{row.catatan || <span className="italic">-</span>}</td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-center gap-1">
@@ -738,11 +758,11 @@ export default function IncomePage() {
                               {entries.length > 0 ? (
                                 <div className="space-y-0.5">
                                   {entries.map((e) => (
-                                    <div key={e.id} className="flex items-center gap-1 px-1.5 py-1 rounded-md border border-transparent hover:border-border/50 transition-colors" style={{ backgroundColor: `${e.divisionColor}0D` }}>
-                                      <span className="w-2 h-2 rounded-full flex-shrink-0 ring-1 ring-white/50" style={{ backgroundColor: e.divisionColor }} />
-                                      <span className="text-[9px] font-semibold truncate" style={{ color: e.divisionColor }}>{e.divisionNama}</span>
-                                      <span className="text-[10px] font-bold ml-auto" style={{ color: e.divisionColor }}>{e.jumlah_titik}</span>
-                                      <span className={cn("text-[8px] font-bold px-1 py-0.5 rounded", e.role === "Driver" ? "bg-blue-500/10 text-blue-600" : "bg-orange-500/10 text-orange-600")}>{e.role === "Driver" ? "D" : "H"}</span>
+                                    <div key={e.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors" style={{ backgroundColor: `${e.divisionColor}20`, borderLeft: `3px solid ${e.divisionColor}` }}>
+                                      <span className="text-[9px] font-bold truncate" style={{ color: e.divisionColor }}>{e.divisionNama}</span>
+                                      <span className="text-[11px] font-extrabold ml-auto" style={{ color: e.divisionColor }}>{e.jumlah_titik}</span>
+                                      <span className={cn("text-[9px] font-extrabold px-1.5 py-0.5 rounded-md", e.role === "Driver" ? "bg-blue-500 text-white" : "bg-orange-500 text-white")}>{e.role === "Driver" ? "D" : "H"}</span>
+                                      {e.statusNama && <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: `${e.statusColor}25`, color: e.statusColor }}>{e.statusNama}</span>}
                                     </div>
                                   ))}
                                 </div>
@@ -865,7 +885,8 @@ export default function IncomePage() {
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-40">Divisi</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Posisi</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-20">Titik</th>
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-32">Catatan</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Status</th>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-28">Catatan</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-12"></th>
                     </tr>
                   </thead>
@@ -981,6 +1002,15 @@ export default function IncomePage() {
                               className={cn("w-full text-center px-2 py-1.5 rounded-md border text-xs font-semibold outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
                                 hasTitik ? "border-success/40 bg-success/[0.06] text-success" : isIncomplete && !hasTitik ? "border-danger/50 bg-danger/[0.03] text-foreground placeholder:text-danger/40" : "border-dashed border-border bg-transparent text-foreground placeholder:text-muted-foreground/40"
                               )} />
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-4 py-1.5">
+                            <select value={row.status_id || ""} onChange={(e) => handleBatchRowChange(row.rowKey, "status_id", parseInt(e.target.value) || 0)}
+                              className="w-full text-[11px] px-2 py-1.5 rounded-md border border-dashed border-border bg-transparent outline-none focus:border-primary text-foreground">
+                              <option value="">-</option>
+                              {dStatuses.map((s) => (<option key={s.id} value={s.id}>{s.kode}</option>))}
+                            </select>
                           </td>
 
                           {/* Catatan */}
@@ -1133,6 +1163,15 @@ export default function IncomePage() {
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Jumlah Titik</label>
                   <input type="number" min={1} value={editForm.jumlah_titik} onChange={(e) => setEditForm({ ...editForm, jumlah_titik: e.target.value })} className={inputClass} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Status <span className="text-muted-foreground font-normal">(opsional)</span></label>
+                  <Select
+                    value={String(editForm.status_id || "")}
+                    onChange={(val) => setEditForm({ ...editForm, status_id: parseInt(val) || 0 })}
+                    options={[{ value: "", label: "Tidak ada" }, ...dStatuses.map((s) => ({ value: String(s.id), label: s.nama }))]}
+                    placeholder="Pilih status"
+                  />
                 </div>
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">

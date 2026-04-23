@@ -115,6 +115,16 @@ export interface DbPegawai {
   jabatan?: DbJabatan;
 }
 
+export interface DbDeliveryStatus {
+  id: number;
+  nama: string;
+  kode: string;
+  color: string;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DbPointRate {
   id: number;
   division_id: number;
@@ -137,11 +147,13 @@ export interface DbDeliveryPoint {
   rate_per_point: number;
   total: number;
   catatan: string | null;
+  status_id: number | null;
   created_at: string;
   updated_at: string;
   // joined
   pegawai?: DbPegawai;
   divisions?: DbDivision;
+  delivery_statuses?: DbDeliveryStatus;
 }
 
 export interface DbEmployeeDevice {
