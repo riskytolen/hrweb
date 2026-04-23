@@ -127,14 +127,21 @@ export default function IncomePage() {
       .order("tanggal", { ascending: false })
       .order("id", { ascending: true });
     if (data) {
-      setDeliveries(data.map((d) => ({
+      const mapped = data.map((d) => ({
         ...d,
         employeeNama: d.pegawai?.nama || d.employee_id,
         divisionNama: d.divisions?.nama || "-",
         divisionColor: d.divisions?.color || "#3b82f6",
         statusNama: d.delivery_statuses?.nama || null,
         statusColor: d.delivery_statuses?.color || null,
-      })) as DeliveryRow[]);
+      })) as DeliveryRow[];
+      // Sort client-side untuk memastikan urutan stabil
+      mapped.sort((a, b) => {
+        const dateCompare = b.tanggal.localeCompare(a.tanggal);
+        if (dateCompare !== 0) return dateCompare;
+        return a.id - b.id;
+      });
+      setDeliveries(mapped);
     }
   };
 
@@ -481,6 +488,8 @@ export default function IncomePage() {
     if (!calDataMap.has(key)) calDataMap.set(key, []);
     calDataMap.get(key)!.push(d);
   });
+  // Sort entri dalam setiap sel by id agar urutan konsisten
+  calDataMap.forEach((entries) => entries.sort((a, b) => a.id - b.id));
 
   // Sync calendar month with filterDate
   const openCalendar = () => {
@@ -1010,7 +1019,7 @@ export default function IncomePage() {
                             <select value={row.status_id || ""} onChange={(e) => handleBatchRowChange(row.rowKey, "status_id", parseInt(e.target.value) || 0)}
                               className="w-full text-[11px] px-2 py-1.5 rounded-md border border-dashed border-border bg-transparent outline-none focus:border-primary text-foreground">
                               <option value="">-</option>
-                              {dStatuses.map((s) => (<option key={s.id} value={s.id}>{s.kode}</option>))}
+                              {dStatuses.map((s) => (<option key={s.id} value={s.id}>{s.nama}</option>))}
                             </select>
                           </td>
 

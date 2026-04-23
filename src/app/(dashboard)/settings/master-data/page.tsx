@@ -1131,7 +1131,7 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLevelForm(false)} />
-          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-accent-light flex items-center justify-center">
@@ -1178,7 +1178,7 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowJabatanForm(false)} />
-          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
@@ -1233,7 +1233,7 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDivisionForm(false)} />
-          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
@@ -1290,8 +1290,8 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLocationForm(false)} />
-          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+           <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30 rounded-t-2xl flex-shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
                   {editingLocationId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
@@ -1300,7 +1300,7 @@ export default function MasterDataPage() {
               </div>
               <button onClick={() => setShowLocationForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 flex-1 overflow-y-auto">
               <div>
                 <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Lokasi <span className="text-danger">*</span></label>
                 <input type="text" placeholder="Contoh: Kantor Pusat Jakarta" value={locationForm.nama} onChange={(e) => setLocationForm({ ...locationForm, nama: e.target.value })} className={inputClass} autoFocus />
@@ -1388,7 +1388,7 @@ export default function MasterDataPage() {
                 <p className="text-[10px] text-muted-foreground mt-1">Satu lokasi bisa dipakai banyak divisi.</p>
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30 rounded-b-2xl flex-shrink-0">
               <Button variant="outline" size="sm" onClick={() => setShowLocationForm(false)}>Batal</Button>
               <Button size="sm" icon={editingLocationId ? Check : Plus} onClick={handleSaveLocation} disabled={!locationForm.nama.trim() || !locationForm.latitude || !locationForm.longitude}>
                 {editingLocationId ? "Simpan" : "Tambah Lokasi"}
@@ -1404,7 +1404,7 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowScheduleForm(false)} />
-          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
@@ -1485,7 +1485,7 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowRateForm(false)} />
-          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
@@ -1549,7 +1549,7 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDStatusForm(false)} />
-          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
@@ -1598,7 +1598,7 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBankForm(false)} />
-          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
@@ -1644,7 +1644,7 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
-          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
             <div className="p-6 text-center">
               <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
                 <Trash2 className="w-7 h-7 text-danger" />
