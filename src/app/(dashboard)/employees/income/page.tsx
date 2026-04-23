@@ -124,7 +124,8 @@ export default function IncomePage() {
       .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
       .gte("tanggal", `${filterDate}-01`)
       .lte("tanggal", `${filterDate}-${String(lastDay).padStart(2, "0")}`)
-      .order("tanggal", { ascending: false });
+      .order("tanggal", { ascending: false })
+      .order("id", { ascending: true });
     if (data) {
       setDeliveries(data.map((d) => ({
         ...d,
@@ -1136,8 +1137,8 @@ export default function IncomePage() {
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowEditForm(false)} />
-            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30 rounded-t-2xl">
                 <h2 className="text-sm font-bold text-foreground">Edit Input Titik</h2>
                 <button onClick={() => setShowEditForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
               </div>
