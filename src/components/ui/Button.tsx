@@ -36,7 +36,7 @@ export default function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center font-semibold transition-all active:scale-[0.98]",
+        "inline-flex items-center justify-center font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none",
         variantStyles[variant],
         sizeStyles[size],
         className

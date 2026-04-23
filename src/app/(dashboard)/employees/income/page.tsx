@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Wallet,
   Plus,
@@ -12,12 +12,18 @@ import {
   Filter,
   Check,
   Users,
+  ChevronUp,
+  ChevronDown,
+  Save,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
+import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
@@ -31,8 +37,9 @@ type BatchRow = {
   employee_id: string;
   nama: string;
   division_id: number;
-  role: "Driver" | "Helper";
+  role: "Driver" | "Helper" | "";
   jumlah_titik: string;
+  catatan: string;
 };
 
 const PAGE_SIZE = 15;
@@ -54,6 +61,10 @@ export default function IncomePage() {
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [batchSearch, setBatchSearch] = useState("");
   const [batchSaving, setBatchSaving] = useState(false);
+  const [showReorder, setShowReorder] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
+  const TEMPLATE_KEY = "batch_employee_order";
 
   // ─── Edit single row ───
   const [showEditForm, setShowEditForm] = useState(false);
@@ -79,11 +90,14 @@ export default function IncomePage() {
   };
 
   const fetchDeliveries = async () => {
+    // Hitung hari terakhir bulan yang benar
+    const [year, month] = filterDate.split("-").map(Number);
+    const lastDay = new Date(year, month, 0).getDate();
     const { data } = await supabase
       .from("delivery_points")
       .select("*, pegawai(nama), divisions(nama)")
       .gte("tanggal", `${filterDate}-01`)
-      .lte("tanggal", `${filterDate}-31`)
+      .lte("tanggal", `${filterDate}-${String(lastDay).padStart(2, "0")}`)
       .order("tanggal", { ascending: false });
     if (data) {
       setDeliveries(data.map((d) => ({
@@ -95,7 +109,7 @@ export default function IncomePage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchDivisions()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchDivisions(), fetchDeliveries()]).then(() => setLoading(false));
   }, []);
 
   useEffect(() => { fetchDeliveries(); }, [filterDate]);
@@ -107,21 +121,75 @@ export default function IncomePage() {
   }, [showBatch, showEditForm]);
 
   // ─── Batch handlers ───
+  const getOrderedEmployees = useCallback((emps: EmployeeLite[]) => {
+    try {
+      const saved = localStorage.getItem(TEMPLATE_KEY);
+      if (saved) {
+        const order: string[] = JSON.parse(saved);
+        const empMap = new Map(emps.map((e) => [e.id, e]));
+        const ordered: EmployeeLite[] = [];
+        order.forEach((id) => { const e = empMap.get(id); if (e) { ordered.push(e); empMap.delete(id); } });
+        empMap.forEach((e) => ordered.push(e)); // pegawai baru yang belum ada di template
+        return ordered;
+      }
+    } catch {}
+    return emps;
+  }, []);
+
   const openBatch = () => {
     setBatchDate(new Date().toISOString().slice(0, 10));
-    setBatchRows(employees.map((e) => ({ employee_id: e.id, nama: e.nama, division_id: divisions[0]?.id || 0, role: "Driver" as const, jumlah_titik: "" })));
+    const ordered = getOrderedEmployees(employees);
+    setBatchRows(ordered.map((e) => ({ employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
     setBatchSearch("");
+    setShowReorder(false);
     setShowBatch(true);
   };
 
-  const handleBatchRowChange = (empId: string, field: "division_id" | "role" | "jumlah_titik", value: string | number) => {
+  const handleBatchRowChange = (empId: string, field: "division_id" | "role" | "jumlah_titik" | "catatan", value: string | number) => {
     setBatchRows((prev) => prev.map((r) => r.employee_id === empId ? { ...r, [field]: value } : r));
+  };
+
+  const moveRow = (idx: number, dir: "up" | "down") => {
+    setBatchRows((prev) => {
+      const arr = [...prev];
+      const target = dir === "up" ? idx - 1 : idx + 1;
+      if (target < 0 || target >= arr.length) return prev;
+      [arr[idx], arr[target]] = [arr[target], arr[idx]];
+      return arr;
+    });
+  };
+
+  const saveTemplate = () => {
+    const order = batchRows.map((r) => r.employee_id);
+    localStorage.setItem(TEMPLATE_KEY, JSON.stringify(order));
+    showSuccess("Template Disimpan", "Urutan pegawai akan digunakan saat input titik berikutnya.");
+  };
+
+  const resetTemplate = () => {
+    localStorage.removeItem(TEMPLATE_KEY);
+    setBatchRows(employees.map((e) => ({ employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
+    showSuccess("Template Direset", "Urutan pegawai kembali ke default (A-Z).");
+  };
+
+  const hasBatchData = batchRows.some((r) => r.jumlah_titik || r.division_id || r.role);
+
+  const tryCloseBatch = () => {
+    if (hasBatchData) {
+      setShowCloseConfirm(true);
+    } else {
+      setShowBatch(false);
+    }
+  };
+
+  const confirmCloseBatch = () => {
+    setShowCloseConfirm(false);
+    setShowBatch(false);
   };
 
   const handleBatchSave = async () => {
     if (!batchDate) return;
 
-    const validRows = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id);
+    const validRows = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id && r.role);
     if (validRows.length === 0) return;
 
     setBatchSaving(true);
@@ -138,6 +206,7 @@ export default function IncomePage() {
       tanggal: batchDate,
       jumlah_titik: parseInt(r.jumlah_titik),
       rate_per_point: rateMap.get(`${r.division_id}-${r.role}`) || 0,
+      catatan: r.catatan || null,
     }));
 
     const { error } = await supabase.from("delivery_points").insert(inserts);
@@ -150,7 +219,13 @@ export default function IncomePage() {
 
     showSuccess("Input Titik Berhasil", `${validRows.length} data pegawai berhasil disimpan.`);
     setShowBatch(false);
-    fetchDeliveries();
+    // Sync filter ke bulan dari tanggal batch agar data langsung terlihat
+    const batchMonth = batchDate.slice(0, 7);
+    if (filterDate !== batchMonth) {
+      setFilterDate(batchMonth); // useEffect akan trigger fetchDeliveries
+    } else {
+      fetchDeliveries();
+    }
   };
 
   // ─── Edit single ───
@@ -204,7 +279,17 @@ export default function IncomePage() {
 
   // Batch filtered
   const batchFiltered = batchRows.filter((r) => r.nama.toLowerCase().includes(batchSearch.toLowerCase()));
-  const batchFilled = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0).length;
+  const batchFilled = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id && r.role).length;
+  // Baris yang setengah terisi (ada salah satu field tapi tidak lengkap)
+  const batchIncomplete = batchRows.filter((r) => {
+    const hasTitik = r.jumlah_titik && parseInt(r.jumlah_titik) > 0;
+    const hasDiv = !!r.division_id;
+    const hasRole = !!r.role;
+    const touched = hasTitik || hasDiv || hasRole;
+    const complete = hasTitik && hasDiv && hasRole;
+    return touched && !complete;
+  });
+  const batchCanSave = batchFilled > 0 && batchIncomplete.length === 0 && !!batchDate;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -321,100 +406,185 @@ export default function IncomePage() {
       {showBatch && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !batchSaving && setShowBatch(false)} />
-            <div className="relative w-full max-w-3xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
-                    <Users className="w-4 h-4 text-primary" />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !batchSaving && tryCloseBatch()} />
+            <div className="relative w-full max-w-4xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+
+              {/* ── Header ── */}
+              <div className="px-6 py-5 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                      <Users className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-foreground">Input Titik Harian</h2>
+                      <p className="text-xs text-muted-foreground mt-0.5">Isi jumlah titik per pegawai, kosongkan yang tidak bertugas</p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-sm font-bold text-foreground">Input Titik Batch</h2>
-                    <p className="text-[11px] text-muted-foreground">Isi jumlah titik per pegawai, kosongkan yang tidak antar</p>
+                  <button onClick={() => !batchSaving && tryCloseBatch()} className="p-2 rounded-xl hover:bg-muted text-muted-foreground"><X className="w-5 h-5" /></button>
+                </div>
+              </div>
+
+              {/* ── Tanggal + Search + Counter ── */}
+              <div className="px-6 py-4 border-b border-border">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="w-full sm:w-56">
+                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Tanggal</label>
+                    <DatePicker value={batchDate} onChange={(val) => setBatchDate(val)} placeholder="Pilih tanggal" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Cari Pegawai</label>
+                    <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2 border border-border focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/10">
+                      <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                      <input type="text" placeholder="Ketik nama pegawai..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
+                        className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
+                    </div>
+                  </div>
+                  <div className="w-full sm:w-auto flex items-end">
+                    <div className={cn("flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold", batchFilled > 0 ? "border-success/30 bg-success-light/50 text-success" : "border-border bg-muted/30 text-muted-foreground")}>
+                      <Check className="w-4 h-4" />
+                      <span>{batchFilled}</span>
+                      <span className="text-xs font-normal">/ {batchRows.length}</span>
+                    </div>
                   </div>
                 </div>
-                <button onClick={() => !batchSaving && setShowBatch(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
               </div>
 
-              {/* Tanggal */}
-              <div className="px-6 py-4 border-b border-border bg-muted/20">
-                <div className="max-w-xs">
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal <span className="text-danger">*</span></label>
-                  <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} className={inputClass} />
+              {/* ── Reorder toolbar ── */}
+              <div className="px-6 py-2 border-b border-border flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setShowReorder(!showReorder)}
+                  className={cn("flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors", showReorder ? "bg-primary-light text-primary" : "text-muted-foreground hover:bg-muted")}
+                >
+                  <ChevronUp className="w-3 h-3" /><ChevronDown className="w-3 h-3 -ml-2" />
+                  {showReorder ? "Selesai Atur Urutan" : "Atur Urutan"}
+                </button>
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={saveTemplate} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-3 py-1.5 rounded-lg transition-colors">
+                    <Save className="w-3 h-3" />Simpan Urutan
+                  </button>
+                  <button type="button" onClick={resetTemplate} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-3 py-1.5 rounded-lg transition-colors">
+                    <RotateCcw className="w-3 h-3" />Reset
+                  </button>
                 </div>
               </div>
 
-              {/* Search pegawai */}
-              <div className="px-6 py-3 border-b border-border">
-                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
-                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                  <input type="text" placeholder="Cari pegawai..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
-                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
-                  {batchFilled > 0 && (
-                    <span className="text-[10px] font-bold text-primary bg-primary-light px-2 py-0.5 rounded-md whitespace-nowrap">{batchFilled} terisi</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Batch table */}
+              {/* ── Batch List ── */}
               <div className="flex-1 overflow-y-auto">
                 <table className="w-full">
                   <thead className="sticky top-0 z-10">
-                    <tr className="bg-muted/50 border-b border-border">
-                      <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-12">#</th>
-                      <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Nama Pegawai</th>
-                      <th className="text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-36">Divisi</th>
-                      <th className="text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-24">Posisi</th>
-                      <th className="text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-24">Titik</th>
+                    <tr className="bg-card border-b-2 border-border shadow-sm">
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3">Pegawai</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-40">Divisi</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Posisi</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-24">Titik</th>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-36">Catatan</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/50">
+                  <tbody>
                     {batchFiltered.map((row, idx) => {
                       const hasTitik = row.jumlah_titik && parseInt(row.jumlah_titik) > 0;
+                      const hasDiv = !!row.division_id;
+                      const hasRole = !!row.role;
+                      const touched = hasTitik || hasDiv || hasRole;
+                      const isComplete = hasTitik && hasDiv && hasRole;
+                      const isIncomplete = touched && !isComplete;
                       return (
-                        <tr key={row.employee_id} className={cn("transition-colors", hasTitik ? "bg-success-light/30" : "hover:bg-muted/30")}>
-                          <td className="px-4 py-2 text-xs text-muted-foreground">{idx + 1}</td>
-                          <td className="px-4 py-2">
-                            <p className={cn("text-sm", hasTitik ? "font-semibold text-foreground" : "text-muted-foreground")}>{row.nama}</p>
+                        <tr key={row.employee_id} className={cn(
+                          "border-b border-border/40 transition-all duration-150",
+                          isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40"
+                        )}>
+                          <td className="px-5 py-3">
+                            {showReorder ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <button type="button" onClick={() => moveRow(idx, "up")} disabled={idx === 0}
+                                  className={cn("p-0.5 rounded transition-colors", idx === 0 ? "text-muted-foreground/20" : "text-muted-foreground hover:text-primary hover:bg-primary-light")}>
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                </button>
+                                <span className="text-[10px] font-mono text-muted-foreground">{idx + 1}</span>
+                                <button type="button" onClick={() => moveRow(idx, "down")} disabled={idx === batchFiltered.length - 1}
+                                  className={cn("p-0.5 rounded transition-colors", idx === batchFiltered.length - 1 ? "text-muted-foreground/20" : "text-muted-foreground hover:text-primary hover:bg-primary-light")}>
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className={cn("text-xs font-mono", isComplete ? "text-success font-bold" : isIncomplete ? "text-danger font-bold" : "text-muted-foreground")}>{idx + 1}</span>
+                            )}
                           </td>
-                          <td className="px-4 py-2">
+                          <td className="px-5 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0",
+                                isComplete ? "bg-success/10 text-success" : isIncomplete ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground"
+                              )}>
+                                {row.nama.charAt(0)}
+                              </div>
+                              <span className={cn("text-sm", isComplete ? "font-semibold text-foreground" : isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3">
                             <select
-                              value={row.division_id}
-                              onChange={(e) => handleBatchRowChange(row.employee_id, "division_id", parseInt(e.target.value))}
-                              className="w-full text-xs px-2 py-1.5 rounded-lg border border-border bg-card outline-none focus:border-primary text-foreground"
+                              value={row.division_id || ""}
+                              onChange={(e) => handleBatchRowChange(row.employee_id, "division_id", parseInt(e.target.value) || 0)}
+                              className={cn(
+                                "w-full text-xs px-2.5 py-2 rounded-lg border outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
+                                row.division_id ? "border-border bg-card text-foreground" : isIncomplete && !hasDiv ? "border-danger/50 bg-danger/[0.03] text-muted-foreground" : "border-dashed border-border bg-transparent text-muted-foreground"
+                              )}
                             >
+                              <option value="">Pilih divisi</option>
                               {divisions.map((d) => (
                                 <option key={d.id} value={d.id}>{d.nama}</option>
                               ))}
                             </select>
                           </td>
-                          <td className="px-4 py-2">
-                            <div className="flex items-center justify-center gap-1">
+                          <td className="px-5 py-3">
+                            <div className="flex items-center justify-center gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => handleBatchRowChange(row.employee_id, "role", "Driver")}
-                                className={cn("px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors",
-                                  row.role === "Driver" ? "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400" : "text-muted-foreground hover:bg-muted"
+                                onClick={() => handleBatchRowChange(row.employee_id, "role", row.role === "Driver" ? "" : "Driver")}
+                                className={cn(
+                                  "w-9 h-8 rounded-lg text-[11px] font-bold transition-all duration-150",
+                                  row.role === "Driver"
+                                    ? "bg-blue-500 text-white shadow-sm shadow-blue-500/25 scale-105"
+                                    : "bg-muted/60 text-muted-foreground hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-500/10"
                                 )}
                               >D</button>
                               <button
                                 type="button"
-                                onClick={() => handleBatchRowChange(row.employee_id, "role", "Helper")}
-                                className={cn("px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors",
-                                  row.role === "Helper" ? "bg-orange-100 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400" : "text-muted-foreground hover:bg-muted"
+                                onClick={() => handleBatchRowChange(row.employee_id, "role", row.role === "Helper" ? "" : "Helper")}
+                                className={cn(
+                                  "w-9 h-8 rounded-lg text-[11px] font-bold transition-all duration-150",
+                                  row.role === "Helper"
+                                    ? "bg-orange-500 text-white shadow-sm shadow-orange-500/25 scale-105"
+                                    : "bg-muted/60 text-muted-foreground hover:bg-orange-50 hover:text-orange-500 dark:hover:bg-orange-500/10"
                                 )}
                               >H</button>
                             </div>
                           </td>
-                          <td className="px-4 py-2">
+                          <td className="px-5 py-3">
                             <input
                               type="number"
                               min={0}
-                              placeholder="0"
+                              placeholder="-"
                               value={row.jumlah_titik}
                               onChange={(e) => handleBatchRowChange(row.employee_id, "jumlah_titik", e.target.value)}
-                              className="w-full text-center px-2 py-1.5 rounded-lg border border-border bg-card text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                              className={cn(
+                                "w-full text-center px-2 py-2 rounded-lg border text-sm font-semibold outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
+                                hasTitik
+                                  ? "border-success/40 bg-success/[0.06] text-success"
+                                  : isIncomplete && !hasTitik ? "border-danger/50 bg-danger/[0.03] text-foreground placeholder:text-danger/40"
+                                  : "border-dashed border-border bg-transparent text-foreground placeholder:text-muted-foreground/40"
+                              )}
+                            />
+                          </td>
+                          <td className="px-5 py-3">
+                            <input
+                              type="text"
+                              placeholder="..."
+                              value={row.catatan}
+                              onChange={(e) => handleBatchRowChange(row.employee_id, "catatan", e.target.value)}
+                              className="w-full text-xs px-2.5 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-muted-foreground/30 text-foreground"
                             />
                           </td>
                         </tr>
@@ -424,17 +594,54 @@ export default function IncomePage() {
                 </table>
               </div>
 
-              {/* Footer */}
-              <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-muted/30">
-                <p className="text-xs text-muted-foreground">
-                  {batchFilled > 0 ? <span className="font-semibold text-foreground">{batchFilled} pegawai</span> : "Belum ada data"} yang akan disimpan
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setShowBatch(false)} disabled={batchSaving}>Batal</Button>
-                  <Button size="sm" icon={Check} onClick={handleBatchSave} disabled={batchSaving || batchFilled === 0 || !batchDate}>
-                    {batchSaving ? "Menyimpan..." : "Simpan Semua"}
-                  </Button>
+              {/* ── Footer ── */}
+              <div className="px-6 py-4 border-t border-border bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {batchIncomplete.length > 0 ? (
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="w-2 h-2 rounded-full bg-danger animate-pulse" />
+                        <span className="text-danger text-xs font-medium">{batchIncomplete.length} data belum lengkap</span>
+                      </div>
+                    ) : batchFilled > 0 ? (
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                        <span className="text-muted-foreground">Siap simpan</span>
+                        <span className="font-bold text-foreground">{batchFilled} pegawai</span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Belum ada data yang diisi</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={tryCloseBatch} disabled={batchSaving}>Batal</Button>
+                    <Button size="sm" icon={Check} onClick={handleBatchSave} disabled={batchSaving || !batchCanSave}>
+                      {batchSaving ? "Menyimpan..." : `Simpan ${batchFilled > 0 ? batchFilled + " Data" : ""}`}
+                    </Button>
+                  </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ CLOSE CONFIRM DIALOG ═══ */}
+      {showCloseConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+              <div className="p-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-warning/10 flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle className="w-7 h-7 text-warning" />
+                </div>
+                <h3 className="text-base font-bold text-foreground">Tutup Form Input?</h3>
+                <p className="text-sm text-muted-foreground mt-2">Data yang sudah diisi belum disimpan dan akan hilang.</p>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowCloseConfirm(false)}>Kembali</Button>
+                <Button variant="danger" size="sm" className="flex-1" onClick={confirmCloseBatch}>Tutup & Hapus</Button>
               </div>
             </div>
           </div>
