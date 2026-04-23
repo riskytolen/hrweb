@@ -33,6 +33,7 @@ type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: str
 
 // Batch form row
 type BatchRow = {
+  rowKey: string;
   employee_id: string;
   nama: string;
   division_id: number;
@@ -40,6 +41,9 @@ type BatchRow = {
   jumlah_titik: string;
   catatan: string;
 };
+
+let rowKeyCounter = 0;
+const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -139,15 +143,38 @@ export default function IncomePage() {
   const openBatch = () => {
     setBatchDate(new Date().toISOString().slice(0, 10));
     const ordered = getOrderedEmployees(employees);
-    setBatchRows(ordered.map((e) => ({ employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
+    setBatchRows(ordered.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
     setBatchSearch("");
     setDragIdx(null);
     setDragOverIdx(null);
     setShowBatch(true);
   };
 
-  const handleBatchRowChange = (empId: string, field: "division_id" | "role" | "jumlah_titik" | "catatan", value: string | number) => {
-    setBatchRows((prev) => prev.map((r) => r.employee_id === empId ? { ...r, [field]: value } : r));
+  const handleBatchRowChange = (rowKey: string, field: "division_id" | "role" | "jumlah_titik" | "catatan", value: string | number) => {
+    setBatchRows((prev) => prev.map((r) => r.rowKey === rowKey ? { ...r, [field]: value } : r));
+  };
+
+  const addExtraRow = (afterRowKey: string) => {
+    setBatchRows((prev) => {
+      const idx = prev.findIndex((r) => r.rowKey === afterRowKey);
+      if (idx === -1) return prev;
+      const source = prev[idx];
+      const newRow: BatchRow = { rowKey: nextRowKey(), employee_id: source.employee_id, nama: source.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" };
+      const arr = [...prev];
+      arr.splice(idx + 1, 0, newRow);
+      return arr;
+    });
+  };
+
+  const removeExtraRow = (rowKey: string) => {
+    setBatchRows((prev) => {
+      // Jangan hapus jika ini satu-satunya baris untuk pegawai ini
+      const row = prev.find((r) => r.rowKey === rowKey);
+      if (!row) return prev;
+      const sameEmpRows = prev.filter((r) => r.employee_id === row.employee_id);
+      if (sameEmpRows.length <= 1) return prev;
+      return prev.filter((r) => r.rowKey !== rowKey);
+    });
   };
 
   const handleDragStart = (e: React.DragEvent, idx: number) => {
@@ -194,7 +221,7 @@ export default function IncomePage() {
 
   const resetTemplate = () => {
     localStorage.removeItem(TEMPLATE_KEY);
-    setBatchRows(employees.map((e) => ({ employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
+    setBatchRows(employees.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
     showSuccess("Template Direset", "Urutan pegawai kembali ke default (A-Z).");
   };
 
@@ -316,7 +343,20 @@ export default function IncomePage() {
     const complete = hasTitik && hasDiv && hasRole;
     return touched && !complete;
   });
-  const batchCanSave = batchFilled > 0 && batchIncomplete.length === 0 && !!batchDate;
+  // Deteksi duplikat: pegawai + divisi + role yang sama
+  const batchDuplicateKeys = new Set<string>();
+  const seenCombos = new Map<string, string>(); // combo -> rowKey pertama
+  batchRows.forEach((r) => {
+    if (!r.division_id || !r.role) return;
+    const combo = `${r.employee_id}-${r.division_id}-${r.role}`;
+    if (seenCombos.has(combo)) {
+      batchDuplicateKeys.add(r.rowKey);
+      batchDuplicateKeys.add(seenCombos.get(combo)!);
+    } else {
+      seenCombos.set(combo, r.rowKey);
+    }
+  });
+  const batchCanSave = batchFilled > 0 && batchIncomplete.length === 0 && batchDuplicateKeys.size === 0 && !!batchDate;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -498,7 +538,8 @@ export default function IncomePage() {
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-40">Divisi</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Posisi</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-20">Titik</th>
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-36">Catatan</th>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-32">Catatan</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-12"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -509,13 +550,20 @@ export default function IncomePage() {
                       const touched = hasTitik || hasDiv || hasRole;
                       const isComplete = hasTitik && hasDiv && hasRole;
                       const isIncomplete = touched && !isComplete;
+                      const isDuplicate = batchDuplicateKeys.has(row.rowKey);
                       const isDragging = dragIdx === idx;
                       const isDropTarget = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;
+
+                      // Cek apakah ini baris pertama untuk pegawai ini (untuk tampilkan nama + grip)
+                      const isFirstRow = idx === 0 || batchFiltered[idx - 1]?.employee_id !== row.employee_id;
+                      const isLastRow = idx === batchFiltered.length - 1 || batchFiltered[idx + 1]?.employee_id !== row.employee_id;
+                      const sameEmpCount = batchFiltered.filter((r) => r.employee_id === row.employee_id).length;
+
                       return (
                         <tr
-                          key={row.employee_id}
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, idx)}
+                          key={row.rowKey}
+                          draggable={isFirstRow}
+                          onDragStart={(e) => isFirstRow && handleDragStart(e, idx)}
                           onDragOver={(e) => handleDragOver(e, idx)}
                           onDrop={() => handleDrop(idx)}
                           onDragEnd={handleDragEnd}
@@ -525,39 +573,50 @@ export default function IncomePage() {
                               ? "opacity-30 scale-[0.98] bg-primary/5 border-b border-primary/30"
                               : isDropTarget
                                 ? "border-b border-border/40"
-                                : "border-b border-border/40",
-                            !isDragging && !isDropTarget && (isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40")
+                                : isFirstRow ? "border-b border-border/40" : "border-b border-border/20",
+                            !isDragging && !isDropTarget && (isDuplicate ? "bg-danger/[0.06]" : isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40"),
+                            !isFirstRow && "bg-muted/[0.02]"
                           )}
                           style={isDropTarget ? { boxShadow: "inset 0 3px 0 0 var(--color-primary, #3b82f6)" } : undefined}
                         >
+                          {/* # + Grip */}
                           <td className="px-4 py-1.5">
-                            <div className="flex items-center gap-1">
-                              <div className={cn(
-                                "p-0.5 rounded cursor-grab active:cursor-grabbing transition-colors",
-                                isDragging ? "text-primary" : "text-muted-foreground/30 hover:text-muted-foreground"
-                              )}>
-                                <GripVertical className="w-3.5 h-3.5" />
+                            {isFirstRow ? (
+                              <div className="flex items-center gap-1">
+                                <div className={cn("p-0.5 rounded cursor-grab active:cursor-grabbing transition-colors", isDragging ? "text-primary" : "text-muted-foreground/30 hover:text-muted-foreground")}>
+                                  <GripVertical className="w-3.5 h-3.5" />
+                                </div>
+                                <span className={cn("text-[10px] font-mono", isComplete ? "text-success font-bold" : isIncomplete ? "text-danger font-bold" : "text-muted-foreground")}>{idx + 1}</span>
                               </div>
-                              <span className={cn("text-[10px] font-mono", isComplete ? "text-success font-bold" : isIncomplete ? "text-danger font-bold" : "text-muted-foreground")}>{idx + 1}</span>
-                            </div>
+                            ) : (
+                              <span className="text-[10px] font-mono text-muted-foreground/40 pl-5">{idx + 1}</span>
+                            )}
                           </td>
+
+                          {/* Nama */}
                           <td className="px-4 py-1.5">
-                            <div className="flex items-center gap-2">
-                              <div className={cn("w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-bold flex-shrink-0",
-                                isComplete ? "bg-success/10 text-success" : isIncomplete ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground"
-                              )}>
-                                {row.nama.charAt(0)}
+                            {isFirstRow ? (
+                              <div className="flex items-center gap-2">
+                                <div className={cn("w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-bold flex-shrink-0",
+                                  isComplete ? "bg-success/10 text-success" : isIncomplete ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground"
+                                )}>
+                                  {row.nama.charAt(0)}
+                                </div>
+                                <span className={cn("text-xs", isComplete || isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
                               </div>
-                              <span className={cn("text-xs", isComplete ? "font-semibold text-foreground" : isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
-                            </div>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground/50 pl-8">↳ divisi lain</span>
+                            )}
                           </td>
+
+                          {/* Divisi */}
                           <td className="px-4 py-1.5">
                             <select
                               value={row.division_id || ""}
-                              onChange={(e) => handleBatchRowChange(row.employee_id, "division_id", parseInt(e.target.value) || 0)}
+                              onChange={(e) => handleBatchRowChange(row.rowKey, "division_id", parseInt(e.target.value) || 0)}
                               className={cn(
                                 "w-full text-[11px] px-2 py-1.5 rounded-md border outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
-                                row.division_id ? "border-border bg-card text-foreground" : isIncomplete && !hasDiv ? "border-danger/50 bg-danger/[0.03] text-muted-foreground" : "border-dashed border-border bg-transparent text-muted-foreground"
+                                isDuplicate ? "border-danger bg-danger/[0.05] text-danger" : row.division_id ? "border-border bg-card text-foreground" : isIncomplete && !hasDiv ? "border-danger/50 bg-danger/[0.03] text-muted-foreground" : "border-dashed border-border bg-transparent text-muted-foreground"
                               )}
                             >
                               <option value="">Pilih divisi</option>
@@ -566,54 +625,49 @@ export default function IncomePage() {
                               ))}
                             </select>
                           </td>
+
+                          {/* Posisi */}
                           <td className="px-4 py-1.5">
                             <div className="flex items-center justify-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleBatchRowChange(row.employee_id, "role", row.role === "Driver" ? "" : "Driver")}
-                                className={cn(
-                                  "w-8 h-7 rounded-md text-[10px] font-bold transition-all duration-150",
-                                  row.role === "Driver"
-                                    ? "bg-blue-500 text-white shadow-sm shadow-blue-500/25"
-                                    : "bg-muted/60 text-muted-foreground hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-500/10"
-                                )}
-                              >D</button>
-                              <button
-                                type="button"
-                                onClick={() => handleBatchRowChange(row.employee_id, "role", row.role === "Helper" ? "" : "Helper")}
-                                className={cn(
-                                  "w-8 h-7 rounded-md text-[10px] font-bold transition-all duration-150",
-                                  row.role === "Helper"
-                                    ? "bg-orange-500 text-white shadow-sm shadow-orange-500/25"
-                                    : "bg-muted/60 text-muted-foreground hover:bg-orange-50 hover:text-orange-500 dark:hover:bg-orange-500/10"
-                                )}
-                              >H</button>
+                              <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Driver" ? "" : "Driver")}
+                                className={cn("w-8 h-7 rounded-md text-[10px] font-bold transition-all duration-150",
+                                  row.role === "Driver" ? "bg-blue-500 text-white shadow-sm shadow-blue-500/25" : "bg-muted/60 text-muted-foreground hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-500/10"
+                                )}>D</button>
+                              <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Helper" ? "" : "Helper")}
+                                className={cn("w-8 h-7 rounded-md text-[10px] font-bold transition-all duration-150",
+                                  row.role === "Helper" ? "bg-orange-500 text-white shadow-sm shadow-orange-500/25" : "bg-muted/60 text-muted-foreground hover:bg-orange-50 hover:text-orange-500 dark:hover:bg-orange-500/10"
+                                )}>H</button>
                             </div>
                           </td>
+
+                          {/* Titik */}
                           <td className="px-4 py-1.5">
-                            <input
-                              type="number"
-                              min={0}
-                              placeholder="-"
-                              value={row.jumlah_titik}
-                              onChange={(e) => handleBatchRowChange(row.employee_id, "jumlah_titik", e.target.value)}
-                              className={cn(
-                                "w-full text-center px-2 py-1.5 rounded-md border text-xs font-semibold outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
-                                hasTitik
-                                  ? "border-success/40 bg-success/[0.06] text-success"
-                                  : isIncomplete && !hasTitik ? "border-danger/50 bg-danger/[0.03] text-foreground placeholder:text-danger/40"
-                                  : "border-dashed border-border bg-transparent text-foreground placeholder:text-muted-foreground/40"
-                              )}
-                            />
+                            <input type="number" min={0} placeholder="-" value={row.jumlah_titik}
+                              onChange={(e) => handleBatchRowChange(row.rowKey, "jumlah_titik", e.target.value)}
+                              className={cn("w-full text-center px-2 py-1.5 rounded-md border text-xs font-semibold outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
+                                hasTitik ? "border-success/40 bg-success/[0.06] text-success" : isIncomplete && !hasTitik ? "border-danger/50 bg-danger/[0.03] text-foreground placeholder:text-danger/40" : "border-dashed border-border bg-transparent text-foreground placeholder:text-muted-foreground/40"
+                              )} />
                           </td>
+
+                          {/* Catatan */}
                           <td className="px-4 py-1.5">
-                            <input
-                              type="text"
-                              placeholder="..."
-                              value={row.catatan}
-                              onChange={(e) => handleBatchRowChange(row.employee_id, "catatan", e.target.value)}
-                              className="w-full text-[11px] px-2 py-1.5 rounded-md border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-muted-foreground/30 text-foreground"
-                            />
+                            <input type="text" placeholder="..." value={row.catatan}
+                              onChange={(e) => handleBatchRowChange(row.rowKey, "catatan", e.target.value)}
+                              className="w-full text-[11px] px-2 py-1.5 rounded-md border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-muted-foreground/30 text-foreground" />
+                          </td>
+
+                          {/* Aksi: + / - */}
+                          <td className="px-2 py-1.5">
+                            <div className="flex items-center justify-center gap-0.5">
+                              {isLastRow && (
+                                <button type="button" onClick={() => addExtraRow(row.rowKey)} title="Tambah divisi lain"
+                                  className="w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-bold text-primary hover:bg-primary-light transition-colors">+</button>
+                              )}
+                              {sameEmpCount > 1 && (
+                                <button type="button" onClick={() => removeExtraRow(row.rowKey)} title="Hapus baris ini"
+                                  className="w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-bold text-danger hover:bg-danger-light transition-colors">&minus;</button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -626,7 +680,12 @@ export default function IncomePage() {
               <div className="px-5 py-3 border-t border-border bg-muted/20">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    {batchIncomplete.length > 0 ? (
+                    {batchDuplicateKeys.size > 0 ? (
+                      <div className="flex items-center gap-2 text-sm">
+                        <div className="w-2 h-2 rounded-full bg-danger animate-pulse" />
+                        <span className="text-danger text-xs font-medium">Ada divisi + posisi yang sama dalam satu pegawai</span>
+                      </div>
+                    ) : batchIncomplete.length > 0 ? (
                       <div className="flex items-center gap-2 text-sm">
                         <div className="w-2 h-2 rounded-full bg-danger animate-pulse" />
                         <span className="text-danger text-xs font-medium">{batchIncomplete.length} data belum lengkap</span>
