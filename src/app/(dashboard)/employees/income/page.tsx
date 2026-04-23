@@ -362,8 +362,8 @@ export default function IncomePage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
-        title="Pendapatan Pegawai"
-        description="Input titik pengantaran harian driver & helper"
+        title="Rekap Titik"
+        description="Rekap titik pengantaran harian driver & helper"
         icon={Wallet}
         actions={<Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
       />

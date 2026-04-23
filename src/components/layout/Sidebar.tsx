@@ -55,7 +55,7 @@ const menuGroups: MenuGroup[] = [
       { name: "Data Pegawai", href: "/employees", icon: Users },
       { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck },
       { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays },
-      { name: "Pendapatan", href: "/employees/income", icon: Wallet },
+      { name: "Rekap Titik", href: "/employees/income", icon: Wallet },
       { name: "Penggajian", href: "/employees/payroll", icon: CreditCard },
       { name: "Kinerja", href: "/employees/performance", icon: Award },
       { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale },
