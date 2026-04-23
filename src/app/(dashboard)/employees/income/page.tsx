@@ -12,6 +12,7 @@ import {
   Filter,
   Check,
   Users,
+  User,
   GripVertical,
   Save,
   RotateCcw,
@@ -133,10 +134,10 @@ export default function IncomePage() {
   useEffect(() => { fetchDeliveries(); }, [filterDate]);
 
   useEffect(() => {
-    if (showBatch || showEditForm) document.body.style.overflow = "hidden";
+    if (showBatch || showEditForm || showCalendar) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showBatch, showEditForm]);
+  }, [showBatch, showEditForm, showCalendar]);
 
   // ─── Batch handlers ───
   const getOrderedEmployees = useCallback((emps: EmployeeLite[]) => {
@@ -716,8 +717,8 @@ export default function IncomePage() {
                         {/* Employee name - sticky left */}
                         <td className={cn("sticky left-0 z-10 border-b border-r-2 border-border px-4 py-2.5 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]", isEven ? "bg-card" : "bg-card")}>
                           <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary flex-shrink-0">
-                              {emp.nama.charAt(0)}
+                            <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
+                              <User className="w-3.5 h-3.5 text-primary/70" />
                             </div>
                             <p className="text-xs font-semibold text-foreground truncate max-w-[130px]">{emp.nama}</p>
                           </div>
@@ -774,7 +775,7 @@ export default function IncomePage() {
                         const isSunday = dayOfWeek === 0;
                         const isSaturday = dayOfWeek === 6;
                         return (
-                          <td key={day} className={cn("bg-card border-t-2 border-r border-border px-1 py-2.5 text-center", isSunday ? "bg-red-500/[0.02]" : isSaturday ? "bg-amber-500/[0.02]" : "")}>
+                          <td key={day} className="bg-card border-t-2 border-r border-border px-1 py-2.5 text-center">
                             {dayTotal > 0 ? (
                               <span className="text-[11px] font-bold text-primary">{dayTotal}</span>
                             ) : (
