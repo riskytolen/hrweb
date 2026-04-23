@@ -15,6 +15,7 @@ import {
   Building2,
   MapPin,
   Clock,
+  CircleDollarSign,
   ArrowUpDown,
   GripVertical,
   CircleCheckBig,
@@ -26,7 +27,7 @@ import Pagination from "@/components/ui/Pagination";
 import { cn } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -35,6 +36,7 @@ type Bank = DbBank;
 type Division = DbDivision;
 type AttendanceLocation = DbAttendanceLocation & { divisionNames?: string[] };
 type DivisionSchedule = DbDivisionSchedule & { divisionNama?: string };
+type PointRate = DbPointRate & { divisionNama?: string };
 
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const selectClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 appearance-none text-foreground";
@@ -46,6 +48,7 @@ const tabs = [
   { key: "divisi", label: "Divisi", icon: Building2 },
   { key: "titik-absen", label: "Titik Absen", icon: MapPin },
   { key: "waktu-kerja", label: "Waktu Kerja", icon: Clock },
+  { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
   { key: "bank", label: "Bank", icon: Landmark },
 ] as const;
 
@@ -100,8 +103,16 @@ export default function MasterDataPage() {
   const [scheduleForm, setScheduleForm] = useState({ division_id: 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", status: "Aktif" });
   const [scheduleErrors, setScheduleErrors] = useState<Set<string>>(new Set());
 
+  // ─── Harga Titik State ───
+  type RateRow = { division_id: number; divisionNama: string; driverRate: number | null; driverRateId: number | null; helperRate: number | null; helperRateId: number | null };
+  const [rateRows, setRateRows] = useState<RateRow[]>([]);
+  const [rateSearch, setRateSearch] = useState("");
+  const [showRateForm, setShowRateForm] = useState(false);
+  const [editingRateDivId, setEditingRateDivId] = useState<number | null>(null);
+  const [rateForm, setRateForm] = useState({ division_id: 0, driver_rate: "", helper_rate: "" });
+
   // ─── Delete Confirm Dialog ───
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "bank"; id: number; nama: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "harga-titik" | "bank"; id: number; nama: string } | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
   const [loading, setLoading] = useState(true);
@@ -145,13 +156,30 @@ export default function MasterDataPage() {
     if (data) setScheduleList(data.map((s) => ({ ...s, divisionNama: s.divisions?.nama || "-" })));
   };
 
+  const fetchRates = async () => {
+    const { data } = await supabase.from("point_rates").select("*, divisions(nama)").order("division_id");
+    if (data) {
+      // Group by division_id into rows with driver + helper
+      const map = new Map<number, RateRow>();
+      data.forEach((r) => {
+        if (!map.has(r.division_id)) {
+          map.set(r.division_id, { division_id: r.division_id, divisionNama: r.divisions?.nama || "-", driverRate: null, driverRateId: null, helperRate: null, helperRateId: null });
+        }
+        const row = map.get(r.division_id)!;
+        if (r.role === "Driver") { row.driverRate = r.rate_per_point; row.driverRateId = r.id; }
+        else { row.helperRate = r.rate_per_point; row.helperRateId = r.id; }
+      });
+      setRateRows(Array.from(map.values()));
+    }
+  };
+
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm) {
+    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -159,7 +187,7 @@ export default function MasterDataPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm]);
+  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showRateForm]);
 
   const showSuccess = (title: string, message?: string) => {
     setToast({ show: true, title, message: message || "" });
@@ -404,6 +432,60 @@ export default function MasterDataPage() {
     fetchSchedules();
   };
 
+  // ─── Harga Titik Handlers ───
+  const filteredRateRows = rateRows.filter((r) =>
+    r.divisionNama.toLowerCase().includes(rateSearch.toLowerCase())
+  );
+  const divisionsWithoutRate = activeDivisions.filter((d) => !rateRows.some((r) => r.division_id === d.id));
+
+  const handleOpenAddRate = () => {
+    setRateForm({ division_id: divisionsWithoutRate[0]?.id || 0, driver_rate: "", helper_rate: "" });
+    setEditingRateDivId(null);
+    setShowRateForm(true);
+  };
+  const handleOpenEditRate = (row: RateRow) => {
+    setRateForm({ division_id: row.division_id, driver_rate: row.driverRate !== null ? String(row.driverRate) : "", helper_rate: row.helperRate !== null ? String(row.helperRate) : "" });
+    setEditingRateDivId(row.division_id);
+    setShowRateForm(true);
+  };
+  const handleSaveRate = async () => {
+    if (!rateForm.division_id) return;
+    if (!rateForm.driver_rate && !rateForm.helper_rate) return;
+    const divNama = divisionList.find((d) => d.id === rateForm.division_id)?.nama || "";
+
+    // Upsert Driver rate
+    if (rateForm.driver_rate) {
+      const existing = rateRows.find((r) => r.division_id === rateForm.division_id);
+      if (existing?.driverRateId) {
+        await supabase.from("point_rates").update({ rate_per_point: parseInt(rateForm.driver_rate) || 0 }).eq("id", existing.driverRateId);
+      } else {
+        await supabase.from("point_rates").insert({ division_id: rateForm.division_id, role: "Driver", rate_per_point: parseInt(rateForm.driver_rate) || 0 });
+      }
+    }
+    // Upsert Helper rate
+    if (rateForm.helper_rate) {
+      const existing = rateRows.find((r) => r.division_id === rateForm.division_id);
+      if (existing?.helperRateId) {
+        await supabase.from("point_rates").update({ rate_per_point: parseInt(rateForm.helper_rate) || 0 }).eq("id", existing.helperRateId);
+      } else {
+        await supabase.from("point_rates").insert({ division_id: rateForm.division_id, role: "Helper", rate_per_point: parseInt(rateForm.helper_rate) || 0 });
+      }
+    }
+
+    showSuccess(editingRateDivId ? "Harga Titik Diperbarui" : "Harga Titik Ditambahkan", `Tarif divisi "${divNama}" telah disimpan.`);
+    setShowRateForm(false);
+    fetchRates();
+  };
+  const handleDeleteRate = async (id: number) => {
+    // Delete both driver & helper rates for this division
+    const row = rateRows.find((r) => r.division_id === id);
+    if (row?.driverRateId) await supabase.from("point_rates").delete().eq("id", row.driverRateId);
+    if (row?.helperRateId) await supabase.from("point_rates").delete().eq("id", row.helperRateId);
+    setDeleteConfirm(null);
+    showSuccess("Harga Titik Dihapus", "Data tarif divisi telah dihapus dari sistem.");
+    fetchRates();
+  };
+
   // ─── Bank Handlers ───
   const filteredBanks = bankList.filter((b) =>
     b.nama.toLowerCase().includes(bankSearch.toLowerCase()) || (b.kode || "").toLowerCase().includes(bankSearch.toLowerCase())
@@ -481,7 +563,7 @@ export default function MasterDataPage() {
           {tabs.map((tab) => {
             const isActive = activeTab === tab.key;
             const Icon = tab.icon;
-            const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : bankList.length;
+            const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "harga-titik" ? rateRows.length : bankList.length;
             return (
               <button
                 key={tab.key}
@@ -803,6 +885,68 @@ export default function MasterDataPage() {
               </table>
             </div>
             <Pagination currentPage={masterPage} totalItems={filteredSchedules.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
+          </>
+        )}
+
+        {/* ─── TAB: HARGA TITIK ─── */}
+        {activeTab === "harga-titik" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input type="text" placeholder="Cari divisi..." value={rateSearch} onChange={(e) => { setRateSearch(e.target.value); setMasterPage(1); }}
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+              </div>
+              <Button icon={Plus} size="sm" onClick={handleOpenAddRate} disabled={divisionsWithoutRate.length === 0}>
+                {divisionsWithoutRate.length === 0 ? "Semua Divisi Sudah Ada" : "Tambah Harga Titik"}
+              </Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Divisi</th>
+                    <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">
+                      <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" />Driver / Titik</span>
+                    </th>
+                    <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">
+                      <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-orange-500" />Helper / Titik</span>
+                    </th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <SkeletonTable rows={5} cols={5} />
+                  ) : filteredRateRows.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data harga titik ditemukan</td></tr>
+                  ) : filteredRateRows.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((row, idx) => (
+                    <tr key={row.division_id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-5 py-3.5"><span className="text-sm font-semibold text-foreground">{row.divisionNama}</span></td>
+                      <td className="px-5 py-3.5 text-right">
+                        {row.driverRate !== null
+                          ? <span className="text-sm font-bold text-blue-600">Rp {row.driverRate.toLocaleString("id-ID")}</span>
+                          : <span className="text-xs text-muted-foreground italic">Belum diatur</span>}
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        {row.helperRate !== null
+                          ? <span className="text-sm font-bold text-orange-600">Rp {row.helperRate.toLocaleString("id-ID")}</span>
+                          : <span className="text-xs text-muted-foreground italic">Belum diatur</span>}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-center gap-1">
+                          <button onClick={() => handleOpenEditRate(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => setDeleteConfirm({ type: "harga-titik", id: row.division_id, nama: row.divisionNama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredRateRows.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -1203,6 +1347,70 @@ export default function MasterDataPage() {
         </Portal>
       )}
 
+      {/* ═══ HARGA TITIK FORM MODAL ═══ */}
+      {showRateForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowRateForm(false)} />
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                  {editingRateDivId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
+                </div>
+                <h2 className="text-sm font-bold text-foreground">{editingRateDivId ? "Edit Harga Titik" : "Tambah Harga Titik"}</h2>
+              </div>
+              <button onClick={() => setShowRateForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi <span className="text-danger">*</span></label>
+                {editingRateDivId !== null ? (
+                  <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">
+                    {divisionList.find((d) => d.id === rateForm.division_id)?.nama || "-"}
+                  </div>
+                ) : (
+                  <Select
+                    value={String(rateForm.division_id)}
+                    onChange={(val) => setRateForm({ ...rateForm, division_id: parseInt(val) })}
+                    options={divisionsWithoutRate.map((d) => ({ value: String(d.id), label: d.nama }))}
+                    placeholder="Pilih divisi"
+                  />
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">
+                    <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" />Harga Driver / Titik</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
+                    <input type="number" min={0} placeholder="15000" value={rateForm.driver_rate} onChange={(e) => setRateForm({ ...rateForm, driver_rate: e.target.value })} className={cn(inputClass, "pl-9")} />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">
+                    <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-orange-500" />Harga Helper / Titik</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
+                    <input type="number" min={0} placeholder="10000" value={rateForm.helper_rate} onChange={(e) => setRateForm({ ...rateForm, helper_rate: e.target.value })} className={cn(inputClass, "pl-9")} />
+                  </div>
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground">Isi minimal salah satu harga. Kosongkan jika posisi tersebut tidak berlaku untuk divisi ini.</p>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <Button variant="outline" size="sm" onClick={() => setShowRateForm(false)}>Batal</Button>
+              <Button size="sm" icon={editingRateDivId ? Check : Plus} onClick={handleSaveRate} disabled={!rateForm.division_id || (!rateForm.driver_rate && !rateForm.helper_rate)}>
+                {editingRateDivId ? "Simpan" : "Tambah"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
       {/* ═══ BANK FORM MODAL ═══ */}
       {showBankForm && (
         <Portal>
@@ -1259,7 +1467,7 @@ export default function MasterDataPage() {
               <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
                 <Trash2 className="w-7 h-7 text-danger" />
               </div>
-              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", bank: "Bank" }[deleteConfirm.type]}?</h3>
+              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "harga-titik": "Harga Titik", bank: "Bank" }[deleteConfirm.type]}?</h3>
               <p className="text-sm text-muted-foreground mt-2">
                 <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen dan tidak dapat dikembalikan.
               </p>
@@ -1272,6 +1480,7 @@ export default function MasterDataPage() {
                 else if (deleteConfirm.type === "divisi") handleDeleteDivision(deleteConfirm.id);
                 else if (deleteConfirm.type === "titik-absen") handleDeleteLocation(deleteConfirm.id);
                 else if (deleteConfirm.type === "waktu-kerja") handleDeleteSchedule(deleteConfirm.id);
+                else if (deleteConfirm.type === "harga-titik") handleDeleteRate(deleteConfirm.id);
                 else handleDeleteBank(deleteConfirm.id);
               }}>Hapus</Button>
             </div>

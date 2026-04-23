@@ -114,6 +114,35 @@ export interface DbPegawai {
   jabatan?: DbJabatan;
 }
 
+export interface DbPointRate {
+  id: number;
+  division_id: number;
+  role: "Driver" | "Helper";
+  rate_per_point: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+  // joined
+  divisions?: DbDivision;
+}
+
+export interface DbDeliveryPoint {
+  id: number;
+  employee_id: string;
+  division_id: number;
+  role: "Driver" | "Helper";
+  tanggal: string;
+  jumlah_titik: number;
+  rate_per_point: number;
+  total: number;
+  catatan: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  pegawai?: DbPegawai;
+  divisions?: DbDivision;
+}
+
 export interface DbEmployeeDevice {
   id: number;
   employee_id: string;
