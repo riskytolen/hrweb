@@ -16,6 +16,11 @@ import {
   Save,
   RotateCcw,
   AlertTriangle,
+  CalendarDays,
+  List,
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -58,6 +63,10 @@ export default function IncomePage() {
   const [divisions, setDivisions] = useState<DivisionLite[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
 
+  // ─── Calendar Mode ───
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calMonth, setCalMonth] = useState(() => new Date().toISOString().slice(0, 7));
+
   // ─── Batch Input State ───
   const [showBatch, setShowBatch] = useState(false);
   const [batchDate, setBatchDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -67,13 +76,17 @@ export default function IncomePage() {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
+  const [duplicateInfo, setDuplicateInfo] = useState<{ newRows: Record<string, unknown>[]; updateRows: { id: number; data: Record<string, unknown> }[]; dupCount: number }>({ newRows: [], updateRows: [], dupCount: 0 });
+  const [dbDuplicateRowKeys, setDbDuplicateRowKeys] = useState<Set<string>>(new Set());
 
   const TEMPLATE_KEY = "batch_employee_order";
 
   // ─── Edit single row ───
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ role: "Driver", jumlah_titik: "" });
+  const [editForm, setEditForm] = useState({ division_id: 0, role: "Driver", jumlah_titik: "" });
+  const [editError, setEditError] = useState("");
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
@@ -148,11 +161,16 @@ export default function IncomePage() {
     setBatchSearch("");
     setDragIdx(null);
     setDragOverIdx(null);
+    setDbDuplicateRowKeys(new Set());
     setShowBatch(true);
   };
 
   const handleBatchRowChange = (rowKey: string, field: "division_id" | "role" | "jumlah_titik" | "catatan", value: string | number) => {
     setBatchRows((prev) => prev.map((r) => r.rowKey === rowKey ? { ...r, [field]: value } : r));
+    // Reset tanda duplikat DB saat user ubah divisi atau posisi
+    if ((field === "division_id" || field === "role") && dbDuplicateRowKeys.has(rowKey)) {
+      setDbDuplicateRowKeys((prev) => { const n = new Set(prev); n.delete(rowKey); return n; });
+    }
   };
 
   const addExtraRow = (afterRowKey: string) => {
@@ -241,64 +259,130 @@ export default function IncomePage() {
     setShowBatch(false);
   };
 
-  const handleBatchSave = async () => {
-    if (!batchDate) return;
-
+  const prepareBatchData = async () => {
     const validRows = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id && r.role);
-    if (validRows.length === 0) return;
+    if (validRows.length === 0 || !batchDate) return null;
 
-    setBatchSaving(true);
-
-    // Lookup all rates at once
+    // Lookup rates
     const { data: allRates } = await supabase.from("point_rates").select("division_id, role, rate_per_point").eq("status", "Aktif");
     const rateMap = new Map<string, number>();
     allRates?.forEach((r) => rateMap.set(`${r.division_id}-${r.role}`, r.rate_per_point));
 
-    const inserts = validRows.map((r) => ({
-      employee_id: r.employee_id,
-      division_id: r.division_id,
-      role: r.role,
-      tanggal: batchDate,
-      jumlah_titik: parseInt(r.jumlah_titik),
-      rate_per_point: rateMap.get(`${r.division_id}-${r.role}`) || 0,
-      catatan: r.catatan || null,
-    }));
+    // Check existing data for this date
+    const { data: existing } = await supabase.from("delivery_points").select("id, employee_id, division_id, role").eq("tanggal", batchDate);
+    const existingMap = new Map<string, number>();
+    existing?.forEach((e) => existingMap.set(`${e.employee_id}-${e.division_id}-${e.role}`, e.id));
 
-    const { error } = await supabase.from("delivery_points").insert(inserts);
-    setBatchSaving(false);
+    const newRows: Record<string, unknown>[] = [];
+    const updateRows: { id: number; data: Record<string, unknown> }[] = [];
+    const dupRowKeys: string[] = [];
 
-    if (error) {
-      showSuccess("Gagal Menyimpan", error.message);
+    validRows.forEach((r) => {
+      const key = `${r.employee_id}-${r.division_id}-${r.role}`;
+      const rate = rateMap.get(`${r.division_id}-${r.role}`) || 0;
+      const payload = {
+        employee_id: r.employee_id,
+        division_id: r.division_id,
+        role: r.role,
+        tanggal: batchDate,
+        jumlah_titik: parseInt(r.jumlah_titik),
+        rate_per_point: rate,
+        catatan: r.catatan || null,
+      };
+
+      const existingId = existingMap.get(key);
+      if (existingId) {
+        updateRows.push({ id: existingId, data: { jumlah_titik: payload.jumlah_titik, rate_per_point: payload.rate_per_point, catatan: payload.catatan } });
+        dupRowKeys.push(r.rowKey);
+      } else {
+        newRows.push(payload);
+      }
+    });
+
+    return { newRows, updateRows, dupCount: updateRows.length, dupRowKeys };
+  };
+
+  const handleBatchSave = async () => {
+    if (!batchDate) return;
+    setBatchSaving(true);
+
+    const result = await prepareBatchData();
+    if (!result) { setBatchSaving(false); return; }
+
+    // Jika ada duplikat, tandai baris dan tampilkan konfirmasi
+    if (result.dupCount > 0) {
+      setDuplicateInfo(result);
+      setDbDuplicateRowKeys(new Set(result.dupRowKeys));
+      setBatchSaving(false);
+      setShowDuplicateConfirm(true);
       return;
     }
 
-    showSuccess("Input Titik Berhasil", `${validRows.length} data pegawai berhasil disimpan.`);
+    // Tidak ada duplikat, langsung simpan
+    await executeBatchSave(result.newRows, result.updateRows);
     setShowBatch(false);
-    // Sync filter ke bulan dari tanggal batch agar data langsung terlihat
     const batchMonth = batchDate.slice(0, 7);
-    if (filterDate !== batchMonth) {
-      setFilterDate(batchMonth); // useEffect akan trigger fetchDeliveries
-    } else {
-      fetchDeliveries();
+    if (filterDate !== batchMonth) setFilterDate(batchMonth);
+    else fetchDeliveries();
+  };
+
+  const executeBatchSave = async (newRows: Record<string, unknown>[], updateRows: { id: number; data: Record<string, unknown> }[]) => {
+    setBatchSaving(true);
+
+    // Insert new rows
+    if (newRows.length > 0) {
+      const { error } = await supabase.from("delivery_points").insert(newRows);
+      if (error) { showSuccess("Gagal Menyimpan", error.message); setBatchSaving(false); return; }
     }
+
+    // Update existing rows
+    for (const row of updateRows) {
+      await supabase.from("delivery_points").update(row.data).eq("id", row.id);
+    }
+
+    setBatchSaving(false);
+    const total = newRows.length + updateRows.length;
+    const msg = updateRows.length > 0
+      ? `${newRows.length} data baru disimpan, ${updateRows.length} data diperbarui.`
+      : `${total} data pegawai berhasil disimpan.`;
+    showSuccess("Input Titik Berhasil", msg);
   };
 
   // ─── Edit single ───
   const openEdit = (row: DeliveryRow) => {
-    setEditForm({ role: row.role, jumlah_titik: String(row.jumlah_titik) });
+    setEditForm({ division_id: row.division_id, role: row.role, jumlah_titik: String(row.jumlah_titik) });
+    setEditError("");
     setEditingId(row.id);
     setShowEditForm(true);
   };
 
   const handleEditSave = async () => {
-    if (!editingId || !editForm.jumlah_titik) return;
+    if (!editingId || !editForm.jumlah_titik || !editForm.division_id) return;
+    setEditError("");
     const row = deliveries.find((d) => d.id === editingId);
     if (!row) return;
 
+    // Cek duplikat: apakah ada data lain dengan pegawai + divisi + posisi + tanggal yang sama
+    const { data: existing } = await supabase
+      .from("delivery_points")
+      .select("id")
+      .eq("employee_id", row.employee_id)
+      .eq("division_id", editForm.division_id)
+      .eq("role", editForm.role)
+      .eq("tanggal", row.tanggal)
+      .neq("id", editingId)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      setEditError(`Data ${row.employeeNama} dengan divisi dan posisi ini sudah ada di tanggal ${row.tanggal}.`);
+      return;
+    }
+
     // Re-lookup rate
-    const { data: rateData } = await supabase.from("point_rates").select("rate_per_point").eq("division_id", row.division_id).eq("role", editForm.role).eq("status", "Aktif").single();
+    const { data: rateData } = await supabase.from("point_rates").select("rate_per_point").eq("division_id", editForm.division_id).eq("role", editForm.role).eq("status", "Aktif").single();
 
     await supabase.from("delivery_points").update({
+      division_id: editForm.division_id,
       role: editForm.role,
       jumlah_titik: parseInt(editForm.jumlah_titik),
       rate_per_point: rateData?.rate_per_point || row.rate_per_point,
@@ -359,13 +443,86 @@ export default function IncomePage() {
   });
   const batchCanSave = batchFilled > 0 && batchIncomplete.length === 0 && batchDuplicateKeys.size === 0 && !!batchDate;
 
+  // ─── Calendar data ───
+  const calYear = parseInt(calMonth.split("-")[0]);
+  const calMon = parseInt(calMonth.split("-")[1]);
+  const calDaysInMonth = new Date(calYear, calMon, 0).getDate();
+  const calDates = Array.from({ length: calDaysInMonth }, (_, i) => i + 1);
+  const calMonthLabel = new Date(calYear, calMon - 1).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+
+  // Filter deliveries for calendar month
+  const calDeliveries = deliveries.filter((d) => d.tanggal.startsWith(calMonth));
+
+  // Group: employee -> date -> entries[]
+  const calEmployeeIds = [...new Set(calDeliveries.map((d) => d.employee_id))];
+  const calEmployees = calEmployeeIds.map((id) => {
+    const first = calDeliveries.find((d) => d.employee_id === id);
+    return { id, nama: first?.employeeNama || id };
+  }).sort((a, b) => a.nama.localeCompare(b.nama));
+
+  const calDataMap = new Map<string, DeliveryRow[]>(); // key: empId-day
+  calDeliveries.forEach((d) => {
+    const day = parseInt(d.tanggal.split("-")[2]);
+    const key = `${d.employee_id}-${day}`;
+    if (!calDataMap.has(key)) calDataMap.set(key, []);
+    calDataMap.get(key)!.push(d);
+  });
+
+  // Sync calendar month with filterDate
+  const openCalendar = () => {
+    setCalMonth(filterDate);
+    setShowCalendar(true);
+  };
+
+  const calPrevMonth = () => {
+    const d = new Date(calYear, calMon - 2, 1);
+    setCalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+  const calNextMonth = () => {
+    const d = new Date(calYear, calMon, 1);
+    setCalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+
+  // Fetch calendar data when month changes
+  useEffect(() => {
+    if (!showCalendar) return;
+    const fetchCalData = async () => {
+      const lastDay = new Date(calYear, calMon, 0).getDate();
+      const { data } = await supabase
+        .from("delivery_points")
+        .select("*, pegawai(nama), divisions(nama, color)")
+        .gte("tanggal", `${calMonth}-01`)
+        .lte("tanggal", `${calMonth}-${String(lastDay).padStart(2, "0")}`)
+        .order("tanggal");
+      if (data) {
+        setDeliveries((prev) => {
+          // Merge: keep non-calendar-month data, replace calendar month data
+          const others = prev.filter((d) => !d.tanggal.startsWith(calMonth));
+          const calRows = data.map((d) => ({
+            ...d,
+            employeeNama: d.pegawai?.nama || d.employee_id,
+            divisionNama: d.divisions?.nama || "-",
+            divisionColor: d.divisions?.color || "#3b82f6",
+          })) as DeliveryRow[];
+          return [...others, ...calRows];
+        });
+      }
+    };
+    fetchCalData();
+  }, [calMonth, showCalendar]);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Rekap Titik"
         description="Rekap titik pengantaran harian driver & helper"
         icon={Wallet}
-        actions={<Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" icon={CalendarDays} size="sm" onClick={openCalendar}>Mode Kalender</Button>
+            <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>
+          </div>
+        }
       />
 
       {toast.show && (
@@ -475,6 +632,147 @@ export default function IncomePage() {
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </div>
 
+      {/* ═══ CALENDAR MODE FULLSCREEN ═══ */}
+      {showCalendar && (
+        <Portal>
+          <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <CalendarDays className="w-4 h-4 text-primary" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">Rekap Titik - Mode Kalender</h2>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Month nav */}
+                <div className="flex items-center gap-1 bg-muted rounded-xl px-1 py-1">
+                  <button onClick={calPrevMonth} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronLeft className="w-4 h-4" /></button>
+                  <span className="text-sm font-semibold text-foreground px-3 min-w-[140px] text-center">{calMonthLabel}</span>
+                  <button onClick={calNextMonth} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronRight className="w-4 h-4" /></button>
+                </div>
+                <div className="w-px h-6 bg-border mx-1" />
+                <button onClick={() => setShowCalendar(false)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <List className="w-3.5 h-3.5" />Kembali
+                </button>
+              </div>
+            </div>
+
+            {/* Info */}
+            <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center gap-4 text-[10px] text-muted-foreground">
+              <span><strong className="text-foreground">{calEmployees.length}</strong> pegawai</span>
+              <span><strong className="text-foreground">{calDeliveries.length}</strong> entri</span>
+              <span><strong className="text-foreground">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</strong> total titik</span>
+            </div>
+
+            {/* Matrix table */}
+            <div className="flex-1 overflow-auto">
+              <table className="border-collapse">
+                <thead className="sticky top-0 z-20">
+                  <tr>
+                    {/* Sticky corner */}
+                    <th className="sticky left-0 z-30 bg-card border-b-2 border-r border-border px-4 py-2 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider min-w-[180px]">
+                      Pegawai
+                    </th>
+                    {calDates.map((day) => {
+                      const dayOfWeek = new Date(calYear, calMon - 1, day).getDay();
+                      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                      const isToday = new Date().getDate() === day && new Date().getMonth() === calMon - 1 && new Date().getFullYear() === calYear;
+                      return (
+                        <th key={day} className={cn(
+                          "border-b-2 border-r border-border px-1 py-2 text-center min-w-[70px]",
+                          isToday ? "bg-primary/10" : isWeekend ? "bg-muted/50" : "bg-card"
+                        )}>
+                          <div className={cn("text-[10px] font-bold", isToday ? "text-primary" : isWeekend ? "text-muted-foreground/60" : "text-muted-foreground")}>
+                            {day}
+                          </div>
+                          <div className={cn("text-[9px]", isToday ? "text-primary/70" : "text-muted-foreground/40")}>
+                            {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][dayOfWeek]}
+                          </div>
+                        </th>
+                      );
+                    })}
+                    {/* Total column */}
+                    <th className="sticky right-0 z-30 bg-card border-b-2 border-l-2 border-border px-3 py-2 text-center text-[10px] font-bold text-muted-foreground uppercase min-w-[60px]">
+                      Total
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calEmployees.length === 0 ? (
+                    <tr>
+                      <td colSpan={calDaysInMonth + 2} className="text-center py-20 text-sm text-muted-foreground">
+                        Tidak ada data untuk bulan ini
+                      </td>
+                    </tr>
+                  ) : calEmployees.map((emp) => {
+                    const empTotal = calDeliveries.filter((d) => d.employee_id === emp.id).reduce((s, d) => s + d.jumlah_titik, 0);
+                    return (
+                      <tr key={emp.id} className="hover:bg-muted/20">
+                        {/* Employee name - sticky left */}
+                        <td className="sticky left-0 z-10 bg-card border-b border-r border-border px-4 py-2">
+                          <p className="text-xs font-semibold text-foreground truncate max-w-[160px]">{emp.nama}</p>
+                        </td>
+                        {calDates.map((day) => {
+                          const entries = calDataMap.get(`${emp.id}-${day}`) || [];
+                          const dayOfWeek = new Date(calYear, calMon - 1, day).getDay();
+                          const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                          const isToday = new Date().getDate() === day && new Date().getMonth() === calMon - 1 && new Date().getFullYear() === calYear;
+                          return (
+                            <td key={day} className={cn(
+                              "border-b border-r border-border px-1 py-1 align-top min-w-[70px]",
+                              isToday ? "bg-primary/[0.04]" : isWeekend ? "bg-muted/30" : "",
+                              entries.length > 0 ? "" : ""
+                            )}>
+                              {entries.length > 0 ? (
+                                <div className="space-y-0.5">
+                                  {entries.map((e) => (
+                                    <div key={e.id} className="flex items-center gap-1 px-1 py-0.5 rounded" style={{ backgroundColor: `${e.divisionColor}10` }}>
+                                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: e.divisionColor }} />
+                                      <span className="text-[9px] font-bold" style={{ color: e.divisionColor }}>{e.jumlah_titik}</span>
+                                      <span className={cn("text-[8px] font-semibold", e.role === "Driver" ? "text-blue-500" : "text-orange-500")}>{e.role === "Driver" ? "D" : "H"}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="h-5" />
+                              )}
+                            </td>
+                          );
+                        })}
+                        {/* Total */}
+                        <td className="sticky right-0 z-10 bg-card border-b border-l-2 border-border px-3 py-2 text-center">
+                          <span className={cn("text-xs font-bold", empTotal > 0 ? "text-foreground" : "text-muted-foreground/30")}>{empTotal || "-"}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {/* Footer totals per day */}
+                  {calEmployees.length > 0 && (
+                    <tr className="sticky bottom-0 z-10">
+                      <td className="sticky left-0 z-20 bg-card border-t-2 border-r border-border px-4 py-2">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">Total / Hari</span>
+                      </td>
+                      {calDates.map((day) => {
+                        const dayTotal = calDeliveries.filter((d) => parseInt(d.tanggal.split("-")[2]) === day).reduce((s, d) => s + d.jumlah_titik, 0);
+                        return (
+                          <td key={day} className="bg-card border-t-2 border-r border-border px-1 py-2 text-center">
+                            <span className={cn("text-[10px] font-bold", dayTotal > 0 ? "text-primary" : "text-muted-foreground/30")}>{dayTotal || "-"}</span>
+                          </td>
+                        );
+                      })}
+                      <td className="sticky right-0 z-20 bg-card border-t-2 border-l-2 border-border px-3 py-2 text-center">
+                        <span className="text-xs font-bold text-primary">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</span>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Portal>
+      )}
+
       {/* ═══ BATCH INPUT MODAL ═══ */}
       {showBatch && (
         <Portal>
@@ -557,6 +855,7 @@ export default function IncomePage() {
                       const isComplete = hasTitik && hasDiv && hasRole;
                       const isIncomplete = touched && !isComplete;
                       const isDuplicate = batchDuplicateKeys.has(row.rowKey);
+                      const isDbDuplicate = dbDuplicateRowKeys.has(row.rowKey);
                       const isDragging = dragIdx === idx;
                       const isDropTarget = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;
 
@@ -580,7 +879,7 @@ export default function IncomePage() {
                               : isDropTarget
                                 ? "border-b border-border/40"
                                 : isFirstRow ? "border-b border-border/40" : "border-b border-border/20",
-                            !isDragging && !isDropTarget && (isDuplicate ? "bg-danger/[0.06]" : isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40"),
+                            !isDragging && !isDropTarget && (isDuplicate ? "bg-danger/[0.06]" : isDbDuplicate ? "bg-warning/[0.08]" : isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40"),
                             !isFirstRow && "bg-muted/[0.02]"
                           )}
                           style={isDropTarget ? { boxShadow: "inset 0 3px 0 0 var(--color-primary, #3b82f6)" } : undefined}
@@ -604,14 +903,20 @@ export default function IncomePage() {
                             {isFirstRow ? (
                               <div className="flex items-center gap-2">
                                 <div className={cn("w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-bold flex-shrink-0",
-                                  isComplete ? "bg-success/10 text-success" : isIncomplete ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground"
+                                  isDbDuplicate ? "bg-warning/10 text-warning" : isComplete ? "bg-success/10 text-success" : isIncomplete ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground"
                                 )}>
                                   {row.nama.charAt(0)}
                                 </div>
-                                <span className={cn("text-xs", isComplete || isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={cn("text-xs truncate", isComplete || isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
+                                  {isDbDuplicate && <span className="text-[8px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded flex-shrink-0">SUDAH ADA</span>}
+                                </div>
                               </div>
                             ) : (
-                              <span className="text-[10px] text-muted-foreground/50 pl-8">↳ divisi lain</span>
+                              <div className="flex items-center gap-1.5 pl-8">
+                                <span className="text-[10px] text-muted-foreground/50">↳ divisi lain</span>
+                                {isDbDuplicate && <span className="text-[8px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded flex-shrink-0">SUDAH ADA</span>}
+                              </div>
                             )}
                           </td>
 
@@ -719,6 +1024,38 @@ export default function IncomePage() {
         </Portal>
       )}
 
+      {/* ═══ DUPLICATE CONFIRM DIALOG ═══ */}
+      {showDuplicateConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+              <div className="p-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-warning/10 flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle className="w-7 h-7 text-warning" />
+                </div>
+                <h3 className="text-base font-bold text-foreground">Data Duplikat Ditemukan</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  <span className="font-semibold text-foreground">{duplicateInfo.dupCount} data</span> sudah ada di tanggal ini dengan pegawai, divisi, dan posisi yang sama.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">Pilih untuk memperbarui jumlah titik yang sudah ada, atau batalkan untuk mengubah input.</p>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowDuplicateConfirm(false)}>Batal</Button>
+                <Button size="sm" className="flex-1" onClick={async () => {
+                  setShowDuplicateConfirm(false);
+                  await executeBatchSave(duplicateInfo.newRows, duplicateInfo.updateRows);
+                  setShowBatch(false);
+                  const batchMonth = batchDate.slice(0, 7);
+                  if (filterDate !== batchMonth) setFilterDate(batchMonth);
+                  else fetchDeliveries();
+                }}>Perbarui {duplicateInfo.dupCount} Data</Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
       {/* ═══ CLOSE CONFIRM DIALOG ═══ */}
       {showCloseConfirm && (
         <Portal>
@@ -752,9 +1089,23 @@ export default function IncomePage() {
                 <button onClick={() => setShowEditForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-5 space-y-4">
+                {editError && (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{editError}
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi</label>
+                  <Select
+                    value={String(editForm.division_id)}
+                    onChange={(val) => { setEditForm({ ...editForm, division_id: parseInt(val) }); setEditError(""); }}
+                    options={divisions.map((d) => ({ value: String(d.id), label: d.nama }))}
+                    placeholder="Pilih divisi"
+                  />
+                </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Posisi</label>
-                  <Select value={editForm.role} onChange={(val) => setEditForm({ ...editForm, role: val })} options={[{ value: "Driver", label: "Driver" }, { value: "Helper", label: "Helper" }]} />
+                  <Select value={editForm.role} onChange={(val) => { setEditForm({ ...editForm, role: val }); setEditError(""); }} options={[{ value: "Driver", label: "Driver" }, { value: "Helper", label: "Helper" }]} />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Jumlah Titik</label>
@@ -763,7 +1114,7 @@ export default function IncomePage() {
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
                 <Button variant="outline" size="sm" onClick={() => setShowEditForm(false)}>Batal</Button>
-                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!editForm.jumlah_titik}>Simpan</Button>
+                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!editForm.jumlah_titik || !editForm.division_id}>Simpan</Button>
               </div>
             </div>
           </div>
