@@ -24,7 +24,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
-import { cn } from "@/lib/utils";
+import { cn, generateDivisionColor } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate } from "@/lib/supabase";
@@ -85,7 +85,7 @@ export default function MasterDataPage() {
   const [divisionSearch, setDivisionSearch] = useState("");
   const [showDivisionForm, setShowDivisionForm] = useState(false);
   const [editingDivisionId, setEditingDivisionId] = useState<number | null>(null);
-  const [divisionForm, setDivisionForm] = useState({ nama: "", deskripsi: "", status: "Aktif" });
+  const [divisionForm, setDivisionForm] = useState({ nama: "", deskripsi: "", color: "#3b82f6", status: "Aktif" });
 
   // ─── Titik Absen State ───
   const [locationList, setLocationList] = useState<AttendanceLocation[]>([]);
@@ -285,22 +285,23 @@ export default function MasterDataPage() {
   );
 
   const handleOpenAddDivision = () => {
-    setDivisionForm({ nama: "", deskripsi: "", status: "Aktif" });
+    const autoColor = generateDivisionColor(divisionList.map((d) => d.color));
+    setDivisionForm({ nama: "", deskripsi: "", color: autoColor, status: "Aktif" });
     setEditingDivisionId(null);
     setShowDivisionForm(true);
   };
   const handleOpenEditDivision = (d: Division) => {
-    setDivisionForm({ nama: d.nama, deskripsi: d.deskripsi || "", status: d.status });
+    setDivisionForm({ nama: d.nama, deskripsi: d.deskripsi || "", color: d.color || "#3b82f6", status: d.status });
     setEditingDivisionId(d.id);
     setShowDivisionForm(true);
   };
   const handleSaveDivision = async () => {
     if (!divisionForm.nama.trim()) return;
     if (editingDivisionId !== null) {
-      await supabase.from("divisions").update({ nama: divisionForm.nama, deskripsi: divisionForm.deskripsi || null, status: divisionForm.status }).eq("id", editingDivisionId);
+      await supabase.from("divisions").update({ nama: divisionForm.nama, deskripsi: divisionForm.deskripsi || null, color: divisionForm.color, status: divisionForm.status }).eq("id", editingDivisionId);
       showSuccess("Divisi Diperbarui", `Data divisi "${divisionForm.nama}" telah disimpan.`);
     } else {
-      await supabase.from("divisions").insert({ nama: divisionForm.nama, deskripsi: divisionForm.deskripsi || null, status: divisionForm.status });
+      await supabase.from("divisions").insert({ nama: divisionForm.nama, deskripsi: divisionForm.deskripsi || null, color: divisionForm.color, status: divisionForm.status });
       showSuccess("Divisi Ditambahkan", `Divisi "${divisionForm.nama}" berhasil ditambahkan ke sistem.`);
     }
     setShowDivisionForm(false);
@@ -737,7 +738,12 @@ export default function MasterDataPage() {
                   ) : filteredDivisions.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((division, idx) => (
                     <tr key={division.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
-                      <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{division.nama}</p></td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: division.color || "#3b82f6" }} />
+                          <p className="text-sm font-semibold text-foreground">{division.nama}</p>
+                        </div>
+                      </td>
                       <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{division.deskripsi || <span className="italic">-</span>}</td>
                       <td className="px-5 py-3.5">
                         <button onClick={() => handleToggleDivisionStatus(division.id)}
@@ -1124,9 +1130,22 @@ export default function MasterDataPage() {
               <button onClick={() => setShowDivisionForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Divisi <span className="text-danger">*</span></label>
-                <input type="text" placeholder="Contoh: IT & Development" value={divisionForm.nama} onChange={(e) => setDivisionForm({ ...divisionForm, nama: e.target.value })} className={inputClass} autoFocus />
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Divisi <span className="text-danger">*</span></label>
+                  <input type="text" placeholder="Contoh: IT & Development" value={divisionForm.nama} onChange={(e) => setDivisionForm({ ...divisionForm, nama: e.target.value })} className={inputClass} autoFocus />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Warna</label>
+                  <div className="relative">
+                    <input
+                      type="color"
+                      value={divisionForm.color}
+                      onChange={(e) => setDivisionForm({ ...divisionForm, color: e.target.value })}
+                      className="w-10 h-10 rounded-xl border border-border cursor-pointer appearance-none bg-transparent [&::-webkit-color-swatch-wrapper]:p-0.5 [&::-webkit-color-swatch]:rounded-lg [&::-webkit-color-swatch]:border-0"
+                    />
+                  </div>
+                </div>
               </div>
               <div>
                 <label className="text-xs font-semibold text-foreground mb-1.5 block">Deskripsi</label>

@@ -11,6 +11,7 @@ export interface DbDivision {
   id: number;
   nama: string;
   deskripsi: string | null;
+  color: string;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;
   updated_at: string;

@@ -28,8 +28,8 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
 
 type EmployeeLite = { id: string; nama: string };
-type DivisionLite = { id: number; nama: string };
-type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: string };
+type DivisionLite = { id: number; nama: string; color: string };
+type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: string; divisionColor?: string };
 
 // Batch form row
 type BatchRow = {
@@ -89,7 +89,7 @@ export default function IncomePage() {
   };
 
   const fetchDivisions = async () => {
-    const { data } = await supabase.from("divisions").select("id, nama").eq("status", "Aktif").order("nama");
+    const { data } = await supabase.from("divisions").select("id, nama, color").eq("status", "Aktif").order("nama");
     if (data) setDivisions(data);
   };
 
@@ -99,7 +99,7 @@ export default function IncomePage() {
     const lastDay = new Date(year, month, 0).getDate();
     const { data } = await supabase
       .from("delivery_points")
-      .select("*, pegawai(nama), divisions(nama)")
+      .select("*, pegawai(nama), divisions(nama, color)")
       .gte("tanggal", `${filterDate}-01`)
       .lte("tanggal", `${filterDate}-${String(lastDay).padStart(2, "0")}`)
       .order("tanggal", { ascending: false });
@@ -108,6 +108,7 @@ export default function IncomePage() {
         ...d,
         employeeNama: d.pegawai?.nama || d.employee_id,
         divisionNama: d.divisions?.nama || "-",
+        divisionColor: d.divisions?.color || "#3b82f6",
       })) as DeliveryRow[]);
     }
   };
@@ -437,7 +438,7 @@ export default function IncomePage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Divisi</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Posisi</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Titik</th>
-                <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Total</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Catatan</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Aksi</th>
               </tr>
             </thead>
@@ -451,10 +452,15 @@ export default function IncomePage() {
                   <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
                   <td className="px-5 py-3.5 text-sm text-foreground">{row.tanggal}</td>
                   <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p></td>
-                  <td className="px-5 py-3.5"><span className="text-xs font-medium text-accent bg-accent-light px-2 py-1 rounded-md">{row.divisionNama}</span></td>
+                  <td className="px-5 py-3.5">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${row.divisionColor}15`, color: row.divisionColor }}>
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: row.divisionColor }} />
+                      {row.divisionNama}
+                    </span>
+                  </td>
                   <td className="px-5 py-3.5"><span className={cn("text-xs font-semibold px-2.5 py-1 rounded-lg", row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400")}>{row.role}</span></td>
                   <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground">{row.jumlah_titik}</td>
-                  <td className="px-5 py-3.5 text-right text-sm font-bold text-success">{formatCurrency(row.total)}</td>
+                  <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[200px] truncate">{row.catatan || <span className="italic">-</span>}</td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => openEdit(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>

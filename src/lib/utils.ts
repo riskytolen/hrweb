@@ -75,3 +75,23 @@ export function getStatusColor(status: string): string {
   };
   return colors[status.toLowerCase()] || "bg-muted text-muted-foreground";
 }
+
+// Palet warna divisi yang kontras dan mudah dibedakan
+const DIVISION_COLORS = [
+  "#3b82f6", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444",
+  "#ec4899", "#06b6d4", "#f97316", "#6366f1", "#14b8a6",
+  "#e11d48", "#84cc16", "#a855f7", "#0ea5e9", "#d946ef",
+  "#22c55e", "#eab308", "#64748b", "#f43f5e", "#2dd4bf",
+];
+
+/**
+ * Generate warna unik untuk divisi baru berdasarkan warna yang sudah dipakai.
+ */
+export function generateDivisionColor(existingColors: string[]): string {
+  const used = new Set(existingColors.map((c) => c.toLowerCase()));
+  const available = DIVISION_COLORS.find((c) => !used.has(c));
+  if (available) return available;
+  // Fallback: random hue
+  const hue = Math.floor(Math.random() * 360);
+  return `hsl(${hue}, 70%, 50%)`;
+}
