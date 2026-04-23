@@ -8,9 +8,10 @@ import {
   Pencil,
   Trash2,
   X,
-  Check,
   CircleCheckBig,
   Filter,
+  Check,
+  Users,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -25,24 +26,39 @@ type EmployeeLite = { id: string; nama: string };
 type DivisionLite = { id: number; nama: string };
 type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: string };
 
-const PAGE_SIZE = 10;
+// Batch form row
+type BatchRow = {
+  employee_id: string;
+  nama: string;
+  division_id: number;
+  role: "Driver" | "Helper";
+  jumlah_titik: string;
+};
+
+const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
 export default function IncomePage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [filterDate, setFilterDate] = useState(() => new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const [filterDate, setFilterDate] = useState(() => new Date().toISOString().slice(0, 7));
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [divisions, setDivisions] = useState<DivisionLite[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
 
-  const [showForm, setShowForm] = useState(false);
+  // ─── Batch Input State ───
+  const [showBatch, setShowBatch] = useState(false);
+  const [batchDate, setBatchDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
+  const [batchSearch, setBatchSearch] = useState("");
+  const [batchSaving, setBatchSaving] = useState(false);
+
+  // ─── Edit single row ───
+  const [showEditForm, setShowEditForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState({ employee_id: "", division_id: 0, role: "Driver", tanggal: new Date().toISOString().slice(0, 10), jumlah_titik: "", catatan: "" });
-  const [formRate, setFormRate] = useState<number | null>(null);
-  const [formErrors, setFormErrors] = useState<Set<string>>(new Set());
+  const [editForm, setEditForm] = useState({ role: "Driver", jumlah_titik: "" });
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
@@ -82,82 +98,88 @@ export default function IncomePage() {
     Promise.all([fetchEmployees(), fetchDivisions()]).then(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    fetchDeliveries();
-  }, [filterDate]);
+  useEffect(() => { fetchDeliveries(); }, [filterDate]);
 
   useEffect(() => {
-    if (showForm) document.body.style.overflow = "hidden";
+    if (showBatch || showEditForm) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showForm]);
+  }, [showBatch, showEditForm]);
 
-  // Lookup rate saat divisi + role berubah
-  const lookupRate = async (divId: number, role: string) => {
-    const { data } = await supabase.from("point_rates").select("rate_per_point").eq("division_id", divId).eq("role", role).eq("status", "Aktif").single();
-    setFormRate(data?.rate_per_point ?? null);
+  // ─── Batch handlers ───
+  const openBatch = () => {
+    setBatchDate(new Date().toISOString().slice(0, 10));
+    setBatchRows(employees.map((e) => ({ employee_id: e.id, nama: e.nama, division_id: divisions[0]?.id || 0, role: "Driver" as const, jumlah_titik: "" })));
+    setBatchSearch("");
+    setShowBatch(true);
   };
 
-  const handleFormChange = (field: string, value: string | number) => {
-    const updated = { ...form, [field]: value };
-    setForm(updated);
-    setFormErrors((prev) => { const n = new Set(prev); n.delete(field); return n; });
+  const handleBatchRowChange = (empId: string, field: "division_id" | "role" | "jumlah_titik", value: string | number) => {
+    setBatchRows((prev) => prev.map((r) => r.employee_id === empId ? { ...r, [field]: value } : r));
+  };
 
-    if (field === "division_id" || field === "role") {
-      const divId = field === "division_id" ? Number(value) : updated.division_id;
-      const role = field === "role" ? String(value) : updated.role;
-      if (divId) lookupRate(divId, role);
+  const handleBatchSave = async () => {
+    if (!batchDate) return;
+
+    const validRows = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id);
+    if (validRows.length === 0) return;
+
+    setBatchSaving(true);
+
+    // Lookup all rates at once
+    const { data: allRates } = await supabase.from("point_rates").select("division_id, role, rate_per_point").eq("status", "Aktif");
+    const rateMap = new Map<string, number>();
+    allRates?.forEach((r) => rateMap.set(`${r.division_id}-${r.role}`, r.rate_per_point));
+
+    const inserts = validRows.map((r) => ({
+      employee_id: r.employee_id,
+      division_id: r.division_id,
+      role: r.role,
+      tanggal: batchDate,
+      jumlah_titik: parseInt(r.jumlah_titik),
+      rate_per_point: rateMap.get(`${r.division_id}-${r.role}`) || 0,
+    }));
+
+    const { error } = await supabase.from("delivery_points").insert(inserts);
+    setBatchSaving(false);
+
+    if (error) {
+      showSuccess("Gagal Menyimpan", error.message);
+      return;
     }
-  };
 
-  const openAdd = () => {
-    setForm({ employee_id: "", division_id: 0, role: "Driver", tanggal: new Date().toISOString().slice(0, 10), jumlah_titik: "", catatan: "" });
-    setFormRate(null);
-    setFormErrors(new Set());
-    setEditingId(null);
-    setShowForm(true);
-  };
-
-  const openEdit = (row: DeliveryRow) => {
-    setForm({ employee_id: row.employee_id, division_id: row.division_id, role: row.role, tanggal: row.tanggal, jumlah_titik: String(row.jumlah_titik), catatan: row.catatan || "" });
-    setFormRate(row.rate_per_point);
-    setFormErrors(new Set());
-    setEditingId(row.id);
-    setShowForm(true);
-  };
-
-  const handleSave = async () => {
-    const errs = new Set<string>();
-    if (!form.employee_id) errs.add("employee_id");
-    if (!form.division_id) errs.add("division_id");
-    if (!form.tanggal) errs.add("tanggal");
-    if (!form.jumlah_titik || parseInt(form.jumlah_titik) <= 0) errs.add("jumlah_titik");
-    if (formRate === null) errs.add("rate");
-    if (errs.size > 0) { setFormErrors(errs); return; }
-
-    const payload = {
-      employee_id: form.employee_id,
-      division_id: form.division_id,
-      role: form.role,
-      tanggal: form.tanggal,
-      jumlah_titik: parseInt(form.jumlah_titik),
-      rate_per_point: formRate!,
-      catatan: form.catatan || null,
-    };
-
-    const empNama = employees.find((e) => e.id === form.employee_id)?.nama || "";
-
-    if (editingId !== null) {
-      await supabase.from("delivery_points").update(payload).eq("id", editingId);
-      showSuccess("Data Diperbarui", `Input titik ${empNama} telah disimpan.`);
-    } else {
-      await supabase.from("delivery_points").insert(payload);
-      showSuccess("Input Titik Berhasil", `${form.jumlah_titik} titik untuk ${empNama} telah dicatat.`);
-    }
-    setShowForm(false);
+    showSuccess("Input Titik Berhasil", `${validRows.length} data pegawai berhasil disimpan.`);
+    setShowBatch(false);
     fetchDeliveries();
   };
 
+  // ─── Edit single ───
+  const openEdit = (row: DeliveryRow) => {
+    setEditForm({ role: row.role, jumlah_titik: String(row.jumlah_titik) });
+    setEditingId(row.id);
+    setShowEditForm(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingId || !editForm.jumlah_titik) return;
+    const row = deliveries.find((d) => d.id === editingId);
+    if (!row) return;
+
+    // Re-lookup rate
+    const { data: rateData } = await supabase.from("point_rates").select("rate_per_point").eq("division_id", row.division_id).eq("role", editForm.role).eq("status", "Aktif").single();
+
+    await supabase.from("delivery_points").update({
+      role: editForm.role,
+      jumlah_titik: parseInt(editForm.jumlah_titik),
+      rate_per_point: rateData?.rate_per_point || row.rate_per_point,
+    }).eq("id", editingId);
+
+    showSuccess("Data Diperbarui", "Input titik telah disimpan.");
+    setShowEditForm(false);
+    fetchDeliveries();
+  };
+
+  // ─── Delete ───
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     await supabase.from("delivery_points").delete().eq("id", deleteConfirm.id);
@@ -166,20 +188,23 @@ export default function IncomePage() {
     fetchDeliveries();
   };
 
+  // ─── Filter & paginate ───
   const filtered = deliveries.filter((d) =>
     (d.employeeNama || "").toLowerCase().includes(search.toLowerCase()) ||
     d.employee_id.toLowerCase().includes(search.toLowerCase()) ||
     (d.divisionNama || "").toLowerCase().includes(search.toLowerCase()) ||
     d.role.toLowerCase().includes(search.toLowerCase())
   );
-
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Summary
   const totalTitik = deliveries.reduce((s, d) => s + d.jumlah_titik, 0);
   const totalPendapatan = deliveries.reduce((s, d) => s + d.total, 0);
-  const totalDriver = deliveries.filter((d) => d.role === "Driver").length;
-  const totalHelper = deliveries.filter((d) => d.role === "Helper").length;
+  const totalEntri = deliveries.length;
+
+  // Batch filtered
+  const batchFiltered = batchRows.filter((r) => r.nama.toLowerCase().includes(batchSearch.toLowerCase()));
+  const batchFilled = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0).length;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -187,7 +212,7 @@ export default function IncomePage() {
         title="Pendapatan Pegawai"
         description="Input titik pengantaran harian driver & helper"
         icon={Wallet}
-        actions={<Button icon={Plus} size="sm" onClick={openAdd}>Input Titik</Button>}
+        actions={<Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
       />
 
       {toast.show && (
@@ -208,8 +233,8 @@ export default function IncomePage() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {loading ? Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        {loading ? Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
             <Skeleton className="w-10 h-10 rounded-xl" />
             <div className="space-y-2"><Skeleton className="h-3 w-14 rounded-md" /><Skeleton className="h-5 w-8 rounded-md" /></div>
@@ -225,12 +250,8 @@ export default function IncomePage() {
               <div><p className="text-xs text-muted-foreground font-medium">Total Titik</p><p className="text-xs text-muted-foreground">bulan ini</p></div>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center"><span className="text-sm font-bold text-primary">{totalDriver}</span></div>
-              <div><p className="text-xs text-muted-foreground font-medium">Entri Driver</p><p className="text-xs text-muted-foreground">transaksi</p></div>
-            </div>
-            <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-accent-light flex items-center justify-center"><span className="text-sm font-bold text-accent">{totalHelper}</span></div>
-              <div><p className="text-xs text-muted-foreground font-medium">Entri Helper</p><p className="text-xs text-muted-foreground">transaksi</p></div>
+              <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center"><span className="text-sm font-bold text-muted-foreground">{totalEntri}</span></div>
+              <div><p className="text-xs text-muted-foreground font-medium">Total Entri</p><p className="text-xs text-muted-foreground">transaksi</p></div>
             </div>
           </>
         )}
@@ -241,7 +262,7 @@ export default function IncomePage() {
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5 flex-1">
             <Search className="w-4 h-4 text-muted-foreground" />
-            <input type="text" placeholder="Cari nama, ID, divisi, atau posisi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            <input type="text" placeholder="Cari nama, divisi, atau posisi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
           </div>
           <div className="flex items-center gap-2">
@@ -264,28 +285,23 @@ export default function IncomePage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Divisi</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Posisi</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Titik</th>
-                <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Rate</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Total</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {loading ? (
-                <SkeletonTable rows={6} cols={9} />
+                <SkeletonTable rows={6} cols={8} />
               ) : paged.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data ditemukan</td></tr>
+                <tr><td colSpan={8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data ditemukan</td></tr>
               ) : paged.map((row, idx) => (
                 <tr key={row.id} className="hover:bg-muted/30">
                   <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
                   <td className="px-5 py-3.5 text-sm text-foreground">{row.tanggal}</td>
-                  <td className="px-5 py-3.5">
-                    <p className="text-sm font-semibold text-foreground">{row.employeeNama}</p>
-                    <p className="text-[11px] text-muted-foreground">{row.employee_id}</p>
-                  </td>
+                  <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p></td>
                   <td className="px-5 py-3.5"><span className="text-xs font-medium text-accent bg-accent-light px-2 py-1 rounded-md">{row.divisionNama}</span></td>
                   <td className="px-5 py-3.5"><span className={cn("text-xs font-semibold px-2.5 py-1 rounded-lg", row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400")}>{row.role}</span></td>
                   <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground">{row.jumlah_titik}</td>
-                  <td className="px-5 py-3.5 text-right text-sm text-muted-foreground">{formatCurrency(row.rate_per_point)}</td>
                   <td className="px-5 py-3.5 text-right text-sm font-bold text-success">{formatCurrency(row.total)}</td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-center gap-1">
@@ -301,111 +317,153 @@ export default function IncomePage() {
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </div>
 
-      {/* ═══ INPUT TITIK FORM MODAL ═══ */}
-      {showForm && (
+      {/* ═══ BATCH INPUT MODAL ═══ */}
+      {showBatch && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowForm(false)} />
-            <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !batchSaving && setShowBatch(false)} />
+            <div className="relative w-full max-w-3xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
-                    {editingId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
+                    <Users className="w-4 h-4 text-primary" />
                   </div>
-                  <h2 className="text-sm font-bold text-foreground">{editingId ? "Edit Input Titik" : "Input Titik Baru"}</h2>
+                  <div>
+                    <h2 className="text-sm font-bold text-foreground">Input Titik Batch</h2>
+                    <p className="text-[11px] text-muted-foreground">Isi jumlah titik per pegawai, kosongkan yang tidak antar</p>
+                  </div>
                 </div>
-                <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                <button onClick={() => !batchSaving && setShowBatch(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+              </div>
+
+              {/* Tanggal */}
+              <div className="px-6 py-4 border-b border-border bg-muted/20">
+                <div className="max-w-xs">
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal <span className="text-danger">*</span></label>
+                  <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} className={inputClass} />
+                </div>
+              </div>
+
+              {/* Search pegawai */}
+              <div className="px-6 py-3 border-b border-border">
+                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
+                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                  <input type="text" placeholder="Cari pegawai..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
+                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
+                  {batchFilled > 0 && (
+                    <span className="text-[10px] font-bold text-primary bg-primary-light px-2 py-0.5 rounded-md whitespace-nowrap">{batchFilled} terisi</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Batch table */}
+              <div className="flex-1 overflow-y-auto">
+                <table className="w-full">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-muted/50 border-b border-border">
+                      <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-12">#</th>
+                      <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5">Nama Pegawai</th>
+                      <th className="text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-36">Divisi</th>
+                      <th className="text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-24">Posisi</th>
+                      <th className="text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-24">Titik</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {batchFiltered.map((row, idx) => {
+                      const hasTitik = row.jumlah_titik && parseInt(row.jumlah_titik) > 0;
+                      return (
+                        <tr key={row.employee_id} className={cn("transition-colors", hasTitik ? "bg-success-light/30" : "hover:bg-muted/30")}>
+                          <td className="px-4 py-2 text-xs text-muted-foreground">{idx + 1}</td>
+                          <td className="px-4 py-2">
+                            <p className={cn("text-sm", hasTitik ? "font-semibold text-foreground" : "text-muted-foreground")}>{row.nama}</p>
+                          </td>
+                          <td className="px-4 py-2">
+                            <select
+                              value={row.division_id}
+                              onChange={(e) => handleBatchRowChange(row.employee_id, "division_id", parseInt(e.target.value))}
+                              className="w-full text-xs px-2 py-1.5 rounded-lg border border-border bg-card outline-none focus:border-primary text-foreground"
+                            >
+                              {divisions.map((d) => (
+                                <option key={d.id} value={d.id}>{d.nama}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-4 py-2">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleBatchRowChange(row.employee_id, "role", "Driver")}
+                                className={cn("px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors",
+                                  row.role === "Driver" ? "bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400" : "text-muted-foreground hover:bg-muted"
+                                )}
+                              >D</button>
+                              <button
+                                type="button"
+                                onClick={() => handleBatchRowChange(row.employee_id, "role", "Helper")}
+                                className={cn("px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors",
+                                  row.role === "Helper" ? "bg-orange-100 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400" : "text-muted-foreground hover:bg-muted"
+                                )}
+                              >H</button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="number"
+                              min={0}
+                              placeholder="0"
+                              value={row.jumlah_titik}
+                              onChange={(e) => handleBatchRowChange(row.employee_id, "jumlah_titik", e.target.value)}
+                              className="w-full text-center px-2 py-1.5 rounded-lg border border-border bg-card text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-muted/30">
+                <p className="text-xs text-muted-foreground">
+                  {batchFilled > 0 ? <span className="font-semibold text-foreground">{batchFilled} pegawai</span> : "Belum ada data"} yang akan disimpan
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setShowBatch(false)} disabled={batchSaving}>Batal</Button>
+                  <Button size="sm" icon={Check} onClick={handleBatchSave} disabled={batchSaving || batchFilled === 0 || !batchDate}>
+                    {batchSaving ? "Menyimpan..." : "Simpan Semua"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ EDIT SINGLE MODAL ═══ */}
+      {showEditForm && editingId && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowEditForm(false)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+                <h2 className="text-sm font-bold text-foreground">Edit Input Titik</h2>
+                <button onClick={() => setShowEditForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-5 space-y-4">
-                {formErrors.size > 0 && (
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
-                    <X className="w-3.5 h-3.5 flex-shrink-0" />Harap lengkapi field yang wajib diisi
-                  </div>
-                )}
-
                 <div>
-                  <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("employee_id") ? "text-danger" : "text-foreground")}>Pegawai <span className="text-danger">*</span></label>
-                  {editingId !== null ? (
-                    <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">
-                      {employees.find((e) => e.id === form.employee_id)?.nama || form.employee_id}
-                    </div>
-                  ) : (
-                    <Select
-                      value={form.employee_id}
-                      onChange={(val) => handleFormChange("employee_id", val)}
-                      options={employees.map((e) => ({ value: e.id, label: e.nama }))}
-                      placeholder="Pilih pegawai"
-                      hasError={formErrors.has("employee_id")}
-                    />
-                  )}
-                  {formErrors.has("employee_id") && <p className="text-[10px] text-danger mt-1">Pegawai wajib dipilih</p>}
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Posisi</label>
+                  <Select value={editForm.role} onChange={(val) => setEditForm({ ...editForm, role: val })} options={[{ value: "Driver", label: "Driver" }, { value: "Helper", label: "Helper" }]} />
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("division_id") ? "text-danger" : "text-foreground")}>Divisi <span className="text-danger">*</span></label>
-                    <Select
-                      value={String(form.division_id)}
-                      onChange={(val) => handleFormChange("division_id", parseInt(val))}
-                      options={divisions.map((d) => ({ value: String(d.id), label: d.nama }))}
-                      placeholder="Pilih divisi"
-                      hasError={formErrors.has("division_id")}
-                    />
-                    {formErrors.has("division_id") && <p className="text-[10px] text-danger mt-1">Divisi wajib dipilih</p>}
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Posisi <span className="text-danger">*</span></label>
-                    <Select
-                      value={form.role}
-                      onChange={(val) => handleFormChange("role", val)}
-                      options={[{ value: "Driver", label: "Driver" }, { value: "Helper", label: "Helper" }]}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("tanggal") ? "text-danger" : "text-foreground")}>Tanggal <span className="text-danger">*</span></label>
-                    <input type="date" value={form.tanggal} onChange={(e) => handleFormChange("tanggal", e.target.value)} className={cn(inputClass, formErrors.has("tanggal") && "border-danger ring-2 ring-danger/20")} />
-                    {formErrors.has("tanggal") && <p className="text-[10px] text-danger mt-1">Tanggal wajib diisi</p>}
-                  </div>
-                  <div>
-                    <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("jumlah_titik") ? "text-danger" : "text-foreground")}>Jumlah Titik <span className="text-danger">*</span></label>
-                    <input type="number" min={1} placeholder="Contoh: 10" value={form.jumlah_titik} onChange={(e) => handleFormChange("jumlah_titik", e.target.value)} className={cn(inputClass, formErrors.has("jumlah_titik") && "border-danger ring-2 ring-danger/20")} />
-                    {formErrors.has("jumlah_titik") && <p className="text-[10px] text-danger mt-1">Jumlah titik wajib diisi</p>}
-                  </div>
-                </div>
-
-                {/* Rate & Total Preview */}
-                <div className="rounded-xl border border-border bg-muted/30 p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Harga per titik</span>
-                    {formRate !== null ? (
-                      <span className="text-sm font-bold text-foreground">{formatCurrency(formRate)}</span>
-                    ) : form.division_id ? (
-                      <span className="text-xs text-danger font-medium">{formErrors.has("rate") ? "Tarif belum diatur di Data Master" : "Pilih divisi & posisi"}</span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">-</span>
-                    )}
-                  </div>
-                  {formRate !== null && form.jumlah_titik && (
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
-                      <span className="text-xs text-muted-foreground">{form.jumlah_titik} titik x {formatCurrency(formRate)}</span>
-                      <span className="text-lg font-bold text-success">{formatCurrency(parseInt(form.jumlah_titik) * formRate)}</span>
-                    </div>
-                  )}
-                </div>
-
                 <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan</label>
-                  <input type="text" placeholder="Opsional" value={form.catatan} onChange={(e) => handleFormChange("catatan", e.target.value)} className={inputClass} />
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Jumlah Titik</label>
+                  <input type="number" min={1} value={editForm.jumlah_titik} onChange={(e) => setEditForm({ ...editForm, jumlah_titik: e.target.value })} className={inputClass} />
                 </div>
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
-                <Button variant="outline" size="sm" onClick={() => setShowForm(false)}>Batal</Button>
-                <Button size="sm" icon={editingId ? Check : Plus} onClick={handleSave}>
-                  {editingId ? "Simpan" : "Input Titik"}
-                </Button>
+                <Button variant="outline" size="sm" onClick={() => setShowEditForm(false)}>Batal</Button>
+                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!editForm.jumlah_titik}>Simpan</Button>
               </div>
             </div>
           </div>
@@ -419,9 +477,7 @@ export default function IncomePage() {
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
             <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
               <div className="p-6 text-center">
-                <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
-                  <Trash2 className="w-7 h-7 text-danger" />
-                </div>
+                <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4"><Trash2 className="w-7 h-7 text-danger" /></div>
                 <h3 className="text-base font-bold text-foreground">Hapus Input Titik?</h3>
                 <p className="text-sm text-muted-foreground mt-2">Data untuk <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen.</p>
               </div>
