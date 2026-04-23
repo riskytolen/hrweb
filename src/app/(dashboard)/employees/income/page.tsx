@@ -12,8 +12,7 @@ import {
   Filter,
   Check,
   Users,
-  ChevronUp,
-  ChevronDown,
+  GripVertical,
   Save,
   RotateCcw,
   AlertTriangle,
@@ -61,7 +60,8 @@ export default function IncomePage() {
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [batchSearch, setBatchSearch] = useState("");
   const [batchSaving, setBatchSaving] = useState(false);
-  const [showReorder, setShowReorder] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   const TEMPLATE_KEY = "batch_employee_order";
@@ -141,7 +141,8 @@ export default function IncomePage() {
     const ordered = getOrderedEmployees(employees);
     setBatchRows(ordered.map((e) => ({ employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "" })));
     setBatchSearch("");
-    setShowReorder(false);
+    setDragIdx(null);
+    setDragOverIdx(null);
     setShowBatch(true);
   };
 
@@ -149,14 +150,40 @@ export default function IncomePage() {
     setBatchRows((prev) => prev.map((r) => r.employee_id === empId ? { ...r, [field]: value } : r));
   };
 
-  const moveRow = (idx: number, dir: "up" | "down") => {
+  const handleDragStart = (e: React.DragEvent, idx: number) => {
+    setDragIdx(idx);
+    // Buat drag ghost transparan agar tidak mengganggu
+    const ghost = document.createElement("div");
+    ghost.style.opacity = "0";
+    ghost.style.position = "absolute";
+    ghost.style.top = "-9999px";
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 0, 0);
+    e.dataTransfer.effectAllowed = "move";
+    setTimeout(() => document.body.removeChild(ghost), 0);
+  };
+
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverIdx(idx);
+  };
+
+  const handleDrop = (idx: number) => {
+    if (dragIdx === null || dragIdx === idx) { setDragIdx(null); setDragOverIdx(null); return; }
     setBatchRows((prev) => {
       const arr = [...prev];
-      const target = dir === "up" ? idx - 1 : idx + 1;
-      if (target < 0 || target >= arr.length) return prev;
-      [arr[idx], arr[target]] = [arr[target], arr[idx]];
+      const [moved] = arr.splice(dragIdx, 1);
+      arr.splice(idx, 0, moved);
       return arr;
     });
+    setDragIdx(null);
+    setDragOverIdx(null);
+  };
+
+  const handleDragEnd = () => {
+    setDragIdx(null);
+    setDragOverIdx(null);
   };
 
   const saveTemplate = () => {
@@ -405,66 +432,57 @@ export default function IncomePage() {
       {/* ═══ BATCH INPUT MODAL ═══ */}
       {showBatch && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !batchSaving && tryCloseBatch()} />
-            <div className="relative w-full max-w-4xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-3">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+            <div className="relative w-full max-w-5xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ height: "calc(100vh - 1.5rem)", maxHeight: "calc(100vh - 1.5rem)" }}>
 
-              {/* ── Header ── */}
-              <div className="px-6 py-5 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <Users className="w-5 h-5 text-primary" />
+              {/* ── Header: Title + Tanggal + Search + Counter ── */}
+              <div className="px-5 py-3 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+                <div className="flex items-center gap-4">
+                  {/* Title */}
+                  <div className="flex items-center gap-2.5 flex-shrink-0">
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Users className="w-4 h-4 text-primary" />
                     </div>
-                    <div>
-                      <h2 className="text-base font-bold text-foreground">Input Titik Harian</h2>
-                      <p className="text-xs text-muted-foreground mt-0.5">Isi jumlah titik per pegawai, kosongkan yang tidak bertugas</p>
+                    <div className="hidden sm:block">
+                      <h2 className="text-sm font-bold text-foreground leading-tight">Input Titik Harian</h2>
+                      <p className="text-[10px] text-muted-foreground">Kosongkan yang tidak bertugas</p>
                     </div>
                   </div>
-                  <button onClick={() => !batchSaving && tryCloseBatch()} className="p-2 rounded-xl hover:bg-muted text-muted-foreground"><X className="w-5 h-5" /></button>
-                </div>
-              </div>
 
-              {/* ── Tanggal + Search + Counter ── */}
-              <div className="px-6 py-4 border-b border-border">
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="w-full sm:w-56">
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Tanggal</label>
+                  {/* Tanggal */}
+                  <div className="w-48 flex-shrink-0">
                     <DatePicker value={batchDate} onChange={(val) => setBatchDate(val)} placeholder="Pilih tanggal" />
                   </div>
-                  <div className="flex-1">
-                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Cari Pegawai</label>
-                    <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2 border border-border focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/10">
-                      <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                      <input type="text" placeholder="Ketik nama pegawai..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
-                        className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
-                    </div>
+
+                  {/* Search */}
+                  <div className="flex-1 flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2 border border-border focus-within:border-primary">
+                    <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                    <input type="text" placeholder="Cari pegawai..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
+                      className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
                   </div>
-                  <div className="w-full sm:w-auto flex items-end">
-                    <div className={cn("flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold", batchFilled > 0 ? "border-success/30 bg-success-light/50 text-success" : "border-border bg-muted/30 text-muted-foreground")}>
-                      <Check className="w-4 h-4" />
-                      <span>{batchFilled}</span>
-                      <span className="text-xs font-normal">/ {batchRows.length}</span>
-                    </div>
+
+                  {/* Counter */}
+                  <div className={cn("flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-semibold flex-shrink-0", batchFilled > 0 ? "border-success/30 bg-success-light/50 text-success" : "border-border bg-muted/30 text-muted-foreground")}>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{batchFilled}<span className="text-xs font-normal text-muted-foreground">/{batchRows.length}</span></span>
                   </div>
+
+                  {/* Close */}
+                  <button onClick={tryCloseBatch} disabled={batchSaving} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50 flex-shrink-0"><X className="w-4 h-4" /></button>
                 </div>
               </div>
 
               {/* ── Reorder toolbar ── */}
-              <div className="px-6 py-2 border-b border-border flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setShowReorder(!showReorder)}
-                  className={cn("flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors", showReorder ? "bg-primary-light text-primary" : "text-muted-foreground hover:bg-muted")}
-                >
-                  <ChevronUp className="w-3 h-3" /><ChevronDown className="w-3 h-3 -ml-2" />
-                  {showReorder ? "Selesai Atur Urutan" : "Atur Urutan"}
-                </button>
-                <div className="flex items-center gap-1.5">
-                  <button type="button" onClick={saveTemplate} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-3 py-1.5 rounded-lg transition-colors">
-                    <Save className="w-3 h-3" />Simpan Urutan
+              <div className="px-5 py-1.5 border-b border-border flex items-center justify-between bg-muted/20">
+                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <GripVertical className="w-3 h-3" />Drag untuk ubah urutan
+                </p>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={saveTemplate} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
+                    <Save className="w-3 h-3" />Simpan
                   </button>
-                  <button type="button" onClick={resetTemplate} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-3 py-1.5 rounded-lg transition-colors">
+                  <button type="button" onClick={resetTemplate} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-2 py-1 rounded-md transition-colors">
                     <RotateCcw className="w-3 h-3" />Reset
                   </button>
                 </div>
@@ -475,12 +493,12 @@ export default function IncomePage() {
                 <table className="w-full">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-card border-b-2 border-border shadow-sm">
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3">Pegawai</th>
-                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-40">Divisi</th>
-                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Posisi</th>
-                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-24">Titik</th>
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-36">Catatan</th>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-14">#</th>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2">Pegawai</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-40">Divisi</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Posisi</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-20">Titik</th>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-36">Catatan</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -491,44 +509,54 @@ export default function IncomePage() {
                       const touched = hasTitik || hasDiv || hasRole;
                       const isComplete = hasTitik && hasDiv && hasRole;
                       const isIncomplete = touched && !isComplete;
+                      const isDragging = dragIdx === idx;
+                      const isDropTarget = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;
                       return (
-                        <tr key={row.employee_id} className={cn(
-                          "border-b border-border/40 transition-all duration-150",
-                          isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40"
-                        )}>
-                          <td className="px-5 py-3">
-                            {showReorder ? (
-                              <div className="flex flex-col items-center gap-0.5">
-                                <button type="button" onClick={() => moveRow(idx, "up")} disabled={idx === 0}
-                                  className={cn("p-0.5 rounded transition-colors", idx === 0 ? "text-muted-foreground/20" : "text-muted-foreground hover:text-primary hover:bg-primary-light")}>
-                                  <ChevronUp className="w-3.5 h-3.5" />
-                                </button>
-                                <span className="text-[10px] font-mono text-muted-foreground">{idx + 1}</span>
-                                <button type="button" onClick={() => moveRow(idx, "down")} disabled={idx === batchFiltered.length - 1}
-                                  className={cn("p-0.5 rounded transition-colors", idx === batchFiltered.length - 1 ? "text-muted-foreground/20" : "text-muted-foreground hover:text-primary hover:bg-primary-light")}>
-                                  <ChevronDown className="w-3.5 h-3.5" />
-                                </button>
+                        <tr
+                          key={row.employee_id}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, idx)}
+                          onDragOver={(e) => handleDragOver(e, idx)}
+                          onDrop={() => handleDrop(idx)}
+                          onDragEnd={handleDragEnd}
+                          className={cn(
+                            "transition-all duration-200 relative",
+                            isDragging
+                              ? "opacity-30 scale-[0.98] bg-primary/5 border-b border-primary/30"
+                              : isDropTarget
+                                ? "border-b border-border/40"
+                                : "border-b border-border/40",
+                            !isDragging && !isDropTarget && (isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40")
+                          )}
+                          style={isDropTarget ? { boxShadow: "inset 0 3px 0 0 var(--color-primary, #3b82f6)" } : undefined}
+                        >
+                          <td className="px-4 py-1.5">
+                            <div className="flex items-center gap-1">
+                              <div className={cn(
+                                "p-0.5 rounded cursor-grab active:cursor-grabbing transition-colors",
+                                isDragging ? "text-primary" : "text-muted-foreground/30 hover:text-muted-foreground"
+                              )}>
+                                <GripVertical className="w-3.5 h-3.5" />
                               </div>
-                            ) : (
-                              <span className={cn("text-xs font-mono", isComplete ? "text-success font-bold" : isIncomplete ? "text-danger font-bold" : "text-muted-foreground")}>{idx + 1}</span>
-                            )}
+                              <span className={cn("text-[10px] font-mono", isComplete ? "text-success font-bold" : isIncomplete ? "text-danger font-bold" : "text-muted-foreground")}>{idx + 1}</span>
+                            </div>
                           </td>
-                          <td className="px-5 py-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0",
+                          <td className="px-4 py-1.5">
+                            <div className="flex items-center gap-2">
+                              <div className={cn("w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-bold flex-shrink-0",
                                 isComplete ? "bg-success/10 text-success" : isIncomplete ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground"
                               )}>
                                 {row.nama.charAt(0)}
                               </div>
-                              <span className={cn("text-sm", isComplete ? "font-semibold text-foreground" : isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
+                              <span className={cn("text-xs", isComplete ? "font-semibold text-foreground" : isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
                             </div>
                           </td>
-                          <td className="px-5 py-3">
+                          <td className="px-4 py-1.5">
                             <select
                               value={row.division_id || ""}
                               onChange={(e) => handleBatchRowChange(row.employee_id, "division_id", parseInt(e.target.value) || 0)}
                               className={cn(
-                                "w-full text-xs px-2.5 py-2 rounded-lg border outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
+                                "w-full text-[11px] px-2 py-1.5 rounded-md border outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
                                 row.division_id ? "border-border bg-card text-foreground" : isIncomplete && !hasDiv ? "border-danger/50 bg-danger/[0.03] text-muted-foreground" : "border-dashed border-border bg-transparent text-muted-foreground"
                               )}
                             >
@@ -538,15 +566,15 @@ export default function IncomePage() {
                               ))}
                             </select>
                           </td>
-                          <td className="px-5 py-3">
-                            <div className="flex items-center justify-center gap-1.5">
+                          <td className="px-4 py-1.5">
+                            <div className="flex items-center justify-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => handleBatchRowChange(row.employee_id, "role", row.role === "Driver" ? "" : "Driver")}
                                 className={cn(
-                                  "w-9 h-8 rounded-lg text-[11px] font-bold transition-all duration-150",
+                                  "w-8 h-7 rounded-md text-[10px] font-bold transition-all duration-150",
                                   row.role === "Driver"
-                                    ? "bg-blue-500 text-white shadow-sm shadow-blue-500/25 scale-105"
+                                    ? "bg-blue-500 text-white shadow-sm shadow-blue-500/25"
                                     : "bg-muted/60 text-muted-foreground hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-500/10"
                                 )}
                               >D</button>
@@ -554,15 +582,15 @@ export default function IncomePage() {
                                 type="button"
                                 onClick={() => handleBatchRowChange(row.employee_id, "role", row.role === "Helper" ? "" : "Helper")}
                                 className={cn(
-                                  "w-9 h-8 rounded-lg text-[11px] font-bold transition-all duration-150",
+                                  "w-8 h-7 rounded-md text-[10px] font-bold transition-all duration-150",
                                   row.role === "Helper"
-                                    ? "bg-orange-500 text-white shadow-sm shadow-orange-500/25 scale-105"
+                                    ? "bg-orange-500 text-white shadow-sm shadow-orange-500/25"
                                     : "bg-muted/60 text-muted-foreground hover:bg-orange-50 hover:text-orange-500 dark:hover:bg-orange-500/10"
                                 )}
                               >H</button>
                             </div>
                           </td>
-                          <td className="px-5 py-3">
+                          <td className="px-4 py-1.5">
                             <input
                               type="number"
                               min={0}
@@ -570,7 +598,7 @@ export default function IncomePage() {
                               value={row.jumlah_titik}
                               onChange={(e) => handleBatchRowChange(row.employee_id, "jumlah_titik", e.target.value)}
                               className={cn(
-                                "w-full text-center px-2 py-2 rounded-lg border text-sm font-semibold outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
+                                "w-full text-center px-2 py-1.5 rounded-md border text-xs font-semibold outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
                                 hasTitik
                                   ? "border-success/40 bg-success/[0.06] text-success"
                                   : isIncomplete && !hasTitik ? "border-danger/50 bg-danger/[0.03] text-foreground placeholder:text-danger/40"
@@ -578,13 +606,13 @@ export default function IncomePage() {
                               )}
                             />
                           </td>
-                          <td className="px-5 py-3">
+                          <td className="px-4 py-1.5">
                             <input
                               type="text"
                               placeholder="..."
                               value={row.catatan}
                               onChange={(e) => handleBatchRowChange(row.employee_id, "catatan", e.target.value)}
-                              className="w-full text-xs px-2.5 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-muted-foreground/30 text-foreground"
+                              className="w-full text-[11px] px-2 py-1.5 rounded-md border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-muted-foreground/30 text-foreground"
                             />
                           </td>
                         </tr>
@@ -595,7 +623,7 @@ export default function IncomePage() {
               </div>
 
               {/* ── Footer ── */}
-              <div className="px-6 py-4 border-t border-border bg-muted/20">
+              <div className="px-5 py-3 border-t border-border bg-muted/20">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {batchIncomplete.length > 0 ? (
