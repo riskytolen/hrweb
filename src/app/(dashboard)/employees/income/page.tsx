@@ -456,8 +456,8 @@ export default function IncomePage() {
   // Group: employee -> date -> entries[]
   const calEmployeeIds = [...new Set(calDeliveries.map((d) => d.employee_id))];
   const calEmployees = calEmployeeIds.map((id) => {
-    const first = calDeliveries.find((d) => d.employee_id === id);
-    return { id, nama: first?.employeeNama || id };
+    const emp = employees.find((e) => e.id === id);
+    return { id, nama: emp?.nama || id };
   }).sort((a, b) => a.nama.localeCompare(b.nama));
 
   const calDataMap = new Map<string, DeliveryRow[]>(); // key: empId-day
@@ -636,113 +636,128 @@ export default function IncomePage() {
       {showCalendar && (
         <Portal>
           <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card">
+            {/* ── Header ── */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-card via-card to-primary/[0.03]">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <CalendarDays className="w-4 h-4 text-primary" />
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20">
+                  <CalendarDays className="w-4.5 h-4.5 text-white" />
                 </div>
-                <h2 className="text-sm font-bold text-foreground">Rekap Titik - Mode Kalender</h2>
+                <div>
+                  <h2 className="text-sm font-bold text-foreground">Mode Kalender</h2>
+                  <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground">
+                    <span><strong className="text-foreground">{calEmployees.length}</strong> pegawai</span>
+                    <span className="w-1 h-1 rounded-full bg-border" />
+                    <span><strong className="text-foreground">{calDeliveries.length}</strong> entri</span>
+                    <span className="w-1 h-1 rounded-full bg-border" />
+                    <span><strong className="text-primary">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</strong> total titik</span>
+                  </div>
+                </div>
               </div>
               <div className="flex items-center gap-2">
-                {/* Month nav */}
-                <div className="flex items-center gap-1 bg-muted rounded-xl px-1 py-1">
-                  <button onClick={calPrevMonth} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronLeft className="w-4 h-4" /></button>
-                  <span className="text-sm font-semibold text-foreground px-3 min-w-[140px] text-center">{calMonthLabel}</span>
-                  <button onClick={calNextMonth} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronRight className="w-4 h-4" /></button>
+                <div className="flex items-center bg-muted rounded-xl p-1">
+                  <button onClick={calPrevMonth} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+                  <span className="text-sm font-bold text-foreground px-4 min-w-[150px] text-center">{calMonthLabel}</span>
+                  <button onClick={calNextMonth} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronRight className="w-4 h-4" /></button>
                 </div>
-                <div className="w-px h-6 bg-border mx-1" />
-                <button onClick={() => setShowCalendar(false)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
-                  <List className="w-3.5 h-3.5" />Kembali
+                <button onClick={() => setShowCalendar(false)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                  <X className="w-3.5 h-3.5" />Tutup
                 </button>
               </div>
             </div>
 
-            {/* Info */}
-            <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center gap-4 text-[10px] text-muted-foreground">
-              <span><strong className="text-foreground">{calEmployees.length}</strong> pegawai</span>
-              <span><strong className="text-foreground">{calDeliveries.length}</strong> entri</span>
-              <span><strong className="text-foreground">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</strong> total titik</span>
-            </div>
-
-            {/* Matrix table */}
+            {/* ── Matrix table ── */}
             <div className="flex-1 overflow-auto">
-              <table className="border-collapse">
+              <table className="border-collapse w-max min-w-full">
                 <thead className="sticky top-0 z-20">
                   <tr>
                     {/* Sticky corner */}
-                    <th className="sticky left-0 z-30 bg-card border-b-2 border-r border-border px-4 py-2 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider min-w-[180px]">
-                      Pegawai
+                    <th className="sticky left-0 z-30 bg-card border-b-2 border-r-2 border-border px-4 py-3 text-left min-w-[180px] shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]">
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pegawai</span>
                     </th>
                     {calDates.map((day) => {
                       const dayOfWeek = new Date(calYear, calMon - 1, day).getDay();
-                      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                      const isSunday = dayOfWeek === 0;
+                      const isSaturday = dayOfWeek === 6;
+                      const isWeekend = isSunday || isSaturday;
                       const isToday = new Date().getDate() === day && new Date().getMonth() === calMon - 1 && new Date().getFullYear() === calYear;
                       return (
                         <th key={day} className={cn(
-                          "border-b-2 border-r border-border px-1 py-2 text-center min-w-[70px]",
-                          isToday ? "bg-primary/10" : isWeekend ? "bg-muted/50" : "bg-card"
+                          "border-b-2 border-r border-border px-1 py-2 text-center min-w-[120px]",
+                          isToday ? "bg-primary text-white" : isSunday ? "bg-red-500/10" : isSaturday ? "bg-amber-500/8" : "bg-card"
                         )}>
-                          <div className={cn("text-[10px] font-bold", isToday ? "text-primary" : isWeekend ? "text-muted-foreground/60" : "text-muted-foreground")}>
+                          <div className={cn("text-xs font-bold leading-tight", isToday ? "text-white" : isSunday ? "text-red-500" : isSaturday ? "text-amber-600" : "text-foreground")}>
                             {day}
                           </div>
-                          <div className={cn("text-[9px]", isToday ? "text-primary/70" : "text-muted-foreground/40")}>
-                            {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][dayOfWeek]}
+                          <div className={cn("text-[9px] font-medium", isToday ? "text-white/70" : isSunday ? "text-red-400" : isSaturday ? "text-amber-500" : "text-muted-foreground/50")}>
+                            {["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"][dayOfWeek]}
                           </div>
                         </th>
                       );
                     })}
                     {/* Total column */}
-                    <th className="sticky right-0 z-30 bg-card border-b-2 border-l-2 border-border px-3 py-2 text-center text-[10px] font-bold text-muted-foreground uppercase min-w-[60px]">
-                      Total
+                    <th className="sticky right-0 z-30 bg-card border-b-2 border-l-2 border-border px-4 py-3 text-center min-w-[65px] shadow-[-2px_0_8px_-2px_rgba(0,0,0,0.06)]">
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total</span>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {calEmployees.length === 0 ? (
                     <tr>
-                      <td colSpan={calDaysInMonth + 2} className="text-center py-20 text-sm text-muted-foreground">
-                        Tidak ada data untuk bulan ini
+                      <td colSpan={calDaysInMonth + 2} className="text-center py-24">
+                        <CalendarDays className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
+                        <p className="text-sm text-muted-foreground">Tidak ada data titik untuk bulan ini</p>
                       </td>
                     </tr>
-                  ) : calEmployees.map((emp) => {
+                  ) : calEmployees.map((emp, empIdx) => {
                     const empTotal = calDeliveries.filter((d) => d.employee_id === emp.id).reduce((s, d) => s + d.jumlah_titik, 0);
+                    const isEven = empIdx % 2 === 0;
                     return (
-                      <tr key={emp.id} className="hover:bg-muted/20">
+                      <tr key={emp.id} className={cn("group transition-colors", isEven ? "" : "bg-muted/[0.03]")}>
                         {/* Employee name - sticky left */}
-                        <td className="sticky left-0 z-10 bg-card border-b border-r border-border px-4 py-2">
-                          <p className="text-xs font-semibold text-foreground truncate max-w-[160px]">{emp.nama}</p>
+                        <td className={cn("sticky left-0 z-10 border-b border-r-2 border-border px-4 py-2.5 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]", isEven ? "bg-card" : "bg-card")}>
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary flex-shrink-0">
+                              {emp.nama.charAt(0)}
+                            </div>
+                            <p className="text-xs font-semibold text-foreground truncate max-w-[130px]">{emp.nama}</p>
+                          </div>
                         </td>
                         {calDates.map((day) => {
                           const entries = calDataMap.get(`${emp.id}-${day}`) || [];
                           const dayOfWeek = new Date(calYear, calMon - 1, day).getDay();
-                          const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                          const isSunday = dayOfWeek === 0;
+                          const isSaturday = dayOfWeek === 6;
                           const isToday = new Date().getDate() === day && new Date().getMonth() === calMon - 1 && new Date().getFullYear() === calYear;
                           return (
                             <td key={day} className={cn(
-                              "border-b border-r border-border px-1 py-1 align-top min-w-[70px]",
-                              isToday ? "bg-primary/[0.04]" : isWeekend ? "bg-muted/30" : "",
-                              entries.length > 0 ? "" : ""
+                              "border-b border-r border-border/60 px-1 py-1 align-top min-w-[120px] transition-colors",
+                              isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
+                              "group-hover:bg-muted/30"
                             )}>
                               {entries.length > 0 ? (
                                 <div className="space-y-0.5">
                                   {entries.map((e) => (
-                                    <div key={e.id} className="flex items-center gap-1 px-1 py-0.5 rounded" style={{ backgroundColor: `${e.divisionColor}10` }}>
-                                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: e.divisionColor }} />
-                                      <span className="text-[9px] font-bold" style={{ color: e.divisionColor }}>{e.jumlah_titik}</span>
-                                      <span className={cn("text-[8px] font-semibold", e.role === "Driver" ? "text-blue-500" : "text-orange-500")}>{e.role === "Driver" ? "D" : "H"}</span>
+                                    <div key={e.id} className="flex items-center gap-1 px-1.5 py-1 rounded-md border border-transparent hover:border-border/50 transition-colors" style={{ backgroundColor: `${e.divisionColor}0D` }}>
+                                      <span className="w-2 h-2 rounded-full flex-shrink-0 ring-1 ring-white/50" style={{ backgroundColor: e.divisionColor }} />
+                                      <span className="text-[9px] font-semibold truncate" style={{ color: e.divisionColor }}>{e.divisionNama}</span>
+                                      <span className="text-[10px] font-bold ml-auto" style={{ color: e.divisionColor }}>{e.jumlah_titik}</span>
+                                      <span className={cn("text-[8px] font-bold px-1 py-0.5 rounded", e.role === "Driver" ? "bg-blue-500/10 text-blue-600" : "bg-orange-500/10 text-orange-600")}>{e.role === "Driver" ? "D" : "H"}</span>
                                     </div>
                                   ))}
                                 </div>
                               ) : (
-                                <div className="h-5" />
+                                <div className="h-7" />
                               )}
                             </td>
                           );
                         })}
                         {/* Total */}
-                        <td className="sticky right-0 z-10 bg-card border-b border-l-2 border-border px-3 py-2 text-center">
-                          <span className={cn("text-xs font-bold", empTotal > 0 ? "text-foreground" : "text-muted-foreground/30")}>{empTotal || "-"}</span>
+                        <td className={cn("sticky right-0 z-10 border-b border-l-2 border-border px-3 py-2.5 text-center shadow-[-2px_0_8px_-2px_rgba(0,0,0,0.06)]", isEven ? "bg-card" : "bg-card")}>
+                          {empTotal > 0 ? (
+                            <span className="text-sm font-bold text-foreground bg-primary/10 text-primary px-2 py-0.5 rounded-md">{empTotal}</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/30">-</span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -750,19 +765,26 @@ export default function IncomePage() {
                   {/* Footer totals per day */}
                   {calEmployees.length > 0 && (
                     <tr className="sticky bottom-0 z-10">
-                      <td className="sticky left-0 z-20 bg-card border-t-2 border-r border-border px-4 py-2">
-                        <span className="text-[10px] font-bold text-muted-foreground uppercase">Total / Hari</span>
+                      <td className="sticky left-0 z-20 bg-card border-t-2 border-r-2 border-border px-4 py-2.5 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total / Hari</span>
                       </td>
                       {calDates.map((day) => {
                         const dayTotal = calDeliveries.filter((d) => parseInt(d.tanggal.split("-")[2]) === day).reduce((s, d) => s + d.jumlah_titik, 0);
+                        const dayOfWeek = new Date(calYear, calMon - 1, day).getDay();
+                        const isSunday = dayOfWeek === 0;
+                        const isSaturday = dayOfWeek === 6;
                         return (
-                          <td key={day} className="bg-card border-t-2 border-r border-border px-1 py-2 text-center">
-                            <span className={cn("text-[10px] font-bold", dayTotal > 0 ? "text-primary" : "text-muted-foreground/30")}>{dayTotal || "-"}</span>
+                          <td key={day} className={cn("bg-card border-t-2 border-r border-border px-1 py-2.5 text-center", isSunday ? "bg-red-500/[0.02]" : isSaturday ? "bg-amber-500/[0.02]" : "")}>
+                            {dayTotal > 0 ? (
+                              <span className="text-[11px] font-bold text-primary">{dayTotal}</span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground/20">-</span>
+                            )}
                           </td>
                         );
                       })}
-                      <td className="sticky right-0 z-20 bg-card border-t-2 border-l-2 border-border px-3 py-2 text-center">
-                        <span className="text-xs font-bold text-primary">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</span>
+                      <td className="sticky right-0 z-20 bg-card border-t-2 border-l-2 border-border px-3 py-2.5 text-center shadow-[-2px_0_8px_-2px_rgba(0,0,0,0.06)]">
+                        <span className="text-sm font-extrabold text-primary">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</span>
                       </td>
                     </tr>
                   )}
