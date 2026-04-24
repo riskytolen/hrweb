@@ -137,9 +137,15 @@ export default function RecruitmentPage() {
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
+    // Hapus file CV dari storage jika ada
+    const row = list.find((r) => r.id === deleteConfirm.id);
+    if (row?.cv_url) {
+      const path = row.cv_url.split("/recruitment-docs/")[1];
+      if (path) await supabase.storage.from("recruitment-docs").remove([path]);
+    }
     await supabase.from("recruitments").delete().eq("id", deleteConfirm.id);
     setDeleteConfirm(null);
-    showSuccess("Data Dihapus", "Data pelamar telah dihapus.");
+    showSuccess("Data Dihapus", "Data pelamar dan file CV telah dihapus.");
     fetchList();
   };
 
