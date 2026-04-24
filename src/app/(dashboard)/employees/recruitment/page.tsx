@@ -1,373 +1,463 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
-  UserPlus,
-  Plus,
-  Download,
-  Search,
-  Filter,
-  Mail,
-  Phone,
-  Briefcase,
-  GraduationCap,
-  MapPin,
-  MoreHorizontal,
-  ChevronRight,
-  Eye,
+  UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig,
+  Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
-import Badge from "@/components/ui/Badge";
-import { candidates } from "@/lib/mock-data";
-import { cn, getInitials, formatShortDate } from "@/lib/utils";
+import Select from "@/components/ui/Select";
+import Pagination from "@/components/ui/Pagination";
+import Portal from "@/components/ui/Portal";
+import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
+import { cn } from "@/lib/utils";
+import { supabase, type DbRecruitment } from "@/lib/supabase";
 
-const stages = [
-  "Semua",
-  "Screening CV",
-  "Review Portfolio",
-  "Technical Test",
-  "Interview HR",
-  "Interview User",
-  "Offering",
-  "Onboarding",
+const PAGE_SIZE = 10;
+const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
+
+const STATUS_OPTIONS = [
+  { value: "Baru", label: "Baru", color: "#6b7280" },
+  { value: "Screening", label: "Screening", color: "#f59e0b" },
+  { value: "Interview", label: "Interview", color: "#3b82f6" },
+  { value: "Diterima", label: "Diterima", color: "#10b981" },
+  { value: "Ditolak", label: "Ditolak", color: "#ef4444" },
 ];
 
-const statusVariant: Record<string, "success" | "warning" | "danger" | "default" | "info" | "muted"> = {
-  Active: "default",
-  Offered: "info",
-  Hired: "success",
-  Rejected: "danger",
-};
-
-const stageColor: Record<string, string> = {
-  "Screening CV": "bg-muted text-muted-foreground",
-  "Review Portfolio": "bg-accent-light text-accent",
-  "Technical Test": "bg-warning-light text-warning",
-  "Interview HR": "bg-primary-light text-primary",
-  "Interview User": "bg-primary-light text-primary",
-  Offering: "bg-success-light text-success",
-  Onboarding: "bg-success-light text-success",
-};
+const PENDIDIKAN_OPTIONS = ["SD", "SMP", "SMA/SMK", "D1", "D2", "D3", "S1", "S2", "S3"];
 
 export default function RecruitmentPage() {
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [selectedStage, setSelectedStage] = useState("Semua");
-  const [viewMode, setViewMode] = useState<"table" | "pipeline">("table");
+  const [filterStatus, setFilterStatus] = useState("Semua");
+  const [list, setList] = useState<DbRecruitment[]>([]);
 
-  const filtered = candidates.filter((c) => {
-    const matchSearch =
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.position.toLowerCase().includes(search.toLowerCase()) ||
-      c.department.toLowerCase().includes(search.toLowerCase());
-    const matchStage =
-      selectedStage === "Semua" || c.stage === selectedStage;
-    return matchSearch && matchStage;
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState({
+    nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK",
+    pengalaman_kerja: "", alamat: "", status: "Baru", catatan: "",
+  });
+  const [cvFile, setCvFile] = useState<File | null>(null);
+  const [formErrors, setFormErrors] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
+  const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
+  const [detailId, setDetailId] = useState<number | null>(null);
+
+  const showSuccess = (title: string, message?: string) => {
+    setToast({ show: true, title, message: message || "" });
+    setTimeout(() => setToast({ show: false, title: "", message: "" }), 3500);
+  };
+
+  const fetchList = async () => {
+    const { data } = await supabase.from("recruitments").select("*").order("created_at", { ascending: false });
+    if (data) setList(data);
+  };
+
+  useEffect(() => { fetchList().then(() => setLoading(false)); }, []);
+
+  useEffect(() => {
+    if (showForm) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
+    return () => { document.body.style.overflow = ""; };
+  }, [showForm]);
+
+  const uploadCv = async (file: File, id: number): Promise<string | null> => {
+    const ext = file.name.split(".").pop();
+    const path = `cv/${id}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("recruitment-docs").upload(path, file, { upsert: true });
+    if (error) return null;
+    const { data } = supabase.storage.from("recruitment-docs").getPublicUrl(path);
+    return data.publicUrl;
+  };
+
+  const openAdd = () => {
+    setForm({ nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK", pengalaman_kerja: "", alamat: "", status: "Baru", catatan: "" });
+    setCvFile(null);
+    setFormErrors(new Set());
+    setEditingId(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (r: DbRecruitment) => {
+    setForm({
+      nama: r.nama, no_hp: r.no_hp, email: r.email || "", posisi_dilamar: r.posisi_dilamar,
+      pendidikan_terakhir: r.pendidikan_terakhir, pengalaman_kerja: r.pengalaman_kerja || "",
+      alamat: r.alamat || "", status: r.status, catatan: r.catatan || "",
+    });
+    setCvFile(null);
+    setFormErrors(new Set());
+    setEditingId(r.id);
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    const errs = new Set<string>();
+    if (!form.nama.trim()) errs.add("nama");
+    if (!form.no_hp.trim()) errs.add("no_hp");
+    if (!form.posisi_dilamar.trim()) errs.add("posisi_dilamar");
+    if (!form.pendidikan_terakhir) errs.add("pendidikan_terakhir");
+    if (errs.size > 0) { setFormErrors(errs); return; }
+
+    setSaving(true);
+    const payload = {
+      nama: form.nama, no_hp: form.no_hp, email: form.email || null,
+      posisi_dilamar: form.posisi_dilamar, pendidikan_terakhir: form.pendidikan_terakhir,
+      pengalaman_kerja: form.pengalaman_kerja || null, alamat: form.alamat || null,
+      status: form.status, catatan: form.catatan || null,
+    };
+
+    let cvUrl: string | null = null;
+
+    if (editingId !== null) {
+      if (cvFile) cvUrl = await uploadCv(cvFile, editingId);
+      await supabase.from("recruitments").update({ ...payload, ...(cvUrl ? { cv_url: cvUrl } : {}) }).eq("id", editingId);
+      showSuccess("Data Diperbarui", `Pelamar "${form.nama}" telah disimpan.`);
+    } else {
+      const { data } = await supabase.from("recruitments").insert(payload).select("id").single();
+      if (data && cvFile) {
+        cvUrl = await uploadCv(cvFile, data.id);
+        if (cvUrl) await supabase.from("recruitments").update({ cv_url: cvUrl }).eq("id", data.id);
+      }
+      showSuccess("Pelamar Ditambahkan", `Data "${form.nama}" berhasil disimpan.`);
+    }
+
+    setSaving(false);
+    setShowForm(false);
+    fetchList();
+  };
+
+  const handleDelete = async () => {
+    if (!deleteConfirm) return;
+    await supabase.from("recruitments").delete().eq("id", deleteConfirm.id);
+    setDeleteConfirm(null);
+    showSuccess("Data Dihapus", "Data pelamar telah dihapus.");
+    fetchList();
+  };
+
+  const handleStatusChange = async (id: number, status: string) => {
+    await supabase.from("recruitments").update({ status }).eq("id", id);
+    fetchList();
+  };
+
+  const filtered = list.filter((r) => {
+    const matchSearch = r.nama.toLowerCase().includes(search.toLowerCase()) ||
+      r.posisi_dilamar.toLowerCase().includes(search.toLowerCase()) ||
+      r.no_hp.includes(search);
+    const matchStatus = filterStatus === "Semua" || r.status === filterStatus;
+    return matchSearch && matchStatus;
   });
 
-  const activeCount = candidates.filter((c) => c.status === "Active").length;
-  const offeredCount = candidates.filter((c) => c.status === "Offered").length;
-  const hiredCount = candidates.filter((c) => c.status === "Hired").length;
-  const rejectedCount = candidates.filter((c) => c.status === "Rejected").length;
+  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const detail = detailId ? list.find((r) => r.id === detailId) : null;
 
-  // Pipeline stages for pipeline view
-  const pipelineStages = [
-    "Screening CV",
-    "Review Portfolio",
-    "Technical Test",
-    "Interview HR",
-    "Interview User",
-    "Offering",
-    "Onboarding",
-  ];
+  const statusCounts = {
+    Semua: list.length,
+    Baru: list.filter((r) => r.status === "Baru").length,
+    Screening: list.filter((r) => r.status === "Screening").length,
+    Interview: list.filter((r) => r.status === "Interview").length,
+    Diterima: list.filter((r) => r.status === "Diterima").length,
+    Ditolak: list.filter((r) => r.status === "Ditolak").length,
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <PageHeader
-        title="Rekrutmen"
-        description="Kelola proses rekrutmen calon pegawai"
-        icon={UserPlus}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" icon={Download} size="sm">
-              Export
-            </Button>
-            <Button icon={Plus} size="sm">
-              Tambah Kandidat
-            </Button>
-          </div>
-        }
-      />
+      <PageHeader title="Rekrutmen" description="Kelola data pelamar dan proses rekrutmen" icon={UserPlus}
+        actions={<Button icon={Plus} size="sm" onClick={openAdd}>Tambah Pelamar</Button>} />
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
-        <div className="bg-card rounded-2xl border border-border p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">Total Kandidat</p>
-              <p className="text-2xl font-bold text-foreground mt-1">{candidates.length}</p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-primary-light flex items-center justify-center">
-              <UserPlus className="w-5 h-5 text-primary" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">Dalam Proses</p>
-              <p className="text-2xl font-bold text-primary mt-1">{activeCount}</p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-primary-light flex items-center justify-center">
-              <Briefcase className="w-5 h-5 text-primary" />
+      {toast.show && (
+        <Portal>
+          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
+            <div className="flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border border-success/20 min-w-[360px] max-w-[480px]">
+              <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0"><CircleCheckBig className="w-5 h-5 text-success" /></div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-foreground">{toast.title}</p>
+                {toast.message && <p className="text-xs text-muted-foreground mt-0.5">{toast.message}</p>}
+              </div>
+              <button onClick={() => setToast({ show: false, title: "", message: "" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
             </div>
           </div>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">Diterima</p>
-              <p className="text-2xl font-bold text-success mt-1">{hiredCount + offeredCount}</p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-success-light flex items-center justify-center">
-              <UserPlus className="w-5 h-5 text-success" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground font-medium">Ditolak</p>
-              <p className="text-2xl font-bold text-danger mt-1">{rejectedCount}</p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-danger-light flex items-center justify-center">
-              <UserPlus className="w-5 h-5 text-danger" />
-            </div>
-          </div>
-        </div>
+        </Portal>
+      )}
+
+      {/* Summary */}
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
+        {(["Semua", "Baru", "Screening", "Interview", "Diterima", "Ditolak"] as const).map((s) => {
+          const color = STATUS_OPTIONS.find((o) => o.value === s)?.color || "#6b7280";
+          const isActive = filterStatus === s;
+          return (
+            <button key={s} onClick={() => { setFilterStatus(s); setPage(1); }}
+              className={cn("bg-card rounded-xl border p-3 text-center transition-all", isActive ? "border-primary ring-2 ring-primary/10" : "border-border hover:border-primary/30")}>
+              <p className="text-lg font-bold" style={s !== "Semua" ? { color } : undefined}>{statusCounts[s]}</p>
+              <p className="text-[10px] text-muted-foreground font-medium mt-0.5">{s}</p>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Filters */}
+      {/* Search */}
       <div className="bg-card rounded-2xl border border-border p-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5 flex-1">
-            <Search className="w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Cari nama, posisi, atau departemen..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60"
-            />
-          </div>
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            <Filter className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            {["Semua", "Screening CV", "Interview HR", "Interview User", "Technical Test", "Offering"].map((stage) => (
-              <button
-                key={stage}
-                onClick={() => setSelectedStage(stage)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap",
-                  selectedStage === stage
-                    ? "bg-primary text-white"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                )}
-              >
-                {stage}
-              </button>
-            ))}
-          </div>
-          {/* View Toggle */}
-          <div className="flex items-center bg-muted rounded-xl p-1">
-            <button
-              onClick={() => setViewMode("table")}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-medium",
-                viewMode === "table"
-                  ? "bg-card shadow-sm text-foreground"
-                  : "text-muted-foreground"
-              )}
-            >
-              Tabel
-            </button>
-            <button
-              onClick={() => setViewMode("pipeline")}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-medium",
-                viewMode === "pipeline"
-                  ? "bg-card shadow-sm text-foreground"
-                  : "text-muted-foreground"
-              )}
-            >
-              Pipeline
-            </button>
-          </div>
+        <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5">
+          <Search className="w-4 h-4 text-muted-foreground" />
+          <input type="text" placeholder="Cari nama, posisi, atau no. HP..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
         </div>
       </div>
 
-      {viewMode === "table" ? (
-        /* Table View */
-        <div className="bg-card rounded-2xl border border-border overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Kandidat</th>
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Posisi</th>
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pengalaman</th>
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Tahap</th>
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Sumber</th>
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Tanggal Lamar</th>
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
-                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50">
-                {filtered.map((candidate) => (
-                  <tr key={candidate.id} className="hover:bg-muted/30 cursor-pointer">
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold">
-                          {getInitials(candidate.name)}
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">{candidate.name}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                              <Mail className="w-3 h-3" />
-                              {candidate.email}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+      {/* Table */}
+      <div className="bg-card rounded-2xl border border-border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Nama</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">No. HP</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Posisi Dilamar</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pendidikan</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">CV</th>
+                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {loading ? <SkeletonTable rows={5} cols={8} /> : paged.length === 0 ? (
+                <tr><td colSpan={8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data pelamar</td></tr>
+              ) : paged.map((r, idx) => {
+                const sc = STATUS_OPTIONS.find((o) => o.value === r.status);
+                return (
+                  <tr key={r.id} className="hover:bg-muted/30">
+                    <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                    <td className="px-5 py-3.5">
+                      <button onClick={() => setDetailId(r.id)} className="text-left">
+                        <p className="text-sm font-semibold text-foreground hover:text-primary">{r.nama}</p>
+                        {r.email && <p className="text-[11px] text-muted-foreground">{r.email}</p>}
+                      </button>
                     </td>
-                    <td className="px-5 py-4">
-                      <p className="text-sm font-medium text-foreground">{candidate.position}</p>
-                      <p className="text-xs text-muted-foreground">{candidate.department}</p>
+                    <td className="px-5 py-3.5 text-sm text-muted-foreground">{r.no_hp}</td>
+                    <td className="px-5 py-3.5 text-sm text-foreground">{r.posisi_dilamar}</td>
+                    <td className="px-5 py-3.5"><span className="text-xs font-medium bg-muted px-2 py-0.5 rounded text-muted-foreground">{r.pendidikan_terakhir}</span></td>
+                    <td className="px-5 py-3.5">
+                      <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{r.status}</span>
                     </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1.5">
-                        <Briefcase className="w-3.5 h-3.5 text-muted-foreground" />
-                        <span className="text-sm text-foreground">{candidate.experience}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <GraduationCap className="w-3.5 h-3.5 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{candidate.education}</span>
-                      </div>
+                    <td className="px-5 py-3.5">
+                      {r.cv_url ? (
+                        <a href={r.cv_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                          <FileText className="w-3.5 h-3.5" />Lihat
+                        </a>
+                      ) : <span className="text-xs text-muted-foreground italic">-</span>}
                     </td>
-                    <td className="px-5 py-4">
-                      <span className={cn(
-                        "inline-flex items-center text-[11px] font-semibold px-2.5 py-1 rounded-lg",
-                        stageColor[candidate.stage] || "bg-muted text-muted-foreground"
-                      )}>
-                        {candidate.stage}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-1 rounded-md">
-                        {candidate.source}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-sm text-muted-foreground">
-                      {formatShortDate(candidate.appliedDate)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <Badge variant={statusVariant[candidate.status] || "muted"}>
-                        {candidate.status}
-                      </Badge>
-                    </td>
-                    <td className="px-5 py-4 text-center">
+                    <td className="px-5 py-3.5">
                       <div className="flex items-center justify-center gap-1">
-                        <button className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary">
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                        <button className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
-                          <MoreHorizontal className="w-3.5 h-3.5" />
-                        </button>
+                        <button onClick={() => openEdit(r)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setDeleteConfirm({ id: r.id, nama: r.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-5 py-3 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-            Menampilkan {filtered.length} dari {candidates.length} kandidat
-          </div>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-      ) : (
-        /* Pipeline View */
-        <div className="overflow-x-auto pb-4">
-          <div className="flex gap-4 min-w-max">
-            {pipelineStages.map((stage) => {
-              const stageCandidates = candidates.filter(
-                (c) => c.stage === stage && c.status !== "Rejected"
-              );
-              return (
-                <div key={stage} className="w-72 flex-shrink-0">
-                  <div className="bg-card rounded-2xl border border-border overflow-hidden">
-                    {/* Stage Header */}
-                    <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-xs font-semibold text-foreground">{stage}</h3>
-                        <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center">
-                          {stageCandidates.length}
-                        </span>
-                      </div>
-                    </div>
+        <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+      </div>
 
-                    {/* Candidates */}
-                    <div className="p-3 space-y-2 min-h-[120px]">
-                      {stageCandidates.length === 0 ? (
-                        <div className="text-center py-6 text-xs text-muted-foreground">
-                          Tidak ada kandidat
-                        </div>
-                      ) : (
-                        stageCandidates.map((candidate) => (
-                          <div
-                            key={candidate.id}
-                            className="p-3 rounded-xl border border-border hover:border-primary/30 hover:shadow-sm cursor-pointer group bg-card"
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
-                                {getInitials(candidate.name)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-foreground truncate">
-                                  {candidate.name}
-                                </p>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {candidate.position}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="mt-2.5 flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                <Briefcase className="w-3 h-3 text-muted-foreground" />
-                                <span className="text-[10px] text-muted-foreground">{candidate.experience}</span>
-                              </div>
-                              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                                {candidate.source}
-                              </span>
-                            </div>
-                            <div className="mt-2 flex items-center justify-between">
-                              <span className="text-[10px] text-muted-foreground">
-                                {formatShortDate(candidate.appliedDate)}
-                              </span>
-                              <Badge variant={statusVariant[candidate.status] || "muted"} size="sm">
-                                {candidate.status}
-                              </Badge>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
+      {/* ═══ FORM MODAL ═══ */}
+      {showForm && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !saving && setShowForm(false)} />
+            <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30 rounded-t-2xl flex-shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                    {editingId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
+                  </div>
+                  <h2 className="text-sm font-bold text-foreground">{editingId ? "Edit Pelamar" : "Tambah Pelamar Baru"}</h2>
+                </div>
+                <button onClick={() => !saving && setShowForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="p-5 space-y-4 flex-1 overflow-y-auto">
+                {formErrors.size > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
+                    <X className="w-3.5 h-3.5 flex-shrink-0" />Harap lengkapi field yang wajib diisi
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("nama") ? "text-danger" : "text-foreground")}>Nama Lengkap <span className="text-danger">*</span></label>
+                    <input type="text" placeholder="Nama pelamar" value={form.nama} onChange={(e) => { setForm({ ...form, nama: e.target.value }); setFormErrors((p) => { const n = new Set(p); n.delete("nama"); return n; }); }} className={cn(inputClass, formErrors.has("nama") && "border-danger")} />
+                  </div>
+                  <div>
+                    <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("no_hp") ? "text-danger" : "text-foreground")}>No. HP <span className="text-danger">*</span></label>
+                    <input type="tel" placeholder="08xx-xxxx-xxxx" value={form.no_hp} onChange={(e) => { setForm({ ...form, no_hp: e.target.value }); setFormErrors((p) => { const n = new Set(p); n.delete("no_hp"); return n; }); }} className={cn(inputClass, formErrors.has("no_hp") && "border-danger")} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Email</label>
+                    <input type="email" placeholder="email@contoh.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputClass} />
+                  </div>
+                  <div>
+                    <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("posisi_dilamar") ? "text-danger" : "text-foreground")}>Posisi Dilamar <span className="text-danger">*</span></label>
+                    <input type="text" placeholder="Contoh: Driver" value={form.posisi_dilamar} onChange={(e) => { setForm({ ...form, posisi_dilamar: e.target.value }); setFormErrors((p) => { const n = new Set(p); n.delete("posisi_dilamar"); return n; }); }} className={cn(inputClass, formErrors.has("posisi_dilamar") && "border-danger")} />
+                  </div>
+                  <div>
+                    <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("pendidikan_terakhir") ? "text-danger" : "text-foreground")}>Pendidikan Terakhir <span className="text-danger">*</span></label>
+                    <Select value={form.pendidikan_terakhir} onChange={(val) => { setForm({ ...form, pendidikan_terakhir: val }); setFormErrors((p) => { const n = new Set(p); n.delete("pendidikan_terakhir"); return n; }); }}
+                      options={PENDIDIKAN_OPTIONS.map((p) => ({ value: p, label: p }))} placeholder="Pilih pendidikan" hasError={formErrors.has("pendidikan_terakhir")} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Pengalaman Kerja</label>
+                    <textarea rows={2} placeholder="Deskripsi singkat pengalaman kerja" value={form.pengalaman_kerja} onChange={(e) => setForm({ ...form, pengalaman_kerja: e.target.value })} className={cn(inputClass, "resize-none")} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Alamat</label>
+                    <textarea rows={2} placeholder="Alamat lengkap" value={form.alamat} onChange={(e) => setForm({ ...form, alamat: e.target.value })} className={cn(inputClass, "resize-none")} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
+                    <Select value={form.status} onChange={(val) => setForm({ ...form, status: val })}
+                      options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Upload CV (PDF)</label>
+                    <label className={cn("flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed cursor-pointer text-xs",
+                      cvFile ? "border-success/40 bg-success-light/20 text-success" : "border-border hover:border-primary/40 text-muted-foreground")}>
+                      {cvFile ? (<><Check className="w-3.5 h-3.5" /><span className="truncate max-w-[120px]">{cvFile.name}</span></>) : (<><Upload className="w-3.5 h-3.5" /><span>Pilih file</span></>)}
+                      <input type="file" accept=".pdf" className="hidden" onChange={(e) => setCvFile(e.target.files?.[0] || null)} />
+                    </label>
+                    {editingId && list.find((r) => r.id === editingId)?.cv_url && !cvFile && (
+                      <p className="text-[10px] text-success mt-1">CV sudah ada</p>
+                    )}
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan</label>
+                    <input type="text" placeholder="Catatan internal (opsional)" value={form.catatan} onChange={(e) => setForm({ ...form, catatan: e.target.value })} className={inputClass} />
                   </div>
                 </div>
-              );
-            })}
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30 rounded-b-2xl flex-shrink-0">
+                <Button variant="outline" size="sm" onClick={() => setShowForm(false)} disabled={saving}>Batal</Button>
+                <Button size="sm" icon={editingId ? Check : Plus} onClick={handleSave} disabled={saving}>
+                  {saving ? "Menyimpan..." : editingId ? "Simpan" : "Tambah"}
+                </Button>
+              </div>
+            </div>
           </div>
-        </div>
+        </Portal>
+      )}
+
+      {/* ═══ DETAIL SLIDE-OVER ═══ */}
+      {detail && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDetailId(null)} />
+            <div className="relative w-full max-w-md bg-card shadow-2xl animate-slide-in-right flex flex-col h-full">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <h2 className="text-sm font-bold text-foreground">Detail Pelamar</h2>
+                <button onClick={() => setDetailId(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                <div className="text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-3">
+                    <UserPlus className="w-8 h-8 text-primary/70" />
+                  </div>
+                  <h3 className="text-lg font-bold text-foreground">{detail.nama}</h3>
+                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md mt-1 inline-block" style={{ backgroundColor: `${STATUS_OPTIONS.find((s) => s.value === detail.status)?.color}20`, color: STATUS_OPTIONS.find((s) => s.value === detail.status)?.color }}>{detail.status}</span>
+                </div>
+
+                <div className="space-y-3">
+                  {[
+                    { icon: Phone, label: "No. HP", value: detail.no_hp },
+                    { icon: Mail, label: "Email", value: detail.email || "-" },
+                    { icon: Briefcase, label: "Posisi Dilamar", value: detail.posisi_dilamar },
+                    { icon: GraduationCap, label: "Pendidikan", value: detail.pendidikan_terakhir },
+                    { icon: MapPin, label: "Alamat", value: detail.alamat || "-" },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                        <item.icon className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">{item.label}</p>
+                        <p className="text-sm text-foreground">{item.value}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {detail.pengalaman_kerja && (
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-1">Pengalaman Kerja</p>
+                    <p className="text-sm text-foreground bg-muted/30 rounded-xl p-3">{detail.pengalaman_kerja}</p>
+                  </div>
+                )}
+
+                {detail.cv_url && (
+                  <a href={detail.cv_url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-3 rounded-xl border border-border hover:border-primary/30 hover:bg-primary-light/10 transition-colors">
+                    <FileText className="w-5 h-5 text-primary" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-foreground">Curriculum Vitae</p>
+                      <p className="text-[10px] text-muted-foreground">Klik untuk membuka PDF</p>
+                    </div>
+                    <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                  </a>
+                )}
+
+                {detail.catatan && (
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-1">Catatan</p>
+                    <p className="text-sm text-foreground bg-muted/30 rounded-xl p-3">{detail.catatan}</p>
+                  </div>
+                )}
+
+                {/* Quick status change */}
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">Ubah Status</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STATUS_OPTIONS.map((s) => (
+                      <button key={s.value} onClick={() => { handleStatusChange(detail.id, s.value); setDetailId(null); }}
+                        className={cn("text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all",
+                          detail.status === s.value ? "ring-2 shadow-sm" : "opacity-50 hover:opacity-100"
+                        )}
+                        style={{ backgroundColor: `${s.color}20`, color: s.color, ...(detail.status === s.value ? { boxShadow: `0 0 0 2px ${s.color}40` } : {}) }}>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 px-5 py-4 border-t border-border flex-shrink-0">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => { openEdit(detail); setDetailId(null); }} icon={Pencil}>Edit</Button>
+                <Button variant="danger" size="sm" className="flex-1" onClick={() => { setDeleteConfirm({ id: detail.id, nama: detail.nama }); setDetailId(null); }} icon={Trash2}>Hapus</Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ DELETE CONFIRM ═══ */}
+      {deleteConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="p-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4"><Trash2 className="w-7 h-7 text-danger" /></div>
+                <h3 className="text-base font-bold text-foreground">Hapus Pelamar?</h3>
+                <p className="text-sm text-muted-foreground mt-2">Data <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen.</p>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)}>Batal</Button>
+                <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={handleDelete}>Hapus</Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
       )}
     </div>
   );

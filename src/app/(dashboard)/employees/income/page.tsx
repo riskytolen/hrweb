@@ -70,6 +70,8 @@ export default function IncomePage() {
   // ─── Calendar Mode ───
   const [showCalendar, setShowCalendar] = useState(false);
   const [calMonth, setCalMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [emptyNavIdx, setEmptyNavIdx] = useState(-1);
+  const [statusNavIdx, setStatusNavIdx] = useState<Map<string, number>>(new Map());
 
   // ─── Batch Input State ───
   const [showBatch, setShowBatch] = useState(false);
@@ -492,6 +494,54 @@ export default function IncomePage() {
   calDataMap.forEach((entries) => entries.sort((a, b) => a.id - b.id));
 
   // Sync calendar month with filterDate
+  // List semua sel kosong: { empId, day }
+  const calEmptyCells = calEmployees.flatMap((emp) =>
+    calDates.filter((day) => !(calDataMap.get(`${emp.id}-${day}`)?.length)).map((day) => ({ empId: emp.id, day }))
+  );
+
+  const navigateToEmptyCell = () => {
+    if (calEmptyCells.length === 0) return;
+    const nextIdx = (emptyNavIdx + 1) % calEmptyCells.length;
+    setEmptyNavIdx(nextIdx);
+    setStatusNavIdx(new Map()); // reset status nav
+    const cell = calEmptyCells[nextIdx];
+    const el = document.getElementById(`cal-${cell.empId}-${cell.day}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  };
+
+  // Sel yang punya status tertentu
+  const calStatusCells = new Map<string, { empId: string; day: number; deliveryId: number }[]>();
+  calDeliveries.forEach((d) => {
+    if (d.statusNama) {
+      const day = parseInt(d.tanggal.split("-")[2]);
+      if (!calStatusCells.has(d.statusNama)) calStatusCells.set(d.statusNama, []);
+      calStatusCells.get(d.statusNama)!.push({ empId: d.employee_id, day, deliveryId: d.id });
+    }
+  });
+
+  const navigateToStatusCell = (statusName: string) => {
+    const cells = calStatusCells.get(statusName);
+    if (!cells || cells.length === 0) return;
+    const currentIdx = statusNavIdx.get(statusName) ?? -1;
+    const nextIdx = (currentIdx + 1) % cells.length;
+    setStatusNavIdx(new Map(statusNavIdx).set(statusName, nextIdx));
+    setEmptyNavIdx(-1); // reset empty nav
+    const cell = cells[nextIdx];
+    const el = document.getElementById(`cal-${cell.empId}-${cell.day}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  };
+
+  // Sel status yang sedang aktif navigasi
+  const activeStatusCell = (() => {
+    for (const [nama, idx] of statusNavIdx.entries()) {
+      if (idx >= 0) {
+        const cells = calStatusCells.get(nama);
+        if (cells && cells[idx]) return cells[idx];
+      }
+    }
+    return null;
+  })();
+
   const openCalendar = () => {
     setCalMonth(filterDate);
     setShowCalendar(true);
@@ -500,10 +550,14 @@ export default function IncomePage() {
   const calPrevMonth = () => {
     const d = new Date(calYear, calMon - 2, 1);
     setCalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    setEmptyNavIdx(-1);
+    setStatusNavIdx(new Map());
   };
   const calNextMonth = () => {
     const d = new Date(calYear, calMon, 1);
     setCalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    setEmptyNavIdx(-1);
+    setStatusNavIdx(new Map());
   };
 
   // Fetch calendar data when month changes
@@ -681,6 +735,42 @@ export default function IncomePage() {
                     <span><strong className="text-foreground">{calDeliveries.length}</strong> entri</span>
                     <span className="w-1 h-1 rounded-full bg-border" />
                     <span><strong className="text-primary">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</strong> total titik</span>
+                    {calDeliveries.filter((d) => d.statusNama).length > 0 && (
+                      <>
+                        <span className="w-1 h-1 rounded-full bg-border" />
+                        {(() => {
+                          const statusCounts = new Map<string, { count: number; color: string }>();
+                          calDeliveries.forEach((d) => {
+                            if (d.statusNama) {
+                              const existing = statusCounts.get(d.statusNama);
+                              if (existing) existing.count++;
+                              else statusCounts.set(d.statusNama, { count: 1, color: d.statusColor || "#6b7280" });
+                            }
+                          });
+                          return Array.from(statusCounts.entries()).map(([nama, { count, color }]) => (
+                            <button key={nama} onClick={() => navigateToStatusCell(nama)} className="inline-flex items-center gap-1 hover:underline cursor-pointer">
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
+                              <strong style={{ color }}>{count}</strong> {nama.toLowerCase()}
+                            </button>
+                          ));
+                        })()}
+                      </>
+                    )}
+                    {(() => {
+                      const totalEmpty = calEmployees.reduce((sum, emp) => {
+                        const emptyDays = calDates.filter((day) => !(calDataMap.get(`${emp.id}-${day}`)?.length));
+                        return sum + emptyDays.length;
+                      }, 0);
+                      return totalEmpty > 0 ? (
+                        <>
+                          <span className="w-1 h-1 rounded-full bg-border" />
+                          <button onClick={navigateToEmptyCell} className="hover:underline cursor-pointer">
+                            <strong className="text-danger">{totalEmpty}</strong> sel kosong
+                            <span className="text-[9px] text-danger/50 ml-1">(klik untuk navigasi)</span>
+                          </button>
+                        </>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
               </div>
@@ -759,10 +849,12 @@ export default function IncomePage() {
                           const isSunday = dayOfWeek === 0;
                           const isSaturday = dayOfWeek === 6;
                           const isToday = new Date().getDate() === day && new Date().getMonth() === calMon - 1 && new Date().getFullYear() === calYear;
+                          const isActiveEmpty = entries.length === 0 && emptyNavIdx >= 0 && calEmptyCells[emptyNavIdx]?.empId === emp.id && calEmptyCells[emptyNavIdx]?.day === day;
+                          const isActiveStatus = activeStatusCell && activeStatusCell.empId === emp.id && activeStatusCell.day === day;
                           return (
-                            <td key={day} className={cn(
+                            <td key={day} id={`cal-${emp.id}-${day}`} className={cn(
                               "border-b border-r border-border/60 px-1 py-1 align-top min-w-[120px] transition-colors",
-                              isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
+                              isActiveEmpty ? "ring-2 ring-danger ring-inset bg-danger/[0.08]" : isActiveStatus ? "ring-2 ring-warning ring-inset bg-warning/[0.08]" : isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
                               "group-hover:bg-muted/30"
                             )}>
                               {entries.length > 0 ? (
@@ -777,15 +869,35 @@ export default function IncomePage() {
                                   ))}
                                 </div>
                               ) : (
-                                <div className="h-7" />
+                                <div className="h-7 flex items-center justify-center bg-danger/[0.04]">
+                                  <span className="text-[8px] text-danger/30">kosong</span>
+                                </div>
                               )}
                             </td>
                           );
                         })}
                         {/* Total */}
-                        <td className={cn("sticky right-0 z-10 border-b border-l-2 border-border px-3 py-2.5 text-center shadow-[-2px_0_8px_-2px_rgba(0,0,0,0.06)]", isEven ? "bg-card" : "bg-card")}>
+                        <td className={cn("sticky right-0 z-10 border-b border-l-2 border-border px-3 py-2 text-center shadow-[-2px_0_8px_-2px_rgba(0,0,0,0.06)]", isEven ? "bg-card" : "bg-card")}>
                           {empTotal > 0 ? (
-                            <span className="text-sm font-bold text-foreground bg-primary/10 text-primary px-2 py-0.5 rounded-md">{empTotal}</span>
+                            <div>
+                              <span className="text-sm font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md">{empTotal}</span>
+                              {(() => {
+                                const empStatuses = calDeliveries.filter((d) => d.employee_id === emp.id && d.statusNama);
+                                if (empStatuses.length === 0) return null;
+                                const counts = new Map<string, { count: number; color: string }>();
+                                empStatuses.forEach((d) => {
+                                  const ex = counts.get(d.statusNama!);
+                                  if (ex) ex.count++; else counts.set(d.statusNama!, { count: 1, color: d.statusColor || "#6b7280" });
+                                });
+                                return (
+                                  <div className="flex items-center justify-center gap-1 mt-1">
+                                    {Array.from(counts.entries()).map(([nama, { count, color }]) => (
+                                      <span key={nama} className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: `${color}20`, color }}>{count}{nama.charAt(0)}</span>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           ) : (
                             <span className="text-xs text-muted-foreground/30">-</span>
                           )}

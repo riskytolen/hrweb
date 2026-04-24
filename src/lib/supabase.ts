@@ -156,6 +156,22 @@ export interface DbDeliveryPoint {
   delivery_statuses?: DbDeliveryStatus;
 }
 
+export interface DbRecruitment {
+  id: number;
+  nama: string;
+  no_hp: string;
+  email: string | null;
+  posisi_dilamar: string;
+  pendidikan_terakhir: string;
+  pengalaman_kerja: string | null;
+  alamat: string | null;
+  cv_url: string | null;
+  status: "Baru" | "Screening" | "Interview" | "Diterima" | "Ditolak";
+  catatan: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DbEmployeeDevice {
   id: number;
   employee_id: string;
