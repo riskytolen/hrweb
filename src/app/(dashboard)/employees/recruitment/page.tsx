@@ -49,6 +49,7 @@ export default function RecruitmentPage() {
   const [deleting, setDeleting] = useState(false);
   const [convertConfirm, setConvertConfirm] = useState<DbRecruitment | null>(null);
   const [converting, setConverting] = useState(false);
+  const [statusChanging, setStatusChanging] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
   const [detailId, setDetailId] = useState<number | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -159,7 +160,11 @@ export default function RecruitmentPage() {
           return;
         }
 
-        if (cvWarning) {
+        // Sync pegawai jika status berubah
+        if (existingRow && existingRow.status !== form.status) {
+          const updatedRec = { ...existingRow, ...payload, ...(cvUrl ? { cv_url: cvUrl } : {}) } as DbRecruitment;
+          await syncPegawaiForStatus(updatedRec, form.status);
+        } else if (cvWarning) {
           showToast("error", "Data Tersimpan, CV Gagal", "Data pelamar berhasil diperbarui tapi CV gagal diupload.");
         } else {
           showToast("success", "Data Diperbarui", `Pelamar "${form.nama}" telah disimpan.`);
@@ -237,61 +242,149 @@ export default function RecruitmentPage() {
     }
   };
 
-  const handleStatusChange = async (id: number, status: string) => {
-    const { data: updated, error } = await supabase
-      .from("recruitments")
-      .update({ status })
-      .eq("id", id)
-      .select("*")
-      .single();
-
-    if (error || !updated) {
-      showToast("error", "Gagal Ubah Status", error?.message || "Gagal mendapat data terbaru.");
-      return;
-    }
-
-    // Update state lokal langsung
-    setList((prev) => prev.map((r) => (r.id === id ? updated : r)));
-    showToast("success", "Status Diperbarui", `Status berhasil diubah ke "${status}".`);
+  // ─── Helper: generate ID pegawai ───
+  const generateEmployeeId = async (): Promise<string> => {
+    const { data: allIds } = await supabase.from("pegawai").select("id");
+    let maxNum = 57200;
+    allIds?.forEach((e) => {
+      const num = parseInt(e.id.replace(/\D/g, ""), 10);
+      if (!isNaN(num) && num > maxNum) maxNum = num;
+    });
+    return `ID${maxNum + 1}`;
   };
 
-  // ─── Convert to Employee ───
+  // ─── Helper: insert pegawai dari data recruitment ───
+  const insertPegawaiFromRecruitment = async (rec: DbRecruitment, pegawaiStatus: string): Promise<{ id: string } | null> => {
+    const newId = await generateEmployeeId();
+    const { error } = await supabase.from("pegawai").insert({
+      id: newId,
+      nama: rec.nama,
+      no_telp: rec.no_hp,
+      alamat_domisili: rec.alamat || null,
+      alamat_ktp: rec.alamat || null,
+      status: pegawaiStatus,
+      tanggal_bergabung: pegawaiStatus === "Training" ? null : new Date().toISOString().slice(0, 10),
+      recruitment_id: rec.id,
+    });
+    if (error) return null;
+    return { id: newId };
+  };
+
+  /** Sync pegawai berdasarkan status recruitment. Dipanggil dari handleStatusChange dan handleSave. */
+  const syncPegawaiForStatus = async (rec: DbRecruitment, newStatus: string) => {
+    // Cek apakah sudah ada pegawai dari recruitment ini
+    const { data: existingEmp } = await supabase
+      .from("pegawai")
+      .select("id, status")
+      .eq("recruitment_id", rec.id)
+      .limit(1)
+      .single();
+
+    if (newStatus === "Training") {
+      if (!existingEmp) {
+        const result = await insertPegawaiFromRecruitment(rec, "Training");
+        if (result) {
+          showToast("success", "Training Dimulai", `${rec.nama} terdaftar sebagai pegawai training (${result.id}).`);
+        } else {
+          showToast("error", "Status Diubah, Gagal Buat Pegawai", "Status berhasil diubah tapi gagal membuat data pegawai.");
+        }
+      } else {
+        await supabase.from("pegawai").update({ status: "Training" }).eq("recruitment_id", rec.id);
+        showToast("success", "Status Diperbarui", `Status diubah ke Training.`);
+      }
+    } else if (newStatus === "Diterima") {
+      if (existingEmp) {
+        await supabase.from("pegawai").update({
+          status: "Aktif",
+          tanggal_bergabung: new Date().toISOString().slice(0, 10),
+        }).eq("recruitment_id", rec.id);
+        showToast("success", "Diterima & Aktif", `${rec.nama} (${existingEmp.id}) sekarang pegawai aktif.`);
+      } else {
+        // Langsung Diterima tanpa Training → buat pegawai Aktif
+        const result = await insertPegawaiFromRecruitment(rec, "Aktif");
+        if (result) {
+          showToast("success", "Diterima", `${rec.nama} terdaftar sebagai pegawai aktif (${result.id}).`);
+        } else {
+          showToast("success", "Status Diperbarui", `Status diubah ke Diterima.`);
+        }
+      }
+    } else if (newStatus === "Ditolak") {
+      if (existingEmp) {
+        await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
+        showToast("success", "Ditolak", `${rec.nama} dihapus dari daftar pegawai. Data rekap titik tetap tersimpan.`);
+      } else {
+        showToast("success", "Status Diperbarui", `Status diubah ke Ditolak.`);
+      }
+    } else {
+      // Status mundur (Terpilih, Lamaran Masuk) → hapus pegawai jika ada
+      if (existingEmp) {
+        await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
+        showToast("success", "Status Diperbarui", `${rec.nama} dihapus dari daftar pegawai karena status mundur.`);
+      } else {
+        showToast("success", "Status Diperbarui", `Status berhasil diubah ke "${newStatus}".`);
+      }
+    }
+  };
+
+  const handleStatusChange = async (id: number, status: string) => {
+    setStatusChanging(true);
+    try {
+      // Jika status Training, set tanggal training otomatis
+      const updatePayload: Record<string, unknown> = { status };
+      if (status === "Training") {
+        const today = new Date().toISOString().slice(0, 10);
+        const selesai = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+        updatePayload.tanggal_training_mulai = today;
+        updatePayload.tanggal_training_selesai = selesai;
+      }
+
+      const { data: updated, error } = await supabase
+        .from("recruitments")
+        .update(updatePayload)
+        .eq("id", id)
+        .select("*")
+        .single();
+
+      if (error || !updated) {
+        showToast("error", "Gagal Ubah Status", error?.message || "Gagal mendapat data terbaru.");
+        return;
+      }
+
+      setList((prev) => prev.map((r) => (r.id === id ? updated : r)));
+      await syncPegawaiForStatus(updated, status);
+    } catch (err) {
+      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal mengubah status.");
+    } finally {
+      setStatusChanging(false);
+    }
+  };
+
+  // ─── Convert to Employee (manual, untuk Diterima yang belum punya pegawai) ───
   const handleConvertToEmployee = async () => {
     if (!convertConfirm) return;
     setConverting(true);
     try {
-      // Generate ID pegawai: ambil ID terakhir dari DB
-      const { data: lastEmp } = await supabase
+      // Cek apakah sudah ada pegawai dari recruitment ini
+      const { data: existingEmp } = await supabase
         .from("pegawai")
         .select("id")
-        .order("created_at", { ascending: false })
+        .eq("recruitment_id", convertConfirm.id)
         .limit(1)
         .single();
 
-      let nextNum = 57201;
-      if (lastEmp?.id) {
-        const num = parseInt(lastEmp.id.replace(/\D/g, ""), 10);
-        if (!isNaN(num)) nextNum = num + 1;
-      }
-      const newId = `ID${nextNum}`;
-
-      // Insert ke pegawai dengan data minimal dari recruitment
-      const { error } = await supabase.from("pegawai").insert({
-        id: newId,
-        nama: convertConfirm.nama,
-        no_telp: convertConfirm.no_hp,
-        alamat_domisili: convertConfirm.alamat || null,
-        alamat_ktp: convertConfirm.alamat || null,
-        status: "Aktif",
-        tanggal_bergabung: new Date().toISOString().slice(0, 10),
-      });
-
-      if (error) {
-        showToast("error", "Gagal Menjadikan Pegawai", error.message);
+      if (existingEmp) {
+        showToast("error", "Sudah Terdaftar", `${convertConfirm.nama} sudah terdaftar sebagai pegawai (${existingEmp.id}).`);
+        setConvertConfirm(null);
         return;
       }
 
-      showToast("success", "Berhasil Dijadikan Pegawai", `${convertConfirm.nama} terdaftar sebagai pegawai dengan ID ${newId}. Lengkapi data di halaman Pegawai.`);
+      const result = await insertPegawaiFromRecruitment(convertConfirm, "Aktif");
+      if (!result) {
+        showToast("error", "Gagal Menjadikan Pegawai", "Gagal insert data pegawai.");
+        return;
+      }
+
+      showToast("success", "Berhasil Dijadikan Pegawai", `${convertConfirm.nama} terdaftar sebagai pegawai (${result.id}). Lengkapi data di halaman Pegawai.`);
       setConvertConfirm(null);
       setDetailId(null);
     } catch (err) {
@@ -603,9 +696,10 @@ export default function RecruitmentPage() {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">Ubah Status</p>
                   <div className="flex flex-wrap gap-1.5">
                     {STATUS_OPTIONS.map((s) => (
-                      <button key={s.value} onClick={() => { handleStatusChange(detail.id, s.value); setDetailId(null); }}
+                      <button key={s.value} disabled={statusChanging}
+                        onClick={() => { if (!statusChanging) { handleStatusChange(detail.id, s.value); setDetailId(null); } }}
                         className={cn("text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all",
-                          detail.status === s.value ? "ring-2 shadow-sm" : "opacity-50 hover:opacity-100"
+                          statusChanging ? "opacity-30 cursor-not-allowed" : detail.status === s.value ? "ring-2 shadow-sm" : "opacity-50 hover:opacity-100"
                         )}
                         style={{ backgroundColor: `${s.color}20`, color: s.color, ...(detail.status === s.value ? { boxShadow: `0 0 0 2px ${s.color}40` } : {}) }}>
                         {s.label}

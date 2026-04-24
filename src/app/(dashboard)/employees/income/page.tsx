@@ -30,7 +30,7 @@ import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint, type DbDeliveryStatus } from "@/lib/supabase";
 
-type EmployeeLite = { id: string; nama: string };
+type EmployeeLite = { id: string; nama: string; status: string };
 type DivisionLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
 type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: string; divisionColor?: string; statusNama?: string; statusColor?: string };
@@ -137,7 +137,7 @@ export default function IncomePage() {
   }, []);
 
   const fetchEmployees = async () => {
-    const { data, error } = await supabase.from("pegawai").select("id, nama").eq("status", "Aktif").order("nama");
+    const { data, error } = await supabase.from("pegawai").select("id, nama, status").in("status", ["Aktif", "Training"]).order("nama");
     if (error) { showToast("error", "Gagal Memuat Pegawai", error.message); return; }
     if (data) setEmployees(data);
   };
@@ -166,7 +166,7 @@ export default function IncomePage() {
     if (data) {
       const mapped = data.map((d) => ({
         ...d,
-        employeeNama: d.pegawai?.nama || d.employee_id,
+        employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
         divisionNama: d.divisions?.nama || "-",
         divisionColor: d.divisions?.color || "#3b82f6",
         statusNama: d.delivery_statuses?.nama || null,
@@ -337,6 +337,7 @@ export default function IncomePage() {
       const rate = rateMap.get(`${r.division_id}-${r.role}`) || 0;
       const payload = {
         employee_id: r.employee_id,
+        employee_nama: r.nama,
         division_id: r.division_id,
         role: r.role,
         tanggal: batchDate,
@@ -428,15 +429,16 @@ export default function IncomePage() {
     if (!row) return;
 
     // Cek duplikat: apakah ada data lain dengan pegawai + divisi + posisi + tanggal yang sama
-    const { data: existing } = await supabase
+    let dupQuery = supabase
       .from("delivery_points")
       .select("id")
-      .eq("employee_id", row.employee_id)
       .eq("division_id", editForm.division_id)
       .eq("role", editForm.role)
       .eq("tanggal", row.tanggal)
       .neq("id", editingId)
       .limit(1);
+    dupQuery = row.employee_id ? dupQuery.eq("employee_id", row.employee_id) : dupQuery.is("employee_id", null);
+    const { data: existing } = await dupQuery;
 
     if (existing && existing.length > 0) {
       setEditError(`Data ${row.employeeNama} dengan divisi dan posisi ini sudah ada di tanggal ${row.tanggal}.`);
@@ -469,7 +471,7 @@ export default function IncomePage() {
     // Update state lokal langsung tanpa re-fetch (menjaga urutan)
     const mappedRow: DeliveryRow = {
       ...updated,
-      employeeNama: updated.pegawai?.nama || updated.employee_id,
+      employeeNama: updated.pegawai?.nama || updated.employee_nama || updated.employee_id || "?",
       divisionNama: updated.divisions?.nama || "-",
       divisionColor: updated.divisions?.color || "#3b82f6",
       statusNama: updated.delivery_statuses?.nama || null,
@@ -506,7 +508,7 @@ export default function IncomePage() {
   // ─── Filter & paginate ───
   const filtered = deliveries.filter((d) =>
     (d.employeeNama || "").toLowerCase().includes(search.toLowerCase()) ||
-    d.employee_id.toLowerCase().includes(search.toLowerCase()) ||
+    (d.employee_id || "").toLowerCase().includes(search.toLowerCase()) ||
     (d.divisionNama || "").toLowerCase().includes(search.toLowerCase()) ||
     d.role.toLowerCase().includes(search.toLowerCase())
   );
@@ -560,27 +562,34 @@ export default function IncomePage() {
   const calDeliveries = deliveries.filter((d) => d.tanggal >= calPeriod.start && d.tanggal <= calPeriod.end);
 
   // Group: employee -> dateStr -> entries[]
-  const calEmployeeIds = [...new Set(calDeliveries.map((d) => d.employee_id))];
-  const calEmployees = calEmployeeIds.map((id) => {
-    const emp = employees.find((e) => e.id === id);
-    return { id, nama: emp?.nama || id };
+  // Gunakan employee_id jika ada, fallback ke employee_nama untuk pegawai yang sudah dihapus
+  const calEmployeeKeys = [...new Set(calDeliveries.map((d) => d.employee_id || `_deleted_${d.employee_nama || d.id}`))];
+  const calEmployees = calEmployeeKeys.map((key) => {
+    const emp = employees.find((e) => e.id === key);
+    if (emp) return { id: key, nama: emp.nama };
+    // Pegawai sudah dihapus — ambil nama dari delivery data
+    const delivery = calDeliveries.find((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === key);
+    return { id: key, nama: delivery?.employeeNama || "?" };
   }).sort((a, b) => a.nama.localeCompare(b.nama));
 
-  const calDataMap = new Map<string, DeliveryRow[]>(); // key: empId-YYYY-MM-DD
+  const calDataMap = new Map<string, DeliveryRow[]>(); // key: empKey-YYYY-MM-DD
   calDeliveries.forEach((d) => {
-    const key = `${d.employee_id}-${d.tanggal}`;
+    const empKey = d.employee_id || `_deleted_${d.employee_nama || d.id}`;
+    const key = `${empKey}-${d.tanggal}`;
     if (!calDataMap.has(key)) calDataMap.set(key, []);
     calDataMap.get(key)!.push(d);
   });
   calDataMap.forEach((entries) => entries.sort((a, b) => a.id - b.id));
 
-  // List semua sel kosong: { empId, dateStr }
-  const calEmptyCells = calEmployees.flatMap((emp) =>
-    calDateList.filter((dt) => {
-      const ds = dt.toISOString().slice(0, 10);
-      return !(calDataMap.get(`${emp.id}-${ds}`)?.length);
-    }).map((dt) => ({ empId: emp.id, dateStr: dt.toISOString().slice(0, 10) }))
-  );
+  // List semua sel kosong (hanya pegawai aktif, bukan deleted): { empId, dateStr }
+  const calEmptyCells = calEmployees
+    .filter((emp) => !emp.id.startsWith("_deleted_"))
+    .flatMap((emp) =>
+      calDateList.filter((dt) => {
+        const ds = dt.toISOString().slice(0, 10);
+        return !(calDataMap.get(`${emp.id}-${ds}`)?.length);
+      }).map((dt) => ({ empId: emp.id, dateStr: dt.toISOString().slice(0, 10) }))
+    );
 
   const navigateToEmptyCell = () => {
     if (calEmptyCells.length === 0) return;
@@ -596,8 +605,9 @@ export default function IncomePage() {
   const calStatusCells = new Map<string, { empId: string; dateStr: string; deliveryId: number }[]>();
   calDeliveries.forEach((d) => {
     if (d.statusNama) {
+      const empKey = d.employee_id || `_deleted_${d.employee_nama || d.id}`;
       if (!calStatusCells.has(d.statusNama)) calStatusCells.set(d.statusNama, []);
-      calStatusCells.get(d.statusNama)!.push({ empId: d.employee_id, dateStr: d.tanggal, deliveryId: d.id });
+      calStatusCells.get(d.statusNama)!.push({ empId: empKey, dateStr: d.tanggal, deliveryId: d.id });
     }
   });
 
@@ -654,8 +664,21 @@ export default function IncomePage() {
     setCalEditEntries((prev) => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
   };
 
+  const isDeletedEmployee = (empId: string) => empId.startsWith("_deleted_");
+
   const handleCalCellSave = async () => {
     if (!calEditCell) return;
+
+    // Block insert untuk pegawai yang sudah dihapus
+    if (isDeletedEmployee(calEditCell.empId)) {
+      // Hanya allow update/delete existing entries, tidak bisa tambah baru
+      const hasNewEntries = calEditEntries.some((e) => !e.id && e.division_id && e.role && e.jumlah_titik);
+      if (hasNewEntries) {
+        showToast("error", "Tidak Bisa Tambah", "Pegawai ini sudah dihapus. Hanya bisa edit/hapus data yang sudah ada.");
+        return;
+      }
+    }
+
     setCalEditSaving(true);
 
     try {
@@ -696,7 +719,8 @@ export default function IncomePage() {
         } else {
           inserts.push({
             ...payload,
-            employee_id: calEditCell.empId,
+            employee_id: isDeletedEmployee(calEditCell.empId) ? null : calEditCell.empId,
+            employee_nama: calEditCell.empNama,
             tanggal: calEditCell.dateStr,
           });
         }
@@ -742,7 +766,7 @@ export default function IncomePage() {
           const others = prev.filter((d) => d.tanggal < cp.start || d.tanggal > cp.end);
           const calRows = data.map((d) => ({
             ...d,
-            employeeNama: d.pegawai?.nama || d.employee_id,
+            employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
             divisionNama: d.divisions?.nama || "-",
             divisionColor: d.divisions?.color || "#3b82f6",
             statusNama: d.delivery_statuses?.nama || null,
@@ -795,7 +819,7 @@ export default function IncomePage() {
           const others = prev.filter((d) => d.tanggal < cp.start || d.tanggal > cp.end);
           const calRows = data.map((d) => ({
             ...d,
-            employeeNama: d.pegawai?.nama || d.employee_id,
+            employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
             divisionNama: d.divisions?.nama || "-",
             divisionColor: d.divisions?.color || "#3b82f6",
             statusNama: d.delivery_statuses?.nama || null,
@@ -1077,7 +1101,7 @@ export default function IncomePage() {
                       </td>
                     </tr>
                   ) : calEmployees.map((emp, empIdx) => {
-                    const empTotal = calDeliveries.filter((d) => d.employee_id === emp.id).reduce((s, d) => s + d.jumlah_titik, 0);
+                    const empTotal = calDeliveries.filter((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === emp.id).reduce((s, d) => s + d.jumlah_titik, 0);
                     const isEven = empIdx % 2 === 0;
                     return (
                       <tr key={emp.id} className={cn("group transition-colors", isEven ? "" : "bg-muted/[0.03]")}>
@@ -1137,7 +1161,7 @@ export default function IncomePage() {
                             <div>
                               <span className="text-sm font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md">{empTotal}</span>
                               {(() => {
-                                const empStatuses = calDeliveries.filter((d) => d.employee_id === emp.id && d.statusNama);
+                                const empStatuses = calDeliveries.filter((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === emp.id && d.statusNama);
                                 if (empStatuses.length === 0) return null;
                                 const counts = new Map<string, { count: number; color: string }>();
                                 empStatuses.forEach((d) => {
@@ -1419,6 +1443,9 @@ export default function IncomePage() {
                                 </div>
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   <span className={cn("text-xs truncate", isComplete || isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
+                                  {employees.find((e) => e.id === row.employee_id)?.status === "Training" && (
+                                    <span className="text-[8px] font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded flex-shrink-0">TRAINING</span>
+                                  )}
                                   {isDbDuplicate && <span className="text-[8px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded flex-shrink-0">SUDAH ADA</span>}
                                 </div>
                               </div>

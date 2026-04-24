@@ -84,18 +84,18 @@ export interface DbJabatan {
 export interface DbPegawai {
   id: string;
   nama: string;
-  jenis_kelamin: "Laki-laki" | "Perempuan";
-  agama: "Islam" | "Kristen" | "Katolik" | "Hindu" | "Buddha" | "Konghucu";
-  status: "Aktif" | "Tidak Aktif" | "Cuti";
-  no_ktp: string;
-  tempat_lahir: string;
-  tanggal_lahir: string;
-  alamat_ktp: string;
-  alamat_domisili: string;
+  jenis_kelamin: "Laki-laki" | "Perempuan" | null;
+  agama: "Islam" | "Kristen" | "Katolik" | "Hindu" | "Buddha" | "Konghucu" | null;
+  status: "Aktif" | "Tidak Aktif" | "Cuti" | "Training";
+  no_ktp: string | null;
+  tempat_lahir: string | null;
+  tanggal_lahir: string | null;
+  alamat_ktp: string | null;
+  alamat_domisili: string | null;
   no_telp: string;
-  tanggal_bergabung: string;
+  tanggal_bergabung: string | null;
   jabatan_id: number | null;
-  status_pernikahan: "Belum Menikah" | "Menikah" | "Cerai";
+  status_pernikahan: "Belum Menikah" | "Menikah" | "Cerai" | null;
   nama_pasangan: string | null;
   jumlah_anak: number;
   foto_ktp: string | null;
@@ -103,12 +103,13 @@ export interface DbPegawai {
   no_bpjs_kesehatan: string | null;
   no_bpjs_ketenagakerjaan: string | null;
   foto_sim: string | null;
-  no_rekening: string;
-  bank: string;
-  nama_rekening: string;
+  no_rekening: string | null;
+  bank: string | null;
+  nama_rekening: string | null;
   kartu_keluarga: string | null;
   tanggal_mulai_pkwt: string | null;
   tanggal_berakhir_pkwt: string | null;
+  recruitment_id: number | null;
   created_at: string;
   updated_at: string;
   // joined
@@ -139,7 +140,8 @@ export interface DbPointRate {
 
 export interface DbDeliveryPoint {
   id: number;
-  employee_id: string;
+  employee_id: string | null;
+  employee_nama: string | null;
   division_id: number;
   role: "Driver" | "Helper";
   tanggal: string;

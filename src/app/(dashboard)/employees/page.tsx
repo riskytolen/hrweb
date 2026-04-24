@@ -1331,7 +1331,7 @@ export default function EmployeesPage() {
                     <Field label="Jenis Kelamin" value={selectedEmployee.jenis_kelamin} />
                     <Field label="Agama" value={selectedEmployee.agama} />
                     <Field label="Tempat Lahir" value={selectedEmployee.tempat_lahir} />
-                    <Field label="Tanggal Lahir" value={formatShortDate(selectedEmployee.tanggal_lahir)} />
+                    <Field label="Tanggal Lahir" value={selectedEmployee.tanggal_lahir ? formatShortDate(selectedEmployee.tanggal_lahir) : "-"} />
                     <Field label="Alamat KTP" value={selectedEmployee.alamat_ktp} full copyable />
                     <Field label="Alamat Domisili" value={selectedEmployee.alamat_domisili} full copyable />
                     <Field label="No. Telepon (WhatsApp)" value={selectedEmployee.no_telp} copyable />
@@ -1342,7 +1342,7 @@ export default function EmployeesPage() {
                   <Section title="Kepegawaian" icon={Briefcase}>
                     <Field label="ID Pegawai" value={selectedEmployee.id} copyable />
                     <Field label="Jabatan" value={selectedEmployee.jabatanNama} />
-                    <Field label="Tanggal Bergabung" value={formatShortDate(selectedEmployee.tanggal_bergabung)} />
+                    <Field label="Tanggal Bergabung" value={selectedEmployee.tanggal_bergabung ? formatShortDate(selectedEmployee.tanggal_bergabung) : "-"} />
                     <Field label="Status" value={<Badge variant={statusVariant[selectedEmployee.status] || "muted"}>{selectedEmployee.status}</Badge>} />
                     <Field label="Mulai PKWT" value={selectedEmployee.tanggal_mulai_pkwt ? formatShortDate(selectedEmployee.tanggal_mulai_pkwt) : "Pegawai Tetap"} />
                     <Field label="Berakhir PKWT" value={selectedEmployee.tanggal_berakhir_pkwt ? formatShortDate(selectedEmployee.tanggal_berakhir_pkwt) : "Pegawai Tetap"} />
