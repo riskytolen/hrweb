@@ -95,6 +95,11 @@ export default function IncomePage() {
   const [emptyNavIdx, setEmptyNavIdx] = useState(-1);
   const [statusNavIdx, setStatusNavIdx] = useState<Map<string, number>>(new Map());
 
+  // Calendar cell edit
+  const [calEditCell, setCalEditCell] = useState<{ empId: string; empNama: string; dateStr: string } | null>(null);
+  const [calEditEntries, setCalEditEntries] = useState<{ id: number | null; division_id: number; role: string; jumlah_titik: string; status_id: number; catatan: string }[]>([]);
+  const [calEditSaving, setCalEditSaving] = useState(false);
+
   // ─── Batch Input State ───
   const [showBatch, setShowBatch] = useState(false);
   const [batchDate, setBatchDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -441,36 +446,55 @@ export default function IncomePage() {
     // Re-lookup rate
     const { data: rateData } = await supabase.from("point_rates").select("rate_per_point").eq("division_id", editForm.division_id).eq("role", editForm.role).eq("status", "Aktif").single();
 
-    const { error: updateError } = await supabase.from("delivery_points").update({
+    const updatePayload = {
       division_id: editForm.division_id,
       role: editForm.role,
       jumlah_titik: parseInt(editForm.jumlah_titik),
       rate_per_point: rateData?.rate_per_point || row.rate_per_point,
       status_id: editForm.status_id || null,
-    }).eq("id", editingId);
+    };
 
-    if (updateError) {
-      showToast("error", "Gagal Memperbarui", updateError.message);
+    const { data: updated, error: updateError } = await supabase
+      .from("delivery_points")
+      .update(updatePayload)
+      .eq("id", editingId)
+      .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
+      .single();
+
+    if (updateError || !updated) {
+      showToast("error", "Gagal Memperbarui", updateError?.message || "Gagal mendapat data terbaru.");
       return;
     }
 
+    // Update state lokal langsung tanpa re-fetch (menjaga urutan)
+    const mappedRow: DeliveryRow = {
+      ...updated,
+      employeeNama: updated.pegawai?.nama || updated.employee_id,
+      divisionNama: updated.divisions?.nama || "-",
+      divisionColor: updated.divisions?.color || "#3b82f6",
+      statusNama: updated.delivery_statuses?.nama || null,
+      statusColor: updated.delivery_statuses?.color || null,
+    };
+    setDeliveries((prev) => prev.map((d) => d.id === editingId ? mappedRow : d));
+
     showToast("success", "Data Diperbarui", "Input titik telah disimpan.");
     setShowEditForm(false);
-    fetchDeliveries();
   };
 
   // ─── Delete ───
   const handleDelete = async () => {
     if (!deleteConfirm) return;
+    const targetId = deleteConfirm.id;
     setDeleting(true);
     try {
-      const { error } = await supabase.from("delivery_points").delete().eq("id", deleteConfirm.id);
+      const { error } = await supabase.from("delivery_points").delete().eq("id", targetId);
       if (error) {
         showToast("error", "Gagal Menghapus", error.message);
         return;
       }
+      // Hapus dari state lokal langsung (menjaga urutan)
+      setDeliveries((prev) => prev.filter((d) => d.id !== targetId));
       showToast("success", "Data Dihapus", "Input titik telah dihapus.");
-      fetchDeliveries();
     } catch (err) {
       showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menghapus data.");
     } finally {
@@ -598,6 +622,141 @@ export default function IncomePage() {
     }
     return null;
   })();
+
+  // ─── Calendar cell edit handlers ───
+  const openCalCell = (empId: string, empNama: string, dateStr: string) => {
+    const entries = calDataMap.get(`${empId}-${dateStr}`) || [];
+    if (entries.length > 0) {
+      setCalEditEntries(entries.map((e) => ({
+        id: e.id,
+        division_id: e.division_id,
+        role: e.role,
+        jumlah_titik: String(e.jumlah_titik),
+        status_id: e.status_id || 0,
+        catatan: e.catatan || "",
+      })));
+    } else {
+      // Sel kosong — buat 1 baris kosong untuk input baru
+      setCalEditEntries([{ id: null, division_id: 0, role: "", jumlah_titik: "", status_id: 0, catatan: "" }]);
+    }
+    setCalEditCell({ empId, empNama, dateStr });
+  };
+
+  const calEditAddRow = () => {
+    setCalEditEntries((prev) => [...prev, { id: null, division_id: 0, role: "", jumlah_titik: "", status_id: 0, catatan: "" }]);
+  };
+
+  const calEditRemoveRow = (idx: number) => {
+    setCalEditEntries((prev) => prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx));
+  };
+
+  const calEditUpdateRow = (idx: number, field: string, value: string | number) => {
+    setCalEditEntries((prev) => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+  };
+
+  const handleCalCellSave = async () => {
+    if (!calEditCell) return;
+    setCalEditSaving(true);
+
+    try {
+      // Lookup rates
+      const { data: allRates } = await supabase.from("point_rates").select("division_id, role, rate_per_point").eq("status", "Aktif");
+      const rateMap = new Map<string, number>();
+      allRates?.forEach((r) => rateMap.set(`${r.division_id}-${r.role}`, r.rate_per_point));
+
+      // Existing entries in DB for this cell
+      const existingEntries = calDataMap.get(`${calEditCell.empId}-${calEditCell.dateStr}`) || [];
+      const existingIds = new Set(existingEntries.map((e) => e.id));
+
+      // Entries to keep (with id) — update them
+      // Entries without id — insert them
+      // Existing ids not in calEditEntries — delete them
+      const keptIds = new Set<number>();
+      const inserts: Record<string, unknown>[] = [];
+      const updates: { id: number; data: Record<string, unknown> }[] = [];
+      let hasError = false;
+
+      for (const entry of calEditEntries) {
+        // Skip empty rows
+        if (!entry.division_id || !entry.role || !entry.jumlah_titik || parseInt(entry.jumlah_titik) <= 0) continue;
+
+        const rate = rateMap.get(`${entry.division_id}-${entry.role}`) || 0;
+        const payload = {
+          division_id: entry.division_id,
+          role: entry.role,
+          jumlah_titik: parseInt(entry.jumlah_titik),
+          rate_per_point: rate,
+          status_id: entry.status_id || null,
+          catatan: entry.catatan || null,
+        };
+
+        if (entry.id) {
+          keptIds.add(entry.id);
+          updates.push({ id: entry.id, data: payload });
+        } else {
+          inserts.push({
+            ...payload,
+            employee_id: calEditCell.empId,
+            tanggal: calEditCell.dateStr,
+          });
+        }
+      }
+
+      // Delete removed entries
+      const toDelete = [...existingIds].filter((id) => !keptIds.has(id));
+      for (const id of toDelete) {
+        const { error } = await supabase.from("delivery_points").delete().eq("id", id);
+        if (error) hasError = true;
+      }
+
+      // Update existing
+      for (const u of updates) {
+        const { error } = await supabase.from("delivery_points").update(u.data).eq("id", u.id);
+        if (error) hasError = true;
+      }
+
+      // Insert new
+      if (inserts.length > 0) {
+        const { error } = await supabase.from("delivery_points").insert(inserts);
+        if (error) { hasError = true; }
+      }
+
+      if (hasError) {
+        showToast("error", "Sebagian Gagal", "Beberapa data gagal disimpan.");
+      } else {
+        const total = updates.length + inserts.length + toDelete.length;
+        if (total > 0) showToast("success", "Data Disimpan", `${calEditCell.empNama} — ${calEditCell.dateStr}`);
+      }
+
+      setCalEditCell(null);
+      // Re-fetch calendar data
+      const cp = getPeriodRange(calMonth);
+      const { data } = await supabase
+        .from("delivery_points")
+        .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
+        .gte("tanggal", cp.start)
+        .lte("tanggal", cp.end)
+        .order("tanggal");
+      if (data) {
+        setDeliveries((prev) => {
+          const others = prev.filter((d) => d.tanggal < cp.start || d.tanggal > cp.end);
+          const calRows = data.map((d) => ({
+            ...d,
+            employeeNama: d.pegawai?.nama || d.employee_id,
+            divisionNama: d.divisions?.nama || "-",
+            divisionColor: d.divisions?.color || "#3b82f6",
+            statusNama: d.delivery_statuses?.nama || null,
+            statusColor: d.delivery_statuses?.color || null,
+          })) as DeliveryRow[];
+          return [...others, ...calRows];
+        });
+      }
+    } catch (err) {
+      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menyimpan.");
+    } finally {
+      setCalEditSaving(false);
+    }
+  };
 
   const openCalendar = () => {
     setCalMonth(periodKey);
@@ -942,13 +1101,17 @@ export default function IncomePage() {
                           const isNewMonth = dt.getDate() === 1;
                           const isActiveEmpty = entries.length === 0 && emptyNavIdx >= 0 && calEmptyCells[emptyNavIdx]?.empId === emp.id && calEmptyCells[emptyNavIdx]?.dateStr === dateStr;
                           const isActiveStatus = activeStatusCell && activeStatusCell.empId === emp.id && activeStatusCell.dateStr === dateStr;
+                          const isCellEditing = calEditCell?.empId === emp.id && calEditCell?.dateStr === dateStr;
                           return (
-                            <td key={dateStr} id={`cal-${emp.id}-${dateStr}`} className={cn(
-                              "border-b border-r border-border/60 px-1 py-1 align-top min-w-[120px] transition-colors",
-                              isNewMonth && "border-l-2 border-l-primary/30",
-                              isActiveEmpty ? "ring-2 ring-danger ring-inset bg-danger/[0.08]" : isActiveStatus ? "ring-2 ring-warning ring-inset bg-warning/[0.08]" : isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
-                              "group-hover:bg-muted/30"
-                            )}>
+                            <td key={dateStr} id={`cal-${emp.id}-${dateStr}`}
+                              onClick={() => !calEditCell && openCalCell(emp.id, emp.nama, dateStr)}
+                              className={cn(
+                                "border-b border-r border-border/60 px-1 py-1 align-top min-w-[120px] transition-colors cursor-pointer",
+                                isNewMonth && "border-l-2 border-l-primary/30",
+                                isCellEditing ? "ring-2 ring-primary ring-inset bg-primary/[0.06]" : isActiveEmpty ? "ring-2 ring-danger ring-inset bg-danger/[0.08]" : isActiveStatus ? "ring-2 ring-warning ring-inset bg-warning/[0.08]" : isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
+                                !calEditCell && "hover:bg-primary/[0.04]",
+                                "group-hover:bg-muted/30"
+                              )}>
                               {entries.length > 0 ? (
                                 <div className="space-y-0.5">
                                   {entries.map((e) => (
@@ -1025,6 +1188,96 @@ export default function IncomePage() {
                 </tbody>
               </table>
             </div>
+
+            {/* ── Calendar Cell Edit Panel ── */}
+            {calEditCell && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget && !calEditSaving) setCalEditCell(null); }}>
+                <div className="absolute inset-0 bg-black/30" />
+                <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/30 rounded-t-2xl">
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">{calEditCell.empNama}</h3>
+                      <p className="text-[10px] text-muted-foreground">{new Date(calEditCell.dateStr + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+                    </div>
+                    <button onClick={() => !calEditSaving && setCalEditCell(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                  </div>
+
+                  {/* Entries */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {calEditEntries.map((entry, idx) => (
+                      <div key={idx} className="rounded-xl border border-border p-3 space-y-2.5 bg-muted/10">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Entri {idx + 1}</span>
+                          {calEditEntries.length > 1 && (
+                            <button onClick={() => calEditRemoveRow(idx)} className="text-[10px] text-danger hover:underline">Hapus</button>
+                          )}
+                        </div>
+                        {/* Divisi */}
+                        <div>
+                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Divisi</label>
+                          <select value={entry.division_id || ""} onChange={(e) => calEditUpdateRow(idx, "division_id", parseInt(e.target.value) || 0)}
+                            className="w-full text-xs px-2.5 py-2 rounded-lg border border-border bg-card outline-none focus:border-primary text-foreground">
+                            <option value="">Pilih divisi</option>
+                            {divisions.map((d) => <option key={d.id} value={d.id}>{d.nama}</option>)}
+                          </select>
+                        </div>
+                        {/* Posisi + Titik (inline) */}
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <label className="text-[10px] font-semibold text-foreground mb-1 block">Posisi</label>
+                            <div className="flex gap-1">
+                              <button type="button" onClick={() => calEditUpdateRow(idx, "role", entry.role === "Driver" ? "" : "Driver")}
+                                className={cn("flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all",
+                                  entry.role === "Driver" ? "bg-blue-500 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-500/10"
+                                )}>Driver</button>
+                              <button type="button" onClick={() => calEditUpdateRow(idx, "role", entry.role === "Helper" ? "" : "Helper")}
+                                className={cn("flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all",
+                                  entry.role === "Helper" ? "bg-orange-500 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-orange-50 hover:text-orange-500 dark:hover:bg-orange-500/10"
+                                )}>Helper</button>
+                            </div>
+                          </div>
+                          <div className="w-20">
+                            <label className="text-[10px] font-semibold text-foreground mb-1 block">Titik</label>
+                            <input type="number" min={0} value={entry.jumlah_titik} onChange={(e) => calEditUpdateRow(idx, "jumlah_titik", e.target.value)}
+                              placeholder="0" className="w-full text-center text-xs font-bold px-2 py-1.5 rounded-lg border border-border bg-card outline-none focus:border-primary text-foreground" />
+                          </div>
+                        </div>
+                        {/* Status + Catatan (inline) */}
+                        <div className="flex gap-2">
+                          <div className="w-28">
+                            <label className="text-[10px] font-semibold text-foreground mb-1 block">Status</label>
+                            <select value={entry.status_id || ""} onChange={(e) => calEditUpdateRow(idx, "status_id", parseInt(e.target.value) || 0)}
+                              className="w-full text-[10px] px-2 py-1.5 rounded-lg border border-border bg-card outline-none focus:border-primary text-foreground">
+                              <option value="">-</option>
+                              {dStatuses.map((s) => <option key={s.id} value={s.id}>{s.nama}</option>)}
+                            </select>
+                          </div>
+                          <div className="flex-1">
+                            <label className="text-[10px] font-semibold text-foreground mb-1 block">Catatan</label>
+                            <input type="text" value={entry.catatan} onChange={(e) => calEditUpdateRow(idx, "catatan", e.target.value)}
+                              placeholder="Opsional..." className="w-full text-[10px] px-2.5 py-1.5 rounded-lg border border-border bg-card outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/40" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    <button type="button" onClick={calEditAddRow}
+                      className="w-full py-2 rounded-xl border-2 border-dashed border-border text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors">
+                      + Tambah Entri
+                    </button>
+                  </div>
+
+                  {/* Footer */}
+                  <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/30 rounded-b-2xl">
+                    <Button variant="outline" size="sm" onClick={() => setCalEditCell(null)} disabled={calEditSaving}>Batal</Button>
+                    <Button size="sm" icon={Check} onClick={handleCalCellSave} disabled={calEditSaving}>
+                      {calEditSaving ? "Menyimpan..." : "Simpan"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </Portal>
       )}
