@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn, getInitials } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   Users,
   ChevronLeft,
@@ -15,8 +15,6 @@ import {
   CalendarDays,
   UserPlus,
   Wallet,
-  LogOut,
-  Sparkles,
   Database,
   Settings,
   UsersRound,
@@ -33,6 +31,7 @@ interface SubItem {
   name: string;
   href: string;
   icon: LucideIcon;
+  comingSoon?: boolean;
 }
 
 interface MenuGroup {
@@ -53,12 +52,12 @@ const menuGroups: MenuGroup[] = [
     basePath: "/employees",
     items: [
       { name: "Data Pegawai", href: "/employees", icon: Users },
-      { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck },
-      { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays },
+      { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck, comingSoon: true },
+      { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays, comingSoon: true },
       { name: "Rekap Titik", href: "/employees/income", icon: Wallet },
-      { name: "Penggajian", href: "/employees/payroll", icon: CreditCard },
-      { name: "Kinerja", href: "/employees/performance", icon: Award },
-      { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale },
+      { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, comingSoon: true },
+      { name: "Kinerja", href: "/employees/performance", icon: Award, comingSoon: true },
+      { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, comingSoon: true },
       { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus },
     ],
   },
@@ -113,21 +112,17 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {/* Logo */}
         <div className={cn("flex items-center h-14 border-b border-white/[0.06]", collapsed ? "px-3 justify-center" : "px-4")}>
           <Link href="/employees" className="flex items-center gap-2.5 min-w-0">
-            <div className="relative flex-shrink-0">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-                <Sparkles className="w-4 h-4 text-white" />
-              </div>
-              <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-[1.5px] border-[#0f1729]" />
-            </div>
-            {!collapsed && (
+            {!collapsed ? (
               <div className="animate-fade-in min-w-0">
                 <h1 className="text-[13px] font-bold bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent leading-tight truncate">
                   ERP System
                 </h1>
                 <p className="text-[9px] font-medium text-blue-400/50 uppercase tracking-[0.15em]">
-                  Enterprise Suite
+                  Jamslogistic
                 </p>
               </div>
+            ) : (
+              <span className="text-xs font-bold text-white/70">ERP</span>
             )}
           </Link>
         </div>
@@ -209,9 +204,22 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     )}>
                       <ul className="ml-[18px] border-l border-white/[0.06] pl-2.5 space-y-0.5 py-0.5">
                         {group.items.map((item) => {
-                          const isActive = pathname === item.href ||
-                            (item.href !== "/employees" && item.href !== "/settings" && pathname.startsWith(item.href + "/"));
+                          const isActive = !item.comingSoon && (pathname === item.href ||
+                            (item.href !== "/employees" && item.href !== "/settings" && pathname.startsWith(item.href + "/")));
                           const ItemIcon = item.icon;
+
+                          if (item.comingSoon) {
+                            return (
+                              <li key={item.href}>
+                                <div className="flex items-center gap-2 px-2.5 py-[7px] rounded-md text-[11.5px] font-medium text-slate-600 cursor-not-allowed">
+                                  <ItemIcon className="w-[13px] h-[13px] flex-shrink-0 text-slate-700" />
+                                  <span className="truncate">{item.name}</span>
+                                  <span className="ml-auto text-[8px] font-bold text-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 rounded flex-shrink-0">SOON</span>
+                                </div>
+                              </li>
+                            );
+                          }
+
                           return (
                             <li key={item.href}>
                               <Link
@@ -223,7 +231,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                                     : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]"
                                 )}
                               >
-                                {/* Active dot on the left border line */}
                                 {isActive && (
                                   <div className="absolute -left-[13px] top-1/2 -translate-y-1/2 w-[5px] h-[5px] rounded-full bg-gradient-to-r from-blue-400 to-cyan-400 shadow-sm shadow-blue-400/50" />
                                 )}
@@ -241,42 +248,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             })}
           </div>
         </nav>
-
-        {/* User Profile */}
-        <div className={cn("border-t border-white/[0.06]", collapsed ? "p-1.5" : "p-2")}>
-          {!collapsed ? (
-            <div className="rounded-lg bg-gradient-to-r from-white/[0.04] to-white/[0.02] border border-white/[0.06] p-2.5">
-              <div className="flex items-center gap-2.5">
-                <div className="relative flex-shrink-0">
-                  <div className="w-7 h-7 rounded-md bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-[10px] font-bold shadow-md shadow-blue-500/15">
-                    {getInitials("Admin User")}
-                  </div>
-                  <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full border-[1.5px] border-[#0f1729]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-semibold text-white truncate">Admin User</p>
-                  <p className="text-[9px] text-slate-500 truncate">Super Admin</p>
-                </div>
-                <button className="p-1 rounded-md text-slate-500 hover:text-rose-400 hover:bg-white/[0.05]">
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex justify-center">
-              <div className="relative group/user">
-                <div className="w-7 h-7 rounded-md bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-[10px] font-bold cursor-pointer shadow-md shadow-blue-500/15">
-                  {getInitials("Admin User")}
-                </div>
-                <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full border-[1.5px] border-[#0f1729]" />
-                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2.5 px-2.5 py-1 bg-slate-800 text-white text-[11px] font-medium rounded-md shadow-xl opacity-0 invisible group-hover/user:opacity-100 group-hover/user:visible whitespace-nowrap z-50 border border-white/10">
-                  Admin User
-                  <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-slate-800" />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
 
         {/* Collapse Toggle */}
         <div className={cn("pb-2.5", collapsed ? "px-1.5" : "px-2")}>
