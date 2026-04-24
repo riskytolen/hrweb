@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Wallet,
   Plus,
@@ -9,7 +9,6 @@ import {
   Trash2,
   X,
   CircleCheckBig,
-  Filter,
   Check,
   Users,
   User,
@@ -18,10 +17,8 @@ import {
   RotateCcw,
   AlertTriangle,
   CalendarDays,
-  List,
   ChevronLeft,
   ChevronRight,
-  Maximize2,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -55,12 +52,37 @@ const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
+const CUT_OFF_DAY = 7; // Tutup buku tanggal 7
+
+/** Hitung periode tutup buku: tgl 7 bulan ini s/d tgl 8 bulan berikutnya */
+function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
+  const [year, month] = periodKey.split("-").map(Number);
+  // Periode: tgl 7 bulan ini → tgl 8 bulan berikutnya
+  const startDate = new Date(year, month - 1, CUT_OFF_DAY);
+  const endDate = new Date(year, month, CUT_OFF_DAY + 1); // tgl 8 bulan berikutnya
+  const start = startDate.toISOString().slice(0, 10);
+  const end = endDate.toISOString().slice(0, 10);
+  const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY + 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
+  return { start, end, label };
+}
+
+/** Tentukan periode aktif berdasarkan tanggal hari ini */
+function getCurrentPeriodKey(): string {
+  const now = new Date();
+  // Jika hari ini < tgl 7, berarti masih periode bulan lalu
+  if (now.getDate() < CUT_OFF_DAY) {
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+  }
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
 
 export default function IncomePage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [filterDate, setFilterDate] = useState(() => new Date().toISOString().slice(0, 7));
+  const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
+  const period = getPeriodRange(periodKey);
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [divisions, setDivisions] = useState<DivisionLite[]>([]);
@@ -95,39 +117,47 @@ export default function IncomePage() {
   const [editError, setEditError] = useState("");
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
-  const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showSuccess = (title: string, message?: string) => {
-    setToast({ show: true, title, message: message || "" });
-    setTimeout(() => setToast({ show: false, title: "", message: "" }), 3500);
-  };
+  const showToast = useCallback((type: "success" | "error", title: string, message?: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ show: true, title, message: message || "", type });
+    toastTimer.current = setTimeout(() => setToast({ show: false, title: "", message: "", type: "success" }), 3500);
+  }, []);
+
+  useEffect(() => {
+    return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
+  }, []);
 
   const fetchEmployees = async () => {
-    const { data } = await supabase.from("pegawai").select("id, nama").eq("status", "Aktif").order("nama");
+    const { data, error } = await supabase.from("pegawai").select("id, nama").eq("status", "Aktif").order("nama");
+    if (error) { showToast("error", "Gagal Memuat Pegawai", error.message); return; }
     if (data) setEmployees(data);
   };
 
   const fetchDivisions = async () => {
-    const { data } = await supabase.from("divisions").select("id, nama, color").eq("status", "Aktif").order("nama");
+    const { data, error } = await supabase.from("divisions").select("id, nama, color").eq("status", "Aktif").order("nama");
+    if (error) { showToast("error", "Gagal Memuat Divisi", error.message); return; }
     if (data) setDivisions(data);
   };
 
   const fetchDStatuses = async () => {
-    const { data } = await supabase.from("delivery_statuses").select("id, nama, kode, color").eq("status", "Aktif").order("nama");
+    const { data, error } = await supabase.from("delivery_statuses").select("id, nama, kode, color").eq("status", "Aktif").order("nama");
+    if (error) { showToast("error", "Gagal Memuat Status", error.message); return; }
     if (data) setDStatuses(data);
   };
 
   const fetchDeliveries = async () => {
-    // Hitung hari terakhir bulan yang benar
-    const [year, month] = filterDate.split("-").map(Number);
-    const lastDay = new Date(year, month, 0).getDate();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("delivery_points")
       .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
-      .gte("tanggal", `${filterDate}-01`)
-      .lte("tanggal", `${filterDate}-${String(lastDay).padStart(2, "0")}`)
+      .gte("tanggal", period.start)
+      .lte("tanggal", period.end)
       .order("tanggal", { ascending: false })
       .order("id", { ascending: true });
+    if (error) { showToast("error", "Gagal Memuat Data Titik", error.message); return; }
     if (data) {
       const mapped = data.map((d) => ({
         ...d,
@@ -137,7 +167,6 @@ export default function IncomePage() {
         statusNama: d.delivery_statuses?.nama || null,
         statusColor: d.delivery_statuses?.color || null,
       })) as DeliveryRow[];
-      // Sort client-side untuk memastikan urutan stabil
       mapped.sort((a, b) => {
         const dateCompare = b.tanggal.localeCompare(a.tanggal);
         if (dateCompare !== 0) return dateCompare;
@@ -151,7 +180,7 @@ export default function IncomePage() {
     Promise.all([fetchEmployees(), fetchDivisions(), fetchDStatuses(), fetchDeliveries()]).then(() => setLoading(false));
   }, []);
 
-  useEffect(() => { fetchDeliveries(); }, [filterDate]);
+  useEffect(() => { fetchDeliveries(); }, [periodKey]);
 
   useEffect(() => {
     if (showBatch || showEditForm || showCalendar) document.body.style.overflow = "hidden";
@@ -256,13 +285,13 @@ export default function IncomePage() {
   const saveTemplate = () => {
     const order = batchRows.map((r) => r.employee_id);
     localStorage.setItem(TEMPLATE_KEY, JSON.stringify(order));
-    showSuccess("Template Disimpan", "Urutan pegawai akan digunakan saat input titik berikutnya.");
+    showToast("success", "Template Disimpan", "Urutan pegawai akan digunakan saat input titik berikutnya.");
   };
 
   const resetTemplate = () => {
     localStorage.removeItem(TEMPLATE_KEY);
     setBatchRows(employees.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "", status_id: 0 })));
-    showSuccess("Template Direset", "Urutan pegawai kembali ke default (A-Z).");
+    showToast("success", "Template Direset", "Urutan pegawai kembali ke default (A-Z).");
   };
 
   const hasBatchData = batchRows.some((r) => r.jumlah_titik || r.division_id || r.role);
@@ -343,31 +372,40 @@ export default function IncomePage() {
     // Tidak ada duplikat, langsung simpan
     await executeBatchSave(result.newRows, result.updateRows);
     setShowBatch(false);
-    const batchMonth = batchDate.slice(0, 7);
-    if (filterDate !== batchMonth) setFilterDate(batchMonth);
-    else fetchDeliveries();
+    await fetchDeliveries();
   };
 
   const executeBatchSave = async (newRows: Record<string, unknown>[], updateRows: { id: number; data: Record<string, unknown> }[]) => {
     setBatchSaving(true);
 
-    // Insert new rows
-    if (newRows.length > 0) {
-      const { error } = await supabase.from("delivery_points").insert(newRows);
-      if (error) { showSuccess("Gagal Menyimpan", error.message); setBatchSaving(false); return; }
-    }
+    try {
+      // Insert new rows
+      if (newRows.length > 0) {
+        const { error } = await supabase.from("delivery_points").insert(newRows);
+        if (error) { showToast("error", "Gagal Menyimpan", error.message); setBatchSaving(false); return; }
+      }
 
-    // Update existing rows
-    for (const row of updateRows) {
-      await supabase.from("delivery_points").update(row.data).eq("id", row.id);
-    }
+      // Update existing rows
+      let updateErrors = 0;
+      for (const row of updateRows) {
+        const { error } = await supabase.from("delivery_points").update(row.data).eq("id", row.id);
+        if (error) updateErrors++;
+      }
 
-    setBatchSaving(false);
-    const total = newRows.length + updateRows.length;
-    const msg = updateRows.length > 0
-      ? `${newRows.length} data baru disimpan, ${updateRows.length} data diperbarui.`
-      : `${total} data pegawai berhasil disimpan.`;
-    showSuccess("Input Titik Berhasil", msg);
+      setBatchSaving(false);
+      const total = newRows.length + updateRows.length;
+      if (updateErrors > 0) {
+        showToast("error", "Sebagian Gagal", `${updateErrors} dari ${updateRows.length} data gagal diperbarui.`);
+      } else {
+        const msg = updateRows.length > 0
+          ? `${newRows.length} data baru disimpan, ${updateRows.length} data diperbarui.`
+          : `${total} data pegawai berhasil disimpan.`;
+        showToast("success", "Input Titik Berhasil", msg);
+      }
+    } catch (err) {
+      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menyimpan data.");
+      setBatchSaving(false);
+    }
   };
 
   // ─── Edit single ───
@@ -403,7 +441,7 @@ export default function IncomePage() {
     // Re-lookup rate
     const { data: rateData } = await supabase.from("point_rates").select("rate_per_point").eq("division_id", editForm.division_id).eq("role", editForm.role).eq("status", "Aktif").single();
 
-    await supabase.from("delivery_points").update({
+    const { error: updateError } = await supabase.from("delivery_points").update({
       division_id: editForm.division_id,
       role: editForm.role,
       jumlah_titik: parseInt(editForm.jumlah_titik),
@@ -411,7 +449,12 @@ export default function IncomePage() {
       status_id: editForm.status_id || null,
     }).eq("id", editingId);
 
-    showSuccess("Data Diperbarui", "Input titik telah disimpan.");
+    if (updateError) {
+      showToast("error", "Gagal Memperbarui", updateError.message);
+      return;
+    }
+
+    showToast("success", "Data Diperbarui", "Input titik telah disimpan.");
     setShowEditForm(false);
     fetchDeliveries();
   };
@@ -419,10 +462,21 @@ export default function IncomePage() {
   // ─── Delete ───
   const handleDelete = async () => {
     if (!deleteConfirm) return;
-    await supabase.from("delivery_points").delete().eq("id", deleteConfirm.id);
-    setDeleteConfirm(null);
-    showSuccess("Data Dihapus", "Input titik telah dihapus.");
-    fetchDeliveries();
+    setDeleting(true);
+    try {
+      const { error } = await supabase.from("delivery_points").delete().eq("id", deleteConfirm.id);
+      if (error) {
+        showToast("error", "Gagal Menghapus", error.message);
+        return;
+      }
+      showToast("success", "Data Dihapus", "Input titik telah dihapus.");
+      fetchDeliveries();
+    } catch (err) {
+      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menghapus data.");
+    } finally {
+      setDeleting(false);
+      setDeleteConfirm(null);
+    }
   };
 
   // ─── Filter & paginate ───
@@ -466,56 +520,60 @@ export default function IncomePage() {
   });
   const batchCanSave = batchFilled > 0 && batchIncomplete.length === 0 && batchDuplicateKeys.size === 0 && !!batchDate;
 
-  // ─── Calendar data ───
-  const calYear = parseInt(calMonth.split("-")[0]);
-  const calMon = parseInt(calMonth.split("-")[1]);
-  const calDaysInMonth = new Date(calYear, calMon, 0).getDate();
-  const calDates = Array.from({ length: calDaysInMonth }, (_, i) => i + 1);
-  const calMonthLabel = new Date(calYear, calMon - 1).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+  // ─── Calendar data (periode tutup buku) ───
+  const calPeriod = getPeriodRange(calMonth);
+  // Generate array of dates for the period (tgl 7 bulan ini s/d tgl 8 bulan berikutnya)
+  const calDateList: Date[] = [];
+  {
+    const startD = new Date(calPeriod.start);
+    const endD = new Date(calPeriod.end);
+    for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+      calDateList.push(new Date(d));
+    }
+  }
 
-  // Filter deliveries for calendar month
-  const calDeliveries = deliveries.filter((d) => d.tanggal.startsWith(calMonth));
+  // Filter deliveries for calendar period
+  const calDeliveries = deliveries.filter((d) => d.tanggal >= calPeriod.start && d.tanggal <= calPeriod.end);
 
-  // Group: employee -> date -> entries[]
+  // Group: employee -> dateStr -> entries[]
   const calEmployeeIds = [...new Set(calDeliveries.map((d) => d.employee_id))];
   const calEmployees = calEmployeeIds.map((id) => {
     const emp = employees.find((e) => e.id === id);
     return { id, nama: emp?.nama || id };
   }).sort((a, b) => a.nama.localeCompare(b.nama));
 
-  const calDataMap = new Map<string, DeliveryRow[]>(); // key: empId-day
+  const calDataMap = new Map<string, DeliveryRow[]>(); // key: empId-YYYY-MM-DD
   calDeliveries.forEach((d) => {
-    const day = parseInt(d.tanggal.split("-")[2]);
-    const key = `${d.employee_id}-${day}`;
+    const key = `${d.employee_id}-${d.tanggal}`;
     if (!calDataMap.has(key)) calDataMap.set(key, []);
     calDataMap.get(key)!.push(d);
   });
-  // Sort entri dalam setiap sel by id agar urutan konsisten
   calDataMap.forEach((entries) => entries.sort((a, b) => a.id - b.id));
 
-  // Sync calendar month with filterDate
-  // List semua sel kosong: { empId, day }
+  // List semua sel kosong: { empId, dateStr }
   const calEmptyCells = calEmployees.flatMap((emp) =>
-    calDates.filter((day) => !(calDataMap.get(`${emp.id}-${day}`)?.length)).map((day) => ({ empId: emp.id, day }))
+    calDateList.filter((dt) => {
+      const ds = dt.toISOString().slice(0, 10);
+      return !(calDataMap.get(`${emp.id}-${ds}`)?.length);
+    }).map((dt) => ({ empId: emp.id, dateStr: dt.toISOString().slice(0, 10) }))
   );
 
   const navigateToEmptyCell = () => {
     if (calEmptyCells.length === 0) return;
     const nextIdx = (emptyNavIdx + 1) % calEmptyCells.length;
     setEmptyNavIdx(nextIdx);
-    setStatusNavIdx(new Map()); // reset status nav
+    setStatusNavIdx(new Map());
     const cell = calEmptyCells[nextIdx];
-    const el = document.getElementById(`cal-${cell.empId}-${cell.day}`);
+    const el = document.getElementById(`cal-${cell.empId}-${cell.dateStr}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
   };
 
   // Sel yang punya status tertentu
-  const calStatusCells = new Map<string, { empId: string; day: number; deliveryId: number }[]>();
+  const calStatusCells = new Map<string, { empId: string; dateStr: string; deliveryId: number }[]>();
   calDeliveries.forEach((d) => {
     if (d.statusNama) {
-      const day = parseInt(d.tanggal.split("-")[2]);
       if (!calStatusCells.has(d.statusNama)) calStatusCells.set(d.statusNama, []);
-      calStatusCells.get(d.statusNama)!.push({ empId: d.employee_id, day, deliveryId: d.id });
+      calStatusCells.get(d.statusNama)!.push({ empId: d.employee_id, dateStr: d.tanggal, deliveryId: d.id });
     }
   });
 
@@ -525,13 +583,12 @@ export default function IncomePage() {
     const currentIdx = statusNavIdx.get(statusName) ?? -1;
     const nextIdx = (currentIdx + 1) % cells.length;
     setStatusNavIdx(new Map(statusNavIdx).set(statusName, nextIdx));
-    setEmptyNavIdx(-1); // reset empty nav
+    setEmptyNavIdx(-1);
     const cell = cells[nextIdx];
-    const el = document.getElementById(`cal-${cell.empId}-${cell.day}`);
+    const el = document.getElementById(`cal-${cell.empId}-${cell.dateStr}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
   };
 
-  // Sel status yang sedang aktif navigasi
   const activeStatusCell = (() => {
     for (const [nama, idx] of statusNavIdx.entries()) {
       if (idx >= 0) {
@@ -543,45 +600,47 @@ export default function IncomePage() {
   })();
 
   const openCalendar = () => {
-    setCalMonth(filterDate);
+    setCalMonth(periodKey);
     setShowCalendar(true);
   };
 
-  const calPrevMonth = () => {
-    const d = new Date(calYear, calMon - 2, 1);
-    setCalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  const calPrevPeriod = () => {
+    const [y, m] = calMonth.split("-").map(Number);
+    const prev = new Date(y, m - 2, 1);
+    setCalMonth(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
     setEmptyNavIdx(-1);
     setStatusNavIdx(new Map());
   };
-  const calNextMonth = () => {
-    const d = new Date(calYear, calMon, 1);
-    setCalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  const calNextPeriod = () => {
+    const [y, m] = calMonth.split("-").map(Number);
+    const next = new Date(y, m, 1);
+    setCalMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
     setEmptyNavIdx(-1);
     setStatusNavIdx(new Map());
   };
 
-  // Fetch calendar data when month changes
+  // Fetch calendar data when period changes
   useEffect(() => {
     if (!showCalendar) return;
     const fetchCalData = async () => {
-      const lastDay = new Date(calYear, calMon, 0).getDate();
-      const { data } = await supabase
+      const cp = getPeriodRange(calMonth);
+      const { data, error } = await supabase
         .from("delivery_points")
-      .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
-        .gte("tanggal", `${calMonth}-01`)
-        .lte("tanggal", `${calMonth}-${String(lastDay).padStart(2, "0")}`)
+        .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
+        .gte("tanggal", cp.start)
+        .lte("tanggal", cp.end)
         .order("tanggal");
+      if (error) { showToast("error", "Gagal Memuat Data Kalender", error.message); return; }
       if (data) {
         setDeliveries((prev) => {
-          // Merge: keep non-calendar-month data, replace calendar month data
-          const others = prev.filter((d) => !d.tanggal.startsWith(calMonth));
+          const others = prev.filter((d) => d.tanggal < cp.start || d.tanggal > cp.end);
           const calRows = data.map((d) => ({
             ...d,
             employeeNama: d.pegawai?.nama || d.employee_id,
             divisionNama: d.divisions?.nama || "-",
-        divisionColor: d.divisions?.color || "#3b82f6",
-        statusNama: d.delivery_statuses?.nama || null,
-        statusColor: d.delivery_statuses?.color || null,
+            divisionColor: d.divisions?.color || "#3b82f6",
+            statusNama: d.delivery_statuses?.nama || null,
+            statusColor: d.delivery_statuses?.color || null,
           })) as DeliveryRow[];
           return [...others, ...calRows];
         });
@@ -607,15 +666,19 @@ export default function IncomePage() {
       {toast.show && (
         <Portal>
           <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
-            <div className="flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border border-success/20 min-w-[360px] max-w-[480px]">
-              <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
-                <CircleCheckBig className="w-5 h-5 text-success" />
+            <div className={cn("flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border min-w-[360px] max-w-[480px]",
+              toast.type === "error" ? "border-danger/20" : "border-success/20")}>
+              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                toast.type === "error" ? "bg-danger/10" : "bg-success/10")}>
+                {toast.type === "error"
+                  ? <AlertTriangle className="w-5 h-5 text-danger" />
+                  : <CircleCheckBig className="w-5 h-5 text-success" />}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-foreground">{toast.title}</p>
                 {toast.message && <p className="text-xs text-muted-foreground mt-0.5">{toast.message}</p>}
               </div>
-              <button onClick={() => setToast({ show: false, title: "", message: "" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setToast({ show: false, title: "", message: "", type: "success" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
             </div>
           </div>
         </Portal>
@@ -636,7 +699,7 @@ export default function IncomePage() {
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-success-light flex items-center justify-center"><span className="text-sm font-bold text-success">{totalTitik}</span></div>
-              <div><p className="text-xs text-muted-foreground font-medium">Total Titik</p><p className="text-xs text-muted-foreground">bulan ini</p></div>
+              <div><p className="text-xs text-muted-foreground font-medium">Total Titik</p><p className="text-xs text-muted-foreground">periode ini</p></div>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center"><span className="text-sm font-bold text-muted-foreground">{totalEntri}</span></div>
@@ -654,10 +717,26 @@ export default function IncomePage() {
             <input type="text" placeholder="Cari nama, divisi, atau posisi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
           </div>
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-muted-foreground" />
-            <input type="month" value={filterDate} onChange={(e) => { setFilterDate(e.target.value); setPage(1); }}
-              className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary text-foreground" />
+          <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+            <button onClick={() => {
+              const [y, m] = periodKey.split("-").map(Number);
+              const prev = new Date(y, m - 2, 1);
+              setPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
+              setPage(1);
+            }} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <div className="px-3 py-1.5 text-center min-w-[240px]">
+              <p className="text-xs font-bold text-foreground">{period.label}</p>
+            </div>
+            <button onClick={() => {
+              const [y, m] = periodKey.split("-").map(Number);
+              const next = new Date(y, m, 1);
+              setPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+              setPage(1);
+            }} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
@@ -758,7 +837,7 @@ export default function IncomePage() {
                     )}
                     {(() => {
                       const totalEmpty = calEmployees.reduce((sum, emp) => {
-                        const emptyDays = calDates.filter((day) => !(calDataMap.get(`${emp.id}-${day}`)?.length));
+                        const emptyDays = calDateList.filter((dt) => !(calDataMap.get(`${emp.id}-${dt.toISOString().slice(0, 10)}`)?.length));
                         return sum + emptyDays.length;
                       }, 0);
                       return totalEmpty > 0 ? (
@@ -776,9 +855,9 @@ export default function IncomePage() {
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-center bg-muted rounded-xl p-1">
-                  <button onClick={calPrevMonth} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                  <span className="text-sm font-bold text-foreground px-4 min-w-[150px] text-center">{calMonthLabel}</span>
-                  <button onClick={calNextMonth} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                  <button onClick={calPrevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+                  <span className="text-xs font-bold text-foreground px-3 min-w-[220px] text-center">{calPeriod.label}</span>
+                  <button onClick={calNextPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronRight className="w-4 h-4" /></button>
                 </div>
                 <button onClick={() => setShowCalendar(false)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors">
                   <X className="w-3.5 h-3.5" />Tutup
@@ -795,22 +874,31 @@ export default function IncomePage() {
                     <th className="sticky left-0 z-30 bg-card border-b-2 border-r-2 border-border px-4 py-3 text-left min-w-[180px] shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]">
                       <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pegawai</span>
                     </th>
-                    {calDates.map((day) => {
-                      const dayOfWeek = new Date(calYear, calMon - 1, day).getDay();
+                    {calDateList.map((dt) => {
+                      const dateStr = dt.toISOString().slice(0, 10);
+                      const day = dt.getDate();
+                      const dayOfWeek = dt.getDay();
                       const isSunday = dayOfWeek === 0;
                       const isSaturday = dayOfWeek === 6;
-                      const isWeekend = isSunday || isSaturday;
-                      const isToday = new Date().getDate() === day && new Date().getMonth() === calMon - 1 && new Date().getFullYear() === calYear;
+                      const now = new Date();
+                      const isToday = day === now.getDate() && dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+                      const isNewMonth = day === 1;
                       return (
-                        <th key={day} className={cn(
+                        <th key={dateStr} className={cn(
                           "border-b-2 border-r border-border px-1 py-2 text-center min-w-[120px]",
+                          isNewMonth && "border-l-2 border-l-primary/30",
                           isToday ? "bg-primary text-white" : isSunday ? "bg-red-500/10" : isSaturday ? "bg-amber-500/8" : "bg-card"
                         )}>
+                          {isNewMonth && (
+                            <div className={cn("text-[8px] font-bold uppercase tracking-wider mb-0.5", isToday ? "text-white/70" : "text-primary/60")}>
+                              {dt.toLocaleDateString("id-ID", { month: "short" })}
+                            </div>
+                          )}
                           <div className={cn("text-xs font-bold leading-tight", isToday ? "text-white" : isSunday ? "text-red-500" : isSaturday ? "text-amber-600" : "text-foreground")}>
                             {day}
                           </div>
                           <div className={cn("text-[9px] font-medium", isToday ? "text-white/70" : isSunday ? "text-red-400" : isSaturday ? "text-amber-500" : "text-muted-foreground/50")}>
-                            {["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"][dayOfWeek]}
+                            {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][dayOfWeek]}
                           </div>
                         </th>
                       );
@@ -824,9 +912,9 @@ export default function IncomePage() {
                 <tbody>
                   {calEmployees.length === 0 ? (
                     <tr>
-                      <td colSpan={calDaysInMonth + 2} className="text-center py-24">
+                      <td colSpan={calDateList.length + 2} className="text-center py-24">
                         <CalendarDays className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
-                        <p className="text-sm text-muted-foreground">Tidak ada data titik untuk bulan ini</p>
+                        <p className="text-sm text-muted-foreground">Tidak ada data titik untuk periode ini</p>
                       </td>
                     </tr>
                   ) : calEmployees.map((emp, empIdx) => {
@@ -843,17 +931,21 @@ export default function IncomePage() {
                             <p className="text-xs font-semibold text-foreground truncate max-w-[130px]">{emp.nama}</p>
                           </div>
                         </td>
-                        {calDates.map((day) => {
-                          const entries = calDataMap.get(`${emp.id}-${day}`) || [];
-                          const dayOfWeek = new Date(calYear, calMon - 1, day).getDay();
+                        {calDateList.map((dt) => {
+                          const dateStr = dt.toISOString().slice(0, 10);
+                          const entries = calDataMap.get(`${emp.id}-${dateStr}`) || [];
+                          const dayOfWeek = dt.getDay();
                           const isSunday = dayOfWeek === 0;
                           const isSaturday = dayOfWeek === 6;
-                          const isToday = new Date().getDate() === day && new Date().getMonth() === calMon - 1 && new Date().getFullYear() === calYear;
-                          const isActiveEmpty = entries.length === 0 && emptyNavIdx >= 0 && calEmptyCells[emptyNavIdx]?.empId === emp.id && calEmptyCells[emptyNavIdx]?.day === day;
-                          const isActiveStatus = activeStatusCell && activeStatusCell.empId === emp.id && activeStatusCell.day === day;
+                          const now = new Date();
+                          const isToday = dt.getDate() === now.getDate() && dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+                          const isNewMonth = dt.getDate() === 1;
+                          const isActiveEmpty = entries.length === 0 && emptyNavIdx >= 0 && calEmptyCells[emptyNavIdx]?.empId === emp.id && calEmptyCells[emptyNavIdx]?.dateStr === dateStr;
+                          const isActiveStatus = activeStatusCell && activeStatusCell.empId === emp.id && activeStatusCell.dateStr === dateStr;
                           return (
-                            <td key={day} id={`cal-${emp.id}-${day}`} className={cn(
+                            <td key={dateStr} id={`cal-${emp.id}-${dateStr}`} className={cn(
                               "border-b border-r border-border/60 px-1 py-1 align-top min-w-[120px] transition-colors",
+                              isNewMonth && "border-l-2 border-l-primary/30",
                               isActiveEmpty ? "ring-2 ring-danger ring-inset bg-danger/[0.08]" : isActiveStatus ? "ring-2 ring-warning ring-inset bg-warning/[0.08]" : isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
                               "group-hover:bg-muted/30"
                             )}>
@@ -911,13 +1003,12 @@ export default function IncomePage() {
                       <td className="sticky left-0 z-20 bg-card border-t-2 border-r-2 border-border px-4 py-2.5 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total / Hari</span>
                       </td>
-                      {calDates.map((day) => {
-                        const dayTotal = calDeliveries.filter((d) => parseInt(d.tanggal.split("-")[2]) === day).reduce((s, d) => s + d.jumlah_titik, 0);
-                        const dayOfWeek = new Date(calYear, calMon - 1, day).getDay();
-                        const isSunday = dayOfWeek === 0;
-                        const isSaturday = dayOfWeek === 6;
+                      {calDateList.map((dt) => {
+                        const dateStr = dt.toISOString().slice(0, 10);
+                        const dayTotal = calDeliveries.filter((d) => d.tanggal === dateStr).reduce((s, d) => s + d.jumlah_titik, 0);
+                        const isNewMonth = dt.getDate() === 1;
                         return (
-                          <td key={day} className="bg-card border-t-2 border-r border-border px-1 py-2.5 text-center">
+                          <td key={dateStr} className={cn("bg-card border-t-2 border-r border-border px-1 py-2.5 text-center", isNewMonth && "border-l-2 border-l-primary/30")}>
                             {dayTotal > 0 ? (
                               <span className="text-[11px] font-bold text-primary">{dayTotal}</span>
                             ) : (
@@ -1221,9 +1312,7 @@ export default function IncomePage() {
                   setShowDuplicateConfirm(false);
                   await executeBatchSave(duplicateInfo.newRows, duplicateInfo.updateRows);
                   setShowBatch(false);
-                  const batchMonth = batchDate.slice(0, 7);
-                  if (filterDate !== batchMonth) setFilterDate(batchMonth);
-                  else fetchDeliveries();
+                  await fetchDeliveries();
                 }}>Perbarui {duplicateInfo.dupCount} Data</Button>
               </div>
             </div>
@@ -1309,7 +1398,7 @@ export default function IncomePage() {
       {deleteConfirm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteConfirm(null)} />
             <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
               <div className="p-6 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4"><Trash2 className="w-7 h-7 text-danger" /></div>
@@ -1317,8 +1406,10 @@ export default function IncomePage() {
                 <p className="text-sm text-muted-foreground mt-2">Data untuk <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen.</p>
               </div>
               <div className="flex items-center gap-3 px-6 pb-6">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)}>Batal</Button>
-                <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={handleDelete}>Hapus</Button>
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)} disabled={deleting}>Batal</Button>
+                <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? "Menghapus..." : "Hapus"}
+                </Button>
               </div>
             </div>
           </div>

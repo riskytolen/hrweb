@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig,
+  UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
@@ -46,16 +46,27 @@ export default function RecruitmentPage() {
   const [saving, setSaving] = useState(false);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
-  const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
   const [detailId, setDetailId] = useState<number | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showSuccess = (title: string, message?: string) => {
-    setToast({ show: true, title, message: message || "" });
-    setTimeout(() => setToast({ show: false, title: "", message: "" }), 3500);
-  };
+  const showToast = useCallback((type: "success" | "error", title: string, message?: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ show: true, title, message: message || "", type });
+    toastTimer.current = setTimeout(() => setToast({ show: false, title: "", message: "", type: "success" }), 3500);
+  }, []);
+
+  useEffect(() => {
+    return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
+  }, []);
 
   const fetchList = async () => {
-    const { data } = await supabase.from("recruitments").select("*").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("recruitments").select("*").order("created_at", { ascending: false });
+    if (error) {
+      showToast("error", "Gagal Memuat Data", error.message);
+      return;
+    }
     if (data) setList(data);
   };
 
@@ -67,13 +78,21 @@ export default function RecruitmentPage() {
     return () => { document.body.style.overflow = ""; };
   }, [showForm]);
 
-  const uploadCv = async (file: File, id: number): Promise<string | null> => {
+  const deleteOldCv = async (cvUrl: string) => {
+    const path = cvUrl.split("/recruitment-docs/")[1];
+    if (path) await supabase.storage.from("recruitment-docs").remove([path]);
+  };
+
+  const uploadCv = async (file: File, id: number, oldCvUrl?: string | null): Promise<{ url: string | null; error: string | null }> => {
+    // Hapus CV lama jika ada (mencegah orphaned files)
+    if (oldCvUrl) await deleteOldCv(oldCvUrl);
+
     const ext = file.name.split(".").pop();
     const path = `cv/${id}-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from("recruitment-docs").upload(path, file, { upsert: true });
-    if (error) return null;
+    if (error) return { url: null, error: `Gagal upload CV: ${error.message}` };
     const { data } = supabase.storage.from("recruitment-docs").getPublicUrl(path);
-    return data.publicUrl;
+    return { url: data.publicUrl, error: null };
   };
 
   const openAdd = () => {
@@ -115,49 +134,131 @@ export default function RecruitmentPage() {
       tanggal_training_selesai: form.tanggal_training_selesai || null,
     };
 
-    let cvUrl: string | null = null;
+    try {
+      if (editingId !== null) {
+        // --- UPDATE ---
+        const existingRow = list.find((r) => r.id === editingId);
+        let cvUrl: string | null = null;
+        let cvWarning = false;
 
-    if (editingId !== null) {
-      if (cvFile) cvUrl = await uploadCv(cvFile, editingId);
-      await supabase.from("recruitments").update({ ...payload, ...(cvUrl ? { cv_url: cvUrl } : {}) }).eq("id", editingId);
-      showSuccess("Data Diperbarui", `Pelamar "${form.nama}" telah disimpan.`);
-    } else {
-      const { data } = await supabase.from("recruitments").insert(payload).select("id").single();
-      if (data && cvFile) {
-        cvUrl = await uploadCv(cvFile, data.id);
-        if (cvUrl) await supabase.from("recruitments").update({ cv_url: cvUrl }).eq("id", data.id);
+        if (cvFile) {
+          const result = await uploadCv(cvFile, editingId, existingRow?.cv_url);
+          if (result.error) cvWarning = true;
+          else cvUrl = result.url;
+        }
+
+        const { error } = await supabase
+          .from("recruitments")
+          .update({ ...payload, ...(cvUrl ? { cv_url: cvUrl } : {}) })
+          .eq("id", editingId);
+
+        if (error) {
+          showToast("error", "Gagal Memperbarui", error.message);
+          return;
+        }
+
+        if (cvWarning) {
+          showToast("error", "Data Tersimpan, CV Gagal", "Data pelamar berhasil diperbarui tapi CV gagal diupload.");
+        } else {
+          showToast("success", "Data Diperbarui", `Pelamar "${form.nama}" telah disimpan.`);
+        }
+      } else {
+        // --- INSERT ---
+        const { data: inserted, error } = await supabase
+          .from("recruitments")
+          .insert(payload)
+          .select("id")
+          .single();
+
+        if (error || !inserted) {
+          showToast("error", "Gagal Menambahkan", error?.message || "Tidak mendapat data dari server.");
+          return;
+        }
+
+        if (cvFile) {
+          const result = await uploadCv(cvFile, inserted.id);
+          if (result.error) {
+            showToast("error", "Pelamar Ditambahkan, CV Gagal", "Data tersimpan tapi CV gagal diupload. Silakan edit untuk upload ulang.");
+          } else if (result.url) {
+            const { error: updateErr } = await supabase
+              .from("recruitments")
+              .update({ cv_url: result.url })
+              .eq("id", inserted.id);
+
+            if (updateErr) {
+              showToast("error", "CV Terupload, Gagal Simpan URL", "File CV berhasil diupload tapi gagal menyimpan referensinya.");
+            } else {
+              showToast("success", "Pelamar Ditambahkan", `Data "${form.nama}" berhasil disimpan.`);
+            }
+          }
+        } else {
+          showToast("success", "Pelamar Ditambahkan", `Data "${form.nama}" berhasil disimpan.`);
+        }
       }
-      showSuccess("Pelamar Ditambahkan", `Data "${form.nama}" berhasil disimpan.`);
-    }
 
-    setSaving(false);
-    setShowForm(false);
-    fetchList();
+      setSaving(false);
+      setShowForm(false);
+      setSearch("");
+      setFilterStatus("Semua");
+      setPage(1);
+      await fetchList();
+    } catch (err) {
+      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Kesalahan tidak diketahui.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
-    // Hapus file CV dari storage jika ada
-    const row = list.find((r) => r.id === deleteConfirm.id);
-    if (row?.cv_url) {
-      const path = row.cv_url.split("/recruitment-docs/")[1];
-      if (path) await supabase.storage.from("recruitment-docs").remove([path]);
+    const targetId = deleteConfirm.id;
+    setDeleting(true);
+    try {
+      // Hapus file CV dari storage jika ada
+      const row = list.find((r) => r.id === targetId);
+      if (row?.cv_url) await deleteOldCv(row.cv_url);
+
+      const { error } = await supabase.from("recruitments").delete().eq("id", targetId);
+      if (error) {
+        showToast("error", "Gagal Menghapus", error.message);
+        return;
+      }
+
+      // Hapus dari state lokal langsung
+      setList((prev) => prev.filter((r) => r.id !== targetId));
+      showToast("success", "Data Dihapus", "Data pelamar dan file CV telah dihapus.");
+    } catch (err) {
+      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menghapus data.");
+    } finally {
+      setDeleting(false);
+      setDeleteConfirm(null);
     }
-    await supabase.from("recruitments").delete().eq("id", deleteConfirm.id);
-    setDeleteConfirm(null);
-    showSuccess("Data Dihapus", "Data pelamar dan file CV telah dihapus.");
-    fetchList();
   };
 
   const handleStatusChange = async (id: number, status: string) => {
-    await supabase.from("recruitments").update({ status }).eq("id", id);
-    fetchList();
+    const { data: updated, error } = await supabase
+      .from("recruitments")
+      .update({ status })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error || !updated) {
+      showToast("error", "Gagal Ubah Status", error?.message || "Gagal mendapat data terbaru.");
+      return;
+    }
+
+    // Update state lokal langsung
+    setList((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    showToast("success", "Status Diperbarui", `Status berhasil diubah ke "${status}".`);
   };
 
   const filtered = list.filter((r) => {
-    const matchSearch = r.nama.toLowerCase().includes(search.toLowerCase()) ||
-      r.posisi_dilamar.toLowerCase().includes(search.toLowerCase()) ||
-      r.no_hp.includes(search);
+    const q = search.toLowerCase();
+    const matchSearch = r.nama.toLowerCase().includes(q) ||
+      r.posisi_dilamar.toLowerCase().includes(q) ||
+      r.no_hp.includes(search) ||
+      (r.email && r.email.toLowerCase().includes(q));
     const matchStatus = filterStatus === "Semua" || r.status === filterStatus;
     return matchSearch && matchStatus;
   });
@@ -165,14 +266,8 @@ export default function RecruitmentPage() {
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const detail = detailId ? list.find((r) => r.id === detailId) : null;
 
-  const statusCounts: Record<string, number> = {
-    Semua: list.length,
-    "Lamaran Masuk": list.filter((r) => r.status === "Lamaran Masuk").length,
-    Terpilih: list.filter((r) => r.status === "Terpilih").length,
-    Training: list.filter((r) => r.status === "Training").length,
-    Diterima: list.filter((r) => r.status === "Diterima").length,
-    Ditolak: list.filter((r) => r.status === "Ditolak").length,
-  };
+  const statusCounts: Record<string, number> = { Semua: list.length, "Lamaran Masuk": 0, Terpilih: 0, Training: 0, Diterima: 0, Ditolak: 0 };
+  for (const r of list) { if (r.status in statusCounts) statusCounts[r.status]++; }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -182,13 +277,19 @@ export default function RecruitmentPage() {
       {toast.show && (
         <Portal>
           <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
-            <div className="flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border border-success/20 min-w-[360px] max-w-[480px]">
-              <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0"><CircleCheckBig className="w-5 h-5 text-success" /></div>
+            <div className={cn("flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border min-w-[360px] max-w-[480px]",
+              toast.type === "error" ? "border-danger/20" : "border-success/20")}>
+              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                toast.type === "error" ? "bg-danger/10" : "bg-success/10")}>
+                {toast.type === "error"
+                  ? <AlertTriangle className="w-5 h-5 text-danger" />
+                  : <CircleCheckBig className="w-5 h-5 text-success" />}
+              </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-foreground">{toast.title}</p>
                 {toast.message && <p className="text-xs text-muted-foreground mt-0.5">{toast.message}</p>}
               </div>
-              <button onClick={() => setToast({ show: false, title: "", message: "" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setToast({ show: false, title: "", message: "", type: "success" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
             </div>
           </div>
         </Portal>
@@ -214,7 +315,7 @@ export default function RecruitmentPage() {
         <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5">
           <Search className="w-4 h-4 text-muted-foreground" />
           <input type="text" placeholder="Cari nama, posisi, atau no. HP..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+            autoComplete="off" className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
         </div>
       </div>
 
@@ -478,7 +579,7 @@ export default function RecruitmentPage() {
       {deleteConfirm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteConfirm(null)} />
             <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
               <div className="p-6 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4"><Trash2 className="w-7 h-7 text-danger" /></div>
@@ -486,8 +587,10 @@ export default function RecruitmentPage() {
                 <p className="text-sm text-muted-foreground mt-2">Data <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen.</p>
               </div>
               <div className="flex items-center gap-3 px-6 pb-6">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)}>Batal</Button>
-                <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={handleDelete}>Hapus</Button>
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)} disabled={deleting}>Batal</Button>
+                <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? "Menghapus..." : "Hapus"}
+                </Button>
               </div>
             </div>
           </div>
