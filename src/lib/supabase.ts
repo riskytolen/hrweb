@@ -166,8 +166,10 @@ export interface DbRecruitment {
   pengalaman_kerja: string | null;
   alamat: string | null;
   cv_url: string | null;
-  status: "Baru" | "Screening" | "Interview" | "Diterima" | "Ditolak";
+  status: "Lamaran Masuk" | "Terpilih" | "Training" | "Diterima" | "Ditolak";
   catatan: string | null;
+  tanggal_training_mulai: string | null;
+  tanggal_training_selesai: string | null;
   created_at: string;
   updated_at: string;
 }

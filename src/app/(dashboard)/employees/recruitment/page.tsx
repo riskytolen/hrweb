@@ -18,9 +18,9 @@ const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
 const STATUS_OPTIONS = [
-  { value: "Baru", label: "Baru", color: "#6b7280" },
-  { value: "Screening", label: "Screening", color: "#f59e0b" },
-  { value: "Interview", label: "Interview", color: "#3b82f6" },
+  { value: "Lamaran Masuk", label: "Lamaran Masuk", color: "#6b7280" },
+  { value: "Terpilih", label: "Terpilih", color: "#3b82f6" },
+  { value: "Training", label: "Training", color: "#f59e0b" },
   { value: "Diterima", label: "Diterima", color: "#10b981" },
   { value: "Ditolak", label: "Ditolak", color: "#ef4444" },
 ];
@@ -38,7 +38,8 @@ export default function RecruitmentPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
     nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK",
-    pengalaman_kerja: "", alamat: "", status: "Baru", catatan: "",
+    pengalaman_kerja: "", alamat: "", status: "Lamaran Masuk", catatan: "",
+    tanggal_training_mulai: "", tanggal_training_selesai: "",
   });
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [formErrors, setFormErrors] = useState<Set<string>>(new Set());
@@ -76,7 +77,7 @@ export default function RecruitmentPage() {
   };
 
   const openAdd = () => {
-    setForm({ nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK", pengalaman_kerja: "", alamat: "", status: "Baru", catatan: "" });
+    setForm({ nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK", pengalaman_kerja: "", alamat: "", status: "Lamaran Masuk", catatan: "", tanggal_training_mulai: "", tanggal_training_selesai: "" });
     setCvFile(null);
     setFormErrors(new Set());
     setEditingId(null);
@@ -88,6 +89,7 @@ export default function RecruitmentPage() {
       nama: r.nama, no_hp: r.no_hp, email: r.email || "", posisi_dilamar: r.posisi_dilamar,
       pendidikan_terakhir: r.pendidikan_terakhir, pengalaman_kerja: r.pengalaman_kerja || "",
       alamat: r.alamat || "", status: r.status, catatan: r.catatan || "",
+      tanggal_training_mulai: r.tanggal_training_mulai || "", tanggal_training_selesai: r.tanggal_training_selesai || "",
     });
     setCvFile(null);
     setFormErrors(new Set());
@@ -109,6 +111,8 @@ export default function RecruitmentPage() {
       posisi_dilamar: form.posisi_dilamar, pendidikan_terakhir: form.pendidikan_terakhir,
       pengalaman_kerja: form.pengalaman_kerja || null, alamat: form.alamat || null,
       status: form.status, catatan: form.catatan || null,
+      tanggal_training_mulai: form.tanggal_training_mulai || null,
+      tanggal_training_selesai: form.tanggal_training_selesai || null,
     };
 
     let cvUrl: string | null = null;
@@ -155,11 +159,11 @@ export default function RecruitmentPage() {
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const detail = detailId ? list.find((r) => r.id === detailId) : null;
 
-  const statusCounts = {
+  const statusCounts: Record<string, number> = {
     Semua: list.length,
-    Baru: list.filter((r) => r.status === "Baru").length,
-    Screening: list.filter((r) => r.status === "Screening").length,
-    Interview: list.filter((r) => r.status === "Interview").length,
+    "Lamaran Masuk": list.filter((r) => r.status === "Lamaran Masuk").length,
+    Terpilih: list.filter((r) => r.status === "Terpilih").length,
+    Training: list.filter((r) => r.status === "Training").length,
     Diterima: list.filter((r) => r.status === "Diterima").length,
     Ditolak: list.filter((r) => r.status === "Ditolak").length,
   };
@@ -186,7 +190,7 @@ export default function RecruitmentPage() {
 
       {/* Summary */}
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
-        {(["Semua", "Baru", "Screening", "Interview", "Diterima", "Ditolak"] as const).map((s) => {
+        {(["Semua", "Lamaran Masuk", "Terpilih", "Training", "Diterima", "Ditolak"] as const).map((s) => {
           const color = STATUS_OPTIONS.find((o) => o.value === s)?.color || "#6b7280";
           const isActive = filterStatus === s;
           return (
@@ -333,6 +337,23 @@ export default function RecruitmentPage() {
                       <p className="text-[10px] text-success mt-1">CV sudah ada</p>
                     )}
                   </div>
+                  {(form.status === "Training" || form.status === "Diterima" || form.status === "Ditolak") && (
+                    <>
+                      <div>
+                        <label className="text-xs font-semibold text-foreground mb-1.5 block">Training Mulai</label>
+                        <input type="date" value={form.tanggal_training_mulai} onChange={(e) => {
+                          const mulai = e.target.value;
+                          const selesai = mulai ? new Date(new Date(mulai).getTime() + 2 * 86400000).toISOString().slice(0, 10) : "";
+                          setForm({ ...form, tanggal_training_mulai: mulai, tanggal_training_selesai: selesai });
+                        }} className={inputClass} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-foreground mb-1.5 block">Training Selesai</label>
+                        <input type="date" value={form.tanggal_training_selesai} onChange={(e) => setForm({ ...form, tanggal_training_selesai: e.target.value })} className={inputClass} />
+                        <p className="text-[10px] text-muted-foreground mt-1">Default 3 hari dari tanggal mulai</p>
+                      </div>
+                    </>
+                  )}
                   <div className="col-span-2">
                     <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan</label>
                     <input type="text" placeholder="Catatan internal (opsional)" value={form.catatan} onChange={(e) => setForm({ ...form, catatan: e.target.value })} className={inputClass} />
@@ -388,6 +409,13 @@ export default function RecruitmentPage() {
                     </div>
                   ))}
                 </div>
+
+                {detail.tanggal_training_mulai && (
+                  <div className="rounded-xl border border-warning/20 bg-warning/5 p-3">
+                    <p className="text-[10px] text-warning uppercase tracking-wider font-semibold mb-1">Periode Training</p>
+                    <p className="text-sm font-semibold text-foreground">{detail.tanggal_training_mulai} s/d {detail.tanggal_training_selesai || "-"}</p>
+                  </div>
+                )}
 
                 {detail.pengalaman_kerja && (
                   <div>
