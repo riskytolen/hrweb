@@ -355,13 +355,14 @@ export default function EmployeesPage() {
     }
   };
 
-  const generateId = () => {
-    const existingNums = employees.map((e) => {
-      const num = parseInt(e.id.replace(/\D/g, ""), 10);
-      return isNaN(num) ? 0 : num;
-    });
-    const nextNum = (existingNums.length > 0 ? Math.max(...existingNums) : 57200) + 1;
-    const generated = `ID${nextNum}`;
+  const generateId = async () => {
+    const { data: allIds } = await supabase.from("pegawai").select("id");
+    const existingSet = new Set(allIds?.map((e) => e.id) || []);
+    let generated: string;
+    do {
+      const rand = Math.floor(Math.random() * 100000);
+      generated = `ID${String(rand).padStart(5, "0")}`;
+    } while (existingSet.has(generated));
     setNewId(generated);
     setAddForm((prev) => ({ ...prev, id: generated }));
   };
@@ -376,8 +377,8 @@ export default function EmployeesPage() {
   ];
 
   const csvSampleRows = [
-    ["ID57201", "Budi Santoso", "Laki-laki", "Islam", "Aktif", "3201012345670001", "Jakarta", "1990-05-15", "Jl. Merdeka No. 10 RT 01/02 Kel. Menteng Kec. Menteng Jakarta Pusat", "Jl. Sudirman No. 25 Jakarta Selatan", "081234567890", "2024-01-15", "Staff", "Menikah", "Siti Aminah", "2", "0001234567890", "JKT2024001234", "1234567890", "BCA", "Budi Santoso", "2024-01-15", "2026-01-14"],
-    ["ID57202", "Dewi Lestari", "Perempuan", "Kristen", "Aktif", "3201019876540002", "Bandung", "1995-11-20", "Jl. Asia Afrika No. 5 Bandung", "Jl. Dago No. 88 Bandung", "085298765432", "2025-03-01", "Supervisor", "Belum Menikah", "", "0", "", "", "9876543210", "Mandiri", "Dewi Lestari", "", ""],
+    ["ID00001", "Budi Santoso", "Laki-laki", "Islam", "Aktif", "3201012345670001", "Jakarta", "1990-05-15", "Jl. Merdeka No. 10 RT 01/02 Kel. Menteng Kec. Menteng Jakarta Pusat", "Jl. Sudirman No. 25 Jakarta Selatan", "081234567890", "2024-01-15", "Staff", "Menikah", "Siti Aminah", "2", "0001234567890", "JKT2024001234", "1234567890", "BCA", "Budi Santoso", "2024-01-15", "2026-01-14"],
+    ["ID00002", "Dewi Lestari", "Perempuan", "Kristen", "Aktif", "3201019876540002", "Bandung", "1995-11-20", "Jl. Asia Afrika No. 5 Bandung", "Jl. Dago No. 88 Bandung", "085298765432", "2025-03-01", "Supervisor", "Belum Menikah", "", "0", "", "", "9876543210", "Mandiri", "Dewi Lestari", "", ""],
   ];
 
   const csvTemplateContent = [
@@ -471,7 +472,7 @@ export default function EmployeesPage() {
     // ── Valid enum values ──
     const validJk = new Set(["Laki-laki", "Perempuan"]);
     const validAgama = new Set(["Islam", "Kristen", "Katolik", "Hindu", "Buddha", "Konghucu"]);
-    const validStatus = new Set(["Aktif", "Tidak Aktif", "Cuti"]);
+    const validStatus = new Set(["Aktif", "Tidak Aktif", "Cuti", "Training"]);
     const validPernikahan = new Set(["Belum Menikah", "Menikah", "Cerai"]);
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -508,26 +509,19 @@ export default function EmployeesPage() {
       const tglMulaiPkwt = r[col("TANGGAL_MULAI_PKWT")]?.trim();
       const tglAkhirPkwt = r[col("TANGGAL_BERAKHIR_PKWT")]?.trim();
 
-      // Required fields
+      // Required fields (hanya ID, NAMA, NO_TELP yang wajib)
       if (!id) rowErrors.push("ID kosong");
+      else if (!/^ID\d{5}$/.test(id)) rowErrors.push(`ID "${id}" harus format ID + 5 digit angka (contoh: ID00001)`);
       if (id && existingIds.has(id)) rowErrors.push(`ID "${id}" sudah ada`);
       if (!nama) rowErrors.push("NAMA kosong");
-      if (!jk) rowErrors.push("JENIS_KELAMIN kosong");
-      else if (!validJk.has(jk)) rowErrors.push(`JENIS_KELAMIN "${jk}" tidak valid`);
-      if (!agama) rowErrors.push("AGAMA kosong");
-      else if (!validAgama.has(agama)) rowErrors.push(`AGAMA "${agama}" tidak valid`);
-      if (!validStatus.has(status)) rowErrors.push(`STATUS "${status}" tidak valid`);
-      if (!noKtp) rowErrors.push("NO_KTP kosong");
-      if (!tempatLahir) rowErrors.push("TEMPAT_LAHIR kosong");
-      if (!tglLahir) rowErrors.push("TANGGAL_LAHIR kosong");
-      else if (!dateRegex.test(tglLahir)) rowErrors.push("TANGGAL_LAHIR harus format YYYY-MM-DD");
       if (!noTelp) rowErrors.push("NO_TELP kosong");
-      if (!tglBergabung) rowErrors.push("TANGGAL_BERGABUNG kosong");
-      else if (!dateRegex.test(tglBergabung)) rowErrors.push("TANGGAL_BERGABUNG harus format YYYY-MM-DD");
-      if (!validPernikahan.has(statusPernikahan)) rowErrors.push(`STATUS_PERNIKAHAN "${statusPernikahan}" tidak valid`);
-      if (!noRek) rowErrors.push("NO_REKENING kosong");
-      if (!bank) rowErrors.push("BANK kosong");
-      if (!namaRek) rowErrors.push("NAMA_REKENING kosong");
+      // Optional fields — validasi format jika diisi
+      if (jk && !validJk.has(jk)) rowErrors.push(`JENIS_KELAMIN "${jk}" tidak valid`);
+      if (agama && !validAgama.has(agama)) rowErrors.push(`AGAMA "${agama}" tidak valid`);
+      if (!validStatus.has(status)) rowErrors.push(`STATUS "${status}" tidak valid`);
+      if (tglLahir && !dateRegex.test(tglLahir)) rowErrors.push("TANGGAL_LAHIR harus format YYYY-MM-DD");
+      if (tglBergabung && !dateRegex.test(tglBergabung)) rowErrors.push("TANGGAL_BERGABUNG harus format YYYY-MM-DD");
+      if (statusPernikahan && !validPernikahan.has(statusPernikahan)) rowErrors.push(`STATUS_PERNIKAHAN "${statusPernikahan}" tidak valid`);
       if (tglMulaiPkwt && !dateRegex.test(tglMulaiPkwt)) rowErrors.push("TANGGAL_MULAI_PKWT harus format YYYY-MM-DD");
       if (tglAkhirPkwt && !dateRegex.test(tglAkhirPkwt)) rowErrors.push("TANGGAL_BERAKHIR_PKWT harus format YYYY-MM-DD");
 
@@ -545,25 +539,25 @@ export default function EmployeesPage() {
         validRows.push({
           id,
           nama,
-          jenis_kelamin: jk,
-          agama,
+          jenis_kelamin: jk || null,
+          agama: agama || null,
           status,
-          no_ktp: noKtp,
-          tempat_lahir: tempatLahir,
-          tanggal_lahir: tglLahir,
-          alamat_ktp: alamatKtp || "-",
-          alamat_domisili: alamatDomisili || "-",
+          no_ktp: noKtp || null,
+          tempat_lahir: tempatLahir || null,
+          tanggal_lahir: tglLahir || null,
+          alamat_ktp: alamatKtp || null,
+          alamat_domisili: alamatDomisili || null,
           no_telp: noTelp,
-          tanggal_bergabung: tglBergabung,
+          tanggal_bergabung: tglBergabung || null,
           jabatan_id: jabatanId,
-          status_pernikahan: statusPernikahan,
+          status_pernikahan: statusPernikahan || null,
           nama_pasangan: namaPasangan || null,
           jumlah_anak: parseInt(jumlahAnak || "0") || 0,
           no_bpjs_kesehatan: noBpjsKes || null,
           no_bpjs_ketenagakerjaan: noBpjsKet || null,
-          no_rekening: noRek,
-          bank,
-          nama_rekening: namaRek,
+          no_rekening: noRek || null,
+          bank: bank || null,
+          nama_rekening: namaRek || null,
           tanggal_mulai_pkwt: tglMulaiPkwt || null,
           tanggal_berakhir_pkwt: tglAkhirPkwt || null,
         });
@@ -1391,7 +1385,7 @@ export default function EmployeesPage() {
       {/* ═══ FORM TAMBAH PEGAWAI (Modal) ═══ */}
       {showAddForm && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 pb-8">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { if (!addSaving) setShowAddForm(false); }} />
+           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative w-full max-w-3xl bg-card rounded-2xl shadow-2xl overflow-hidden max-h-[calc(100vh-4rem)] flex flex-col animate-scale-in">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-3">

@@ -245,12 +245,13 @@ export default function RecruitmentPage() {
   // ─── Helper: generate ID pegawai ───
   const generateEmployeeId = async (): Promise<string> => {
     const { data: allIds } = await supabase.from("pegawai").select("id");
-    let maxNum = 57200;
-    allIds?.forEach((e) => {
-      const num = parseInt(e.id.replace(/\D/g, ""), 10);
-      if (!isNaN(num) && num > maxNum) maxNum = num;
-    });
-    return `ID${maxNum + 1}`;
+    const existingSet = new Set(allIds?.map((e) => e.id) || []);
+    let generated: string;
+    do {
+      const rand = Math.floor(Math.random() * 100000);
+      generated = `ID${String(rand).padStart(5, "0")}`;
+    } while (existingSet.has(generated));
+    return generated;
   };
 
   // ─── Helper: insert pegawai dari data recruitment ───
