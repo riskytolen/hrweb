@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
+  UserPlus, UserCheck, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
@@ -47,6 +47,8 @@ export default function RecruitmentPage() {
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [convertConfirm, setConvertConfirm] = useState<DbRecruitment | null>(null);
+  const [converting, setConverting] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
   const [detailId, setDetailId] = useState<number | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -251,6 +253,52 @@ export default function RecruitmentPage() {
     // Update state lokal langsung
     setList((prev) => prev.map((r) => (r.id === id ? updated : r)));
     showToast("success", "Status Diperbarui", `Status berhasil diubah ke "${status}".`);
+  };
+
+  // ─── Convert to Employee ───
+  const handleConvertToEmployee = async () => {
+    if (!convertConfirm) return;
+    setConverting(true);
+    try {
+      // Generate ID pegawai: ambil ID terakhir dari DB
+      const { data: lastEmp } = await supabase
+        .from("pegawai")
+        .select("id")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      let nextNum = 57201;
+      if (lastEmp?.id) {
+        const num = parseInt(lastEmp.id.replace(/\D/g, ""), 10);
+        if (!isNaN(num)) nextNum = num + 1;
+      }
+      const newId = `ID${nextNum}`;
+
+      // Insert ke pegawai dengan data minimal dari recruitment
+      const { error } = await supabase.from("pegawai").insert({
+        id: newId,
+        nama: convertConfirm.nama,
+        no_telp: convertConfirm.no_hp,
+        alamat_domisili: convertConfirm.alamat || null,
+        alamat_ktp: convertConfirm.alamat || null,
+        status: "Aktif",
+        tanggal_bergabung: new Date().toISOString().slice(0, 10),
+      });
+
+      if (error) {
+        showToast("error", "Gagal Menjadikan Pegawai", error.message);
+        return;
+      }
+
+      showToast("success", "Berhasil Dijadikan Pegawai", `${convertConfirm.nama} terdaftar sebagai pegawai dengan ID ${newId}. Lengkapi data di halaman Pegawai.`);
+      setConvertConfirm(null);
+      setDetailId(null);
+    } catch (err) {
+      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menjadikan pegawai.");
+    } finally {
+      setConverting(false);
+    }
   };
 
   const filtered = list.filter((r) => {
@@ -566,9 +614,45 @@ export default function RecruitmentPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 px-5 py-4 border-t border-border flex-shrink-0">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => { openEdit(detail); setDetailId(null); }} icon={Pencil}>Edit</Button>
-                <Button variant="danger" size="sm" className="flex-1" onClick={() => { setDeleteConfirm({ id: detail.id, nama: detail.nama }); setDetailId(null); }} icon={Trash2}>Hapus</Button>
+              <div className="px-5 py-4 border-t border-border flex-shrink-0 space-y-2">
+                {detail.status === "Diterima" && (
+                  <Button size="sm" className="w-full" icon={UserCheck} onClick={() => setConvertConfirm(detail)}>
+                    Jadikan Pegawai
+                  </Button>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => { openEdit(detail); setDetailId(null); }} icon={Pencil}>Edit</Button>
+                  <Button variant="danger" size="sm" className="flex-1" onClick={() => { setDeleteConfirm({ id: detail.id, nama: detail.nama }); setDetailId(null); }} icon={Trash2}>Hapus</Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ CONVERT TO EMPLOYEE CONFIRM ═══ */}
+      {convertConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !converting && setConvertConfirm(null)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="p-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-success/10 flex items-center justify-center mx-auto mb-4">
+                  <UserCheck className="w-7 h-7 text-success" />
+                </div>
+                <h3 className="text-base font-bold text-foreground">Jadikan Pegawai?</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  <span className="font-semibold text-foreground">{convertConfirm.nama}</span> akan didaftarkan sebagai pegawai baru.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2 bg-muted/50 rounded-lg px-3 py-2">
+                  Data yang akan diisi otomatis: nama, no. HP, dan alamat. Data lainnya bisa dilengkapi nanti di halaman Pegawai.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setConvertConfirm(null)} disabled={converting}>Batal</Button>
+                <Button size="sm" icon={UserCheck} className="flex-1" onClick={handleConvertToEmployee} disabled={converting}>
+                  {converting ? "Memproses..." : "Ya, Jadikan Pegawai"}
+                </Button>
               </div>
             </div>
           </div>
