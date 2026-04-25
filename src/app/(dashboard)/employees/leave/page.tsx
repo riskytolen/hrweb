@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { supabase, type DbLeaveRequest } from "@/lib/supabase";
 
 type EmployeeLite = { id: string; nama: string };
+type DivisionLite = { id: number };
 type LeaveRow = DbLeaveRequest & { employeeNama?: string };
 
 const PAGE_SIZE = 10;
@@ -51,6 +52,7 @@ export default function LeavePage() {
   const [filterStatus, setFilterStatus] = useState("Semua");
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  const [divisions, setDivisions] = useState<DivisionLite[]>([]);
   const [list, setList] = useState<LeaveRow[]>([]);
 
   // Form
@@ -91,6 +93,10 @@ export default function LeavePage() {
     const { data } = await supabase.from("pegawai").select("id, nama").in("status", ["Aktif", "Training"]).order("nama");
     if (data) setEmployees(data);
   };
+  const fetchDivisions = async () => {
+    const { data } = await supabase.from("divisions").select("id").eq("status", "Aktif").order("id").limit(1);
+    if (data) setDivisions(data);
+  };
 
   const fetchList = useCallback(async () => {
     const { data, error } = await supabase
@@ -104,7 +110,7 @@ export default function LeavePage() {
   }, [showToast]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchList()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchDivisions(), fetchList()]).then(() => setLoading(false));
   }, []);
 
   // Summary
@@ -217,27 +223,54 @@ export default function LeavePage() {
       if (isApprove) {
         const req = list.find((r) => r.id === approvalConfirm.id);
         if (req) {
-          const inserts: Record<string, unknown>[] = [];
-          const start = new Date(req.tanggal_mulai + "T00:00:00");
-          const end = new Date(req.tanggal_selesai + "T00:00:00");
-          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            const tanggal = d.toISOString().slice(0, 10);
-            inserts.push({
+          // Generate tanggal dari range (tanpa Date object untuk hindari timezone issue)
+          const dates: string[] = [];
+          const [sy, sm, sd] = req.tanggal_mulai.split("-").map(Number);
+          const [ey, em, ed] = req.tanggal_selesai.split("-").map(Number);
+          const startMs = Date.UTC(sy, sm - 1, sd);
+          const endMs = Date.UTC(ey, em - 1, ed);
+          for (let ms = startMs; ms <= endMs; ms += 86400000) {
+            const dt = new Date(ms);
+            dates.push(`${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`);
+          }
+
+          // Insert/update attendance_records (overwrite jika sudah ada)
+          for (const tanggal of dates) {
+            // Cek apakah sudah ada record
+            const { data: existRec } = await supabase
+              .from("attendance_records")
+              .select("id")
+              .eq("employee_id", req.employee_id)
+              .eq("tanggal", tanggal)
+              .limit(1)
+              .maybeSingle();
+
+            const defaultDivId = divisions[0]?.id || 1;
+            const payload = {
               employee_id: req.employee_id,
-              division_id: 1, // default, akan di-resolve oleh sistem
+              division_id: defaultDivId,
               tanggal,
               jam_masuk: "00:00",
               schedule_jam_masuk: "00:00",
               toleransi_menit: 0,
-              status: req.jenis, // Izin / Sakit / Cuti
+              status: req.jenis,
               durasi_telat: 0,
               denda: 0,
               catatan: `${req.jenis}: ${req.alasan || "-"}`,
-            });
-          }
-          // Insert, skip duplicates (jika sudah ada record di tanggal itu)
-          for (const ins of inserts) {
-            await supabase.from("attendance_records").upsert(ins, { onConflict: "employee_id,tanggal", ignoreDuplicates: true });
+            };
+
+            if (existRec) {
+              // Update record yang sudah ada
+              await supabase.from("attendance_records").update({
+                status: req.jenis,
+                jam_masuk: "00:00",
+                durasi_telat: 0,
+                denda: 0,
+                catatan: `${req.jenis}: ${req.alasan || "-"}`,
+              }).eq("id", existRec.id);
+            } else {
+              await supabase.from("attendance_records").insert(payload);
+            }
           }
         }
       }
@@ -249,10 +282,33 @@ export default function LeavePage() {
     setApprovalNote("");
   };
 
+  // Helper: cleanup attendance records for a leave request
+  const cleanupAttendanceForLeave = async (req: LeaveRow) => {
+    if (req.status !== "Disetujui") return;
+    // Hapus attendance records yang dibuat dari pengajuan ini
+    const [sy, sm, sd] = req.tanggal_mulai.split("-").map(Number);
+    const [ey, em, ed] = req.tanggal_selesai.split("-").map(Number);
+    const startMs = Date.UTC(sy, sm - 1, sd);
+    const endMs = Date.UTC(ey, em - 1, ed);
+    for (let ms = startMs; ms <= endMs; ms += 86400000) {
+      const dt = new Date(ms);
+      const tanggal = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+      await supabase.from("attendance_records")
+        .delete()
+        .eq("employee_id", req.employee_id)
+        .eq("tanggal", tanggal)
+        .in("status", ["Izin", "Sakit", "Cuti"]);
+    }
+  };
+
   // Delete
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     setDeleting(true);
+    // Cleanup attendance jika sudah disetujui
+    const req = list.find((r) => r.id === deleteConfirm.id);
+    if (req) await cleanupAttendanceForLeave(req);
+
     const { error } = await supabase.from("leave_requests").delete().eq("id", deleteConfirm.id);
     if (error) showToast("error", "Gagal Menghapus", error.message);
     else {
@@ -398,9 +454,9 @@ export default function LeavePage() {
                               title="Setujui" className="p-1.5 rounded-lg hover:bg-success-light text-muted-foreground hover:text-success"><Check className="w-3.5 h-3.5" /></button>
                             <button onClick={() => setApprovalConfirm({ id: row.id, nama: `${row.employeeNama} (${row.jenis})`, action: "reject" })}
                               title="Tolak" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><X className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
                           </>
                         )}
-                        <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
                         <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.jenis})` })}
                           title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div>

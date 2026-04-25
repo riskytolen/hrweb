@@ -238,6 +238,15 @@ export interface DbEmployeeOffDay {
   pegawai?: DbPegawai;
 }
 
+export interface DbEmployeeLeaveOverride {
+  id: number;
+  employee_id: string;
+  tanggal: string;
+  type: "libur" | "masuk";
+  catatan: string | null;
+  created_at: string;
+}
+
 export interface DbEmployeeDevice {
   id: number;
   employee_id: string;
