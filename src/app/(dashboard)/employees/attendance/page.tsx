@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   ClipboardCheck, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   ChevronLeft, ChevronRight, ChevronUp, Download, FileText, ChevronDown, Clock, User,
+  CalendarOff,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -16,6 +17,7 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbAttendanceRecord } from "@/lib/supabase";
 
 type EmployeeLite = { id: string; nama: string; status: string };
+type OffDayEntry = { employee_id: string; day_of_week: number };
 type DivisionLite = { id: number; nama: string; color: string };
 type ScheduleLite = { division_id: number; jam_masuk: string; toleransi_menit: number };
 type PenaltyLite = { division_id: number; denda_per_menit: number; batas_menit: number; denda_maksimum: number; denda_alpha: number };
@@ -34,9 +36,12 @@ const STATUS_OPTIONS = [
   { value: "Izin", label: "Izin", color: "#3b82f6" },
   { value: "Sakit", label: "Sakit", color: "#ef4444" },
   { value: "Alpha", label: "Alpha", color: "#6b7280" },
+  { value: "Libur", label: "Libur", color: "#8b5cf6" },
 ];
 
 const SPECIAL_STATUSES = ["Izin", "Sakit", "Alpha"];
+const DAY_NAMES = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+const DAY_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);
@@ -78,6 +83,7 @@ export default function AttendancePage() {
   const [schedules, setSchedules] = useState<ScheduleLite[]>([]);
   const [penalties, setPenalties] = useState<PenaltyLite[]>([]);
   const [records, setRecords] = useState<AttendanceRow[]>([]);
+  const [offDays, setOffDays] = useState<OffDayEntry[]>([]);
 
   // ─── Add/Edit Form ───
   const [showForm, setShowForm] = useState(false);
@@ -89,6 +95,12 @@ export default function AttendancePage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [formExistingEmpIds, setFormExistingEmpIds] = useState<Set<string>>(new Set());
+
+  // Off day setting modal
+  const [showOffDay, setShowOffDay] = useState(false);
+  const [offDaySearch, setOffDaySearch] = useState("");
+  const [offDaySaving, setOffDaySaving] = useState(false);
+  const [offDayLocal, setOffDayLocal] = useState<Map<string, Set<number>>>(new Map());
 
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -117,10 +129,10 @@ export default function AttendancePage() {
   }, []);
 
   useEffect(() => {
-    if (showForm) document.body.style.overflow = "hidden";
+    if (showForm || showOffDay) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showForm]);
+  }, [showForm, showOffDay]);
 
   // ─── Fetch ───
   const fetchEmployees = async () => {
@@ -138,6 +150,11 @@ export default function AttendancePage() {
   const fetchPenalties = async () => {
     const { data } = await supabase.from("attendance_penalty_rates").select("division_id, denda_per_menit, batas_menit, denda_maksimum, denda_alpha").eq("status", "Aktif");
     if (data) setPenalties(data);
+  };
+
+  const fetchOffDays = async () => {
+    const { data } = await supabase.from("employee_off_days").select("employee_id, day_of_week");
+    if (data) setOffDays(data);
   };
 
   const fetchRecords = useCallback(async () => {
@@ -159,13 +176,13 @@ export default function AttendancePage() {
   }, [dateFilter, showToast]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchRecords()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchOffDays(), fetchRecords()]).then(() => setLoading(false));
   }, []);
 
   useEffect(() => { fetchRecords(); }, [dateFilter, fetchRecords]);
 
   // ─── Summary ───
-  const statusCounts: Record<string, number> = { Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpha: 0 };
+  const statusCounts: Record<string, number> = { Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpha: 0, Libur: 0 };
   records.forEach((r) => { if (r.status in statusCounts) statusCounts[r.status]++; });
   const totalDenda = records.reduce((s, r) => s + r.denda, 0);
 
@@ -329,6 +346,47 @@ export default function AttendancePage() {
     setDeleteConfirm(null);
   };
 
+  // ─── Off Day Modal ───
+  const openOffDay = () => {
+    const map = new Map<string, Set<number>>();
+    employees.forEach((e) => map.set(e.id, new Set()));
+    offDays.forEach((od) => {
+      if (map.has(od.employee_id)) map.get(od.employee_id)!.add(od.day_of_week);
+    });
+    setOffDayLocal(map);
+    setOffDaySearch("");
+    setShowOffDay(true);
+  };
+
+  const toggleOffDay = (empId: string, day: number) => {
+    setOffDayLocal((prev) => {
+      const next = new Map(prev);
+      const days = new Set(next.get(empId) || []);
+      if (days.has(day)) days.delete(day); else days.add(day);
+      next.set(empId, days);
+      return next;
+    });
+  };
+
+  const handleSaveOffDays = async () => {
+    setOffDaySaving(true);
+    // Delete all then re-insert
+    await supabase.from("employee_off_days").delete().neq("id", 0);
+    const inserts: { employee_id: string; day_of_week: number }[] = [];
+    offDayLocal.forEach((days, empId) => {
+      days.forEach((d) => inserts.push({ employee_id: empId, day_of_week: d }));
+    });
+    if (inserts.length > 0) {
+      await supabase.from("employee_off_days").insert(inserts);
+    }
+    await fetchOffDays();
+    setOffDaySaving(false);
+    setShowOffDay(false);
+    showToast("success", "Jadwal Libur Disimpan", `${inserts.length} hari libur untuk ${offDayLocal.size} pegawai.`);
+  };
+
+
+
   // ─── Export CSV ───
   const exportCSV = () => {
     const headers = ["Tanggal", "Pegawai", "Divisi", "Jam Masuk", "Jadwal", "Status", "Telat (menit)", "Denda", "Catatan"];
@@ -389,6 +447,7 @@ export default function AttendancePage() {
         icon={ClipboardCheck}
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" icon={CalendarOff} onClick={openOffDay}>Atur Libur</Button>
             <div ref={exportRef} className="relative">
               <Button variant="outline" size="sm" icon={Download} onClick={() => setShowExportMenu(!showExportMenu)} disabled={records.length === 0}>
                 Export <ChevronDown className="w-3 h-3 ml-0.5" />
@@ -427,65 +486,69 @@ export default function AttendancePage() {
         </Portal>
       )}
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-        {[
-          { label: "Semua", value: records.length, color: "#6b7280" },
-          ...STATUS_OPTIONS.map((s) => ({ label: s.label, value: statusCounts[s.value], color: s.color })),
-        ].map((stat) => {
-          const isActive = filterStatus === stat.label;
-          return (
-            <button key={stat.label} onClick={() => { setFilterStatus(stat.label); setPage(1); }}
-              className={cn("bg-card rounded-xl border p-3 text-center transition-all", isActive ? "border-primary ring-2 ring-primary/10" : "border-border hover:border-primary/30")}>
-              {loading ? <Skeleton className="h-6 w-8 mx-auto rounded-md" /> : (
-                <p className="text-lg font-bold" style={stat.label !== "Semua" ? { color: stat.color } : undefined}>{stat.value}</p>
-              )}
-              <p className="text-[10px] text-muted-foreground font-medium mt-0.5">{stat.label}</p>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Denda total */}
-      {totalDenda > 0 && !loading && (
-        <div className="bg-card rounded-xl border border-warning/20 p-3 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center">
-            <AlertTriangle className="w-4 h-4 text-warning" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Total Denda Hari Ini</p>
-            <p className="text-sm font-bold text-warning">{formatCurrency(totalDenda)}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Filter & Date */}
-      <div className="bg-card rounded-2xl border border-border p-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5 flex-1">
-            <Search className="w-4 h-4 text-muted-foreground" />
-            <input type="text" placeholder="Cari nama atau divisi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
-          </div>
-          <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+      {/* Compact toolbar: date nav + search + status filter + info badges */}
+      <div className="bg-card rounded-2xl border border-border p-3">
+        {/* Row 1: Date navigator + search + tutup absen */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-muted rounded-xl p-0.5 flex-shrink-0">
             <button onClick={() => {
               const d = new Date(dateFilter); d.setDate(d.getDate() - 1);
               setDateFilter(d.toISOString().slice(0, 10)); setPage(1);
-            }} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
-              <ChevronLeft className="w-4 h-4" />
+            }} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
-            <div className="px-3 py-1.5 text-center min-w-[180px]">
-              <p className="text-xs font-bold text-foreground">
+            <div className="px-2 py-1 text-center min-w-[170px]">
+              <p className="text-[11px] font-bold text-foreground">
                 {new Date(dateFilter + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
               </p>
             </div>
             <button onClick={() => {
               const d = new Date(dateFilter); d.setDate(d.getDate() + 1);
               setDateFilter(d.toISOString().slice(0, 10)); setPage(1);
-            }} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
-              <ChevronRight className="w-4 h-4" />
+            }} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
+          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1">
+            <Search className="w-3.5 h-3.5 text-muted-foreground" />
+            <input type="text" placeholder="Cari nama atau divisi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+          </div>
+
+        </div>
+        {/* Row 2: Status filter pills + info badges */}
+        <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+          {[
+            { label: "Semua", value: records.length, color: "#6b7280" },
+            ...STATUS_OPTIONS.map((s) => ({ label: s.label, value: statusCounts[s.value], color: s.color })),
+          ].map((stat) => {
+            const isActive = filterStatus === stat.label;
+            return (
+              <button key={stat.label} onClick={() => { setFilterStatus(stat.label); setPage(1); }}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all",
+                  isActive ? "bg-primary/10 text-primary ring-1 ring-primary/20" : "text-muted-foreground hover:bg-muted"
+                )}>
+                {stat.label !== "Semua" && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: stat.color }} />}
+                <span>{stat.label}</span>
+                <span className={cn("text-[9px] font-bold px-1 py-0.5 rounded", isActive ? "bg-primary/15" : "bg-muted")}
+                  style={!isActive && stat.label !== "Semua" ? { color: stat.color } : undefined}>
+                  {loading ? "-" : stat.value}
+                </span>
+              </button>
+            );
+          })}
+          {/* Denda badge */}
+          {totalDenda > 0 && !loading && (
+            <>
+              <div className="h-4 w-px bg-border" />
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-warning/10 text-[11px]">
+                <AlertTriangle className="w-3 h-3 text-warning" />
+                <span className="text-muted-foreground">Denda:</span>
+                <span className="font-bold text-warning">{formatCurrency(totalDenda)}</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -819,6 +882,98 @@ export default function AttendancePage() {
           </div>
         </Portal>
       )}
+
+      {/* ═══ ATUR LIBUR MODAL ═══ */}
+      {showOffDay && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-3">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+            <div className="relative w-full max-w-2xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 1.5rem)" }}>
+              {/* Header */}
+              <div className="px-5 py-3 border-b border-border bg-gradient-to-r from-violet-500/5 to-transparent flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center">
+                    <CalendarOff className="w-4 h-4 text-violet-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-foreground">Atur Hari Libur Pegawai</h2>
+                    <p className="text-[10px] text-muted-foreground">Pilih hari libur tetap per minggu untuk setiap pegawai</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowOffDay(false)} disabled={offDaySaving} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+              </div>
+
+              {/* Search */}
+              <div className="px-5 py-2 border-b border-border">
+                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
+                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                  <input type="text" placeholder="Cari pegawai..." value={offDaySearch} onChange={(e) => setOffDaySearch(e.target.value)}
+                    className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="flex-1 overflow-y-auto">
+                <table className="w-full">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-card border-b-2 border-border">
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2">Pegawai</th>
+                      {DAY_SHORT.map((d, i) => (
+                        <th key={i} className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2 w-14">{d}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employees
+                      .filter((e) => e.nama.toLowerCase().includes(offDaySearch.toLowerCase()))
+                      .map((emp) => {
+                        const empDays = offDayLocal.get(emp.id) || new Set<number>();
+                        return (
+                          <tr key={emp.id} className="border-b border-border/40 hover:bg-muted/30">
+                            <td className="px-5 py-2">
+                              <span className="text-xs font-semibold text-foreground">{emp.nama}</span>
+                            </td>
+                            {DAY_SHORT.map((_, dayIdx) => {
+                              const isOff = empDays.has(dayIdx);
+                              return (
+                                <td key={dayIdx} className="px-2 py-2 text-center">
+                                  <button type="button" onClick={() => toggleOffDay(emp.id, dayIdx)}
+                                    className={cn(
+                                      "w-8 h-8 rounded-lg text-[10px] font-bold transition-all",
+                                      isOff
+                                        ? "bg-violet-500 text-white shadow-sm shadow-violet-500/25"
+                                        : "bg-muted/50 text-muted-foreground/40 hover:bg-muted hover:text-muted-foreground"
+                                    )}>
+                                    {isOff ? "OFF" : "-"}
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-3 border-t border-border bg-muted/20 flex items-center justify-between flex-shrink-0">
+                <p className="text-xs text-muted-foreground">
+                  {Array.from(offDayLocal.values()).reduce((s, days) => s + days.size, 0)} hari libur untuk {employees.length} pegawai
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setShowOffDay(false)} disabled={offDaySaving}>Batal</Button>
+                  <Button size="sm" icon={Check} onClick={handleSaveOffDays} disabled={offDaySaving}>
+                    {offDaySaving ? "Menyimpan..." : "Simpan"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+
     </div>
   );
 }
