@@ -19,6 +19,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  FileText,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -29,6 +30,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint, type DbDeliveryStatus } from "@/lib/supabase";
+import ReportDetail from "./ReportDetail";
 
 type EmployeeLite = { id: string; nama: string; status: string };
 type DivisionLite = { id: number; nama: string; color: string };
@@ -121,6 +123,7 @@ export default function IncomePage() {
   const [editForm, setEditForm] = useState({ division_id: 0, role: "Driver", jumlah_titik: "", status_id: 0 });
   const [editError, setEditError] = useState("");
 
+  const [showReport, setShowReport] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
@@ -188,10 +191,10 @@ export default function IncomePage() {
   useEffect(() => { fetchDeliveries(); }, [periodKey]);
 
   useEffect(() => {
-    if (showBatch || showEditForm || showCalendar) document.body.style.overflow = "hidden";
+    if (showBatch || showEditForm || showCalendar || showReport) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showBatch, showEditForm, showCalendar]);
+  }, [showBatch, showEditForm, showCalendar, showReport]);
 
   // ─── Batch handlers ───
   const getOrderedEmployees = useCallback((emps: EmployeeLite[]) => {
@@ -840,6 +843,7 @@ export default function IncomePage() {
         icon={Wallet}
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowReport(true)}>Laporan Detail</Button>
             <Button variant="outline" icon={CalendarDays} size="sm" onClick={openCalendar}>Mode Kalender</Button>
             <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>
           </div>
@@ -1673,6 +1677,14 @@ export default function IncomePage() {
           </div>
         </Portal>
       )}
+
+      {/* ═══ REPORT DETAIL ═══ */}
+      <ReportDetail
+        show={showReport}
+        onClose={() => setShowReport(false)}
+        divisions={divisions}
+        dStatuses={dStatuses}
+      />
 
       {/* ═══ DELETE CONFIRM ═══ */}
       {deleteConfirm && (
