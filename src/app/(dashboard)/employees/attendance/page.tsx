@@ -1011,13 +1011,17 @@ export default function AttendancePage() {
             <div className="flex-1 overflow-auto">
               {offDayTab === "mingguan" ? (
                 /* ── Tab Mingguan ── */
-                <table className="w-full">
+                <table className="w-full border-collapse" style={{ tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: "180px" }} />
+                    {DAY_SHORT.map((_, i) => <col key={i} />)}
+                  </colgroup>
                   <thead className="sticky top-0 z-10">
-                    <tr className="bg-card border-b-2 border-border shadow-sm">
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 min-w-[180px]">Pegawai</th>
-                      {DAY_NAMES.map((d, i) => (
-                        <th key={i} className={cn("text-center text-[10px] font-bold uppercase tracking-wider px-2 py-2.5 w-[90px]",
-                          i === 0 ? "text-danger/60" : i === 6 ? "text-warning/60" : "text-muted-foreground")}>{d}</th>
+                    <tr className="bg-card">
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-3 border-b-2 border-r border-border">Pegawai</th>
+                      {DAY_SHORT.map((d, i) => (
+                        <th key={i} className={cn("text-center text-[10px] font-bold uppercase tracking-wider py-3 border-b-2 border-r border-border last:border-r-0",
+                          i === 0 ? "text-danger/70 bg-danger/[0.03]" : i === 6 ? "text-warning/70 bg-warning/[0.03]" : "text-muted-foreground")}>{d}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1028,32 +1032,38 @@ export default function AttendancePage() {
                         const empDays = offDayLocal.get(emp.id) || new Set<number>();
                         const offCount = empDays.size;
                         return (
-                          <tr key={emp.id} className={cn("border-b border-border/40 transition-colors", empIdx % 2 === 0 ? "" : "bg-muted/[0.02]", "hover:bg-muted/30")}>
-                            <td className="px-5 py-2">
-                              <div className="flex items-center gap-2.5">
-                                <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold flex-shrink-0",
-                                  offCount > 0 ? "bg-violet-500/10 text-violet-500" : "bg-muted text-muted-foreground/40")}>
-                                  {emp.nama.charAt(0)}
+                          <tr key={emp.id} className={cn("transition-colors", empIdx % 2 === 0 ? "bg-card" : "bg-muted/[0.04]", "hover:bg-violet-500/[0.03]")}>
+                            <td className="px-3 py-2 border-b border-r border-border">
+                              <div className="flex items-center gap-2">
+                                <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0",
+                                  offCount > 0 ? "bg-gradient-to-br from-violet-500 to-violet-600 shadow-sm shadow-violet-500/20" : "bg-primary/10")}>
+                                  <User className={cn("w-3.5 h-3.5", offCount > 0 ? "text-white" : "text-primary/60")} />
                                 </div>
-                                <div className="min-w-0">
-                                  <p className="text-xs font-semibold text-foreground truncate">{emp.nama}</p>
-                                  {offCount > 0 && <p className="text-[9px] text-violet-500">{offCount} hari libur</p>}
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[11px] font-semibold text-foreground truncate">{emp.nama}</p>
+                                  <p className={cn("text-[9px]", offCount > 0 ? "text-violet-500" : "text-muted-foreground/30")}>
+                                    {offCount > 0 ? `${offCount} hari libur` : "Tidak ada libur"}
+                                  </p>
                                 </div>
                               </div>
                             </td>
-                            {DAY_NAMES.map((_, dayIdx) => {
+                            {DAY_SHORT.map((_, dayIdx) => {
                               const isOff = empDays.has(dayIdx);
                               const isSunday = dayIdx === 0;
+                              const isSaturday = dayIdx === 6;
                               return (
-                                <td key={dayIdx} className={cn("px-2 py-2 text-center", isSunday && "bg-danger/[0.02]")}>
+                                <td key={dayIdx} className={cn(
+                                  "py-2 text-center border-b border-r border-border last:border-r-0",
+                                  isSunday ? "bg-danger/[0.02]" : isSaturday ? "bg-warning/[0.02]" : ""
+                                )}>
                                   <button type="button" onClick={() => toggleOffDay(emp.id, dayIdx)}
                                     className={cn(
-                                      "w-full py-2 rounded-lg text-[10px] font-bold transition-all",
+                                      "w-10 h-9 rounded-lg text-[10px] font-extrabold transition-all mx-auto block",
                                       isOff
-                                        ? "bg-violet-500 text-white shadow-sm shadow-violet-500/20 hover:bg-violet-600"
-                                        : "bg-muted/40 text-muted-foreground/30 hover:bg-violet-500/10 hover:text-violet-500"
+                                        ? "bg-gradient-to-b from-violet-500 to-violet-600 text-white shadow-md shadow-violet-500/25 hover:shadow-lg hover:shadow-violet-500/30 scale-105"
+                                        : "bg-muted/40 text-muted-foreground/15 hover:bg-violet-500/10 hover:text-violet-500 hover:scale-105"
                                     )}>
-                                    {isOff ? "LIBUR" : "—"}
+                                    {isOff ? "OFF" : "•"}
                                   </button>
                                 </td>
                               );

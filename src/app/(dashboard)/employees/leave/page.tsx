@@ -156,6 +156,22 @@ export default function LeavePage() {
     if (form.jenis !== "Sakit" && !form.tanggal_selesai) { setFormError("Pilih tanggal selesai."); return; }
     if (form.tanggal_selesai && form.tanggal_selesai < form.tanggal_mulai) { setFormError("Tanggal selesai harus >= tanggal mulai."); return; }
 
+    // Cek overlap tanggal dengan pengajuan lain (hanya saat tambah baru)
+    if (!editingId) {
+      const tglEnd = form.tanggal_selesai || form.tanggal_mulai;
+      const { data: overlap } = await supabase
+        .from("leave_requests")
+        .select("id, jenis, tanggal_mulai, tanggal_selesai")
+        .eq("employee_id", form.employee_id)
+        .lte("tanggal_mulai", tglEnd)
+        .gte("tanggal_selesai", form.tanggal_mulai)
+        .limit(1);
+      if (overlap && overlap.length > 0) {
+        setFormError(`Tanggal bentrok dengan pengajuan ${overlap[0].jenis} (${overlap[0].tanggal_mulai} s/d ${overlap[0].tanggal_selesai}).`);
+        return;
+      }
+    }
+
     setFormSaving(true);
     const payload: Record<string, unknown> = {
       employee_id: form.employee_id,
@@ -219,11 +235,23 @@ export default function LeavePage() {
     if (error) {
       showToast("error", "Gagal", error.message);
     } else {
-      // Jika disetujui, insert ke attendance_records
+      // Jika disetujui, insert ke attendance_records (skip hari libur)
       if (isApprove) {
         const req = list.find((r) => r.id === approvalConfirm.id);
         if (req) {
-          // Generate tanggal dari range (tanpa Date object untuk hindari timezone issue)
+          // Fetch hari libur pegawai ini
+          const { data: empOffDays } = await supabase
+            .from("employee_off_days").select("day_of_week").eq("employee_id", req.employee_id);
+          const offDaySet = new Set(empOffDays?.map((o) => o.day_of_week) || []);
+
+          // Fetch custom overrides untuk range ini
+          const { data: empOverrides } = await supabase
+            .from("employee_leave_overrides").select("tanggal, type").eq("employee_id", req.employee_id)
+            .gte("tanggal", req.tanggal_mulai).lte("tanggal", req.tanggal_selesai);
+          const overrideMap = new Map<string, string>();
+          empOverrides?.forEach((o) => overrideMap.set(o.tanggal, o.type));
+
+          // Generate tanggal dari range (timezone safe)
           const dates: string[] = [];
           const [sy, sm, sd] = req.tanggal_mulai.split("-").map(Number);
           const [ey, em, ed] = req.tanggal_selesai.split("-").map(Number);
@@ -234,19 +262,23 @@ export default function LeavePage() {
             dates.push(`${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`);
           }
 
-          // Insert/update attendance_records (overwrite jika sudah ada)
-          for (const tanggal of dates) {
-            // Cek apakah sudah ada record
-            const { data: existRec } = await supabase
-              .from("attendance_records")
-              .select("id")
-              .eq("employee_id", req.employee_id)
-              .eq("tanggal", tanggal)
-              .limit(1)
-              .maybeSingle();
+          const defaultDivId = divisions[0]?.id || 1;
 
-            const defaultDivId = divisions[0]?.id || 1;
-            const payload = {
+          for (const tanggal of dates) {
+            // Skip hari libur (kecuali ada override masuk)
+            const [ty, tm, td] = tanggal.split("-").map(Number);
+            const dow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay();
+            const override = overrideMap.get(tanggal);
+            const isOffDay = override === "libur" || (!override && offDaySet.has(dow));
+            const isMasukOverride = override === "masuk";
+            if (isOffDay && !isMasukOverride) continue; // skip hari libur
+
+            const { data: existRec } = await supabase
+              .from("attendance_records").select("id")
+              .eq("employee_id", req.employee_id).eq("tanggal", tanggal)
+              .limit(1).maybeSingle();
+
+            const attPayload = {
               employee_id: req.employee_id,
               division_id: defaultDivId,
               tanggal,
@@ -260,16 +292,12 @@ export default function LeavePage() {
             };
 
             if (existRec) {
-              // Update record yang sudah ada
               await supabase.from("attendance_records").update({
-                status: req.jenis,
-                jam_masuk: "00:00",
-                durasi_telat: 0,
-                denda: 0,
+                status: req.jenis, jam_masuk: "00:00", durasi_telat: 0, denda: 0,
                 catatan: `${req.jenis}: ${req.alasan || "-"}`,
               }).eq("id", existRec.id);
             } else {
-              await supabase.from("attendance_records").insert(payload);
+              await supabase.from("attendance_records").insert(attPayload);
             }
           }
         }
