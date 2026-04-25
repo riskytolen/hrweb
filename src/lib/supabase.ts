@@ -199,7 +199,7 @@ export interface DbAttendanceRecord {
   jam_masuk: string;
   schedule_jam_masuk: string;
   toleransi_menit: number;
-  status: "Hadir" | "Terlambat" | "Izin" | "Sakit" | "Alpha" | "Libur";
+  status: "Hadir" | "Terlambat" | "Izin" | "Sakit" | "Alpha" | "Libur" | "Cuti";
   durasi_telat: number;
   denda: number;
   location_id: number | null;
@@ -210,6 +210,23 @@ export interface DbAttendanceRecord {
   pegawai?: DbPegawai;
   divisions?: DbDivision;
   attendance_locations?: DbAttendanceLocation;
+}
+
+export interface DbLeaveRequest {
+  id: number;
+  employee_id: string;
+  jenis: "Izin" | "Sakit" | "Cuti";
+  tanggal_mulai: string;
+  tanggal_selesai: string;
+  alasan: string | null;
+  lampiran_url: string | null;
+  status: "Menunggu" | "Disetujui" | "Ditolak";
+  catatan_approval: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  pegawai?: DbPegawai;
 }
 
 export interface DbEmployeeOffDay {

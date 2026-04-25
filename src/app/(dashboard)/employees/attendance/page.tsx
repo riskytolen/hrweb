@@ -37,9 +37,14 @@ const STATUS_OPTIONS = [
   { value: "Sakit", label: "Sakit", color: "#ef4444" },
   { value: "Alpha", label: "Alpha", color: "#6b7280" },
   { value: "Libur", label: "Libur", color: "#8b5cf6" },
+  { value: "Cuti", label: "Cuti", color: "#8b5cf6" },
 ];
 
-const SPECIAL_STATUSES = ["Izin", "Sakit", "Alpha"];
+// Status yang tidak perlu jam masuk
+const NO_JAM_STATUSES = ["Izin", "Sakit", "Alpha", "Libur", "Cuti"];
+
+// Status yang bisa dipilih manual di form input (Izin/Sakit/Cuti lewat pengajuan)
+const MANUAL_SPECIAL = ["Alpha"];
 const DAY_NAMES = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 const DAY_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
@@ -182,7 +187,7 @@ export default function AttendancePage() {
   useEffect(() => { fetchRecords(); }, [dateFilter, fetchRecords]);
 
   // ─── Summary ───
-  const statusCounts: Record<string, number> = { Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpha: 0, Libur: 0 };
+  const statusCounts: Record<string, number> = { Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpha: 0, Libur: 0, Cuti: 0 };
   records.forEach((r) => { if (r.status in statusCounts) statusCounts[r.status]++; });
   const totalDenda = records.reduce((s, r) => s + r.denda, 0);
 
@@ -196,7 +201,7 @@ export default function AttendancePage() {
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // ─── Form: live preview ───
-  const isSpecial = SPECIAL_STATUSES.includes(form.specialStatus);
+  const isSpecial = NO_JAM_STATUSES.includes(form.specialStatus);
   const formSchedule = useMemo(() => schedules.find((s) => s.division_id === form.division_id), [schedules, form.division_id]);
   const formPenalty = useMemo(() => penalties.find((p) => p.division_id === form.division_id), [penalties, form.division_id]);
 
@@ -231,7 +236,7 @@ export default function AttendancePage() {
 
   // ─── Open Edit ───
   const openEdit = (row: AttendanceRow) => {
-    const isSpec = SPECIAL_STATUSES.includes(row.status);
+    const isSpec = NO_JAM_STATUSES.includes(row.status);
     setForm({
       employee_id: row.employee_id,
       division_id: row.division_id,
@@ -253,7 +258,7 @@ export default function AttendancePage() {
     if (!form.employee_id) { setFormError("Pilih pegawai terlebih dahulu."); return; }
     if (!form.division_id) { setFormError("Pilih divisi terlebih dahulu."); return; }
     if (!form.tanggal) { setFormError("Pilih tanggal terlebih dahulu."); return; }
-    if (!isSpecial && !form.jam_masuk) { setFormError("Isi jam masuk atau pilih status Izin/Sakit/Alpha."); return; }
+    if (!isSpecial && !form.jam_masuk) { setFormError("Isi jam masuk atau pilih status Alpha."); return; }
 
     // Cek duplikat sebelum insert (hanya mode tambah)
     if (!editingId) {
@@ -391,9 +396,8 @@ export default function AttendancePage() {
   const exportCSV = () => {
     const headers = ["Tanggal", "Pegawai", "Divisi", "Jam Masuk", "Jadwal", "Status", "Telat (menit)", "Denda", "Catatan"];
     const csvRows = [headers.join(",")];
-    const noJamStatuses = ["Izin", "Sakit", "Alpha", "Libur"];
     filtered.forEach((r) => {
-      const showJam = !noJamStatuses.includes(r.status);
+      const showJam = !NO_JAM_STATUSES.includes(r.status);
       csvRows.push([
         r.tanggal, `"${r.employeeNama}"`, `"${r.divisionNama}"`,
         showJam ? r.jam_masuk.slice(0, 5) : "-", showJam ? r.schedule_jam_masuk.slice(0, 5) : "-", r.status,
@@ -422,9 +426,8 @@ export default function AttendancePage() {
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.text(`Tanggal: ${dateFilter}`, pw / 2, 21, { align: "center" });
-    const noJamStatuses = ["Izin", "Sakit", "Alpha", "Libur"];
     const tableData = filtered.map((r, i) => {
-      const showJam = !noJamStatuses.includes(r.status);
+      const showJam = !NO_JAM_STATUSES.includes(r.status);
       return [
         i + 1, r.employeeNama || "-", r.divisionNama || "-",
         showJam ? r.jam_masuk.slice(0, 5) : "-", showJam ? r.schedule_jam_masuk.slice(0, 5) : "-",
@@ -593,12 +596,12 @@ export default function AttendancePage() {
                       </span>
                     </td>
                     <td className="px-5 py-3.5 text-center text-sm">
-                      {["Izin", "Sakit", "Alpha", "Libur"].includes(row.status)
+                      {NO_JAM_STATUSES.includes(row.status)
                         ? <span className="text-muted-foreground italic">-</span>
                         : <span className="font-semibold text-foreground">{row.jam_masuk.slice(0, 5)}</span>}
                     </td>
                     <td className="px-5 py-3.5 text-center text-xs">
-                      {["Izin", "Sakit", "Alpha", "Libur"].includes(row.status)
+                      {NO_JAM_STATUSES.includes(row.status)
                         ? <span className="text-muted-foreground italic">-</span>
                         : <span className="text-muted-foreground">{row.schedule_jam_masuk.slice(0, 5)}</span>}
                     </td>
@@ -701,7 +704,7 @@ export default function AttendancePage() {
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-2 block">Keterangan Tidak Hadir</label>
                   <div className="flex items-center gap-2">
-                    {(["Izin", "Sakit", "Alpha"] as const).map((s) => {
+                    {(["Alpha"] as const).map((s) => {
                       const sc = STATUS_OPTIONS.find((o) => o.value === s)!;
                       const active = form.specialStatus === s;
                       return (
