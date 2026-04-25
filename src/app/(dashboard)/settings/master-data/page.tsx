@@ -116,7 +116,7 @@ export default function MasterDataPage() {
   const [penaltySearch, setPenaltySearch] = useState("");
   const [showPenaltyForm, setShowPenaltyForm] = useState(false);
   const [editingPenaltyId, setEditingPenaltyId] = useState<number | null>(null);
-  const [penaltyForm, setPenaltyForm] = useState({ division_id: 0, denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", status: "Aktif" });
+  const [penaltyForm, setPenaltyForm] = useState({ division_id: 0, denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", denda_alpha: "100000", status: "Aktif" });
 
   // ─── Harga Titik State ───
   type RateRow = { division_id: number; divisionNama: string; driverRate: number | null; driverRateId: number | null; helperRate: number | null; helperRateId: number | null };
@@ -473,13 +473,13 @@ export default function MasterDataPage() {
   const divisionsWithoutPenalty = activeDivisions.filter((d) => !penaltyList.some((p) => p.division_id === d.id));
 
   const handleOpenAddPenalty = () => {
-    setPenaltyForm({ division_id: divisionsWithoutPenalty[0]?.id || 0, denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", status: "Aktif" });
+    setPenaltyForm({ division_id: divisionsWithoutPenalty[0]?.id || 0, denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", denda_alpha: "100000", status: "Aktif" });
     setEditingPenaltyId(null);
     setShowPenaltyForm(true);
   };
 
   const handleOpenEditPenalty = (p: PenaltyRate) => {
-    setPenaltyForm({ division_id: p.division_id, denda_per_menit: String(p.denda_per_menit), batas_menit: String(p.batas_menit), denda_maksimum: String(p.denda_maksimum), status: p.status });
+    setPenaltyForm({ division_id: p.division_id, denda_per_menit: String(p.denda_per_menit), batas_menit: String(p.batas_menit), denda_maksimum: String(p.denda_maksimum), denda_alpha: String(p.denda_alpha), status: p.status });
     setEditingPenaltyId(p.id);
     setShowPenaltyForm(true);
   };
@@ -491,6 +491,7 @@ export default function MasterDataPage() {
       denda_per_menit: parseInt(penaltyForm.denda_per_menit) || 3000,
       batas_menit: parseInt(penaltyForm.batas_menit) || 20,
       denda_maksimum: parseInt(penaltyForm.denda_maksimum) || 60000,
+      denda_alpha: parseInt(penaltyForm.denda_alpha) || 100000,
       status: penaltyForm.status,
     };
     if (editingPenaltyId) {
@@ -1049,13 +1050,14 @@ export default function MasterDataPage() {
                     <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-32">Denda/Menit</th>
                     <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Batas Menit</th>
                     <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-36">Denda Maksimum</th>
+                    <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-32">Denda Alpha</th>
                     <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Status</th>
                     <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-24">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {loading ? <SkeletonTable rows={4} cols={7} /> : filteredPenalties.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-8 text-sm text-muted-foreground">Belum ada data denda</td></tr>
+                  {loading ? <SkeletonTable rows={4} cols={8} /> : filteredPenalties.length === 0 ? (
+                    <tr><td colSpan={8} className="text-center py-8 text-sm text-muted-foreground">Belum ada data denda</td></tr>
                   ) : filteredPenalties.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((p, idx) => (
                     <tr key={p.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3 text-xs text-muted-foreground">{(masterPage - 1) * MASTER_PAGE_SIZE + idx + 1}</td>
@@ -1063,6 +1065,7 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3 text-right text-sm font-semibold text-foreground">Rp {p.denda_per_menit.toLocaleString("id-ID")}</td>
                       <td className="px-5 py-3 text-center text-sm text-foreground">{p.batas_menit} menit</td>
                       <td className="px-5 py-3 text-right text-sm font-semibold text-foreground">Rp {p.denda_maksimum.toLocaleString("id-ID")}</td>
+                      <td className="px-5 py-3 text-right text-sm font-semibold text-foreground">Rp {p.denda_alpha.toLocaleString("id-ID")}</td>
                       <td className="px-5 py-3 text-center">
                         <button onClick={() => handleTogglePenaltyStatus(p.id)}
                           className={cn("text-[10px] font-bold px-2 py-1 rounded-md cursor-pointer", p.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
@@ -1832,6 +1835,15 @@ export default function MasterDataPage() {
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-1">Denda flat jika telat melebihi batas menit</p>
               </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Denda Alpha</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium">Rp</span>
+                  <input type="number" min={0} value={penaltyForm.denda_alpha} onChange={(e) => setPenaltyForm({ ...penaltyForm, denda_alpha: e.target.value })}
+                    className={cn(inputClass, "pl-10")} placeholder="100000" />
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">Denda flat untuk tidak hadir tanpa keterangan (Alpha)</p>
+              </div>
               {/* Preview */}
               <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-1.5">
                 <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Preview Perhitungan</p>
@@ -1846,6 +1858,10 @@ export default function MasterDataPage() {
                 <div className="flex items-center justify-between text-xs border-t border-border pt-1.5">
                   <span className="text-muted-foreground">Telat &gt; {penaltyForm.batas_menit || 20} menit</span>
                   <span className="font-semibold text-warning">Rp {(parseInt(penaltyForm.denda_maksimum) || 0).toLocaleString("id-ID")} (flat)</span>
+                </div>
+                <div className="flex items-center justify-between text-xs border-t border-border pt-1.5">
+                  <span className="text-muted-foreground">Alpha (tidak hadir)</span>
+                  <span className="font-semibold text-danger">Rp {(parseInt(penaltyForm.denda_alpha) || 0).toLocaleString("id-ID")} (flat)</span>
                 </div>
               </div>
             </div>

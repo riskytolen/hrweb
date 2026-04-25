@@ -183,6 +183,7 @@ export interface DbAttendancePenaltyRate {
   denda_per_menit: number;
   batas_menit: number;
   denda_maksimum: number;
+  denda_alpha: number;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;
   updated_at: string;

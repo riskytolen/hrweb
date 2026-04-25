@@ -18,7 +18,7 @@ import { supabase, type DbAttendanceRecord } from "@/lib/supabase";
 type EmployeeLite = { id: string; nama: string; status: string };
 type DivisionLite = { id: number; nama: string; color: string };
 type ScheduleLite = { division_id: number; jam_masuk: string; toleransi_menit: number };
-type PenaltyLite = { division_id: number; denda_per_menit: number; batas_menit: number; denda_maksimum: number };
+type PenaltyLite = { division_id: number; denda_per_menit: number; batas_menit: number; denda_maksimum: number; denda_alpha: number };
 type AttendanceRow = DbAttendanceRecord & {
   employeeNama?: string;
   divisionNama?: string;
@@ -59,6 +59,11 @@ function computeDenda(durasiTelat: number, penalty: PenaltyLite | undefined): nu
   const dendaMaksimum = penalty?.denda_maksimum ?? 60000;
   if (durasiTelat > batasMenit) return dendaMaksimum;
   return durasiTelat * dendaPerMenit;
+}
+
+/** Hitung denda alpha */
+function computeDendaAlpha(penalty: PenaltyLite | undefined): number {
+  return penalty?.denda_alpha ?? 100000;
 }
 
 export default function AttendancePage() {
@@ -131,7 +136,7 @@ export default function AttendancePage() {
     if (data) setSchedules(data);
   };
   const fetchPenalties = async () => {
-    const { data } = await supabase.from("attendance_penalty_rates").select("division_id, denda_per_menit, batas_menit, denda_maksimum").eq("status", "Aktif");
+    const { data } = await supabase.from("attendance_penalty_rates").select("division_id, denda_per_menit, batas_menit, denda_maksimum, denda_alpha").eq("status", "Aktif");
     if (data) setPenalties(data);
   };
 
@@ -179,7 +184,10 @@ export default function AttendancePage() {
   const formPenalty = useMemo(() => penalties.find((p) => p.division_id === form.division_id), [penalties, form.division_id]);
 
   const formPreview = useMemo(() => {
-    if (isSpecial) return { status: form.specialStatus as string, durasi: 0, denda: 0 };
+    if (isSpecial) {
+      const denda = form.specialStatus === "Alpha" ? computeDendaAlpha(formPenalty) : 0;
+      return { status: form.specialStatus as string, durasi: 0, denda };
+    }
     if (!form.jam_masuk || !formSchedule) return null;
     const result = computeLateness(form.jam_masuk, formSchedule.jam_masuk, formSchedule.toleransi_menit);
     const denda = computeDenda(result.durasi, formPenalty);
@@ -258,6 +266,7 @@ export default function AttendancePage() {
 
     if (isSpecial) {
       status = form.specialStatus;
+      if (status === "Alpha") denda = computeDendaAlpha(penalty);
     } else {
       const result = computeLateness(form.jam_masuk, schedJamMasuk, toleransi);
       status = result.status;
