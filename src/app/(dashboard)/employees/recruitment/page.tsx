@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   UserPlus, UserCheck, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
-  Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink,
+  Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink, Eye,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -474,7 +474,7 @@ export default function RecruitmentPage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pendidikan</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">CV</th>
-                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Aksi</th>
+                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-32">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
@@ -486,10 +486,8 @@ export default function RecruitmentPage() {
                   <tr key={r.id} className="hover:bg-muted/30">
                     <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
                     <td className="px-5 py-3.5">
-                      <button onClick={() => setDetailId(r.id)} className="text-left">
-                        <p className="text-sm font-semibold text-foreground hover:text-primary">{r.nama}</p>
-                        {r.email && <p className="text-[11px] text-muted-foreground">{r.email}</p>}
-                      </button>
+                      <p className="text-sm font-semibold text-foreground">{r.nama}</p>
+                      {r.email && <p className="text-[11px] text-muted-foreground">{r.email}</p>}
                     </td>
                     <td className="px-5 py-3.5 text-sm text-muted-foreground">{r.no_hp}</td>
                     <td className="px-5 py-3.5 text-sm text-foreground">{r.posisi_dilamar}</td>
@@ -506,8 +504,9 @@ export default function RecruitmentPage() {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => openEdit(r)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => setDeleteConfirm({ id: r.id, nama: r.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setDetailId(r.id)} title="Lihat Detail" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Eye className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => openEdit(r)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setDeleteConfirm({ id: r.id, nama: r.nama })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div>
                     </td>
                   </tr>
