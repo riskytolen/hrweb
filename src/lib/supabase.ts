@@ -177,6 +177,40 @@ export interface DbRecruitment {
   updated_at: string;
 }
 
+export interface DbAttendancePenaltyRate {
+  id: number;
+  division_id: number;
+  denda_per_menit: number;
+  batas_menit: number;
+  denda_maksimum: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+  // joined
+  divisions?: DbDivision;
+}
+
+export interface DbAttendanceRecord {
+  id: number;
+  employee_id: string;
+  division_id: number;
+  tanggal: string;
+  jam_masuk: string;
+  schedule_jam_masuk: string;
+  toleransi_menit: number;
+  status: "Hadir" | "Terlambat" | "Izin" | "Sakit" | "Alpha";
+  durasi_telat: number;
+  denda: number;
+  location_id: number | null;
+  catatan: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  pegawai?: DbPegawai;
+  divisions?: DbDivision;
+  attendance_locations?: DbAttendanceLocation;
+}
+
 export interface DbEmployeeDevice {
   id: number;
   employee_id: string;

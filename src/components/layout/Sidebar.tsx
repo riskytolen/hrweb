@@ -52,7 +52,7 @@ const menuGroups: MenuGroup[] = [
     basePath: "/employees",
     items: [
       { name: "Data Pegawai", href: "/employees", icon: Users },
-      { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck, comingSoon: true },
+      { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck },
       { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays, comingSoon: true },
       { name: "Rekap Titik", href: "/employees/income", icon: Wallet },
       { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, comingSoon: true },

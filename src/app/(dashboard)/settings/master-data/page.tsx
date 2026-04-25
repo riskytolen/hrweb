@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Database,
   Plus,
@@ -20,6 +20,9 @@ import {
   ArrowUpDown,
   GripVertical,
   CircleCheckBig,
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -28,7 +31,7 @@ import Pagination from "@/components/ui/Pagination";
 import { cn, generateDivisionColor } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbAttendancePenaltyRate } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -39,6 +42,7 @@ type AttendanceLocation = DbAttendanceLocation & { divisionNames?: string[] };
 type DivisionSchedule = DbDivisionSchedule & { divisionNama?: string };
 type PointRate = DbPointRate & { divisionNama?: string };
 type DeliveryStatus = DbDeliveryStatus;
+type PenaltyRate = DbAttendancePenaltyRate & { divisionNama?: string };
 
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const selectClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 appearance-none text-foreground";
@@ -50,6 +54,7 @@ const tabs = [
   { key: "divisi", label: "Divisi", icon: Building2 },
   { key: "titik-absen", label: "Titik Absen", icon: MapPin },
   { key: "waktu-kerja", label: "Waktu Kerja", icon: Clock },
+  { key: "denda-telat", label: "Denda Telat", icon: AlertTriangle },
   { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
   { key: "status-titik", label: "Status Titik", icon: Tag },
   { key: "bank", label: "Bank", icon: Landmark },
@@ -106,6 +111,13 @@ export default function MasterDataPage() {
   const [scheduleForm, setScheduleForm] = useState({ division_id: 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", status: "Aktif" });
   const [scheduleErrors, setScheduleErrors] = useState<Set<string>>(new Set());
 
+  // ─── Denda Telat State ───
+  const [penaltyList, setPenaltyList] = useState<PenaltyRate[]>([]);
+  const [penaltySearch, setPenaltySearch] = useState("");
+  const [showPenaltyForm, setShowPenaltyForm] = useState(false);
+  const [editingPenaltyId, setEditingPenaltyId] = useState<number | null>(null);
+  const [penaltyForm, setPenaltyForm] = useState({ division_id: 0, denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", status: "Aktif" });
+
   // ─── Harga Titik State ───
   type RateRow = { division_id: number; divisionNama: string; driverRate: number | null; driverRateId: number | null; helperRate: number | null; helperRateId: number | null };
   const [rateRows, setRateRows] = useState<RateRow[]>([]);
@@ -122,10 +134,11 @@ export default function MasterDataPage() {
   const [dStatusForm, setDStatusForm] = useState({ nama: "", kode: "", color: "#6b7280", status: "Aktif" });
 
   // ─── Delete Confirm Dialog ───
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
   const [loading, setLoading] = useState(true);
+  const tabScrollRef = useRef<HTMLDivElement>(null);
 
   // ─── Fetch data from Supabase ───
   const fetchLevels = async () => {
@@ -188,13 +201,18 @@ export default function MasterDataPage() {
     if (data) setDStatusList(data);
   };
 
+  const fetchPenalties = async () => {
+    const { data } = await supabase.from("attendance_penalty_rates").select("*, divisions(nama)").order("division_id");
+    if (data) setPenaltyList(data.map((p) => ({ ...p, divisionNama: p.divisions?.nama || "-" })));
+  };
+
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates(), fetchDStatuses()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates(), fetchDStatuses(), fetchPenalties()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm || showDStatusForm) {
+    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm || showDStatusForm || showPenaltyForm) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -448,6 +466,57 @@ export default function MasterDataPage() {
     fetchSchedules();
   };
 
+  // ─── Denda Telat Handlers ───
+  const filteredPenalties = penaltyList.filter((p) =>
+    (p.divisionNama || "").toLowerCase().includes(penaltySearch.toLowerCase())
+  );
+  const divisionsWithoutPenalty = activeDivisions.filter((d) => !penaltyList.some((p) => p.division_id === d.id));
+
+  const handleOpenAddPenalty = () => {
+    setPenaltyForm({ division_id: divisionsWithoutPenalty[0]?.id || 0, denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", status: "Aktif" });
+    setEditingPenaltyId(null);
+    setShowPenaltyForm(true);
+  };
+
+  const handleOpenEditPenalty = (p: PenaltyRate) => {
+    setPenaltyForm({ division_id: p.division_id, denda_per_menit: String(p.denda_per_menit), batas_menit: String(p.batas_menit), denda_maksimum: String(p.denda_maksimum), status: p.status });
+    setEditingPenaltyId(p.id);
+    setShowPenaltyForm(true);
+  };
+
+  const handleSavePenalty = async () => {
+    if (!penaltyForm.division_id) return;
+    const payload = {
+      division_id: penaltyForm.division_id,
+      denda_per_menit: parseInt(penaltyForm.denda_per_menit) || 3000,
+      batas_menit: parseInt(penaltyForm.batas_menit) || 20,
+      denda_maksimum: parseInt(penaltyForm.denda_maksimum) || 60000,
+      status: penaltyForm.status,
+    };
+    if (editingPenaltyId) {
+      await supabase.from("attendance_penalty_rates").update(payload).eq("id", editingPenaltyId);
+    } else {
+      await supabase.from("attendance_penalty_rates").insert(payload);
+    }
+    setShowPenaltyForm(false);
+    fetchPenalties();
+    setToast({ show: true, title: editingPenaltyId ? "Denda Diperbarui" : "Denda Ditambahkan", message: "" });
+  };
+
+  const handleDeletePenalty = async (id: number) => {
+    await supabase.from("attendance_penalty_rates").delete().eq("id", id);
+    setDeleteConfirm(null);
+    fetchPenalties();
+    setToast({ show: true, title: "Denda Dihapus", message: "" });
+  };
+
+  const handleTogglePenaltyStatus = async (id: number) => {
+    const p = penaltyList.find((x) => x.id === id);
+    if (!p) return;
+    await supabase.from("attendance_penalty_rates").update({ status: p.status === "Aktif" ? "Tidak Aktif" : "Aktif" }).eq("id", id);
+    fetchPenalties();
+  };
+
   // ─── Harga Titik Handlers ───
   const filteredRateRows = rateRows.filter((r) =>
     r.divisionNama.toLowerCase().includes(rateSearch.toLowerCase())
@@ -614,33 +683,45 @@ export default function MasterDataPage() {
       {/* ═══ MAIN CARD WITH TABS ═══ */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         {/* Tab Bar */}
-        <div className="flex items-center border-b border-border bg-muted/30">
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.key;
-            const Icon = tab.icon;
-            const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : bankList.length;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => { setActiveTab(tab.key); setMasterPage(1); }}
-                className={cn(
-                  "flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 -mb-px",
-                  isActive
-                    ? "border-primary text-primary bg-card"
-                    : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {tab.label}
-                <span className={cn(
-                  "text-[10px] font-bold px-1.5 py-0.5 rounded-md",
-                  isActive ? "bg-primary-light text-primary" : "bg-muted text-muted-foreground"
-                )}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
+        <div className="relative border-b border-border bg-muted/30">
+          <button onClick={() => tabScrollRef.current?.scrollBy({ left: -200, behavior: "smooth" })}
+            className="absolute left-0 top-0 bottom-0 z-10 w-8 flex items-center justify-center bg-gradient-to-r from-muted/80 to-transparent text-muted-foreground hover:text-foreground">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <div ref={tabScrollRef} className="overflow-x-auto scrollbar-none mx-8">
+            <div className="flex items-center min-w-max">
+              {tabs.map((tab) => {
+                const isActive = activeTab === tab.key;
+                const Icon = tab.icon;
+                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : bankList.length;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => { setActiveTab(tab.key); setMasterPage(1); }}
+                    className={cn(
+                      "flex items-center gap-1.5 px-4 py-3 text-xs font-medium border-b-2 -mb-px whitespace-nowrap flex-shrink-0 transition-colors",
+                      isActive
+                        ? "border-primary text-primary bg-card"
+                        : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {tab.label}
+                    <span className={cn(
+                      "text-[9px] font-bold px-1.5 py-0.5 rounded-md",
+                      isActive ? "bg-primary-light text-primary" : "bg-muted text-muted-foreground"
+                    )}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <button onClick={() => tabScrollRef.current?.scrollBy({ left: 200, behavior: "smooth" })}
+            className="absolute right-0 top-0 bottom-0 z-10 w-8 flex items-center justify-center bg-gradient-to-l from-muted/80 to-transparent text-muted-foreground hover:text-foreground">
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
 
         {/* ─── TAB: LEVEL ─── */}
@@ -945,6 +1026,61 @@ export default function MasterDataPage() {
               </table>
             </div>
             <Pagination currentPage={masterPage} totalItems={filteredSchedules.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
+          </>
+        )}
+
+        {/* ─── TAB: DENDA TELAT ─── */}
+        {activeTab === "denda-telat" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input type="text" placeholder="Cari divisi..." value={penaltySearch} onChange={(e) => { setPenaltySearch(e.target.value); setMasterPage(1); }}
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+              </div>
+              <Button icon={Plus} size="sm" onClick={handleOpenAddPenalty} disabled={divisionsWithoutPenalty.length === 0}>Tambah Denda</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-10">#</th>
+                    <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3">Divisi</th>
+                    <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-32">Denda/Menit</th>
+                    <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Batas Menit</th>
+                    <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-36">Denda Maksimum</th>
+                    <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Status</th>
+                    <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-3 w-24">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? <SkeletonTable rows={4} cols={7} /> : filteredPenalties.length === 0 ? (
+                    <tr><td colSpan={7} className="text-center py-8 text-sm text-muted-foreground">Belum ada data denda</td></tr>
+                  ) : filteredPenalties.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((p, idx) => (
+                    <tr key={p.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3 text-xs text-muted-foreground">{(masterPage - 1) * MASTER_PAGE_SIZE + idx + 1}</td>
+                      <td className="px-5 py-3 text-sm font-semibold text-foreground">{p.divisionNama}</td>
+                      <td className="px-5 py-3 text-right text-sm font-semibold text-foreground">Rp {p.denda_per_menit.toLocaleString("id-ID")}</td>
+                      <td className="px-5 py-3 text-center text-sm text-foreground">{p.batas_menit} menit</td>
+                      <td className="px-5 py-3 text-right text-sm font-semibold text-foreground">Rp {p.denda_maksimum.toLocaleString("id-ID")}</td>
+                      <td className="px-5 py-3 text-center">
+                        <button onClick={() => handleTogglePenaltyStatus(p.id)}
+                          className={cn("text-[10px] font-bold px-2 py-1 rounded-md cursor-pointer", p.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                          {p.status}
+                        </button>
+                      </td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center justify-center gap-1">
+                          <button onClick={() => handleOpenEditPenalty(p)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => setDeleteConfirm({ type: "denda-telat", id: p.id, nama: p.divisionNama || "-" })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredPenalties.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -1639,6 +1775,91 @@ export default function MasterDataPage() {
         </Portal>
       )}
 
+      {/* ═══ DENDA TELAT FORM MODAL ═══ */}
+      {showPenaltyForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowPenaltyForm(false)} />
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center">
+                  {editingPenaltyId ? <Pencil className="w-4 h-4 text-warning" /> : <Plus className="w-4 h-4 text-warning" />}
+                </div>
+                <h2 className="text-sm font-bold text-foreground">{editingPenaltyId ? "Edit Denda Telat" : "Tambah Denda Telat"}</h2>
+              </div>
+              <button onClick={() => setShowPenaltyForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi</label>
+                {editingPenaltyId ? (
+                  <div className="px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-foreground">
+                    {penaltyList.find((p) => p.id === editingPenaltyId)?.divisionNama || "-"}
+                  </div>
+                ) : (
+                  <Select
+                    value={String(penaltyForm.division_id || "")}
+                    onChange={(val) => setPenaltyForm({ ...penaltyForm, division_id: parseInt(val) || 0 })}
+                    options={divisionsWithoutPenalty.map((d) => ({ value: String(d.id), label: d.nama }))}
+                    placeholder="Pilih divisi"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Denda Per Menit</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium">Rp</span>
+                  <input type="number" min={0} value={penaltyForm.denda_per_menit} onChange={(e) => setPenaltyForm({ ...penaltyForm, denda_per_menit: e.target.value })}
+                    className={cn(inputClass, "pl-10")} placeholder="3000" />
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">Denda per menit keterlambatan dalam batas waktu</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Batas Menit</label>
+                <div className="relative">
+                  <input type="number" min={1} value={penaltyForm.batas_menit} onChange={(e) => setPenaltyForm({ ...penaltyForm, batas_menit: e.target.value })}
+                    className={inputClass} placeholder="20" />
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">Jika telat melebihi batas ini, denda menjadi flat (denda maksimum)</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Denda Maksimum</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium">Rp</span>
+                  <input type="number" min={0} value={penaltyForm.denda_maksimum} onChange={(e) => setPenaltyForm({ ...penaltyForm, denda_maksimum: e.target.value })}
+                    className={cn(inputClass, "pl-10")} placeholder="60000" />
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">Denda flat jika telat melebihi batas menit</p>
+              </div>
+              {/* Preview */}
+              <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-1.5">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Preview Perhitungan</p>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Telat 5 menit</span>
+                  <span className="font-semibold text-foreground">Rp {(5 * (parseInt(penaltyForm.denda_per_menit) || 0)).toLocaleString("id-ID")}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Telat {penaltyForm.batas_menit || 20} menit</span>
+                  <span className="font-semibold text-foreground">Rp {((parseInt(penaltyForm.batas_menit) || 20) * (parseInt(penaltyForm.denda_per_menit) || 0)).toLocaleString("id-ID")}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs border-t border-border pt-1.5">
+                  <span className="text-muted-foreground">Telat &gt; {penaltyForm.batas_menit || 20} menit</span>
+                  <span className="font-semibold text-warning">Rp {(parseInt(penaltyForm.denda_maksimum) || 0).toLocaleString("id-ID")} (flat)</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <Button variant="outline" size="sm" onClick={() => setShowPenaltyForm(false)}>Batal</Button>
+              <Button size="sm" icon={editingPenaltyId ? Check : Plus} onClick={handleSavePenalty} disabled={!penaltyForm.division_id && !editingPenaltyId}>
+                {editingPenaltyId ? "Simpan" : "Tambah"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
       {/* ═══ DELETE CONFIRM DIALOG ═══ */}
       {deleteConfirm && (
         <Portal>
@@ -1649,7 +1870,7 @@ export default function MasterDataPage() {
               <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
                 <Trash2 className="w-7 h-7 text-danger" />
               </div>
-              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "harga-titik": "Harga Titik", "status-titik": "Status Titik", bank: "Bank" }[deleteConfirm.type]}?</h3>
+              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "denda-telat": "Denda Telat", "harga-titik": "Harga Titik", "status-titik": "Status Titik", bank: "Bank" }[deleteConfirm.type]}?</h3>
               <p className="text-sm text-muted-foreground mt-2">
                 <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen dan tidak dapat dikembalikan.
               </p>
@@ -1662,6 +1883,7 @@ export default function MasterDataPage() {
                 else if (deleteConfirm.type === "divisi") handleDeleteDivision(deleteConfirm.id);
                 else if (deleteConfirm.type === "titik-absen") handleDeleteLocation(deleteConfirm.id);
                 else if (deleteConfirm.type === "waktu-kerja") handleDeleteSchedule(deleteConfirm.id);
+                else if (deleteConfirm.type === "denda-telat") handleDeletePenalty(deleteConfirm.id);
                 else if (deleteConfirm.type === "harga-titik") handleDeleteRate(deleteConfirm.id);
                 else if (deleteConfirm.type === "status-titik") handleDeleteDStatus(deleteConfirm.id);
                 else handleDeleteBank(deleteConfirm.id);
