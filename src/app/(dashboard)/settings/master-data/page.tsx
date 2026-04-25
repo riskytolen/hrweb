@@ -1783,8 +1783,8 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowPenaltyForm(false)} />
-          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30 flex-shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center">
                   {editingPenaltyId ? <Pencil className="w-4 h-4 text-warning" /> : <Plus className="w-4 h-4 text-warning" />}
@@ -1793,7 +1793,7 @@ export default function MasterDataPage() {
               </div>
               <button onClick={() => setShowPenaltyForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 flex-1 overflow-y-auto">
               <div>
                 <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi</label>
                 {editingPenaltyId ? (
@@ -1865,7 +1865,7 @@ export default function MasterDataPage() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30 flex-shrink-0">
               <Button variant="outline" size="sm" onClick={() => setShowPenaltyForm(false)}>Batal</Button>
               <Button size="sm" icon={editingPenaltyId ? Check : Plus} onClick={handleSavePenalty} disabled={!penaltyForm.division_id && !editingPenaltyId}>
                 {editingPenaltyId ? "Simpan" : "Tambah"}
