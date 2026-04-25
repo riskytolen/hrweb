@@ -391,10 +391,12 @@ export default function AttendancePage() {
   const exportCSV = () => {
     const headers = ["Tanggal", "Pegawai", "Divisi", "Jam Masuk", "Jadwal", "Status", "Telat (menit)", "Denda", "Catatan"];
     const csvRows = [headers.join(",")];
+    const noJamStatuses = ["Izin", "Sakit", "Alpha", "Libur"];
     filtered.forEach((r) => {
+      const showJam = !noJamStatuses.includes(r.status);
       csvRows.push([
         r.tanggal, `"${r.employeeNama}"`, `"${r.divisionNama}"`,
-        r.jam_masuk.slice(0, 5), r.schedule_jam_masuk.slice(0, 5), r.status,
+        showJam ? r.jam_masuk.slice(0, 5) : "-", showJam ? r.schedule_jam_masuk.slice(0, 5) : "-", r.status,
         r.durasi_telat, r.denda, `"${r.catatan || ""}"`,
       ].join(","));
     });
@@ -420,11 +422,16 @@ export default function AttendancePage() {
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.text(`Tanggal: ${dateFilter}`, pw / 2, 21, { align: "center" });
-    const tableData = filtered.map((r, i) => [
-      i + 1, r.employeeNama || "-", r.divisionNama || "-", r.jam_masuk.slice(0, 5),
-      r.schedule_jam_masuk.slice(0, 5), r.status, r.durasi_telat > 0 ? `${r.durasi_telat} mnt` : "-",
-      r.denda > 0 ? formatCurrency(r.denda) : "-", r.catatan || "-",
-    ]);
+    const noJamStatuses = ["Izin", "Sakit", "Alpha", "Libur"];
+    const tableData = filtered.map((r, i) => {
+      const showJam = !noJamStatuses.includes(r.status);
+      return [
+        i + 1, r.employeeNama || "-", r.divisionNama || "-",
+        showJam ? r.jam_masuk.slice(0, 5) : "-", showJam ? r.schedule_jam_masuk.slice(0, 5) : "-",
+        r.status, r.durasi_telat > 0 ? `${r.durasi_telat} mnt` : "-",
+        r.denda > 0 ? formatCurrency(r.denda) : "-", r.catatan || "-",
+      ];
+    });
     autoTable(doc, {
       startY: 28,
       head: [["#", "Pegawai", "Divisi", "Masuk", "Jadwal", "Status", "Telat", "Denda", "Catatan"]],
@@ -585,8 +592,16 @@ export default function AttendancePage() {
                         {row.divisionNama}
                       </span>
                     </td>
-                    <td className="px-5 py-3.5 text-center text-sm font-semibold text-foreground">{row.jam_masuk.slice(0, 5)}</td>
-                    <td className="px-5 py-3.5 text-center text-xs text-muted-foreground">{row.schedule_jam_masuk.slice(0, 5)}</td>
+                    <td className="px-5 py-3.5 text-center text-sm">
+                      {["Izin", "Sakit", "Alpha", "Libur"].includes(row.status)
+                        ? <span className="text-muted-foreground italic">-</span>
+                        : <span className="font-semibold text-foreground">{row.jam_masuk.slice(0, 5)}</span>}
+                    </td>
+                    <td className="px-5 py-3.5 text-center text-xs">
+                      {["Izin", "Sakit", "Alpha", "Libur"].includes(row.status)
+                        ? <span className="text-muted-foreground italic">-</span>
+                        : <span className="text-muted-foreground">{row.schedule_jam_masuk.slice(0, 5)}</span>}
+                    </td>
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{row.status}</span>
                     </td>
