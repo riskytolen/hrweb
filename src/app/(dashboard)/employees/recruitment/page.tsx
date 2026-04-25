@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  UserPlus, UserCheck, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
-  Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink, Eye,
+  UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
+  Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink, Eye, Car,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -26,6 +26,13 @@ const STATUS_OPTIONS = [
 ];
 
 const PENDIDIKAN_OPTIONS = ["SD", "SMP", "SMA/SMK", "D1", "D2", "D3", "S1", "S2", "S3"];
+const SIM_OPTIONS = [
+  { value: "", label: "Tidak Ada" },
+  { value: "A", label: "SIM A" },
+  { value: "B1", label: "SIM B1" },
+  { value: "B2", label: "SIM B2" },
+  { value: "C", label: "SIM C" },
+];
 
 export default function RecruitmentPage() {
   const [loading, setLoading] = useState(true);
@@ -38,7 +45,7 @@ export default function RecruitmentPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
     nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK",
-    pengalaman_kerja: "", alamat: "", status: "Lamaran Masuk", catatan: "",
+    pengalaman_kerja: "", alamat: "", sim: "", status: "Lamaran Masuk", catatan: "",
     tanggal_training_mulai: "", tanggal_training_selesai: "",
   });
   const [cvFile, setCvFile] = useState<File | null>(null);
@@ -47,8 +54,7 @@ export default function RecruitmentPage() {
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [convertConfirm, setConvertConfirm] = useState<DbRecruitment | null>(null);
-  const [converting, setConverting] = useState(false);
+
   const [statusChanging, setStatusChanging] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -99,7 +105,7 @@ export default function RecruitmentPage() {
   };
 
   const openAdd = () => {
-    setForm({ nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK", pengalaman_kerja: "", alamat: "", status: "Lamaran Masuk", catatan: "", tanggal_training_mulai: "", tanggal_training_selesai: "" });
+    setForm({ nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK", pengalaman_kerja: "", alamat: "", sim: "", status: "Lamaran Masuk", catatan: "", tanggal_training_mulai: "", tanggal_training_selesai: "" });
     setCvFile(null);
     setFormErrors(new Set());
     setEditingId(null);
@@ -110,7 +116,7 @@ export default function RecruitmentPage() {
     setForm({
       nama: r.nama, no_hp: r.no_hp, email: r.email || "", posisi_dilamar: r.posisi_dilamar,
       pendidikan_terakhir: r.pendidikan_terakhir, pengalaman_kerja: r.pengalaman_kerja || "",
-      alamat: r.alamat || "", status: r.status, catatan: r.catatan || "",
+      alamat: r.alamat || "", sim: r.sim || "", status: r.status, catatan: r.catatan || "",
       tanggal_training_mulai: r.tanggal_training_mulai || "", tanggal_training_selesai: r.tanggal_training_selesai || "",
     });
     setCvFile(null);
@@ -132,6 +138,7 @@ export default function RecruitmentPage() {
       nama: form.nama, no_hp: form.no_hp, email: form.email || null,
       posisi_dilamar: form.posisi_dilamar, pendidikan_terakhir: form.pendidikan_terakhir,
       pengalaman_kerja: form.pengalaman_kerja || null, alamat: form.alamat || null,
+      sim: form.sim || null,
       status: form.status, catatan: form.catatan || null,
       tanggal_training_mulai: form.tanggal_training_mulai || null,
       tanggal_training_selesai: form.tanggal_training_selesai || null,
@@ -360,41 +367,6 @@ export default function RecruitmentPage() {
     }
   };
 
-  // ─── Convert to Employee (manual, untuk Diterima yang belum punya pegawai) ───
-  const handleConvertToEmployee = async () => {
-    if (!convertConfirm) return;
-    setConverting(true);
-    try {
-      // Cek apakah sudah ada pegawai dari recruitment ini
-      const { data: existingEmp } = await supabase
-        .from("pegawai")
-        .select("id")
-        .eq("recruitment_id", convertConfirm.id)
-        .limit(1)
-        .single();
-
-      if (existingEmp) {
-        showToast("error", "Sudah Terdaftar", `${convertConfirm.nama} sudah terdaftar sebagai pegawai (${existingEmp.id}).`);
-        setConvertConfirm(null);
-        return;
-      }
-
-      const result = await insertPegawaiFromRecruitment(convertConfirm, "Aktif");
-      if (!result) {
-        showToast("error", "Gagal Menjadikan Pegawai", "Gagal insert data pegawai.");
-        return;
-      }
-
-      showToast("success", "Berhasil Dijadikan Pegawai", `${convertConfirm.nama} terdaftar sebagai pegawai (${result.id}). Lengkapi data di halaman Pegawai.`);
-      setConvertConfirm(null);
-      setDetailId(null);
-    } catch (err) {
-      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menjadikan pegawai.");
-    } finally {
-      setConverting(false);
-    }
-  };
-
   const filtered = list.filter((r) => {
     const q = search.toLowerCase();
     const matchSearch = r.nama.toLowerCase().includes(q) ||
@@ -570,6 +542,11 @@ export default function RecruitmentPage() {
                     <textarea rows={2} placeholder="Alamat lengkap" value={form.alamat} onChange={(e) => setForm({ ...form, alamat: e.target.value })} className={cn(inputClass, "resize-none")} />
                   </div>
                   <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">SIM</label>
+                    <Select value={form.sim} onChange={(val) => setForm({ ...form, sim: val })}
+                      options={SIM_OPTIONS} placeholder="Pilih SIM" />
+                  </div>
+                  <div>
                     <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
                     <Select value={form.status} onChange={(val) => setForm({ ...form, status: val })}
                       options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))} />
@@ -645,6 +622,7 @@ export default function RecruitmentPage() {
                     { icon: Briefcase, label: "Posisi Dilamar", value: detail.posisi_dilamar },
                     { icon: GraduationCap, label: "Pendidikan", value: detail.pendidikan_terakhir },
                     { icon: MapPin, label: "Alamat", value: detail.alamat || "-" },
+                    { icon: Car, label: "SIM", value: detail.sim ? `SIM ${detail.sim}` : "Tidak Ada" },
                   ].map((item) => (
                     <div key={item.label} className="flex items-start gap-3">
                       <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
@@ -708,45 +686,11 @@ export default function RecruitmentPage() {
                   </div>
                 </div>
               </div>
-              <div className="px-5 py-4 border-t border-border flex-shrink-0 space-y-2">
-                {detail.status === "Diterima" && (
-                  <Button size="sm" className="w-full" icon={UserCheck} onClick={() => setConvertConfirm(detail)}>
-                    Jadikan Pegawai
-                  </Button>
-                )}
+              <div className="px-5 py-4 border-t border-border flex-shrink-0">
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" className="flex-1" onClick={() => { openEdit(detail); setDetailId(null); }} icon={Pencil}>Edit</Button>
                   <Button variant="danger" size="sm" className="flex-1" onClick={() => { setDeleteConfirm({ id: detail.id, nama: detail.nama }); setDetailId(null); }} icon={Trash2}>Hapus</Button>
                 </div>
-              </div>
-            </div>
-          </div>
-        </Portal>
-      )}
-
-      {/* ═══ CONVERT TO EMPLOYEE CONFIRM ═══ */}
-      {convertConfirm && (
-        <Portal>
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !converting && setConvertConfirm(null)} />
-            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
-              <div className="p-6 text-center">
-                <div className="w-14 h-14 rounded-2xl bg-success/10 flex items-center justify-center mx-auto mb-4">
-                  <UserCheck className="w-7 h-7 text-success" />
-                </div>
-                <h3 className="text-base font-bold text-foreground">Jadikan Pegawai?</h3>
-                <p className="text-sm text-muted-foreground mt-2">
-                  <span className="font-semibold text-foreground">{convertConfirm.nama}</span> akan didaftarkan sebagai pegawai baru.
-                </p>
-                <p className="text-xs text-muted-foreground mt-2 bg-muted/50 rounded-lg px-3 py-2">
-                  Data yang akan diisi otomatis: nama, no. HP, dan alamat. Data lainnya bisa dilengkapi nanti di halaman Pegawai.
-                </p>
-              </div>
-              <div className="flex items-center gap-3 px-6 pb-6">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => setConvertConfirm(null)} disabled={converting}>Batal</Button>
-                <Button size="sm" icon={UserCheck} className="flex-1" onClick={handleConvertToEmployee} disabled={converting}>
-                  {converting ? "Memproses..." : "Ya, Jadikan Pegawai"}
-                </Button>
               </div>
             </div>
           </div>
