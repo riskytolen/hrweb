@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   CreditCard,
   Search,
@@ -142,6 +142,10 @@ export default function PayrollPage() {
   const [wsData, setWsData] = useState<Record<number, Record<string, number>>>({});
   const [wsChanged, setWsChanged] = useState<Set<number>>(new Set());
   const [wsSaving, setWsSaving] = useState(false);
+  const [wsExpandedId, setWsExpandedId] = useState<number | null>(null);
+  const [showBatchFill, setShowBatchFill] = useState(false);
+  const [batchField, setBatchField] = useState("");
+  const [batchValue, setBatchValue] = useState("");
 
   // ─── Delete confirm ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -690,6 +694,31 @@ export default function PayrollPage() {
     await fetchPayrolls();
   };
 
+  // ─── Batch Fill handler ───
+  const BATCH_FILL_OPTIONS = [
+    ...PENDAPATAN_FIELDS.filter((f) => !f.readonly),
+    ...POTONGAN_FIELDS.filter((f) => !f.readonly),
+  ];
+
+  const handleBatchFill = () => {
+    if (!batchField) return;
+    const value = parseCurrencyInput(batchValue);
+    const newData = { ...wsData };
+    const newChanged = new Set(wsChanged);
+    filtered.forEach((row) => {
+      if (newData[row.id]) {
+        newData[row.id] = { ...newData[row.id], [batchField]: value };
+        newChanged.add(row.id);
+      }
+    });
+    setWsData(newData);
+    setWsChanged(newChanged);
+    setShowBatchFill(false);
+    setBatchField("");
+    setBatchValue("");
+    showToast("success", "Batch Fill Berhasil", `${filtered.length} pegawai diisi ${BATCH_FILL_OPTIONS.find((f) => f.key === batchField)?.label || batchField} = ${formatCurrency(value)}`);
+  };
+
   // ─── Gapok handlers ───
   const handleGapokEdit = (empId: string, currentValue: number) => {
     setGapokEditId(empId);
@@ -1113,7 +1142,7 @@ export default function PayrollPage() {
                   <div className="flex items-center gap-2.5 mt-0.5 text-[10px] text-muted-foreground">
                     <span><strong className="text-foreground">{filtered.length}</strong> pegawai</span>
                     <span className="w-px h-3 bg-border" />
-                    <span>Total Netto: <strong className="text-primary">{formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}</strong></span>
+                    <span>Netto: <strong className="text-primary">{formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}</strong></span>
                     {wsChanged.size > 0 && (
                       <>
                         <span className="w-px h-3 bg-border" />
@@ -1137,7 +1166,11 @@ export default function PayrollPage() {
                   <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => setSearch(e.target.value)}
                     className="bg-transparent text-[11px] outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
                 </div>
-                {wsChanged.size > 0 ? (
+                <button onClick={() => { setBatchField(""); setBatchValue(""); setShowBatchFill(true); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">
+                  <Zap className="w-3 h-3" />Batch Fill
+                </button>
+                {wsChanged.size > 0 && (
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => initWsData(payrolls)} disabled={wsSaving}
                       className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">
@@ -1147,69 +1180,31 @@ export default function PayrollPage() {
                       {wsSaving ? "Menyimpan..." : `Simpan (${wsChanged.size})`}
                     </Button>
                   </div>
-                ) : null}
+                )}
                 <button onClick={() => setShowWorksheet(false)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Tutup">
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {/* ── Spreadsheet ── */}
-            <div className="flex-1 overflow-auto bg-muted/20">
-              <table className="border-collapse w-max min-w-full">
-                <thead className="sticky top-0 z-20">
-                  {/* Group header row */}
-                  <tr>
-                    <th className="sticky left-0 z-30 bg-card" rowSpan={2} />
-                    <th className="sticky left-[36px] z-30 bg-card border-r-2 border-border shadow-[2px_0_6px_-2px_rgba(0,0,0,0.1)]" rowSpan={2} />
-                    <th colSpan={PENDAPATAN_FIELDS.length} className="text-center text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-widest py-1.5 bg-emerald-50 dark:bg-emerald-500/[0.06] border-b border-emerald-200/50 dark:border-emerald-500/10 border-r-2 border-emerald-300/30 dark:border-emerald-500/15">
-                      Pendapatan
-                    </th>
-                    <th rowSpan={2} className="text-center text-[9px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider px-1 bg-emerald-100/60 dark:bg-emerald-500/[0.08] border-r-[3px] border-emerald-300/50 dark:border-emerald-500/20 min-w-[100px]">
-                      <span className="block leading-tight">Total</span><span className="block leading-tight">Pendapatan</span>
-                    </th>
-                    <th colSpan={POTONGAN_FIELDS.length} className="text-center text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-widest py-1.5 bg-rose-50 dark:bg-rose-500/[0.06] border-b border-rose-200/50 dark:border-rose-500/10 border-r-2 border-rose-300/30 dark:border-rose-500/15">
-                      Potongan
-                    </th>
-                    <th rowSpan={2} className="text-center text-[9px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider px-1 bg-rose-100/60 dark:bg-rose-500/[0.08] border-r-[3px] border-rose-300/50 dark:border-rose-500/20 min-w-[100px]">
-                      <span className="block leading-tight">Total</span><span className="block leading-tight">Potongan</span>
-                    </th>
-                    <th rowSpan={2} className="text-center text-[9px] font-bold text-primary uppercase tracking-wider px-1 bg-primary/[0.06] min-w-[120px]">
-                      <span className="block text-[11px]">Netto</span>
-                    </th>
-                    <th rowSpan={2} className="bg-card border-l-2 border-border min-w-[60px]" />
-                  </tr>
-                  {/* Column header row */}
-                  <tr className="border-b-2 border-border">
-                    {PENDAPATAN_FIELDS.map((f, i) => (
-                      <th key={f.key} className={cn(
-                        "text-right text-[9px] font-semibold uppercase tracking-wider px-2 py-2 min-w-[105px] border-r border-emerald-200/30 dark:border-emerald-500/10",
-                        i === PENDAPATAN_FIELDS.length - 1 && "border-r-2 border-emerald-300/30 dark:border-emerald-500/15",
-                        f.readonly
-                          ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50/80 dark:bg-emerald-500/[0.05]"
-                          : "text-muted-foreground bg-card"
-                      )}>
-                        {f.label}
-                        {f.readonly && <span className="block text-[7px] font-normal normal-case tracking-normal opacity-60">otomatis</span>}
-                      </th>
-                    ))}
-                    {POTONGAN_FIELDS.map((f, i) => (
-                      <th key={f.key} className={cn(
-                        "text-right text-[9px] font-semibold uppercase tracking-wider px-2 py-2 min-w-[105px] border-r border-rose-200/30 dark:border-rose-500/10",
-                        i === POTONGAN_FIELDS.length - 1 && "border-r-2 border-rose-300/30 dark:border-rose-500/15",
-                        f.readonly
-                          ? "text-rose-600 dark:text-rose-400 bg-rose-50/80 dark:bg-rose-500/[0.05]"
-                          : "text-muted-foreground bg-card"
-                      )}>
-                        {f.label}
-                        {f.readonly && <span className="block text-[7px] font-normal normal-case tracking-normal opacity-60">otomatis</span>}
-                      </th>
-                    ))}
+            {/* ── Table ── */}
+            <div className="flex-1 overflow-auto">
+              <table className="w-full border-collapse min-w-[900px]">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b-2 border-border bg-muted/80">
+                    <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-10">#</th>
+                    <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">Pegawai</th>
+                    <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-[130px]">Gaji Pokok</th>
+                    <th className="text-right text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider px-4 py-3 w-[130px]">Pend. Titik <span className="block text-[7px] font-normal normal-case opacity-60">otomatis</span></th>
+                    <th className="text-right text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider px-4 py-3 w-[140px] bg-emerald-50/50 dark:bg-emerald-500/[0.04]">Total Pendapatan</th>
+                    <th className="text-right text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider px-4 py-3 w-[140px] bg-rose-50/50 dark:bg-rose-500/[0.04]">Total Potongan</th>
+                    <th className="text-right text-[10px] font-bold text-primary uppercase tracking-wider px-4 py-3 w-[150px] bg-primary/[0.04]">Netto</th>
+                    <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-3 w-[80px]">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
-                    <tr><td colSpan={PENDAPATAN_FIELDS.length + POTONGAN_FIELDS.length + 6} className="text-center py-24 text-sm text-muted-foreground bg-card">
+                    <tr><td colSpan={8} className="text-center py-24 text-sm text-muted-foreground">
                       <CreditCard className="w-10 h-10 text-muted-foreground/15 mx-auto mb-2" />
                       Belum ada slip gaji untuk periode ini
                     </td></tr>
@@ -1217,126 +1212,236 @@ export default function PayrollPage() {
                     const vals = wsData[row.id] || {};
                     const computed = wsComputeTotals(row.id);
                     const isChanged = wsChanged.has(row.id);
+                    const isExpanded = wsExpandedId === row.id;
                     const isEven = idx % 2 === 0;
-                    const rowBg = isChanged ? "bg-amber-50/60 dark:bg-amber-500/[0.04]" : isEven ? "bg-card" : "bg-muted/25";
-                    const frozenBg = isChanged ? "bg-amber-50 dark:bg-amber-900/10" : isEven ? "bg-card" : "bg-muted/40";
                     return (
-                      <tr key={row.id} className={cn("hover:bg-primary/[0.03] transition-colors border-b border-border/40", rowBg)}>
-                        {/* # */}
-                        <td className={cn("sticky left-0 z-10 px-2 py-1.5 text-[10px] text-muted-foreground text-center w-[36px] border-r border-border/60", frozenBg)}>
-                          {idx + 1}
-                        </td>
-                        {/* Pegawai */}
-                        <td className={cn("sticky left-[36px] z-10 px-3 py-1.5 border-r-2 border-border shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] min-w-[180px]", frozenBg)}>
-                          <p className="text-[11px] font-semibold text-foreground truncate max-w-[160px] leading-tight">{row.pegawaiNama}</p>
-                          <p className="text-[9px] text-muted-foreground truncate max-w-[160px] leading-tight">{row.pegawaiJabatan}</p>
-                        </td>
-                        {/* Pendapatan */}
-                        {PENDAPATAN_FIELDS.map((f, i) => (
-                          <td key={f.key} className={cn(
-                            "px-0.5 py-0.5",
-                            i === PENDAPATAN_FIELDS.length - 1 ? "border-r-2 border-emerald-300/30 dark:border-emerald-500/15" : "border-r border-border/20",
-                            f.readonly && "bg-emerald-50/40 dark:bg-emerald-500/[0.02]"
-                          )}>
-                            {f.readonly ? (
-                              <div className="text-right text-[11px] font-medium text-emerald-700/70 dark:text-emerald-400/70 px-2 py-1.5 tabular-nums">{formatCurrency(vals[f.key] || 0)}</div>
-                            ) : (
-                              <input
-                                type="text"
-                                value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
-                                onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
-                                placeholder="—"
-                                className="w-full text-right text-[11px] tabular-nums px-2 py-1.5 border border-transparent rounded bg-transparent hover:bg-muted/40 focus:bg-white dark:focus:bg-card focus:border-primary/40 focus:shadow-[0_0_0_2px_rgba(59,130,246,0.1)] outline-none text-foreground placeholder:text-border transition-all"
-                              />
-                            )}
+                      <React.Fragment key={row.id}>
+                        {/* Main row */}
+                        <tr
+                          className={cn(
+                            "border-b transition-colors cursor-pointer",
+                            isChanged ? "bg-amber-50/60 dark:bg-amber-500/[0.04] border-amber-200/50 dark:border-amber-500/10" : isEven ? "bg-card border-border/40" : "bg-muted/20 border-border/40",
+                            isExpanded ? "border-b-0" : "hover:bg-primary/[0.03]"
+                          )}
+                          onClick={() => setWsExpandedId(isExpanded ? null : row.id)}
+                        >
+                          <td className="px-4 py-3 text-[10px] text-muted-foreground">{idx + 1}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold text-foreground truncate">{row.pegawaiNama}</p>
+                                <p className="text-[10px] text-muted-foreground truncate">{row.pegawaiJabatan}</p>
+                              </div>
+                              <ChevronRight className={cn("w-3.5 h-3.5 text-muted-foreground/40 transition-transform flex-shrink-0", isExpanded && "rotate-90")} />
+                            </div>
                           </td>
-                        ))}
-                        {/* Total Pendapatan */}
-                        <td className="px-2 py-1.5 text-right text-[11px] font-bold text-emerald-700 dark:text-emerald-400 tabular-nums border-r-[3px] border-emerald-300/50 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/[0.04]">
-                          {formatCurrency(computed.totalPendapatan)}
-                        </td>
-                        {/* Potongan */}
-                        {POTONGAN_FIELDS.map((f, i) => (
-                          <td key={f.key} className={cn(
-                            "px-0.5 py-0.5",
-                            i === POTONGAN_FIELDS.length - 1 ? "border-r-2 border-rose-300/30 dark:border-rose-500/15" : "border-r border-border/20",
-                            f.readonly && "bg-rose-50/40 dark:bg-rose-500/[0.02]"
-                          )}>
-                            {f.readonly ? (
-                              <div className="text-right text-[11px] font-medium text-rose-700/70 dark:text-rose-400/70 px-2 py-1.5 tabular-nums">{formatCurrency(vals[f.key] || 0)}</div>
-                            ) : (
-                              <input
-                                type="text"
-                                value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
-                                onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
-                                placeholder="—"
-                                className="w-full text-right text-[11px] tabular-nums px-2 py-1.5 border border-transparent rounded bg-transparent hover:bg-muted/40 focus:bg-white dark:focus:bg-card focus:border-primary/40 focus:shadow-[0_0_0_2px_rgba(59,130,246,0.1)] outline-none text-foreground placeholder:text-border transition-all"
-                              />
-                            )}
+                          <td className="px-4 py-3 text-right text-xs font-medium text-foreground tabular-nums">{formatCurrency(vals.gaji_pokok || 0)}</td>
+                          <td className="px-4 py-3 text-right text-xs font-medium text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(vals.pendapatan_titik || 0)}</td>
+                          <td className="px-4 py-3 text-right text-xs font-bold text-emerald-700 dark:text-emerald-400 tabular-nums bg-emerald-50/30 dark:bg-emerald-500/[0.02]">{formatCurrency(computed.totalPendapatan)}</td>
+                          <td className="px-4 py-3 text-right text-xs font-bold text-rose-700 dark:text-rose-400 tabular-nums bg-rose-50/30 dark:bg-rose-500/[0.02]">{formatCurrency(computed.totalPotongan)}</td>
+                          <td className="px-4 py-3 text-right text-sm font-bold text-foreground tabular-nums bg-primary/[0.02]">{formatCurrency(computed.netto)}</td>
+                          <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-center gap-0.5">
+                              <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary transition-colors" title="PDF">
+                                <Download className="w-3 h-3" />
+                              </button>
+                              <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors" title="Hapus">
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
                           </td>
-                        ))}
-                        {/* Total Potongan */}
-                        <td className="px-2 py-1.5 text-right text-[11px] font-bold text-rose-700 dark:text-rose-400 tabular-nums border-r-[3px] border-rose-300/50 dark:border-rose-500/20 bg-rose-50/50 dark:bg-rose-500/[0.04]">
-                          {formatCurrency(computed.totalPotongan)}
-                        </td>
-                        {/* Netto */}
-                        <td className="px-3 py-1.5 text-right text-[12px] font-bold text-foreground tabular-nums bg-primary/[0.03]">
-                          {formatCurrency(computed.netto)}
-                        </td>
-                        {/* Aksi */}
-                        <td className="px-1 py-1.5 border-l-2 border-border bg-card">
-                          <div className="flex items-center justify-center gap-0.5">
-                            <button onClick={() => exportSlipPDF(row)} className="p-1 rounded hover:bg-primary-light text-muted-foreground hover:text-primary transition-colors" title="Download PDF">
-                              <Download className="w-3 h-3" />
-                            </button>
-                            <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1 rounded hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors" title="Hapus">
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                        </tr>
+
+                        {/* Expanded detail row */}
+                        {isExpanded && (
+                          <tr className={cn("border-b border-border", isChanged ? "bg-amber-50/30 dark:bg-amber-500/[0.02]" : "bg-muted/10")}>
+                            <td />
+                            <td colSpan={7} className="px-4 py-4">
+                              <div className="grid grid-cols-2 gap-6 max-w-4xl">
+                                {/* Pendapatan */}
+                                <div>
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <div className="w-5 h-5 rounded-md bg-emerald-100 dark:bg-emerald-500/10 flex items-center justify-center">
+                                      <TrendingDown className="w-3 h-3 text-emerald-600 dark:text-emerald-400 rotate-180" />
+                                    </div>
+                                    <h4 className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Pendapatan</h4>
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {PENDAPATAN_FIELDS.map((f) => (
+                                      <div key={f.key} className="flex items-center gap-2">
+                                        <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
+                                        {f.readonly ? (
+                                          <span className="flex-1 text-right text-[11px] font-medium text-emerald-600/70 dark:text-emerald-400/70 tabular-nums">{formatCurrency(vals[f.key] || 0)}</span>
+                                        ) : (
+                                          <div className="flex-1 relative">
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">Rp</span>
+                                            <input
+                                              type="text"
+                                              value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
+                                              onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
+                                              placeholder="0"
+                                              onClick={(e) => e.stopPropagation()}
+                                              className="w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-foreground placeholder:text-muted-foreground/30 transition-all"
+                                            />
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                    <div className="flex items-center gap-2 pt-2 mt-1 border-t border-emerald-200/50 dark:border-emerald-500/10">
+                                      <span className="text-[11px] font-bold text-foreground w-32">Total</span>
+                                      <span className="flex-1 text-right text-xs font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(computed.totalPendapatan)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Potongan */}
+                                <div>
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <div className="w-5 h-5 rounded-md bg-rose-100 dark:bg-rose-500/10 flex items-center justify-center">
+                                      <TrendingDown className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+                                    </div>
+                                    <h4 className="text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider">Potongan</h4>
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {POTONGAN_FIELDS.map((f) => (
+                                      <div key={f.key} className="flex items-center gap-2">
+                                        <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
+                                        {f.readonly ? (
+                                          <span className="flex-1 text-right text-[11px] font-medium text-rose-600/70 dark:text-rose-400/70 tabular-nums">{formatCurrency(vals[f.key] || 0)}</span>
+                                        ) : (
+                                          <div className="flex-1 relative">
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">Rp</span>
+                                            <input
+                                              type="text"
+                                              value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
+                                              onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
+                                              placeholder="0"
+                                              onClick={(e) => e.stopPropagation()}
+                                              className="w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-foreground placeholder:text-muted-foreground/30 transition-all"
+                                            />
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                    <div className="flex items-center gap-2 pt-2 mt-1 border-t border-rose-200/50 dark:border-rose-500/10">
+                                      <span className="text-[11px] font-bold text-foreground w-32">Total</span>
+                                      <span className="flex-1 text-right text-xs font-bold text-rose-700 dark:text-rose-400 tabular-nums">{formatCurrency(computed.totalPotongan)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Netto bar */}
+                              <div className="mt-4 flex items-center justify-between px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary/5 to-primary/10 border border-primary/10 max-w-4xl">
+                                <span className="text-xs font-bold text-foreground">Gaji Bersih (Netto)</span>
+                                <span className={cn("text-lg font-bold tabular-nums", computed.netto >= 0 ? "text-primary" : "text-danger")}>{formatCurrency(computed.netto)}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
-                {/* Sticky Footer */}
+                {/* Footer */}
                 {filtered.length > 0 && (
                   <tfoot className="sticky bottom-0 z-10">
                     <tr className="border-t-2 border-border bg-card shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.08)]">
-                      <td className="sticky left-0 z-20 bg-card px-2 py-2.5 border-r border-border/60" />
-                      <td className="sticky left-[36px] z-20 bg-card px-3 py-2.5 border-r-2 border-border shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]">
+                      <td className="px-4 py-3" />
+                      <td className="px-4 py-3">
                         <p className="text-[10px] font-bold text-foreground uppercase tracking-wider">Grand Total</p>
                         <p className="text-[9px] text-muted-foreground">{filtered.length} pegawai</p>
                       </td>
-                      {PENDAPATAN_FIELDS.map((f, i) => (
-                        <td key={f.key} className={cn(
-                          "px-2 py-2.5 text-right text-[10px] font-bold text-muted-foreground tabular-nums",
-                          i === PENDAPATAN_FIELDS.length - 1 ? "border-r-2 border-emerald-300/30 dark:border-emerald-500/15" : "border-r border-border/20"
-                        )}>
-                          {formatCurrency(filtered.reduce((s, r) => s + ((wsData[r.id] || {})[f.key] || 0), 0))}
-                        </td>
-                      ))}
-                      <td className="px-2 py-2.5 text-right text-[11px] font-extrabold text-emerald-700 dark:text-emerald-400 tabular-nums border-r-[3px] border-emerald-300/50 dark:border-emerald-500/20 bg-emerald-50/60 dark:bg-emerald-500/[0.06]">
+                      <td className="px-4 py-3 text-right text-[11px] font-bold text-muted-foreground tabular-nums">
+                        {formatCurrency(filtered.reduce((s, r) => s + ((wsData[r.id] || {}).gaji_pokok || 0), 0))}
+                      </td>
+                      <td className="px-4 py-3 text-right text-[11px] font-bold text-muted-foreground tabular-nums">
+                        {formatCurrency(filtered.reduce((s, r) => s + ((wsData[r.id] || {}).pendapatan_titik || 0), 0))}
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs font-extrabold text-emerald-700 dark:text-emerald-400 tabular-nums bg-emerald-50/50 dark:bg-emerald-500/[0.04]">
                         {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).totalPendapatan, 0))}
                       </td>
-                      {POTONGAN_FIELDS.map((f, i) => (
-                        <td key={f.key} className={cn(
-                          "px-2 py-2.5 text-right text-[10px] font-bold text-muted-foreground tabular-nums",
-                          i === POTONGAN_FIELDS.length - 1 ? "border-r-2 border-rose-300/30 dark:border-rose-500/15" : "border-r border-border/20"
-                        )}>
-                          {formatCurrency(filtered.reduce((s, r) => s + ((wsData[r.id] || {})[f.key] || 0), 0))}
-                        </td>
-                      ))}
-                      <td className="px-2 py-2.5 text-right text-[11px] font-extrabold text-rose-700 dark:text-rose-400 tabular-nums border-r-[3px] border-rose-300/50 dark:border-rose-500/20 bg-rose-50/60 dark:bg-rose-500/[0.06]">
+                      <td className="px-4 py-3 text-right text-xs font-extrabold text-rose-700 dark:text-rose-400 tabular-nums bg-rose-50/50 dark:bg-rose-500/[0.04]">
                         {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).totalPotongan, 0))}
                       </td>
-                      <td className="px-3 py-2.5 text-right text-sm font-extrabold text-primary tabular-nums bg-primary/[0.06]">
+                      <td className="px-4 py-3 text-right text-sm font-extrabold text-primary tabular-nums bg-primary/[0.04]">
                         {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}
                       </td>
-                      <td className="border-l-2 border-border bg-card" />
+                      <td />
                     </tr>
                   </tfoot>
                 )}
               </table>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ Batch Fill Modal ═══ */}
+      {showBatchFill && (
+        <Portal>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBatchFill(false)} />
+            <div className="relative bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm mx-4 animate-fade-in">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                    <Zap className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Batch Fill</h3>
+                    <p className="text-[10px] text-muted-foreground">Isi nilai yang sama untuk {filtered.length} pegawai</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowBatchFill(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="px-5 py-4 space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Komponen</label>
+                  <select
+                    value={batchField}
+                    onChange={(e) => setBatchField(e.target.value)}
+                    className={cn(inputClass, "appearance-none")}
+                  >
+                    <option value="">Pilih komponen...</option>
+                    <optgroup label="Pendapatan">
+                      {PENDAPATAN_FIELDS.filter((f) => !f.readonly).map((f) => (
+                        <option key={f.key} value={f.key}>{f.label}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Potongan">
+                      {POTONGAN_FIELDS.filter((f) => !f.readonly).map((f) => (
+                        <option key={f.key} value={f.key}>{f.label}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Nilai</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
+                    <input
+                      type="text"
+                      value={batchValue}
+                      onChange={(e) => {
+                        const raw = parseCurrencyInput(e.target.value);
+                        setBatchValue(formatInputCurrency(raw));
+                      }}
+                      placeholder="0"
+                      className={cn(inputClass, "pl-9 text-right")}
+                    />
+                  </div>
+                </div>
+                {batchField && batchValue && (
+                  <div className="bg-muted/50 rounded-xl px-3 py-2.5 text-xs text-muted-foreground">
+                    <strong className="text-foreground">{BATCH_FILL_OPTIONS.find((f) => f.key === batchField)?.label}</strong> akan diisi <strong className="text-primary">{formatCurrency(parseCurrencyInput(batchValue))}</strong> untuk <strong className="text-foreground">{filtered.length} pegawai</strong>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
+                <Button variant="outline" size="sm" onClick={() => setShowBatchFill(false)}>Batal</Button>
+                <Button icon={Zap} size="sm" onClick={handleBatchFill} disabled={!batchField || !batchValue}>Terapkan</Button>
+              </div>
             </div>
           </div>
         </Portal>
