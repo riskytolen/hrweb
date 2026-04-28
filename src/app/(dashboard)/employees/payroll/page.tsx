@@ -1103,144 +1103,193 @@ export default function PayrollPage() {
         <Portal>
           <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
             {/* ── Header ── */}
-            <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-card via-card to-primary/[0.03] flex-shrink-0">
+            <div className="flex items-center justify-between px-5 py-2.5 border-b border-border bg-card flex-shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20">
-                  <CreditCard className="w-4.5 h-4.5 text-white" />
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20">
+                  <CreditCard className="w-4 h-4 text-white" />
                 </div>
                 <div>
                   <h2 className="text-sm font-bold text-foreground">Worksheet Penggajian</h2>
-                  <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground">
+                  <div className="flex items-center gap-2.5 mt-0.5 text-[10px] text-muted-foreground">
                     <span><strong className="text-foreground">{filtered.length}</strong> pegawai</span>
-                    <span className="w-1 h-1 rounded-full bg-border" />
-                    <span>Netto: <strong className="text-primary">{formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}</strong></span>
+                    <span className="w-px h-3 bg-border" />
+                    <span>Total Netto: <strong className="text-primary">{formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}</strong></span>
                     {wsChanged.size > 0 && (
                       <>
-                        <span className="w-1 h-1 rounded-full bg-border" />
-                        <span className="text-warning"><strong>{wsChanged.size}</strong> belum disimpan</span>
+                        <span className="w-px h-3 bg-border" />
+                        <span className="flex items-center gap-1 text-warning">
+                          <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
+                          <strong>{wsChanged.size}</strong> diubah
+                        </span>
                       </>
                     )}
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {/* Period navigator */}
-                <div className="flex items-center bg-muted rounded-xl p-1">
-                  <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                  <span className="text-xs font-bold text-foreground px-3 min-w-[220px] text-center">{period.label}</span>
-                  <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                <div className="flex items-center bg-muted rounded-xl p-0.5">
+                  <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-3.5 h-3.5" /></button>
+                  <span className="text-[11px] font-bold text-foreground px-2.5 min-w-[200px] text-center">{period.label}</span>
+                  <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronRight className="w-3.5 h-3.5" /></button>
                 </div>
-                {/* Search */}
-                <div className="flex items-center gap-1.5 bg-muted rounded-xl px-3 py-1.5 w-52">
-                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                  <input type="text" placeholder="Cari..." value={search} onChange={(e) => setSearch(e.target.value)}
-                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
+                <div className="flex items-center gap-1.5 bg-muted rounded-xl px-2.5 py-1.5 w-44">
+                  <Search className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                  <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => setSearch(e.target.value)}
+                    className="bg-transparent text-[11px] outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
                 </div>
-                {/* Save */}
-                {wsChanged.size > 0 && (
-                  <Button icon={wsSaving ? Loader2 : Save} size="sm" onClick={handleWsSaveAll} disabled={wsSaving}>
-                    {wsSaving ? "Menyimpan..." : `Simpan (${wsChanged.size})`}
-                  </Button>
-                )}
-                {/* Close */}
-                <button onClick={() => setShowWorksheet(false)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                  <X className="w-3.5 h-3.5" />Tutup
+                {wsChanged.size > 0 ? (
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => initWsData(payrolls)} disabled={wsSaving}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">
+                      Reset
+                    </button>
+                    <Button icon={wsSaving ? Loader2 : Save} size="sm" onClick={handleWsSaveAll} disabled={wsSaving}>
+                      {wsSaving ? "Menyimpan..." : `Simpan (${wsChanged.size})`}
+                    </Button>
+                  </div>
+                ) : null}
+                <button onClick={() => setShowWorksheet(false)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Tutup">
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
             {/* ── Spreadsheet ── */}
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto bg-muted/20">
               <table className="border-collapse w-max min-w-full">
                 <thead className="sticky top-0 z-20">
-                  <tr className="border-b-2 border-border bg-muted/90">
-                    <th className="sticky left-0 z-30 bg-muted/95 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-3 w-10 border-r border-border">#</th>
-                    <th className="sticky left-[40px] z-30 bg-muted/95 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-3 min-w-[180px] border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">Pegawai</th>
-                    {PENDAPATAN_FIELDS.map((f) => (
+                  {/* Group header row */}
+                  <tr>
+                    <th className="sticky left-0 z-30 bg-card" rowSpan={2} />
+                    <th className="sticky left-[36px] z-30 bg-card border-r-2 border-border shadow-[2px_0_6px_-2px_rgba(0,0,0,0.1)]" rowSpan={2} />
+                    <th colSpan={PENDAPATAN_FIELDS.length} className="text-center text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-widest py-1.5 bg-emerald-50 dark:bg-emerald-500/[0.06] border-b border-emerald-200/50 dark:border-emerald-500/10 border-r-2 border-emerald-300/30 dark:border-emerald-500/15">
+                      Pendapatan
+                    </th>
+                    <th rowSpan={2} className="text-center text-[9px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider px-1 bg-emerald-100/60 dark:bg-emerald-500/[0.08] border-r-[3px] border-emerald-300/50 dark:border-emerald-500/20 min-w-[100px]">
+                      <span className="block leading-tight">Total</span><span className="block leading-tight">Pendapatan</span>
+                    </th>
+                    <th colSpan={POTONGAN_FIELDS.length} className="text-center text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-widest py-1.5 bg-rose-50 dark:bg-rose-500/[0.06] border-b border-rose-200/50 dark:border-rose-500/10 border-r-2 border-rose-300/30 dark:border-rose-500/15">
+                      Potongan
+                    </th>
+                    <th rowSpan={2} className="text-center text-[9px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider px-1 bg-rose-100/60 dark:bg-rose-500/[0.08] border-r-[3px] border-rose-300/50 dark:border-rose-500/20 min-w-[100px]">
+                      <span className="block leading-tight">Total</span><span className="block leading-tight">Potongan</span>
+                    </th>
+                    <th rowSpan={2} className="text-center text-[9px] font-bold text-primary uppercase tracking-wider px-1 bg-primary/[0.06] min-w-[120px]">
+                      <span className="block text-[11px]">Netto</span>
+                    </th>
+                    <th rowSpan={2} className="bg-card border-l-2 border-border min-w-[60px]" />
+                  </tr>
+                  {/* Column header row */}
+                  <tr className="border-b-2 border-border">
+                    {PENDAPATAN_FIELDS.map((f, i) => (
                       <th key={f.key} className={cn(
-                        "text-right text-[10px] font-bold uppercase tracking-wider px-2 py-3 min-w-[115px] border-r border-border/50",
-                        f.readonly ? "text-primary bg-primary/[0.04]" : "text-muted-foreground"
+                        "text-right text-[9px] font-semibold uppercase tracking-wider px-2 py-2 min-w-[105px] border-r border-emerald-200/30 dark:border-emerald-500/10",
+                        i === PENDAPATAN_FIELDS.length - 1 && "border-r-2 border-emerald-300/30 dark:border-emerald-500/15",
+                        f.readonly
+                          ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50/80 dark:bg-emerald-500/[0.05]"
+                          : "text-muted-foreground bg-card"
                       )}>
                         {f.label}
-                        {f.readonly && <span className="block text-[8px] font-normal normal-case tracking-normal text-primary/60">otomatis</span>}
+                        {f.readonly && <span className="block text-[7px] font-normal normal-case tracking-normal opacity-60">otomatis</span>}
                       </th>
                     ))}
-                    <th className="text-right text-[10px] font-bold text-success uppercase tracking-wider px-2 py-3 min-w-[120px] border-r-2 border-success/30 bg-success/[0.06]">Total Pend.</th>
-                    {POTONGAN_FIELDS.map((f) => (
+                    {POTONGAN_FIELDS.map((f, i) => (
                       <th key={f.key} className={cn(
-                        "text-right text-[10px] font-bold uppercase tracking-wider px-2 py-3 min-w-[115px] border-r border-border/50",
-                        f.readonly ? "text-danger bg-danger/[0.04]" : "text-muted-foreground"
+                        "text-right text-[9px] font-semibold uppercase tracking-wider px-2 py-2 min-w-[105px] border-r border-rose-200/30 dark:border-rose-500/10",
+                        i === POTONGAN_FIELDS.length - 1 && "border-r-2 border-rose-300/30 dark:border-rose-500/15",
+                        f.readonly
+                          ? "text-rose-600 dark:text-rose-400 bg-rose-50/80 dark:bg-rose-500/[0.05]"
+                          : "text-muted-foreground bg-card"
                       )}>
                         {f.label}
-                        {f.readonly && <span className="block text-[8px] font-normal normal-case tracking-normal text-danger/60">otomatis</span>}
+                        {f.readonly && <span className="block text-[7px] font-normal normal-case tracking-normal opacity-60">otomatis</span>}
                       </th>
                     ))}
-                    <th className="text-right text-[10px] font-bold text-danger uppercase tracking-wider px-2 py-3 min-w-[120px] border-r-2 border-danger/30 bg-danger/[0.06]">Total Pot.</th>
-                    <th className="text-right text-[10px] font-bold text-foreground uppercase tracking-wider px-3 py-3 min-w-[130px] bg-primary/[0.06]">Netto</th>
-                    <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-3 w-20 border-l border-border">Aksi</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/30">
+                <tbody>
                   {filtered.length === 0 ? (
-                    <tr><td colSpan={PENDAPATAN_FIELDS.length + POTONGAN_FIELDS.length + 6} className="text-center py-20 text-sm text-muted-foreground">
+                    <tr><td colSpan={PENDAPATAN_FIELDS.length + POTONGAN_FIELDS.length + 6} className="text-center py-24 text-sm text-muted-foreground bg-card">
+                      <CreditCard className="w-10 h-10 text-muted-foreground/15 mx-auto mb-2" />
                       Belum ada slip gaji untuk periode ini
                     </td></tr>
                   ) : filtered.map((row, idx) => {
                     const vals = wsData[row.id] || {};
                     const computed = wsComputeTotals(row.id);
                     const isChanged = wsChanged.has(row.id);
+                    const isEven = idx % 2 === 0;
+                    const rowBg = isChanged ? "bg-amber-50/60 dark:bg-amber-500/[0.04]" : isEven ? "bg-card" : "bg-muted/25";
+                    const frozenBg = isChanged ? "bg-amber-50 dark:bg-amber-900/10" : isEven ? "bg-card" : "bg-muted/40";
                     return (
-                      <tr key={row.id} className={cn("hover:bg-muted/20 transition-colors", isChanged && "bg-warning/[0.04]")}>
-                        <td className="sticky left-0 z-10 bg-card px-3 py-2 text-xs text-muted-foreground border-r border-border">{idx + 1}</td>
-                        <td className="sticky left-[40px] z-10 bg-card px-3 py-2 border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
-                          <p className="text-xs font-semibold text-foreground truncate max-w-[160px]">{row.pegawaiNama}</p>
-                          <p className="text-[10px] text-muted-foreground truncate max-w-[160px]">{row.pegawaiJabatan}</p>
+                      <tr key={row.id} className={cn("hover:bg-primary/[0.03] transition-colors border-b border-border/40", rowBg)}>
+                        {/* # */}
+                        <td className={cn("sticky left-0 z-10 px-2 py-1.5 text-[10px] text-muted-foreground text-center w-[36px] border-r border-border/60", frozenBg)}>
+                          {idx + 1}
                         </td>
-                        {PENDAPATAN_FIELDS.map((f) => (
-                          <td key={f.key} className={cn("px-1 py-1 border-r border-border/30", f.readonly && "bg-muted/20")}>
+                        {/* Pegawai */}
+                        <td className={cn("sticky left-[36px] z-10 px-3 py-1.5 border-r-2 border-border shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)] min-w-[180px]", frozenBg)}>
+                          <p className="text-[11px] font-semibold text-foreground truncate max-w-[160px] leading-tight">{row.pegawaiNama}</p>
+                          <p className="text-[9px] text-muted-foreground truncate max-w-[160px] leading-tight">{row.pegawaiJabatan}</p>
+                        </td>
+                        {/* Pendapatan */}
+                        {PENDAPATAN_FIELDS.map((f, i) => (
+                          <td key={f.key} className={cn(
+                            "px-0.5 py-0.5",
+                            i === PENDAPATAN_FIELDS.length - 1 ? "border-r-2 border-emerald-300/30 dark:border-emerald-500/15" : "border-r border-border/20",
+                            f.readonly && "bg-emerald-50/40 dark:bg-emerald-500/[0.02]"
+                          )}>
                             {f.readonly ? (
-                              <div className="text-right text-xs font-medium text-muted-foreground px-1.5 py-1.5">{formatCurrency(vals[f.key] || 0)}</div>
+                              <div className="text-right text-[11px] font-medium text-emerald-700/70 dark:text-emerald-400/70 px-2 py-1.5 tabular-nums">{formatCurrency(vals[f.key] || 0)}</div>
                             ) : (
                               <input
                                 type="text"
                                 value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
                                 onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
-                                placeholder="0"
-                                className="w-full text-right text-xs px-1.5 py-1.5 rounded-lg border border-transparent bg-transparent hover:border-border focus:border-primary focus:bg-card focus:ring-1 focus:ring-primary/20 outline-none text-foreground placeholder:text-muted-foreground/30 transition-colors"
+                                placeholder="—"
+                                className="w-full text-right text-[11px] tabular-nums px-2 py-1.5 border border-transparent rounded bg-transparent hover:bg-muted/40 focus:bg-white dark:focus:bg-card focus:border-primary/40 focus:shadow-[0_0_0_2px_rgba(59,130,246,0.1)] outline-none text-foreground placeholder:text-border transition-all"
                               />
                             )}
                           </td>
                         ))}
-                        <td className="px-2 py-2 text-right text-xs font-bold text-success border-r-2 border-success/20 bg-success/[0.02]">
+                        {/* Total Pendapatan */}
+                        <td className="px-2 py-1.5 text-right text-[11px] font-bold text-emerald-700 dark:text-emerald-400 tabular-nums border-r-[3px] border-emerald-300/50 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/[0.04]">
                           {formatCurrency(computed.totalPendapatan)}
                         </td>
-                        {POTONGAN_FIELDS.map((f) => (
-                          <td key={f.key} className={cn("px-1 py-1 border-r border-border/30", f.readonly && "bg-muted/20")}>
+                        {/* Potongan */}
+                        {POTONGAN_FIELDS.map((f, i) => (
+                          <td key={f.key} className={cn(
+                            "px-0.5 py-0.5",
+                            i === POTONGAN_FIELDS.length - 1 ? "border-r-2 border-rose-300/30 dark:border-rose-500/15" : "border-r border-border/20",
+                            f.readonly && "bg-rose-50/40 dark:bg-rose-500/[0.02]"
+                          )}>
                             {f.readonly ? (
-                              <div className="text-right text-xs font-medium text-muted-foreground px-1.5 py-1.5">{formatCurrency(vals[f.key] || 0)}</div>
+                              <div className="text-right text-[11px] font-medium text-rose-700/70 dark:text-rose-400/70 px-2 py-1.5 tabular-nums">{formatCurrency(vals[f.key] || 0)}</div>
                             ) : (
                               <input
                                 type="text"
                                 value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
                                 onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
-                                placeholder="0"
-                                className="w-full text-right text-xs px-1.5 py-1.5 rounded-lg border border-transparent bg-transparent hover:border-border focus:border-primary focus:bg-card focus:ring-1 focus:ring-primary/20 outline-none text-foreground placeholder:text-muted-foreground/30 transition-colors"
+                                placeholder="—"
+                                className="w-full text-right text-[11px] tabular-nums px-2 py-1.5 border border-transparent rounded bg-transparent hover:bg-muted/40 focus:bg-white dark:focus:bg-card focus:border-primary/40 focus:shadow-[0_0_0_2px_rgba(59,130,246,0.1)] outline-none text-foreground placeholder:text-border transition-all"
                               />
                             )}
                           </td>
                         ))}
-                        <td className="px-2 py-2 text-right text-xs font-bold text-danger border-r-2 border-danger/20 bg-danger/[0.02]">
+                        {/* Total Potongan */}
+                        <td className="px-2 py-1.5 text-right text-[11px] font-bold text-rose-700 dark:text-rose-400 tabular-nums border-r-[3px] border-rose-300/50 dark:border-rose-500/20 bg-rose-50/50 dark:bg-rose-500/[0.04]">
                           {formatCurrency(computed.totalPotongan)}
                         </td>
-                        <td className="px-3 py-2 text-right text-sm font-bold text-foreground bg-primary/[0.02]">
+                        {/* Netto */}
+                        <td className="px-3 py-1.5 text-right text-[12px] font-bold text-foreground tabular-nums bg-primary/[0.03]">
                           {formatCurrency(computed.netto)}
                         </td>
-                        <td className="px-2 py-2 border-l border-border">
+                        {/* Aksi */}
+                        <td className="px-1 py-1.5 border-l-2 border-border bg-card">
                           <div className="flex items-center justify-center gap-0.5">
-                            <button onClick={() => exportSlipPDF(row)} className="p-1 rounded-md hover:bg-primary-light text-muted-foreground hover:text-primary" title="Download PDF">
+                            <button onClick={() => exportSlipPDF(row)} className="p-1 rounded hover:bg-primary-light text-muted-foreground hover:text-primary transition-colors" title="Download PDF">
                               <Download className="w-3 h-3" />
                             </button>
-                            <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1 rounded-md hover:bg-danger-light text-muted-foreground hover:text-danger" title="Hapus">
+                            <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1 rounded hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors" title="Hapus">
                               <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
@@ -1248,36 +1297,45 @@ export default function PayrollPage() {
                       </tr>
                     );
                   })}
-                  {/* Grand Total Row */}
-                  {filtered.length > 0 && (
-                    <tr className="bg-muted/50 border-t-2 border-border sticky bottom-0 z-10">
-                      <td className="sticky left-0 z-20 bg-muted/80 px-3 py-3 border-r border-border" />
-                      <td className="sticky left-[40px] z-20 bg-muted/80 px-3 py-3 border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
-                        <p className="text-xs font-bold text-foreground">TOTAL ({filtered.length} pegawai)</p>
+                </tbody>
+                {/* Sticky Footer */}
+                {filtered.length > 0 && (
+                  <tfoot className="sticky bottom-0 z-10">
+                    <tr className="border-t-2 border-border bg-card shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.08)]">
+                      <td className="sticky left-0 z-20 bg-card px-2 py-2.5 border-r border-border/60" />
+                      <td className="sticky left-[36px] z-20 bg-card px-3 py-2.5 border-r-2 border-border shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]">
+                        <p className="text-[10px] font-bold text-foreground uppercase tracking-wider">Grand Total</p>
+                        <p className="text-[9px] text-muted-foreground">{filtered.length} pegawai</p>
                       </td>
-                      {PENDAPATAN_FIELDS.map((f) => (
-                        <td key={f.key} className="px-2 py-3 text-right text-[10px] font-bold text-muted-foreground border-r border-border/30">
+                      {PENDAPATAN_FIELDS.map((f, i) => (
+                        <td key={f.key} className={cn(
+                          "px-2 py-2.5 text-right text-[10px] font-bold text-muted-foreground tabular-nums",
+                          i === PENDAPATAN_FIELDS.length - 1 ? "border-r-2 border-emerald-300/30 dark:border-emerald-500/15" : "border-r border-border/20"
+                        )}>
                           {formatCurrency(filtered.reduce((s, r) => s + ((wsData[r.id] || {})[f.key] || 0), 0))}
                         </td>
                       ))}
-                      <td className="px-2 py-3 text-right text-xs font-bold text-success border-r-2 border-success/20 bg-success/[0.06]">
+                      <td className="px-2 py-2.5 text-right text-[11px] font-extrabold text-emerald-700 dark:text-emerald-400 tabular-nums border-r-[3px] border-emerald-300/50 dark:border-emerald-500/20 bg-emerald-50/60 dark:bg-emerald-500/[0.06]">
                         {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).totalPendapatan, 0))}
                       </td>
-                      {POTONGAN_FIELDS.map((f) => (
-                        <td key={f.key} className="px-2 py-3 text-right text-[10px] font-bold text-muted-foreground border-r border-border/30">
+                      {POTONGAN_FIELDS.map((f, i) => (
+                        <td key={f.key} className={cn(
+                          "px-2 py-2.5 text-right text-[10px] font-bold text-muted-foreground tabular-nums",
+                          i === POTONGAN_FIELDS.length - 1 ? "border-r-2 border-rose-300/30 dark:border-rose-500/15" : "border-r border-border/20"
+                        )}>
                           {formatCurrency(filtered.reduce((s, r) => s + ((wsData[r.id] || {})[f.key] || 0), 0))}
                         </td>
                       ))}
-                      <td className="px-2 py-3 text-right text-xs font-bold text-danger border-r-2 border-danger/20 bg-danger/[0.06]">
+                      <td className="px-2 py-2.5 text-right text-[11px] font-extrabold text-rose-700 dark:text-rose-400 tabular-nums border-r-[3px] border-rose-300/50 dark:border-rose-500/20 bg-rose-50/60 dark:bg-rose-500/[0.06]">
                         {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).totalPotongan, 0))}
                       </td>
-                      <td className="px-3 py-3 text-right text-sm font-bold text-primary bg-primary/[0.06]">
+                      <td className="px-3 py-2.5 text-right text-sm font-extrabold text-primary tabular-nums bg-primary/[0.06]">
                         {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}
                       </td>
-                      <td className="border-l border-border" />
+                      <td className="border-l-2 border-border bg-card" />
                     </tr>
-                  )}
-                </tbody>
+                  </tfoot>
+                )}
               </table>
             </div>
           </div>
