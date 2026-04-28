@@ -109,11 +109,47 @@ export interface DbPegawai {
   kartu_keluarga: string | null;
   tanggal_mulai_pkwt: string | null;
   tanggal_berakhir_pkwt: string | null;
+  gaji_pokok: number;
   recruitment_id: number | null;
   created_at: string;
   updated_at: string;
   // joined
   jabatan?: DbJabatan;
+}
+
+export interface DbPayroll {
+  id: number;
+  employee_id: string;
+  periode: string;
+  periode_mulai: string;
+  periode_selesai: string;
+  // Pendapatan
+  gaji_pokok: number;
+  pendapatan_titik: number;
+  extra_job: number;
+  uang_makan: number;
+  insentif: number;
+  tunjangan_jabatan: number;
+  transport: number;
+  tunjangan_lain: number;
+  tambahan_lain: number;
+  total_pendapatan: number;
+  // Potongan
+  koperasi: number;
+  pinjaman_perusahaan: number;
+  potongan_absen: number;
+  potongan_lain: number;
+  jht: number;
+  bpjs_kesehatan: number;
+  total_potongan: number;
+  // Netto
+  netto: number;
+  status: "Draft" | "Final";
+  catatan: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  pegawai?: DbPegawai;
 }
 
 export interface DbDeliveryStatus {
