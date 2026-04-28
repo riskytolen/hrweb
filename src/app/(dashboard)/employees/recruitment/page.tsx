@@ -13,6 +13,7 @@ import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase, type DbRecruitment } from "@/lib/supabase";
+import { compressFile } from "@/lib/file-compression";
 
 const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -49,6 +50,7 @@ export default function RecruitmentPage() {
     tanggal_training_mulai: "", tanggal_training_selesai: "",
   });
   const [cvFile, setCvFile] = useState<File | null>(null);
+  const [cvCompressing, setCvCompressing] = useState(false);
   const [formErrors, setFormErrors] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
@@ -552,13 +554,31 @@ export default function RecruitmentPage() {
                       options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))} />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Upload CV (PDF)</label>
-                    <label className={cn("flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed cursor-pointer text-xs",
-                      cvFile ? "border-success/40 bg-success-light/20 text-success" : "border-border hover:border-primary/40 text-muted-foreground")}>
-                      {cvFile ? (<><Check className="w-3.5 h-3.5" /><span className="truncate max-w-[120px]">{cvFile.name}</span></>) : (<><Upload className="w-3.5 h-3.5" /><span>Pilih file</span></>)}
-                      <input type="file" accept=".pdf" className="hidden" onChange={(e) => setCvFile(e.target.files?.[0] || null)} />
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Upload CV (PDF, maks 300KB)</label>
+                    <label className={cn("flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed text-xs transition-all",
+                      cvCompressing
+                        ? "border-warning/40 bg-warning/5 text-warning cursor-wait pointer-events-none"
+                        : cvFile
+                          ? "border-success/40 bg-success-light/20 text-success cursor-pointer"
+                          : "border-border hover:border-primary/40 text-muted-foreground cursor-pointer")}>
+                      {cvCompressing ? (
+                        <><span className="w-3.5 h-3.5 border-2 border-warning/30 border-t-warning rounded-full animate-spin" /><span>Memproses...</span></>
+                      ) : cvFile ? (
+                        <><Check className="w-3.5 h-3.5" /><span className="truncate max-w-[120px]">{cvFile.name}</span></>
+                      ) : (
+                        <><Upload className="w-3.5 h-3.5" /><span>Pilih file</span></>
+                      )}
+                      <input type="file" accept=".pdf" className="hidden" disabled={cvCompressing} onChange={async (e) => {
+                        const file = e.target.files?.[0] || null;
+                        if (!file) { setCvFile(null); return; }
+                        setCvCompressing(true);
+                        const result = await compressFile(file);
+                        setCvCompressing(false);
+                        if (!result.success) { showToast("error", "File Gagal", result.error); e.target.value = ""; return; }
+                        setCvFile(result.file);
+                      }} />
                     </label>
-                    {editingId && list.find((r) => r.id === editingId)?.cv_url && !cvFile && (
+                    {editingId && list.find((r) => r.id === editingId)?.cv_url && !cvFile && !cvCompressing && (
                       <p className="text-[10px] text-success mt-1">CV sudah ada</p>
                     )}
                   </div>

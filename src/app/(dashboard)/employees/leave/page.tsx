@@ -15,6 +15,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase, type DbLeaveRequest } from "@/lib/supabase";
+import { compressFile } from "@/lib/file-compression";
 
 type EmployeeLite = { id: string; nama: string };
 type DivisionLite = { id: number };
@@ -62,6 +63,7 @@ export default function LeavePage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [lampFile, setLampFile] = useState<File | null>(null);
+  const [lampCompressing, setLampCompressing] = useState(false);
 
   // Approval
   const [approvalConfirm, setApprovalConfirm] = useState<{ id: number; nama: string; action: "approve" | "reject" } | null>(null);
@@ -611,19 +613,31 @@ export default function LeavePage() {
                 {/* Lampiran foto (opsional, hanya untuk Izin & Sakit) */}
                 {(form.jenis === "Izin" || form.jenis === "Sakit") && (
                   <div>
-                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Bukti Foto <span className="text-muted-foreground font-normal">(opsional)</span></label>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Bukti Foto <span className="text-muted-foreground font-normal">(opsional, maks 300KB)</span></label>
                     <label className={cn(
-                      "flex items-center justify-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed cursor-pointer text-xs transition-all",
-                      lampFile
-                        ? "border-success/40 bg-success-light/20 text-success"
-                        : "border-border hover:border-primary/40 text-muted-foreground hover:text-primary"
+                      "flex items-center justify-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed text-xs transition-all",
+                      lampCompressing
+                        ? "border-warning/40 bg-warning/5 text-warning cursor-wait pointer-events-none"
+                        : lampFile
+                          ? "border-success/40 bg-success-light/20 text-success cursor-pointer"
+                          : "border-border hover:border-primary/40 text-muted-foreground hover:text-primary cursor-pointer"
                     )}>
-                      {lampFile ? (
+                      {lampCompressing ? (
+                        <><span className="w-3.5 h-3.5 border-2 border-warning/30 border-t-warning rounded-full animate-spin" /><span>Memproses...</span></>
+                      ) : lampFile ? (
                         <><Check className="w-3.5 h-3.5" /><span className="truncate max-w-[200px]">{lampFile.name}</span></>
                       ) : (
                         <><Upload className="w-3.5 h-3.5" /><span>Upload foto bukti (JPG, PNG, PDF)</span></>
                       )}
-                      <input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => setLampFile(e.target.files?.[0] || null)} />
+                      <input type="file" accept="image/*,.pdf" className="hidden" disabled={lampCompressing} onChange={async (e) => {
+                        const file = e.target.files?.[0] || null;
+                        if (!file) { setLampFile(null); return; }
+                        setLampCompressing(true);
+                        const result = await compressFile(file);
+                        setLampCompressing(false);
+                        if (!result.success) { showToast("error", "File Gagal", result.error); e.target.value = ""; return; }
+                        setLampFile(result.file);
+                      }} />
                     </label>
                     {editingId && list.find((r) => r.id === editingId)?.lampiran_url && !lampFile && (
                       <div className="flex items-center gap-1.5 mt-1.5">

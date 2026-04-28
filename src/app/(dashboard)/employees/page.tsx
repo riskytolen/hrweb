@@ -40,9 +40,71 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import Pagination from "@/components/ui/Pagination";
 import { supabase, type DbPegawai } from "@/lib/supabase";
 import { cn, formatShortDate, toTitleCase } from "@/lib/utils";
+import { compressFile } from "@/lib/file-compression";
 
 // ─── Map DB row to UI-friendly shape ───
 type Employee = DbPegawai & { jabatanNama?: string };
+
+// ─── Kelengkapan Data ───
+const COMPLETENESS_FIELDS: { key: keyof DbPegawai; label: string; group: string }[] = [
+  // Data Pribadi
+  { key: "nama", label: "Nama Lengkap", group: "Pribadi" },
+  { key: "no_ktp", label: "No. KTP", group: "Pribadi" },
+  { key: "jenis_kelamin", label: "Jenis Kelamin", group: "Pribadi" },
+  { key: "agama", label: "Agama", group: "Pribadi" },
+  { key: "tempat_lahir", label: "Tempat Lahir", group: "Pribadi" },
+  { key: "tanggal_lahir", label: "Tanggal Lahir", group: "Pribadi" },
+  { key: "alamat_ktp", label: "Alamat KTP", group: "Pribadi" },
+  { key: "alamat_domisili", label: "Alamat Domisili", group: "Pribadi" },
+  { key: "no_telp", label: "No. Telepon", group: "Pribadi" },
+  // Kepegawaian
+  { key: "jabatan_id", label: "Jabatan", group: "Kepegawaian" },
+  { key: "tanggal_bergabung", label: "Tanggal Bergabung", group: "Kepegawaian" },
+  // Keuangan
+  { key: "bank", label: "Bank", group: "Keuangan" },
+  { key: "no_rekening", label: "No. Rekening", group: "Keuangan" },
+  { key: "nama_rekening", label: "Nama Rekening", group: "Keuangan" },
+  // BPJS
+  { key: "no_bpjs_kesehatan", label: "BPJS Kesehatan", group: "BPJS" },
+  { key: "no_bpjs_ketenagakerjaan", label: "BPJS Ketenagakerjaan", group: "BPJS" },
+  // Dokumen
+  { key: "foto_ktp", label: "Foto KTP", group: "Dokumen" },
+  { key: "foto_diri", label: "Foto Diri", group: "Dokumen" },
+  { key: "foto_sim", label: "Foto SIM", group: "Dokumen" },
+  { key: "kartu_keluarga", label: "Kartu Keluarga", group: "Dokumen" },
+];
+
+function getCompleteness(emp: Employee) {
+  const total = COMPLETENESS_FIELDS.length;
+  let filled = 0;
+  const missing: { label: string; group: string }[] = [];
+
+  for (const f of COMPLETENESS_FIELDS) {
+    const val = emp[f.key];
+    const isFilled = val !== null && val !== undefined && val !== "" && val !== "-";
+    if (isFilled) filled++;
+    else missing.push({ label: f.label, group: f.group });
+  }
+
+  const percent = Math.round((filled / total) * 100);
+  return { filled, total, percent, missing };
+}
+
+function CompletenessRing({ percent, size = 28 }: { percent: number; size?: number }) {
+  const stroke = 3;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (percent / 100) * circumference;
+  const color = percent === 100 ? "var(--color-success)" : percent >= 70 ? "var(--color-warning)" : "var(--color-danger)";
+
+  return (
+    <svg width={size} height={size} className="flex-shrink-0 -rotate-90">
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="currentColor" strokeWidth={stroke} className="text-border" />
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-500" />
+    </svg>
+  );
+}
 
 // ─── Status helpers ───
 const statusVariant: Record<string, "success" | "warning" | "muted"> = {
@@ -121,8 +183,6 @@ function DocBadge({ exists, label, url, onPreview }: { exists: boolean; label: s
     </button>
   );
 }
-
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
 // ─── Form Field Component ───
 function FormField({ label, required, children, full, hasError }: { label: string; required?: boolean; children: React.ReactNode; full?: boolean; hasError?: boolean }) {
@@ -203,6 +263,7 @@ export default function EmployeesPage() {
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
   const [editData, setEditData] = useState<Record<string, string | null>>({});
   const [successToast, setSuccessToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
 
@@ -294,6 +355,7 @@ export default function EmployeesPage() {
 
   const handleSaveEdit = async () => {
     if (!selectedEmployee) return;
+    setEditSaving(true);
 
     // Upload new files if any
     const fileUpdates: Record<string, string | null> = {};
@@ -342,6 +404,8 @@ export default function EmployeesPage() {
         ...fileUpdates,
       })
       .eq("id", selectedEmployee.id);
+
+    setEditSaving(false);
 
     if (!error) {
       setIsEditing(false);
@@ -745,6 +809,7 @@ export default function EmployeesPage() {
   const [addSaving, setAddSaving] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
   const [editFiles, setEditFiles] = useState<Record<string, File | null>>({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null });
+  const [compressingField, setCompressingField] = useState<string | null>(null);
   const [jabatanOptions, setJabatanOptions] = useState<{ id: number; nama: string }[]>([]);
   const [bankOptions, setBankOptions] = useState<{ id: number; nama: string }[]>([]);
 
@@ -771,21 +836,29 @@ export default function EmployeesPage() {
     }
   };
 
-  const handleEditFileSelect = (field: string, file: File | null) => {
-    if (file && file.size > MAX_FILE_SIZE) {
-      showSuccessToast("File Terlalu Besar", `File "${file.name}" (${(file.size / 1024 / 1024).toFixed(1)}MB) melebihi batas 2MB.`);
+  const handleEditFileSelect = async (field: string, file: File | null) => {
+    if (!file) { setEditFiles((prev) => ({ ...prev, [field]: null })); return; }
+    setCompressingField(field);
+    const result = await compressFile(file);
+    setCompressingField(null);
+    if (!result.success) {
+      showSuccessToast("File Gagal", result.error);
       return;
     }
-    setEditFiles((prev) => ({ ...prev, [field]: file }));
+    setEditFiles((prev) => ({ ...prev, [field]: result.file }));
   };
 
-  const handleFileSelect = (field: string, file: File | null) => {
-    if (file && file.size > MAX_FILE_SIZE) {
-      setAddError(`File "${file.name}" terlalu besar (${(file.size / 1024 / 1024).toFixed(1)}MB). Maksimal 2MB.`);
+  const handleFileSelect = async (field: string, file: File | null) => {
+    if (!file) { setAddFiles((prev) => ({ ...prev, [field]: null })); return; }
+    setCompressingField(field);
+    const result = await compressFile(file);
+    setCompressingField(null);
+    if (!result.success) {
+      setAddError(result.error);
       return;
     }
     setAddError("");
-    setAddFiles((prev) => ({ ...prev, [field]: file }));
+    setAddFiles((prev) => ({ ...prev, [field]: result.file }));
   };
 
   const handleOpenPreview = (url: string, label: string) => {
@@ -918,6 +991,7 @@ export default function EmployeesPage() {
   const activeCount = employees.filter((e) => e.status === "Aktif").length;
   const cutiCount = employees.filter((e) => e.status === "Cuti").length;
   const inactiveCount = employees.filter((e) => e.status === "Tidak Aktif").length;
+  const incompleteCount = employees.filter((e) => getCompleteness(e).percent < 100).length;
 
   return (
     <>
@@ -982,10 +1056,10 @@ export default function EmployeesPage() {
         />
 
         {/* Summary */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           {loading ? (
             <>
-              {Array.from({ length: 4 }).map((_, i) => (
+              {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
                   <Skeleton className="w-10 h-10 rounded-xl" />
                   <div className="space-y-2">
@@ -1030,6 +1104,15 @@ export default function EmployeesPage() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground font-medium">Tidak Aktif</p>
+                  <p className="text-xs text-muted-foreground">pegawai</p>
+                </div>
+              </div>
+              <div className={cn("bg-card rounded-2xl border p-4 flex items-center gap-3", incompleteCount > 0 ? "border-danger/30" : "border-border")}>
+                <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", incompleteCount > 0 ? "bg-danger/10" : "bg-success-light")}>
+                  <span className={cn("text-sm font-bold", incompleteCount > 0 ? "text-danger" : "text-success")}>{incompleteCount}</span>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium">Belum Lengkap</p>
                   <p className="text-xs text-muted-foreground">pegawai</p>
                 </div>
               </div>
@@ -1078,6 +1161,7 @@ export default function EmployeesPage() {
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Jabatan</th>
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">No. Telepon</th>
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
+                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Kelengkapan</th>
                   <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Aksi</th>
                 </tr>
               </thead>
@@ -1098,6 +1182,7 @@ export default function EmployeesPage() {
                       <td className="px-5 py-4"><Skeleton className="h-4 w-20 rounded-md" /></td>
                       <td className="px-5 py-4"><Skeleton className="h-4 w-24 rounded-md" /></td>
                       <td className="px-5 py-4"><Skeleton className="h-6 w-14 rounded-lg" /></td>
+                      <td className="px-5 py-4 text-center"><Skeleton className="h-6 w-12 rounded-lg mx-auto" /></td>
                       <td className="px-5 py-4 text-center"><Skeleton className="h-6 w-14 rounded-lg mx-auto" /></td>
                     </tr>
                   ))
@@ -1128,6 +1213,19 @@ export default function EmployeesPage() {
                         <Badge variant={statusVariant[emp.status] || "muted"}>{emp.status}</Badge>
                       </td>
                       <td className="px-5 py-4 text-center">
+                        {(() => {
+                          const c = getCompleteness(emp);
+                          return (
+                            <div className="inline-flex items-center gap-1.5" title={c.percent === 100 ? "Data lengkap" : `${c.missing.length} data belum diisi`}>
+                              <CompletenessRing percent={c.percent} />
+                              <span className={cn("text-[11px] font-bold",
+                                c.percent === 100 ? "text-success" : c.percent >= 70 ? "text-warning" : "text-danger"
+                              )}>{c.percent}%</span>
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-5 py-4 text-center">
                         <button
                           onClick={() => handleOpenDetail(emp)}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-primary hover:bg-primary-light"
@@ -1154,7 +1252,7 @@ export default function EmployeesPage() {
       {/* ═══ DETAIL PANEL (Slide-over) ═══ */}
       {selectedEmployee && (
         <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { if (!isEditing) { setSelectedEmployee(null); } }} />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { if (!isEditing && !editSaving) { setSelectedEmployee(null); } }} />
           <div className="relative w-full max-w-2xl bg-card shadow-2xl flex flex-col animate-slide-in-left">
             {/* Header */}
             <div className="sticky top-0 z-10 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
@@ -1186,8 +1284,15 @@ export default function EmployeesPage() {
                   </>
                 ) : (
                   <>
-                    <Button variant="outline" size="sm" onClick={handleCancelEdit}>Batal</Button>
-                    <Button icon={Save} size="sm" onClick={handleSaveEdit}>Simpan</Button>
+                    <Button variant="outline" size="sm" onClick={handleCancelEdit} disabled={editSaving}>Batal</Button>
+                    <Button icon={editSaving ? undefined : Save} size="sm" onClick={handleSaveEdit} disabled={editSaving}>
+                      {editSaving ? (
+                        <span className="flex items-center gap-2">
+                          <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          Menyimpan...
+                        </span>
+                      ) : "Simpan"}
+                    </Button>
                   </>
                 )}
               </div>
@@ -1197,6 +1302,40 @@ export default function EmployeesPage() {
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+              {/* ── Kelengkapan Data ── */}
+              {!isEditing && (() => {
+                const c = getCompleteness(selectedEmployee);
+                if (c.percent === 100) return null;
+                const grouped = c.missing.reduce<Record<string, string[]>>((acc, m) => {
+                  (acc[m.group] ??= []).push(m.label);
+                  return acc;
+                }, {});
+                return (
+                  <div className={cn(
+                    "rounded-2xl border p-4",
+                    c.percent >= 70 ? "border-warning/20 bg-warning/[0.04]" : "border-danger/20 bg-danger/[0.04]"
+                  )}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <CompletenessRing percent={c.percent} size={36} />
+                      <div>
+                        <p className="text-sm font-bold text-foreground">{c.percent}% Lengkap</p>
+                        <p className="text-[11px] text-muted-foreground">{c.missing.length} dari {c.total} data belum diisi</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {Object.entries(grouped).map(([group, fields]) => (
+                        fields.map((f) => (
+                          <span key={f} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-card border border-border text-[10px] text-muted-foreground">
+                            <span className="w-1 h-1 rounded-full bg-danger/60 flex-shrink-0" />
+                            {f}
+                          </span>
+                        ))
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* ── MODE EDIT ── */}
               {isEditing ? (
@@ -1267,7 +1406,7 @@ export default function EmployeesPage() {
 
                   <Section title="Dokumen & Berkas" icon={FileText}>
                     <div className="sm:col-span-2">
-                      <p className="text-[10px] text-muted-foreground mb-3">Pilih file baru untuk mengganti. Maks 2MB per file (JPG, PNG, PDF).</p>
+                      <p className="text-[10px] text-muted-foreground mb-3">Pilih file baru untuk mengganti. Maks 300KB per file (JPG, PNG, PDF).</p>
                       <div className="grid grid-cols-2 gap-3">
                         {([
                           { label: "Foto KTP", key: "foto_ktp", current: selectedEmployee.foto_ktp },
@@ -1277,18 +1416,26 @@ export default function EmployeesPage() {
                         ] as const).map((doc) => {
                           const newFile = editFiles[doc.key];
                           const hasExisting = !!doc.current;
+                          const isCompressing = compressingField === doc.key;
                           return (
                             <div key={doc.key}>
                               <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">{doc.label}</label>
                               <label className={cn(
-                                "flex items-center justify-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed cursor-pointer text-xs",
-                                newFile
-                                  ? "border-success/40 bg-success-light/20 text-success"
-                                  : hasExisting
-                                    ? "border-primary/30 bg-primary-light/10 text-primary hover:border-primary/50"
-                                    : "border-border hover:border-primary/40 hover:bg-primary-light/20 text-muted-foreground"
+                                "flex items-center justify-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed text-xs transition-all",
+                                isCompressing
+                                  ? "border-warning/40 bg-warning/5 text-warning cursor-wait pointer-events-none"
+                                  : newFile
+                                    ? "border-success/40 bg-success-light/20 text-success cursor-pointer"
+                                    : hasExisting
+                                      ? "border-primary/30 bg-primary-light/10 text-primary hover:border-primary/50 cursor-pointer"
+                                      : "border-border hover:border-primary/40 hover:bg-primary-light/20 text-muted-foreground cursor-pointer"
                               )}>
-                                {newFile ? (
+                                {isCompressing ? (
+                                  <>
+                                    <span className="w-3.5 h-3.5 border-2 border-warning/30 border-t-warning rounded-full animate-spin" />
+                                    <span>Memproses...</span>
+                                  </>
+                                ) : newFile ? (
                                   <>
                                     <Check className="w-3.5 h-3.5" />
                                     <span className="truncate max-w-[100px]">{newFile.name}</span>
@@ -1304,9 +1451,9 @@ export default function EmployeesPage() {
                                     <span>Upload</span>
                                   </>
                                 )}
-                                <input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => handleEditFileSelect(doc.key, e.target.files?.[0] || null)} />
+                                <input type="file" accept="image/*,.pdf" className="hidden" disabled={isCompressing} onChange={(e) => handleEditFileSelect(doc.key, e.target.files?.[0] || null)} />
                               </label>
-                              {hasExisting && !newFile && (
+                              {hasExisting && !newFile && !isCompressing && (
                                 <p className="text-[9px] text-success mt-1">File tersedia</p>
                               )}
                             </div>
@@ -1558,36 +1705,46 @@ export default function EmployeesPage() {
               {/* Dokumen Upload */}
               <div>
                 <div className="flex items-center gap-2 mb-1"><FileText className="w-4 h-4 text-primary" /><h3 className="text-sm font-bold text-foreground">Dokumen & Berkas</h3></div>
-                <p className="text-[10px] text-muted-foreground mb-4">Format: JPG, PNG, PDF. Maksimal 2MB per file.</p>
+                <p className="text-[10px] text-muted-foreground mb-4">Format: JPG, PNG, PDF. Maksimal 300KB per file.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {([
                     { label: "Foto KTP", key: "foto_ktp" },
                     { label: "Foto Diri", key: "foto_diri" },
                     { label: "Foto SIM", key: "foto_sim" },
                     { label: "Kartu Keluarga", key: "kartu_keluarga" },
-                  ] as const).map((doc) => (
-                    <FormField key={doc.key} label={doc.label}>
-                      <label className={cn(
-                        "flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer text-sm",
-                        addFiles[doc.key]
-                          ? "border-success/40 bg-success-light/20 text-success"
-                          : "border-border hover:border-primary/40 hover:bg-primary-light/20 text-muted-foreground"
-                      )}>
-                        {addFiles[doc.key] ? (
-                          <>
-                            <Check className="w-4 h-4" />
-                            <span className="truncate max-w-[150px]">{addFiles[doc.key]!.name}</span>
-                          </>
-                        ) : (
-                          <>
-                            <ImageIcon className="w-4 h-4" />
-                            <span>Pilih file</span>
-                          </>
-                        )}
-                        <input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => handleFileSelect(doc.key, e.target.files?.[0] || null)} />
-                      </label>
-                    </FormField>
-                  ))}
+                  ] as const).map((doc) => {
+                    const isCompressing = compressingField === doc.key;
+                    return (
+                      <FormField key={doc.key} label={doc.label}>
+                        <label className={cn(
+                          "flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed text-sm transition-all",
+                          isCompressing
+                            ? "border-warning/40 bg-warning/5 text-warning cursor-wait pointer-events-none"
+                            : addFiles[doc.key]
+                              ? "border-success/40 bg-success-light/20 text-success cursor-pointer"
+                              : "border-border hover:border-primary/40 hover:bg-primary-light/20 text-muted-foreground cursor-pointer"
+                        )}>
+                          {isCompressing ? (
+                            <>
+                              <span className="w-4 h-4 border-2 border-warning/30 border-t-warning rounded-full animate-spin" />
+                              <span>Memproses...</span>
+                            </>
+                          ) : addFiles[doc.key] ? (
+                            <>
+                              <Check className="w-4 h-4" />
+                              <span className="truncate max-w-[150px]">{addFiles[doc.key]!.name}</span>
+                            </>
+                          ) : (
+                            <>
+                              <ImageIcon className="w-4 h-4" />
+                              <span>Pilih file</span>
+                            </>
+                          )}
+                          <input type="file" accept="image/*,.pdf" className="hidden" disabled={isCompressing} onChange={(e) => handleFileSelect(doc.key, e.target.files?.[0] || null)} />
+                        </label>
+                      </FormField>
+                    );
+                  })}
                 </div>
               </div>
             </div>
