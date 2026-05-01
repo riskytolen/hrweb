@@ -74,6 +74,7 @@ const PERMISSION_OPTIONS = [
   { key: "recruitment", label: "Rekrutmen" },
   { key: "performance", label: "Kinerja" },
   { key: "legal", label: "Legal & Administrasi" },
+  { key: "settings", label: "Pengaturan" },
 ];
 
 export default function AccountsPage() {
@@ -394,13 +395,25 @@ export default function AccountsPage() {
     setDeleteConfirm(null);
   };
 
-  const togglePermission = (key: string) => {
-    setRoleForm((prev) => ({
-      ...prev,
-      permissions: prev.permissions.includes(key)
-        ? prev.permissions.filter((p) => p !== key)
-        : [...prev.permissions, key],
-    }));
+  // Permission per modul: 3 keadaan
+  // - tidak ada key → tidak tampil
+  // - "key.view" → hanya lihat
+  // - "key" → CRUD penuh (edit)
+  const getPermissionState = (key: string): "none" | "view" | "edit" => {
+    if (roleForm.permissions.includes(key)) return "edit";
+    if (roleForm.permissions.includes(key + ".view")) return "view";
+    return "none";
+  };
+
+  const setPermissionState = (key: string, state: "none" | "view" | "edit") => {
+    setRoleForm((prev) => {
+      // Hapus semua varian key ini dulu
+      const cleaned = prev.permissions.filter((p) => p !== key && p !== key + ".view");
+      // Tambah sesuai state baru
+      if (state === "edit") return { ...prev, permissions: [...cleaned, key] };
+      if (state === "view") return { ...prev, permissions: [...cleaned, key + ".view"] };
+      return { ...prev, permissions: cleaned };
+    });
   };
 
   // ─── Filter (memoized) ───
@@ -770,11 +783,24 @@ export default function AccountsPage() {
                         Akses Penuh
                       </span>
                     ) : r.permissions.length > 0 ? (
-                      r.permissions.map((p) => (
-                        <span key={p} className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-medium">
-                          {PERMISSION_OPTIONS.find((o) => o.key === p || p.startsWith(o.key))?.label || p}
-                        </span>
-                      ))
+                      r.permissions.map((p) => {
+                        const isView = p.endsWith(".view");
+                        const baseKey = isView ? p.replace(".view", "") : p;
+                        const label = PERMISSION_OPTIONS.find((o) => o.key === baseKey)?.label || p;
+                        return (
+                          <span
+                            key={p}
+                            className={cn(
+                              "px-2 py-0.5 rounded-full text-[11px] font-medium",
+                              isView
+                                ? "bg-amber-500/10 text-amber-600"
+                                : "bg-primary/10 text-primary"
+                            )}
+                          >
+                            {label}{isView ? " (Lihat)" : ""}
+                          </span>
+                        );
+                      })
                     ) : (
                       <span className="text-xs text-muted-foreground">Tidak ada</span>
                     )}
@@ -1227,26 +1253,50 @@ export default function AccountsPage() {
                   </label>
 
                   {!roleForm.permissions.includes("all") && (
-                    <div className="grid grid-cols-2 gap-2">
-                      {PERMISSION_OPTIONS.map((opt) => (
-                        <label
-                          key={opt.key}
-                          className={cn(
-                            "flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all",
-                            roleForm.permissions.includes(opt.key)
-                              ? "border-primary/30 bg-primary/5"
-                              : "border-border hover:bg-muted/30"
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={roleForm.permissions.includes(opt.key)}
-                            onChange={() => togglePermission(opt.key)}
-                            className="w-4 h-4 rounded accent-primary"
-                          />
-                          <span className="text-xs font-medium text-foreground">{opt.label}</span>
-                        </label>
-                      ))}
+                    <div className="space-y-1.5">
+                      {PERMISSION_OPTIONS.map((opt) => {
+                        const state = getPermissionState(opt.key);
+                        return (
+                          <div
+                            key={opt.key}
+                            className={cn(
+                              "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+                              state === "edit"
+                                ? "border-primary/30 bg-primary/5"
+                                : state === "view"
+                                  ? "border-amber-500/30 bg-amber-500/5"
+                                  : "border-border"
+                            )}
+                          >
+                            <span className="text-xs font-medium text-foreground">{opt.label}</span>
+                            <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+                              {([
+                                { value: "none" as const, label: "Tidak Tampil" },
+                                { value: "view" as const, label: "Lihat" },
+                                { value: "edit" as const, label: "Edit" },
+                              ]).map((s) => (
+                                <button
+                                  key={s.value}
+                                  type="button"
+                                  onClick={() => setPermissionState(opt.key, s.value)}
+                                  className={cn(
+                                    "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                                    state === s.value
+                                      ? s.value === "edit"
+                                        ? "bg-primary text-white shadow-sm"
+                                        : s.value === "view"
+                                          ? "bg-amber-500 text-white shadow-sm"
+                                          : "bg-card text-muted-foreground shadow-sm"
+                                      : "text-muted-foreground/60 hover:text-muted-foreground"
+                                  )}
+                                >
+                                  {s.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

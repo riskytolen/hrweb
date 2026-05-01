@@ -31,6 +31,8 @@ import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint, type DbDeliveryStatus } from "@/lib/supabase";
 import ReportDetail from "./ReportDetail";
+import { useAuth } from "@/components/AuthProvider";
+import RouteGuard from "@/components/RouteGuard";
 
 type EmployeeLite = { id: string; nama: string; status: string };
 type DivisionLite = { id: number; nama: string; color: string };
@@ -80,6 +82,8 @@ function getCurrentPeriodKey(): string {
 }
 
 export default function IncomePage() {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("income");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -836,6 +840,7 @@ export default function IncomePage() {
   }, [calMonth, showCalendar]);
 
   return (
+    <RouteGuard permission="income">
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Rekap Titik"
@@ -845,7 +850,7 @@ export default function IncomePage() {
           <div className="flex items-center gap-2">
             <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowReport(true)}>Laporan Detail</Button>
             <Button variant="outline" icon={CalendarDays} size="sm" onClick={openCalendar}>Mode Kalender</Button>
-            <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>
+            {canEdit && <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
           </div>
         }
       />
@@ -971,8 +976,8 @@ export default function IncomePage() {
                   <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[200px] truncate">{row.catatan || <span className="italic">-</span>}</td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => openEdit(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.tanggal})` })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                      {canEdit && <button onClick={() => openEdit(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                      {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.tanggal})` })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                     </div>
                   </td>
                 </tr>
@@ -1708,5 +1713,6 @@ export default function IncomePage() {
         </Portal>
       )}
     </div>
+    </RouteGuard>
   );
 }

@@ -16,6 +16,8 @@ import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase, type DbLeaveRequest } from "@/lib/supabase";
 import { compressFile } from "@/lib/file-compression";
+import { useAuth } from "@/components/AuthProvider";
+import RouteGuard from "@/components/RouteGuard";
 
 type EmployeeLite = { id: string; nama: string };
 type DivisionLite = { id: number };
@@ -47,6 +49,8 @@ function formatTanggal(d: string): string {
 }
 
 export default function LeavePage() {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("leave");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -354,12 +358,13 @@ export default function LeavePage() {
     ? countDays(form.tanggal_mulai, form.tanggal_selesai) : 0;
 
   return (
+    <RouteGuard permission="leave">
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Cuti & Izin"
         description="Kelola pengajuan cuti, izin, dan sakit pegawai"
         icon={CalendarDays}
-        actions={<Button icon={Plus} size="sm" onClick={openAdd}>Ajukan</Button>}
+        actions={canEdit ? <Button icon={Plus} size="sm" onClick={openAdd}>Ajukan</Button> : undefined}
       />
 
       {/* Toast */}
@@ -478,7 +483,7 @@ export default function LeavePage() {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-center gap-1">
-                        {row.status === "Menunggu" && (
+                        {canEdit && row.status === "Menunggu" && (
                           <>
                             <button onClick={() => setApprovalConfirm({ id: row.id, nama: `${row.employeeNama} (${row.jenis})`, action: "approve" })}
                               title="Setujui" className="p-1.5 rounded-lg hover:bg-success-light text-muted-foreground hover:text-success"><Check className="w-3.5 h-3.5" /></button>
@@ -487,8 +492,8 @@ export default function LeavePage() {
                             <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
                           </>
                         )}
-                        <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.jenis})` })}
-                          title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                        {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.jenis})` })}
+                          title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                       </div>
                     </td>
                   </tr>
@@ -732,5 +737,6 @@ export default function LeavePage() {
         </Portal>
       )}
     </div>
+    </RouteGuard>
   );
 }
