@@ -131,7 +131,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, [supabase, fetchProfile]);
 
-  const isSuperAdmin = (profile?.roles?.level ?? 0) >= 100;
+  const isSuperAdmin = (profile?.roles?.level ?? 0) >= 100 || (profile?.roles?.permissions ?? []).includes("all");
 
   const hasPermission = useCallback(
     (permission: string): boolean => {

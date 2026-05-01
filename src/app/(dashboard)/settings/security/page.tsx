@@ -25,6 +25,8 @@ import {
   type DbEmployeeDevice,
   type DbEmployeeFaceProfile,
 } from "@/lib/supabase";
+import { useAuth } from "@/components/AuthProvider";
+import RouteGuard from "@/components/RouteGuard";
 
 type EmployeeLite = {
   id: string;
@@ -38,6 +40,8 @@ type FaceRow = DbEmployeeFaceProfile & { employeeNama?: string };
 const PAGE_SIZE = 10;
 
 export default function SecuritySettingsPage() {
+  const { isSuperAdmin } = useAuth();
+  const canEdit = isSuperAdmin;
   const [activeTab, setActiveTab] = useState<"device" | "face">("device");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -215,6 +219,7 @@ export default function SecuritySettingsPage() {
   };
 
   return (
+    <RouteGuard permission="settings">
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Keamanan"
@@ -277,9 +282,9 @@ export default function SecuritySettingsPage() {
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
                 />
               </div>
-              <Button icon={Plus} size="sm" onClick={openAddDevice} disabled={employeesWithoutDevice.length === 0}>
+              {canEdit && <Button icon={Plus} size="sm" onClick={openAddDevice} disabled={employeesWithoutDevice.length === 0}>
                 {employeesWithoutDevice.length === 0 ? "Semua Pegawai Sudah Terdaftar" : "Tambah Device"}
-              </Button>
+              </Button>}
             </div>
 
             <div className="overflow-x-auto">
@@ -312,8 +317,8 @@ export default function SecuritySettingsPage() {
                         </td>
                         <td className="px-5 py-3.5">
                           <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => openEditDevice(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setDeleteConfirm({ type: "device", id: row.id, name: row.employeeNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                            {canEdit && <button onClick={() => openEditDevice(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                            {canEdit && <button onClick={() => setDeleteConfirm({ type: "device", id: row.id, name: row.employeeNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                           </div>
                         </td>
                       </tr>
@@ -339,9 +344,9 @@ export default function SecuritySettingsPage() {
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
                 />
               </div>
-              <Button icon={Plus} size="sm" onClick={openAddFace} disabled={employeesWithoutFace.length === 0}>
+              {canEdit && <Button icon={Plus} size="sm" onClick={openAddFace} disabled={employeesWithoutFace.length === 0}>
                 {employeesWithoutFace.length === 0 ? "Semua Pegawai Sudah Terdaftar" : "Tambah Data Wajah"}
-              </Button>
+              </Button>}
             </div>
 
             <div className="overflow-x-auto">
@@ -374,8 +379,8 @@ export default function SecuritySettingsPage() {
                         </td>
                         <td className="px-5 py-3.5">
                           <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => openEditFace(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setDeleteConfirm({ type: "face", id: row.id, name: row.employeeNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                            {canEdit && <button onClick={() => openEditFace(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                            {canEdit && <button onClick={() => setDeleteConfirm({ type: "face", id: row.id, name: row.employeeNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                           </div>
                         </td>
                       </tr>
@@ -502,5 +507,6 @@ export default function SecuritySettingsPage() {
         </Portal>
       )}
     </div>
+    </RouteGuard>
   );
 }

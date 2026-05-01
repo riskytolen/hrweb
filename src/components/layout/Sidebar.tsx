@@ -73,8 +73,8 @@ const allMenuGroups: MenuGroup[] = [
     color: "from-teal-500 to-cyan-400",
     basePath: "/settings",
     items: [
-      { name: "Data Master", href: "/settings/master-data", icon: Database },
-      { name: "Keamanan", href: "/settings/security", icon: Shield },
+      { name: "Data Master", href: "/settings/master-data", icon: Database, permission: "settings" },
+      { name: "Keamanan", href: "/settings/security", icon: Shield, permission: "settings" },
       { name: "Manajemen Akun", href: "/settings/accounts", icon: UserCog },
     ],
   },

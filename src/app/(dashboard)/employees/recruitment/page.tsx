@@ -14,6 +14,8 @@ import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase, type DbRecruitment } from "@/lib/supabase";
 import { compressFile } from "@/lib/file-compression";
+import { useAuth } from "@/components/AuthProvider";
+import RouteGuard from "@/components/RouteGuard";
 
 const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -36,6 +38,8 @@ const SIM_OPTIONS = [
 ];
 
 export default function RecruitmentPage() {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("recruitment");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -386,9 +390,10 @@ export default function RecruitmentPage() {
   for (const r of list) { if (r.status in statusCounts) statusCounts[r.status]++; }
 
   return (
+    <RouteGuard permission="recruitment">
     <div className="space-y-6 animate-fade-in">
       <PageHeader title="Rekrutmen" description="Kelola data pelamar dan proses rekrutmen" icon={UserPlus}
-        actions={<Button icon={Plus} size="sm" onClick={openAdd}>Tambah Pelamar</Button>} />
+        actions={canEdit ? <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Pelamar</Button> : undefined} />
 
       {toast.show && (
         <Portal>
@@ -479,8 +484,8 @@ export default function RecruitmentPage() {
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-center gap-1">
                         <button onClick={() => setDetailId(r.id)} title="Lihat Detail" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Eye className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => openEdit(r)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => setDeleteConfirm({ id: r.id, nama: r.nama })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                        {canEdit && <button onClick={() => openEdit(r)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                        {canEdit && <button onClick={() => setDeleteConfirm({ id: r.id, nama: r.nama })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                       </div>
                     </td>
                   </tr>
@@ -708,8 +713,8 @@ export default function RecruitmentPage() {
               </div>
               <div className="px-5 py-4 border-t border-border flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" className="flex-1" onClick={() => { openEdit(detail); setDetailId(null); }} icon={Pencil}>Edit</Button>
-                  <Button variant="danger" size="sm" className="flex-1" onClick={() => { setDeleteConfirm({ id: detail.id, nama: detail.nama }); setDetailId(null); }} icon={Trash2}>Hapus</Button>
+                  {canEdit && <Button variant="outline" size="sm" className="flex-1" onClick={() => { openEdit(detail); setDetailId(null); }} icon={Pencil}>Edit</Button>}
+                  {canEdit && <Button variant="danger" size="sm" className="flex-1" onClick={() => { setDeleteConfirm({ id: detail.id, nama: detail.nama }); setDetailId(null); }} icon={Trash2}>Hapus</Button>}
                 </div>
               </div>
             </div>
@@ -739,5 +744,6 @@ export default function RecruitmentPage() {
         </Portal>
       )}
     </div>
+    </RouteGuard>
   );
 }

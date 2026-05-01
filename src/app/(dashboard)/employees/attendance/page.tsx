@@ -17,6 +17,8 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbAttendanceRecord } from "@/lib/supabase";
+import { useAuth } from "@/components/AuthProvider";
+import RouteGuard from "@/components/RouteGuard";
 
 type EmployeeLite = { id: string; nama: string; status: string };
 type OffDayEntry = { employee_id: string; day_of_week: number };
@@ -93,6 +95,8 @@ function computeDendaAlpha(penalty: PenaltyLite | undefined): number {
 }
 
 export default function AttendancePage() {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("attendance");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -508,6 +512,7 @@ export default function AttendancePage() {
   };
 
   return (
+    <RouteGuard permission="attendance">
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Absensi Pegawai"
@@ -531,7 +536,7 @@ export default function AttendancePage() {
                 </div>
               )}
             </div>
-            <Button icon={Plus} size="sm" onClick={openAdd}>Input Absen</Button>
+            {canEdit && <Button icon={Plus} size="sm" onClick={openAdd}>Input Absen</Button>}
           </div>
         }
       />
@@ -671,8 +676,8 @@ export default function AttendancePage() {
                     <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[150px] truncate">{row.catatan || <span className="italic">-</span>}</td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.tanggal})` })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                        {canEdit && <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                        {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.tanggal})` })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                       </div>
                     </td>
                   </tr>
@@ -1195,5 +1200,6 @@ export default function AttendancePage() {
 
 
     </div>
+    </RouteGuard>
   );
 }

@@ -30,6 +30,8 @@ import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
 import { cn, generateDivisionColor } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
+import { useAuth } from "@/components/AuthProvider";
+import RouteGuard from "@/components/RouteGuard";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbAttendancePenaltyRate } from "@/lib/supabase";
 
@@ -65,6 +67,8 @@ type TabKey = (typeof tabs)[number]["key"];
 const MASTER_PAGE_SIZE = 10;
 
 export default function MasterDataPage() {
+  const { isSuperAdmin } = useAuth();
+  const canEdit = isSuperAdmin;
   const [activeTab, setActiveTab] = useState<TabKey>("level");
   const [masterPage, setMasterPage] = useState(1);
 
@@ -653,6 +657,7 @@ export default function MasterDataPage() {
   };
 
   return (
+    <RouteGuard permission="settings">
     <div className="space-y-6 animate-fade-in">
       <PageHeader title="Data Master" description="Kelola data referensi Level, Jabatan, Divisi, dan Bank" icon={Database} />
 
@@ -735,7 +740,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari level..." value={levelSearch} onChange={(e) => { setLevelSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddLevel}>Tambah Level</Button>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddLevel}>Tambah Level</Button>}
             </div>
             {/* Table */}
             <div className="overflow-x-auto">
@@ -774,8 +779,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditLevel(level)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "level", id: level.id, nama: level.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditLevel(level)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "level", id: level.id, nama: level.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -796,7 +801,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari jabatan atau level..." value={jabatanSearch} onChange={(e) => { setJabatanSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddJabatan}>Tambah Jabatan</Button>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddJabatan}>Tambah Jabatan</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -831,8 +836,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditJabatan(jabatan)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "jabatan", id: jabatan.id, nama: jabatan.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditJabatan(jabatan)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "jabatan", id: jabatan.id, nama: jabatan.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -853,7 +858,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari divisi..." value={divisionSearch} onChange={(e) => { setDivisionSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddDivision}>Tambah Divisi</Button>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddDivision}>Tambah Divisi</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -891,8 +896,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditDivision(division)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "divisi", id: division.id, nama: division.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditDivision(division)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "divisi", id: division.id, nama: division.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -913,7 +918,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari lokasi atau divisi..." value={locationSearch} onChange={(e) => { setLocationSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddLocation}>Tambah Lokasi</Button>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddLocation}>Tambah Lokasi</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -956,8 +961,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditLocation(loc)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "titik-absen", id: loc.id, nama: loc.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditLocation(loc)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "titik-absen", id: loc.id, nama: loc.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -978,9 +983,9 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari divisi..." value={scheduleSearch} onChange={(e) => { setScheduleSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddSchedule} disabled={divisionsWithoutSchedule.length === 0}>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddSchedule} disabled={divisionsWithoutSchedule.length === 0}>
                 {divisionsWithoutSchedule.length === 0 ? "Semua Divisi Sudah Ada" : "Tambah Jadwal"}
-              </Button>
+              </Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1017,8 +1022,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditSchedule(sch)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "waktu-kerja", id: sch.id, nama: sch.divisionNama || "" })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditSchedule(sch)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "waktu-kerja", id: sch.id, nama: sch.divisionNama || "" })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -1039,7 +1044,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari divisi..." value={penaltySearch} onChange={(e) => { setPenaltySearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddPenalty} disabled={divisionsWithoutPenalty.length === 0}>Tambah Denda</Button>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddPenalty} disabled={divisionsWithoutPenalty.length === 0}>Tambah Denda</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1074,8 +1079,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditPenalty(p)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "denda-telat", id: p.id, nama: p.divisionNama || "-" })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditPenalty(p)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "denda-telat", id: p.id, nama: p.divisionNama || "-" })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -1096,9 +1101,9 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari divisi..." value={rateSearch} onChange={(e) => { setRateSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddRate} disabled={divisionsWithoutRate.length === 0}>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddRate} disabled={divisionsWithoutRate.length === 0}>
                 {divisionsWithoutRate.length === 0 ? "Semua Divisi Sudah Ada" : "Tambah Harga Titik"}
-              </Button>
+              </Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1136,8 +1141,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditRate(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "harga-titik", id: row.division_id, nama: row.divisionNama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditRate(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "harga-titik", id: row.division_id, nama: row.divisionNama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -1158,7 +1163,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari status..." value={dStatusSearch} onChange={(e) => { setDStatusSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddDStatus}>Tambah Status</Button>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddDStatus}>Tambah Status</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1196,8 +1201,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditDStatus(s)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "status-titik", id: s.id, nama: s.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditDStatus(s)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "status-titik", id: s.id, nama: s.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -1218,7 +1223,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari bank atau kode..." value={bankSearch} onChange={(e) => { setBankSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              <Button icon={Plus} size="sm" onClick={handleOpenAddBank}>Tambah Bank</Button>
+              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddBank}>Tambah Bank</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1251,8 +1256,8 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleOpenEditBank(bank)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setDeleteConfirm({ type: "bank", id: bank.id, nama: bank.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleOpenEditBank(bank)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "bank", id: bank.id, nama: bank.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -1910,5 +1915,6 @@ export default function MasterDataPage() {
         </Portal>
       )}
     </div>
+    </RouteGuard>
   );
 }

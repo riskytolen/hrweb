@@ -33,6 +33,8 @@ import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbPayroll, type DbPegawai } from "@/lib/supabase";
+import { useAuth } from "@/components/AuthProvider";
+import RouteGuard from "@/components/RouteGuard";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
@@ -101,6 +103,8 @@ const POTONGAN_FIELDS: { key: string; label: string; readonly?: boolean }[] = [
 ];
 
 export default function PayrollPage() {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("payroll");
   // ─── Tab state ───
   const [activeTab, setActiveTab] = useState<"slip" | "gapok">("slip");
 
@@ -783,6 +787,7 @@ export default function PayrollPage() {
   };
 
   return (
+    <RouteGuard permission="payroll">
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Penggajian"
@@ -804,9 +809,9 @@ export default function PayrollPage() {
             <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowWorksheet(true)} disabled={payrolls.length === 0}>
               Worksheet
             </Button>
-            <Button icon={Zap} size="sm" onClick={() => { setGeneratePeriod(periodKey); setShowGenerate(true); }}>
+            {canEdit && <Button icon={Zap} size="sm" onClick={() => { setGeneratePeriod(periodKey); setShowGenerate(true); }}>
               Generate Slip
-            </Button>
+            </Button>}
           </div>
         }
       />
@@ -984,7 +989,7 @@ export default function PayrollPage() {
                                 </button>
                               </>
                             ) : (
-                              <button
+                              canEdit && <button
                                 onClick={() => handleGapokEdit(emp.id, emp.gaji_pokok || 0)}
                                 className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"
                                 title="Edit Gaji Pokok"
@@ -1110,9 +1115,9 @@ export default function PayrollPage() {
                       <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary" title="Download PDF">
                         <Download className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger" title="Hapus">
+                      {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger" title="Hapus">
                         <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      </button>}
                     </div>
                   </td>
                 </tr>
@@ -1799,5 +1804,6 @@ export default function PayrollPage() {
 
 
     </div>
+    </RouteGuard>
   );
 }

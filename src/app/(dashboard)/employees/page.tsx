@@ -41,6 +41,8 @@ import Pagination from "@/components/ui/Pagination";
 import { supabase, type DbPegawai } from "@/lib/supabase";
 import { cn, formatShortDate, toTitleCase } from "@/lib/utils";
 import { compressFile } from "@/lib/file-compression";
+import { useAuth } from "@/components/AuthProvider";
+import RouteGuard from "@/components/RouteGuard";
 
 // ─── Map DB row to UI-friendly shape ───
 type Employee = DbPegawai & { jabatanNama?: string };
@@ -255,6 +257,8 @@ function EditField({ label, value, field, editData, setEditData, full, type = "t
 // MAIN PAGE
 // ═══════════════════════════════════════════
 export default function EmployeesPage() {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("employees");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -994,7 +998,7 @@ export default function EmployeesPage() {
   const incompleteCount = employees.filter((e) => getCompleteness(e).percent < 100).length;
 
   return (
-    <>
+    <RouteGuard permission="employees">
       {/* ═══ GLOBAL SUCCESS TOAST ═══ */}
       {successToast.show && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
@@ -1027,7 +1031,7 @@ export default function EmployeesPage() {
           icon={Users}
           actions={
             <div className="flex items-center gap-2">
-              <Button variant="outline" icon={Upload} size="sm" onClick={() => setShowImportCsv(true)}>Import CSV</Button>
+              {canEdit && <Button variant="outline" icon={Upload} size="sm" onClick={() => setShowImportCsv(true)}>Import CSV</Button>}
               <div ref={exportMenuRef} className="relative">
                 <Button variant="outline" icon={Download} size="sm" onClick={() => setShowExportMenu(!showExportMenu)}>Export</Button>
                 {showExportMenu && (
@@ -1050,7 +1054,7 @@ export default function EmployeesPage() {
                   </div>
                 )}
               </div>
-              <Button icon={Plus} size="sm" onClick={() => { setNewId(""); setAddForm(emptyForm); setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null }); setAddError(""); setAddErrors(new Set()); setShowAddForm(true); }}>Tambah Pegawai</Button>
+              {canEdit && <Button icon={Plus} size="sm" onClick={() => { setNewId(""); setAddForm(emptyForm); setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null }); setAddError(""); setAddErrors(new Set()); setShowAddForm(true); }}>Tambah Pegawai</Button>}
             </div>
           }
         />
@@ -1275,9 +1279,9 @@ export default function EmployeesPage() {
                 {!isEditing ? (
                   <>
                     <Badge variant={statusVariant[selectedEmployee.status] || "muted"}>{selectedEmployee.status}</Badge>
-                    <button onClick={handleStartEdit} className="p-2 rounded-xl hover:bg-primary-light text-primary" title="Edit Data">
+                    {canEdit && <button onClick={handleStartEdit} className="p-2 rounded-xl hover:bg-primary-light text-primary" title="Edit Data">
                       <Pencil className="w-4 h-4" />
-                    </button>
+                    </button>}
                     <button onClick={() => setSelectedEmployee(null)} className="p-2 rounded-xl hover:bg-muted text-muted-foreground">
                       <X className="w-5 h-5" />
                     </button>
@@ -1285,14 +1289,14 @@ export default function EmployeesPage() {
                 ) : (
                   <>
                     <Button variant="outline" size="sm" onClick={handleCancelEdit} disabled={editSaving}>Batal</Button>
-                    <Button icon={editSaving ? undefined : Save} size="sm" onClick={handleSaveEdit} disabled={editSaving}>
+                    {canEdit && <Button icon={editSaving ? undefined : Save} size="sm" onClick={handleSaveEdit} disabled={editSaving}>
                       {editSaving ? (
                         <span className="flex items-center gap-2">
                           <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                           Menyimpan...
                         </span>
                       ) : "Simpan"}
-                    </Button>
+                    </Button>}
                   </>
                 )}
               </div>
@@ -2022,6 +2026,6 @@ export default function EmployeesPage() {
           </div>
         </div>
       )}
-    </>
+    </RouteGuard>
   );
 }
