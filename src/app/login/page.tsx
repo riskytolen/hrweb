@@ -1,209 +1,350 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, Eye, EyeOff, ArrowRight, Lock, Mail } from "lucide-react";
+import Image from "next/image";
+import {
+  Eye,
+  EyeOff,
+  ArrowRight,
+  Lock,
+  Mail,
+  Shield,
+  Truck,
+  AlertCircle,
+} from "lucide-react";
+import { createClient } from "@/lib/supabase-browser";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [supabase] = useState(() => createClient());
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     setIsLoading(true);
-    setTimeout(() => {
+
+    try {
+      // 1. Sign in with Supabase Auth
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (authError) {
+        if (authError.message.includes("Invalid login credentials")) {
+          setError("Email atau password salah. Silakan coba lagi.");
+        } else if (authError.message.includes("Email not confirmed")) {
+          setError("Akun belum dikonfirmasi. Hubungi Super Admin.");
+        } else {
+          setError(authError.message);
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Check if user profile is active
+      if (data.user) {
+        const { data: profile } = await supabase
+          .from("user_profiles")
+          .select("status")
+          .eq("id", data.user.id)
+          .single();
+
+        if (profile && profile.status === "Tidak Aktif") {
+          await supabase.auth.signOut();
+          setError("Akun Anda telah dinonaktifkan. Hubungi Super Admin.");
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // 3. Success → redirect
       router.push("/employees");
-    }, 800);
+      router.refresh();
+    } catch {
+      setError("Terjadi kesalahan. Silakan coba lagi.");
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen flex">
-      {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 relative overflow-hidden">
-        {/* Background Pattern */}
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-20 left-20 w-72 h-72 bg-blue-500 rounded-full blur-3xl" />
-          <div className="absolute bottom-20 right-20 w-96 h-96 bg-purple-500 rounded-full blur-3xl" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-cyan-500 rounded-full blur-3xl" />
+    <div className="login-page h-screen flex relative overflow-hidden">
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* FULL-SCREEN ANIMATED BACKGROUND                        */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      <div className="absolute inset-0 login-bg-base">
+        <div className="login-orb login-orb-1" />
+        <div className="login-orb login-orb-2" />
+        <div className="login-orb login-orb-3" />
+        <div className="absolute inset-0 login-grid-pattern opacity-[0.03]" />
+        <div className="absolute inset-0 login-noise opacity-[0.015]" />
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* LEFT — Branding & Info                                  */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      <div className="hidden lg:flex lg:w-[50%] relative z-10 flex-col justify-between p-10 xl:p-14">
+        {/* Top — Logo */}
+        <div
+          className={`transition-all duration-700 ${
+            mounted ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4"
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <div className="login-logo-box">
+              <Image
+                src="/logo.png"
+                alt="Jamslogistic"
+                width={22}
+                height={22}
+                className="object-contain"
+              />
+            </div>
+            <span className="text-white font-bold text-xl tracking-tight">
+              Jams<span className="login-brand-accent">logistic</span>
+            </span>
+          </div>
         </div>
 
-        {/* Grid Pattern */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
-            backgroundSize: "60px 60px",
-          }}
-        />
-
-        <div className="relative z-10 flex flex-col justify-between p-12 w-full">
-          {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center border border-white/10">
-              <Building2 className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-white font-bold text-lg">HRM System</h1>
-              <p className="text-blue-300/60 text-[10px] uppercase tracking-[0.2em]">
-                Human Resource
-              </p>
+        {/* Center — Hero Content */}
+        <div className="space-y-8 max-w-lg">
+          <div
+            className={`transition-all duration-700 delay-100 ${
+              mounted
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 translate-y-6"
+            }`}
+          >
+            <div className="login-badge">
+              <Truck className="w-3.5 h-3.5" />
+              <span>Human Resource Management System</span>
             </div>
           </div>
 
-          {/* Center Content */}
-          <div className="space-y-6 max-w-md">
-            <h2 className="text-4xl font-bold text-white leading-tight">
-              Kelola SDM Anda
+          <div
+            className={`space-y-4 transition-all duration-1000 delay-200 ${
+              mounted
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 translate-y-8"
+            }`}
+          >
+            <h1 className="text-[2.5rem] xl:text-[3.25rem] font-extrabold text-white leading-[1.1] tracking-[-0.03em]">
+              Kelola SDM
               <br />
-              <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                Lebih Efisien
-              </span>
-            </h2>
-            <p className="text-blue-200/60 text-base leading-relaxed">
-              Platform manajemen sumber daya manusia untuk mengelola
-              data karyawan, kehadiran, cuti, dan penggajian dalam satu sistem.
+              Perusahaan dengan
+              <br />
+              <span className="login-gradient-text">Lebih Efisien.</span>
+            </h1>
+            <p className="text-white/45 text-base xl:text-lg leading-relaxed max-w-md font-medium">
+              Sistem manajemen sumber daya manusia internal Jamslogistic.
+              Absensi, penggajian, dan performa dalam satu platform.
             </p>
+          </div>
 
-            {/* Feature Pills */}
-            <div className="flex flex-wrap gap-2 pt-2">
-              {[
-                "Data Karyawan",
-                "Kehadiran",
-                "Cuti & Izin",
-                "Penggajian",
-                "Laporan HR",
-              ].map((feature) => (
-                <span
-                  key={feature}
-                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-white/5 text-blue-200/80 border border-white/10"
-                >
-                  {feature}
-                </span>
-              ))}
+          <div
+            className={`flex flex-wrap gap-3 transition-all duration-1000 delay-400 ${
+              mounted
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 translate-y-4"
+            }`}
+          >
+            {["Absensi", "Penggajian", "Rekrutmen", "Performa"].map(
+              (item, i) => (
+                <div key={i} className="login-feature-pill">
+                  {item}
+                </div>
+              )
+            )}
+          </div>
+        </div>
+
+        {/* Bottom — Footer */}
+        <div
+          className={`flex items-center gap-5 transition-all duration-1000 delay-600 ${
+            mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="login-status-dot">
+              <span className="login-status-ping" />
+              <span className="login-status-core" />
             </div>
+            <span className="text-white/40 text-sm font-medium">
+              Sistem aktif
+            </span>
           </div>
-
-          {/* Bottom Stats */}
-          <div className="flex items-center gap-8">
-            {[
-              { value: "248+", label: "Karyawan" },
-              { value: "7", label: "Departemen" },
-              { value: "99.9%", label: "Uptime" },
-            ].map((stat) => (
-              <div key={stat.label}>
-                <p className="text-2xl font-bold text-white">{stat.value}</p>
-                <p className="text-xs text-blue-300/50">{stat.label}</p>
-              </div>
-            ))}
-          </div>
+          <div className="w-px h-4 bg-white/10" />
+          <span className="text-white/25 text-sm">
+            &copy; {new Date().getFullYear()} Jamslogistic
+          </span>
         </div>
       </div>
 
-      {/* Right Panel - Login Form */}
-      <div className="flex-1 flex items-center justify-center p-6 bg-white">
-        <div className="w-full max-w-[400px] space-y-8">
-          {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center gap-3 justify-center mb-4">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-white" />
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* RIGHT — Login Card                                      */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      <div className="flex-1 flex items-center justify-center px-6 sm:px-10 relative z-10">
+        <div
+          className={`login-card transition-all duration-700 delay-150 ${
+            mounted
+              ? "opacity-100 translate-y-0 scale-100"
+              : "opacity-0 translate-y-6 scale-[0.98]"
+          }`}
+        >
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[60%] h-px login-card-glow" />
+
+          {/* Mobile brand */}
+          <div className="lg:hidden flex items-center gap-3 mb-8">
+            <div className="login-logo-box">
+              <Image
+                src="/logo.png"
+                alt="Jamslogistic"
+                width={20}
+                height={20}
+                className="object-contain"
+              />
             </div>
-            <h1 className="text-xl font-bold">HRM System</h1>
+            <span className="text-white font-bold text-lg tracking-tight">
+              Jams<span className="login-brand-accent">logistic</span>
+            </span>
           </div>
 
           {/* Header */}
-          <div className="text-center lg:text-left">
-            <h2 className="text-2xl font-bold text-foreground">Selamat Datang</h2>
-            <p className="text-muted-foreground text-sm mt-2">
-              Masuk ke akun Anda untuk melanjutkan
+          <div className="mb-7">
+            <div className="flex items-center gap-2.5 mb-3">
+              <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <Shield className="w-4 h-4 text-blue-400" />
+              </div>
+              <span className="text-white/40 text-xs font-semibold uppercase tracking-widest">
+                Internal Access
+              </span>
+            </div>
+            <h2 className="text-[1.6rem] font-bold text-white tracking-tight leading-tight">
+              Masuk ke HRM System
+            </h2>
+            <p className="text-white/40 text-sm mt-2 leading-relaxed">
+              Gunakan email dan password perusahaan Anda.
             </p>
           </div>
 
+          {/* Error Alert */}
+          {error && (
+            <div className="login-error-alert mb-5">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+
           {/* Form */}
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">
-                Email
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <form onSubmit={handleLogin} className="space-y-4">
+            {/* Email */}
+            <div className="space-y-2">
+              <label className="login-label">Email</label>
+              <div
+                className={`login-input-wrap ${
+                  focusedField === "email" ? "is-focused" : ""
+                }`}
+              >
+                <Mail className="login-input-icon" />
                 <input
                   type="email"
-                  defaultValue="admin@company.com"
-                  placeholder="nama@perusahaan.com"
-                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="nama@jamslogistic.com"
+                  required
+                  onFocus={() => setFocusedField("email")}
+                  onBlur={() => setFocusedField(null)}
+                  className="login-input"
                 />
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-foreground">
-                  Password
-                </label>
-                <a
-                  href="#"
-                  className="text-xs text-primary font-medium hover:underline"
-                >
-                  Lupa password?
-                </a>
-              </div>
-              <div className="relative">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            {/* Password */}
+            <div className="space-y-2">
+              <label className="login-label">Password</label>
+              <div
+                className={`login-input-wrap ${
+                  focusedField === "password" ? "is-focused" : ""
+                }`}
+              >
+                <Lock className="login-input-icon" />
                 <input
                   type={showPassword ? "text" : "password"}
-                  defaultValue="password123"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   placeholder="Masukkan password"
-                  className="w-full pl-10 pr-12 py-3 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50"
+                  required
+                  onFocus={() => setFocusedField("password")}
+                  onBlur={() => setFocusedField(null)}
+                  className="login-input !pr-12"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
                 >
                   {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
+                    <EyeOff className="w-[18px] h-[18px]" />
                   ) : (
-                    <Eye className="w-4 h-4" />
+                    <Eye className="w-[18px] h-[18px]" />
                   )}
                 </button>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Remember */}
+            <div className="flex items-center gap-3 py-1">
               <input
                 type="checkbox"
                 id="remember"
                 defaultChecked
-                className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20"
+                className="login-checkbox"
               />
               <label
                 htmlFor="remember"
-                className="text-sm text-muted-foreground"
+                className="text-sm text-white/40 cursor-pointer select-none font-medium"
               >
-                Ingat saya
+                Ingat saya di perangkat ini
               </label>
             </div>
 
+            {/* Submit */}
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-2 bg-primary text-white py-3 rounded-xl font-semibold text-sm hover:bg-primary/90 active:scale-[0.99] shadow-lg shadow-primary/25 disabled:opacity-70"
+              className="login-submit-btn group"
             >
               {isLoading ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <>
+                  <div className="login-spinner" />
+                  <span>Memverifikasi...</span>
+                </>
               ) : (
                 <>
-                  Masuk
-                  <ArrowRight className="w-4 h-4" />
+                  <span>Masuk</span>
+                  <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
                 </>
               )}
             </button>
           </form>
 
           {/* Footer */}
-          <p className="text-center text-xs text-muted-foreground">
-            &copy; 2024 HRM System. All rights reserved.
+          <p className="text-center text-white/20 text-xs mt-7 leading-relaxed font-medium">
+            Akses terbatas hanya untuk karyawan Jamslogistic.
+            <br />
+            Hubungi HRD jika mengalami kendala login.
           </p>
         </div>
       </div>

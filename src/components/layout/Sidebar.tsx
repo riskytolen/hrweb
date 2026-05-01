@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/components/AuthProvider";
 import {
   Users,
   ChevronLeft,
@@ -19,6 +21,7 @@ import {
   Settings,
   UsersRound,
   Shield,
+  UserCog,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,6 +35,7 @@ interface SubItem {
   href: string;
   icon: LucideIcon;
   comingSoon?: boolean;
+  permission?: string; // permission required to see this item
 }
 
 interface MenuGroup {
@@ -40,10 +44,11 @@ interface MenuGroup {
   icon: LucideIcon;
   color: string;
   basePath: string;
+  permission?: string; // permission required to see this group
   items: SubItem[];
 }
 
-const menuGroups: MenuGroup[] = [
+const allMenuGroups: MenuGroup[] = [
   {
     key: "hrm",
     label: "HRM",
@@ -51,14 +56,14 @@ const menuGroups: MenuGroup[] = [
     color: "from-blue-500 to-cyan-400",
     basePath: "/employees",
     items: [
-      { name: "Data Pegawai", href: "/employees", icon: Users },
-      { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck },
-      { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays },
-      { name: "Rekap Titik", href: "/employees/income", icon: Wallet },
-      { name: "Penggajian", href: "/employees/payroll", icon: CreditCard },
-      { name: "Kinerja", href: "/employees/performance", icon: Award, comingSoon: true },
-      { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, comingSoon: true },
-      { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus },
+      { name: "Data Pegawai", href: "/employees", icon: Users, permission: "employees" },
+      { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck, permission: "attendance" },
+      { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays, permission: "leave" },
+      { name: "Rekap Titik", href: "/employees/income", icon: Wallet, permission: "income" },
+      { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, permission: "payroll" },
+      { name: "Kinerja", href: "/employees/performance", icon: Award, comingSoon: true, permission: "performance" },
+      { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, comingSoon: true, permission: "legal" },
+      { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus, permission: "recruitment" },
     ],
   },
   {
@@ -70,15 +75,35 @@ const menuGroups: MenuGroup[] = [
     items: [
       { name: "Data Master", href: "/settings/master-data", icon: Database },
       { name: "Keamanan", href: "/settings/security", icon: Shield },
+      { name: "Manajemen Akun", href: "/settings/accounts", icon: UserCog },
     ],
   },
 ];
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const { isSuperAdmin, hasPermission, isLoading, profile } = useAuth();
+
+  // Filter menu berdasarkan permission user
+  // Saat loading atau belum ada profile, tampilkan semua menu (akan diproteksi middleware)
+  const menuGroups = allMenuGroups
+    .map((group) => {
+      const filteredItems = group.items.filter((item) => {
+        // Saat masih loading, tampilkan semua
+        if (isLoading || !profile) return true;
+        // Manajemen Akun hanya untuk superadmin
+        if (item.href === "/settings/accounts") return isSuperAdmin;
+        // Item tanpa permission = tampilkan untuk semua
+        if (!item.permission) return true;
+        // Cek permission
+        return hasPermission(item.permission) || hasPermission(item.permission + ".view");
+      });
+      return { ...group, items: filteredItems };
+    })
+    .filter((group) => group.items.length > 0);
 
   // Auto-open group yang memiliki sub item aktif
-  const getInitialOpen = () => {
+  const computeOpenGroups = () => {
     const open: Record<string, boolean> = {};
     menuGroups.forEach((g) => {
       open[g.key] = g.items.some((item) =>
@@ -88,7 +113,13 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     return open;
   };
 
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(getInitialOpen);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(computeOpenGroups);
+
+  // Re-compute open groups saat profile/permissions berubah
+  useEffect(() => {
+    setOpenGroups(computeOpenGroups());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile, pathname]);
 
   const toggleGroup = (key: string) => {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -112,17 +143,24 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {/* Logo */}
         <div className={cn("flex items-center h-14 border-b border-white/[0.06]", collapsed ? "px-3 justify-center" : "px-4")}>
           <Link href="/employees" className="flex items-center gap-2.5 min-w-0">
-            {!collapsed ? (
+            <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center">
+              <Image
+                src="/logo.png"
+                alt="Logo"
+                width={28}
+                height={28}
+                className="object-contain"
+              />
+            </div>
+            {!collapsed && (
               <div className="animate-fade-in min-w-0">
                 <h1 className="text-[13px] font-bold bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent leading-tight truncate">
-                  ERP System
+                  Jamslogistic
                 </h1>
                 <p className="text-[9px] font-medium text-blue-400/50 uppercase tracking-[0.15em]">
-                  Jamslogistic
+                  HRM System
                 </p>
               </div>
-            ) : (
-              <span className="text-xs font-bold text-white/70">ERP</span>
             )}
           </Link>
         </div>
