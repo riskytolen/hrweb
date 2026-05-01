@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Bell,
   Search,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { useTheme } from "@/components/ThemeProvider";
+import { useAuth } from "@/components/AuthProvider";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -44,10 +46,25 @@ const notifications = [
 ];
 
 export default function Header({ onMenuToggle }: HeaderProps) {
+  const router = useRouter();
   const [showNotif, setShowNotif] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const unreadCount = notifications.filter((n) => n.unread).length;
   const { theme, toggleTheme } = useTheme();
+  const { profile, signOut } = useAuth();
+
+  const displayName = profile?.nama || "User";
+  const displayEmail = profile?.email || "";
+  const displayRole = profile?.roles?.nama || "User";
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    setShowProfile(false);
+    await signOut();
+    router.push("/login");
+    router.refresh();
+  };
 
   return (
     <header className="sticky top-0 z-30 h-16 bg-card/80 backdrop-blur-xl border-b border-border flex items-center justify-between px-4 lg:px-6">
@@ -167,12 +184,12 @@ export default function Header({ onMenuToggle }: HeaderProps) {
             className="flex items-center gap-3 p-1.5 pr-3 rounded-xl hover:bg-muted"
           >
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-xs font-bold">
-              {getInitials("Admin User")}
+              {getInitials(displayName)}
             </div>
             <div className="hidden md:block text-left">
-              <p className="text-sm font-semibold leading-tight text-foreground">Admin User</p>
+              <p className="text-sm font-semibold leading-tight text-foreground">{displayName}</p>
               <p className="text-[10px] text-muted-foreground">
-                Super Administrator
+                {displayRole}
               </p>
             </div>
             <ChevronDown className="w-4 h-4 text-muted-foreground hidden md:block" />
@@ -181,15 +198,18 @@ export default function Header({ onMenuToggle }: HeaderProps) {
           {showProfile && (
             <div className="absolute right-0 top-full mt-2 w-56 bg-card rounded-2xl shadow-lg border border-border overflow-hidden animate-scale-in">
               <div className="px-4 py-3 border-b border-border">
-                <p className="text-sm font-semibold text-foreground">Admin User</p>
+                <p className="text-sm font-semibold text-foreground">{displayName}</p>
                 <p className="text-xs text-muted-foreground">
-                  admin@company.com
+                  {displayEmail}
                 </p>
+                <span className="inline-block mt-1.5 px-2 py-0.5 text-[10px] font-semibold rounded-full bg-primary/10 text-primary">
+                  {displayRole}
+                </span>
               </div>
               <div className="py-1">
                 {[
                   { icon: User, label: "Profil Saya", href: "#" },
-                  { icon: Settings, label: "Pengaturan", href: "#" },
+                  { icon: Settings, label: "Pengaturan", href: "/settings/master-data" },
                 ].map((item) => (
                   <a
                     key={item.label}
@@ -202,9 +222,17 @@ export default function Header({ onMenuToggle }: HeaderProps) {
                 ))}
               </div>
               <div className="border-t border-border py-1">
-                <button className="flex items-center gap-3 px-4 py-2.5 text-sm text-danger hover:bg-danger-light/50 w-full">
-                  <LogOut className="w-4 h-4" />
-                  Keluar
+                <button
+                  onClick={handleLogout}
+                  disabled={isLoggingOut}
+                  className="flex items-center gap-3 px-4 py-2.5 text-sm text-danger hover:bg-danger-light/50 w-full disabled:opacity-50"
+                >
+                  {isLoggingOut ? (
+                    <div className="w-4 h-4 border-2 border-danger/30 border-t-danger rounded-full animate-spin" />
+                  ) : (
+                    <LogOut className="w-4 h-4" />
+                  )}
+                  {isLoggingOut ? "Keluar..." : "Keluar"}
                 </button>
               </div>
             </div>

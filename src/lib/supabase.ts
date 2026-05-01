@@ -307,3 +307,31 @@ export interface DbEmployeeFaceProfile {
   // joined
   pegawai?: DbPegawai;
 }
+
+// ─── Auth & Roles ───
+
+export interface DbRole {
+  id: number;
+  nama: string;
+  deskripsi: string | null;
+  level: number;
+  permissions: string[];
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbUserProfile {
+  id: string;
+  email: string;
+  nama: string;
+  role_id: number | null;
+  employee_id: string | null;
+  avatar_url: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  last_login: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  roles?: DbRole;
+}
