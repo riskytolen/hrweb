@@ -5,6 +5,7 @@
       "type": "local",
       "command": ["npx", "-y", "@supabase/mcp-server-supabase"],
       "enabled": true,
+      "timeout": 15000,
       "environment": {
         "SUPABASE_ACCESS_TOKEN": "sbp_f07414397df107f4e1194e16801e02bf629c1d5f"
       }
