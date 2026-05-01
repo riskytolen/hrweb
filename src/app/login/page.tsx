@@ -304,22 +304,6 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Remember */}
-            <div className="flex items-center gap-3 py-1">
-              <input
-                type="checkbox"
-                id="remember"
-                defaultChecked
-                className="login-checkbox"
-              />
-              <label
-                htmlFor="remember"
-                className="text-sm text-white/40 cursor-pointer select-none font-medium"
-              >
-                Ingat saya di perangkat ini
-              </label>
-            </div>
-
             {/* Submit */}
             <button
               type="submit"
