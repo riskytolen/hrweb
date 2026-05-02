@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
   Shield,
   Smartphone,
@@ -12,6 +12,7 @@ import {
   X,
   Check,
   CircleCheckBig,
+  AlertTriangle,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -56,28 +57,27 @@ export default function SecuritySettingsPage() {
   const [faceSearch, setFaceSearch] = useState("");
 
   const [showDeviceForm, setShowDeviceForm] = useState(false);
-  const [showFaceForm, setShowFaceForm] = useState(false);
   const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null);
-  const [editingFaceId, setEditingFaceId] = useState<number | null>(null);
 
   const [deviceForm, setDeviceForm] = useState({
     employee_id: "",
     device_id: "",
     status: "Aktif",
   });
-  const [faceForm, setFaceForm] = useState({
-    employee_id: "",
-    face_data_ref: "",
-    status: "Aktif",
-  });
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "device" | "face"; id: number; name: string } | null>(null);
-  const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
+  const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showSuccess = (title: string, message?: string) => {
-    setToast({ show: true, title, message: message || "" });
-    setTimeout(() => setToast({ show: false, title: "", message: "" }), 3500);
-  };
+  const showToast = useCallback((type: "success" | "error", title: string, message?: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ show: true, title, message: message || "", type });
+    toastTimer.current = setTimeout(() => setToast({ show: false, title: "", message: "", type: "success" }), 3500);
+  }, []);
+
+  useEffect(() => {
+    return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
+  }, []);
 
   const fetchEmployees = async () => {
     const { data } = await supabase.from("pegawai").select("id, nama, status").order("nama");
@@ -103,19 +103,12 @@ export default function SecuritySettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (showDeviceForm || showFaceForm) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [showDeviceForm, showFaceForm]);
+    if (showDeviceForm) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
+    return () => { document.body.style.overflow = ""; };
+  }, [showDeviceForm]);
 
-  const employeeOptions = employees.map((e) => ({ value: e.id, label: `${e.nama} (${e.id})` }));
   const employeesWithoutDevice = employees.filter((e) => !deviceList.some((d) => d.employee_id === e.id));
-  const employeesWithoutFace = employees.filter((e) => !faceList.some((f) => f.employee_id === e.id));
 
   const filteredDevices = deviceList.filter((d) =>
     (d.employeeNama || "").toLowerCase().includes(deviceSearch.toLowerCase()) ||
@@ -130,95 +123,52 @@ export default function SecuritySettingsPage() {
   const pagedDevices = filteredDevices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const pagedFaces = filteredFaces.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  // ─── Device CRUD ───
   const openAddDevice = () => {
-    setDeviceForm({
-      employee_id: employeesWithoutDevice[0]?.id || "",
-      device_id: "",
-      status: "Aktif",
-    });
+    setDeviceForm({ employee_id: employeesWithoutDevice[0]?.id || "", device_id: "", status: "Aktif" });
     setEditingDeviceId(null);
     setShowDeviceForm(true);
   };
 
   const openEditDevice = (row: DeviceRow) => {
-    setDeviceForm({
-      employee_id: row.employee_id,
-      device_id: row.device_id,
-      status: row.status,
-    });
+    setDeviceForm({ employee_id: row.employee_id, device_id: row.device_id, status: row.status });
     setEditingDeviceId(row.id);
     setShowDeviceForm(true);
   };
 
   const saveDevice = async () => {
     if (!deviceForm.employee_id || !deviceForm.device_id.trim()) return;
-    const payload = {
-      employee_id: deviceForm.employee_id,
-      device_id: deviceForm.device_id,
-      status: deviceForm.status,
-    };
+    const payload = { employee_id: deviceForm.employee_id, device_id: deviceForm.device_id, status: deviceForm.status };
     if (editingDeviceId !== null) {
       await supabase.from("employee_devices").update(payload).eq("id", editingDeviceId);
-      showSuccess("Device Diperbarui", "Data perangkat pegawai telah disimpan.");
+      showToast("success", "Device Diperbarui", "Data perangkat pegawai telah disimpan.");
     } else {
       await supabase.from("employee_devices").insert(payload);
-      showSuccess("Device Ditambahkan", "Data perangkat pegawai berhasil ditambahkan.");
+      showToast("success", "Device Ditambahkan", "Data perangkat pegawai berhasil ditambahkan.");
     }
     setShowDeviceForm(false);
     fetchDevices();
   };
 
-  const openAddFace = () => {
-    setFaceForm({
-      employee_id: employeesWithoutFace[0]?.id || "",
-      face_data_ref: "",
-      status: "Aktif",
-    });
-    setEditingFaceId(null);
-    setShowFaceForm(true);
-  };
-
-  const openEditFace = (row: FaceRow) => {
-    setFaceForm({
-      employee_id: row.employee_id,
-      face_data_ref: row.face_data_ref || "",
-      status: row.status,
-    });
-    setEditingFaceId(row.id);
-    setShowFaceForm(true);
-  };
-
-  const saveFace = async () => {
-    if (!faceForm.employee_id) return;
-    const payload = {
-      employee_id: faceForm.employee_id,
-      face_data_ref: faceForm.face_data_ref || null,
-      status: faceForm.status,
-    };
-    if (editingFaceId !== null) {
-      await supabase.from("employee_face_profiles").update(payload).eq("id", editingFaceId);
-      showSuccess("Data Wajah Diperbarui", "Profil wajah pegawai telah disimpan.");
-    } else {
-      await supabase.from("employee_face_profiles").insert(payload);
-      showSuccess("Data Wajah Ditambahkan", "Profil wajah pegawai berhasil ditambahkan.");
-    }
-    setShowFaceForm(false);
-    fetchFaces();
-  };
-
+  // ─── Delete ───
   const deleteRow = async () => {
     if (!deleteConfirm) return;
     if (deleteConfirm.type === "device") {
       await supabase.from("employee_devices").delete().eq("id", deleteConfirm.id);
-      showSuccess("Device Dihapus", "Data perangkat pegawai telah dihapus.");
+      showToast("success", "Device Dihapus", "Data perangkat pegawai telah dihapus.");
       fetchDevices();
     } else {
       await supabase.from("employee_face_profiles").delete().eq("id", deleteConfirm.id);
-      showSuccess("Data Wajah Dihapus", "Profil wajah pegawai telah dihapus.");
+      showToast("success", "Data Wajah Dihapus", "Profil wajah pegawai telah dihapus.");
       fetchFaces();
     }
     setDeleteConfirm(null);
   };
+
+  // ─── Face stats ───
+  const registeredCount = faceList.filter((f) => f.face_data_ref).length;
+  const activeEmployees = employees.filter((e) => e.status === "Aktif").length;
+  const notRegisteredCount = activeEmployees - registeredCount;
 
   return (
     <RouteGuard permission="settings">
@@ -232,15 +182,19 @@ export default function SecuritySettingsPage() {
       {toast.show && (
         <Portal>
           <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
-            <div className="flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border border-success/20 min-w-[360px] max-w-[480px]">
-              <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
-                <CircleCheckBig className="w-5 h-5 text-success" />
+            <div className={cn("flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border min-w-[360px] max-w-[480px]",
+              toast.type === "error" ? "border-danger/20" : "border-success/20")}>
+              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                toast.type === "error" ? "bg-danger/10" : "bg-success/10")}>
+                {toast.type === "error"
+                  ? <AlertTriangle className="w-5 h-5 text-danger" />
+                  : <CircleCheckBig className="w-5 h-5 text-success" />}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-foreground">{toast.title}</p>
                 {toast.message && <p className="text-xs text-muted-foreground mt-0.5">{toast.message}</p>}
               </div>
-              <button onClick={() => setToast({ show: false, title: "", message: "" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground">
+              <button onClick={() => setToast({ show: false, title: "", message: "", type: "success" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -271,6 +225,7 @@ export default function SecuritySettingsPage() {
           })}
         </div>
 
+        {/* ═══ DEVICE TAB ═══ */}
         {activeTab === "device" && (
           <>
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -285,7 +240,7 @@ export default function SecuritySettingsPage() {
                 />
               </div>
               {canInput && <Button icon={Plus} size="sm" onClick={openAddDevice} disabled={employeesWithoutDevice.length === 0}>
-                {employeesWithoutDevice.length === 0 ? "Semua Pegawai Sudah Terdaftar" : "Tambah Device"}
+                {employeesWithoutDevice.length === 0 ? "Semua Sudah Terdaftar" : "Tambah Device"}
               </Button>}
             </div>
 
@@ -333,9 +288,40 @@ export default function SecuritySettingsPage() {
           </>
         )}
 
+        {/* ═══ FACE TAB — Read-only monitoring ═══ */}
         {activeTab === "face" && (
           <>
-            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            {/* Info banner */}
+            <div className="mx-5 mt-4 flex items-start gap-3 bg-primary/5 border border-primary/10 rounded-xl p-3.5">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Smartphone className="w-4 h-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-foreground">Pendaftaran via Aplikasi Android</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Data wajah didaftarkan melalui aplikasi Android khusus. Halaman ini hanya untuk monitoring status pendaftaran wajah pegawai.
+                </p>
+              </div>
+            </div>
+
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-3 px-5 mt-3">
+              <div className="bg-muted/30 rounded-xl border border-border p-3 text-center">
+                <p className="text-lg font-bold text-foreground">{faceList.length}</p>
+                <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Total Terdaftar</p>
+              </div>
+              <div className="bg-success/5 rounded-xl border border-success/10 p-3 text-center">
+                <p className="text-lg font-bold text-success">{registeredCount}</p>
+                <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Descriptor Aktif</p>
+              </div>
+              <div className="bg-warning/5 rounded-xl border border-warning/10 p-3 text-center">
+                <p className="text-lg font-bold text-warning">{notRegisteredCount > 0 ? notRegisteredCount : 0}</p>
+                <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Belum Daftar</p>
+              </div>
+            </div>
+
+            {/* Search */}
+            <div className="px-5 py-3 border-b border-border mt-2">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-72">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
                 <input
@@ -346,9 +332,6 @@ export default function SecuritySettingsPage() {
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
                 />
               </div>
-              {canInput && <Button icon={Plus} size="sm" onClick={openAddFace} disabled={employeesWithoutFace.length === 0}>
-                {employeesWithoutFace.length === 0 ? "Semua Pegawai Sudah Terdaftar" : "Tambah Data Wajah"}
-              </Button>}
             </div>
 
             <div className="overflow-x-auto">
@@ -357,34 +340,66 @@ export default function SecuritySettingsPage() {
                   <tr className="bg-muted/30 border-b border-border">
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Pegawai</th>
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Face Data Ref</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Face Descriptor</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Status</th>
-                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Terdaftar</th>
+                    {canEdit && <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Aksi</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
                   {loading ? (
-                    <SkeletonTable rows={5} cols={5} />
+                    <SkeletonTable rows={5} cols={canEdit ? 6 : 5} />
                   ) : pagedFaces.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data wajah ditemukan</td></tr>
+                    <tr><td colSpan={canEdit ? 6 : 5} className="text-center py-10 text-sm text-muted-foreground">
+                      {faceList.length === 0 ? "Belum ada data wajah terdaftar. Gunakan aplikasi Android untuk mendaftarkan wajah pegawai." : "Tidak ada data ditemukan"}
+                    </td></tr>
                   ) : (
                     pagedFaces.map((row, idx) => (
                       <tr key={row.id} className="hover:bg-muted/30">
                         <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                        <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p><p className="text-[11px] text-muted-foreground">{row.employee_id}</p></td>
-                        <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">{row.face_data_ref || "-"}</span></td>
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-[10px] font-bold">
+                              <ScanFace className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">{row.employeeNama}</p>
+                              <p className="text-[11px] text-muted-foreground">{row.employee_id}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          {row.face_data_ref ? (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-success bg-success-light px-2 py-1 rounded-lg">
+                              <Check className="w-3 h-3" />
+                              128-d vector
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-muted-foreground italic">Belum ada data</span>
+                          )}
+                        </td>
                         <td className="px-5 py-3.5">
                           <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg", row.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
                             <span className={cn("w-1.5 h-1.5 rounded-full", row.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
                             {row.status}
                           </span>
                         </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center justify-center gap-1">
-                            {canEdit && <button onClick={() => openEditFace(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
-                            {canEdit && <button onClick={() => setDeleteConfirm({ type: "face", id: row.id, name: row.employeeNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
-                          </div>
+                        <td className="px-5 py-3.5 text-xs text-muted-foreground">
+                          {new Date(row.enrolled_at).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}
                         </td>
+                        {canEdit && (
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center justify-center">
+                              <button
+                                onClick={() => setDeleteConfirm({ type: "face", id: row.id, name: row.employeeNama || row.employee_id })}
+                                title="Hapus data wajah"
+                                className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
@@ -396,6 +411,7 @@ export default function SecuritySettingsPage() {
         )}
       </div>
 
+      {/* ═══ DEVICE FORM MODAL ═══ */}
       {showDeviceForm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -441,51 +457,7 @@ export default function SecuritySettingsPage() {
         </Portal>
       )}
 
-      {showFaceForm && (
-        <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowFaceForm(false)} />
-            <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
-                <h2 className="text-sm font-bold text-foreground">{editingFaceId !== null ? "Edit Data Wajah" : "Tambah Data Wajah"}</h2>
-                <button onClick={() => setShowFaceForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
-              </div>
-              <div className="p-5 space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Pegawai *</label>
-                  {editingFaceId !== null ? (
-                    <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">
-                      {employees.find((e) => e.id === faceForm.employee_id)?.nama || faceForm.employee_id}
-                    </div>
-                  ) : (
-                    <Select
-                      value={faceForm.employee_id}
-                      onChange={(val) => setFaceForm({ ...faceForm, employee_id: val })}
-                      options={employeesWithoutFace.map((e) => ({ value: e.id, label: `${e.nama} (${e.id})` }))}
-                      placeholder="Pilih pegawai"
-                    />
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Face Data Ref</label>
-                  <input type="text" value={faceForm.face_data_ref} onChange={(e) => setFaceForm({ ...faceForm, face_data_ref: e.target.value })} className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary" placeholder="Contoh: face-embed-v1-emp-0001" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
-                  <Select value={faceForm.status} onChange={(val) => setFaceForm({ ...faceForm, status: val })} options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]} />
-                </div>
-              </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
-                <Button variant="outline" size="sm" onClick={() => setShowFaceForm(false)}>Batal</Button>
-                <Button size="sm" icon={editingFaceId !== null ? Check : Plus} onClick={saveFace} disabled={!faceForm.employee_id}>
-                  {editingFaceId !== null ? "Simpan" : "Tambah"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Portal>
-      )}
-
+      {/* ═══ DELETE CONFIRM ═══ */}
       {deleteConfirm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -497,7 +469,8 @@ export default function SecuritySettingsPage() {
                 </div>
                 <h3 className="text-base font-bold text-foreground">Hapus {deleteConfirm.type === "device" ? "Device" : "Data Wajah"}?</h3>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Data untuk <span className="font-semibold text-foreground">"{deleteConfirm.name}"</span> akan dihapus permanen.
+                  Data untuk <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.name}&rdquo;</span> akan dihapus permanen.
+                  {deleteConfirm.type === "face" && <span className="block mt-1 text-xs">Pegawai perlu mendaftar ulang melalui aplikasi Android.</span>}
                 </p>
               </div>
               <div className="flex items-center gap-3 px-6 pb-6">
