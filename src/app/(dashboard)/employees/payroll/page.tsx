@@ -103,8 +103,10 @@ const POTONGAN_FIELDS: { key: string; label: string; readonly?: boolean }[] = [
 ];
 
 export default function PayrollPage() {
-  const { hasPermission } = useAuth();
-  const canEdit = hasPermission("payroll");
+  const { getPermissionLevel } = useAuth();
+  const permLevel = getPermissionLevel("payroll");
+  const canInput = permLevel === "input" || permLevel === "edit";
+  const canEdit = permLevel === "edit";
   // ─── Tab state ───
   const [activeTab, setActiveTab] = useState<"slip" | "gapok">("slip");
 
@@ -809,7 +811,7 @@ export default function PayrollPage() {
             <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowWorksheet(true)} disabled={payrolls.length === 0}>
               Worksheet
             </Button>
-            {canEdit && <Button icon={Zap} size="sm" onClick={() => { setGeneratePeriod(periodKey); setShowGenerate(true); }}>
+            {canInput && <Button icon={Zap} size="sm" onClick={() => { setGeneratePeriod(periodKey); setShowGenerate(true); }}>
               Generate Slip
             </Button>}
           </div>

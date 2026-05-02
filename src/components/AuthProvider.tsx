@@ -32,13 +32,25 @@ export interface UserProfile {
   } | null;
 }
 
+/**
+ * Permission level untuk setiap modul:
+ * - "none"  → tidak ada akses
+ * - "view"  → hanya lihat
+ * - "input" → lihat + tambah data baru (tidak bisa edit/hapus)
+ * - "edit"  → CRUD penuh (lihat, tambah, edit, hapus)
+ */
+export type PermissionLevel = "none" | "view" | "input" | "edit";
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   profile: UserProfile | null;
   isLoading: boolean;
   isSuperAdmin: boolean;
+  /** Cek apakah user punya akses ke modul (minimal view) */
   hasPermission: (permission: string) => boolean;
+  /** Dapatkan level permission untuk modul tertentu */
+  getPermissionLevel: (module: string) => PermissionLevel;
   refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -50,6 +62,7 @@ const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   isSuperAdmin: false,
   hasPermission: () => false,
+  getPermissionLevel: () => "none",
   refreshProfile: async () => {},
   signOut: async () => {},
 });
@@ -140,9 +153,31 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       // "all" = akses penuh
       if (perms.includes("all")) return true;
       // Cek exact match atau parent match (e.g. "employees" covers "employees.view")
+      // Juga: "employees.input" covers "employees.view"
       return perms.some(
         (p) => p === permission || permission.startsWith(p + ".")
       );
+    },
+    [profile]
+  );
+
+  /**
+   * Dapatkan level permission untuk modul tertentu.
+   * Urutan prioritas: edit > input > view > none
+   */
+  const getPermissionLevel = useCallback(
+    (module: string): PermissionLevel => {
+      if (!profile?.roles) return "none";
+      const perms = profile.roles.permissions;
+      // "all" = akses penuh
+      if (perms.includes("all")) return "edit";
+      // "module" (tanpa suffix) = full CRUD
+      if (perms.includes(module)) return "edit";
+      // "module.input" = lihat + tambah
+      if (perms.includes(module + ".input")) return "input";
+      // "module.view" = hanya lihat
+      if (perms.includes(module + ".view")) return "view";
+      return "none";
     },
     [profile]
   );
@@ -167,6 +202,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         isSuperAdmin,
         hasPermission,
+        getPermissionLevel,
         refreshProfile,
         signOut,
       }}

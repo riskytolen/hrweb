@@ -95,8 +95,10 @@ function computeDendaAlpha(penalty: PenaltyLite | undefined): number {
 }
 
 export default function AttendancePage() {
-  const { hasPermission } = useAuth();
-  const canEdit = hasPermission("attendance");
+  const { getPermissionLevel } = useAuth();
+  const permLevel = getPermissionLevel("attendance");
+  const canInput = permLevel === "input" || permLevel === "edit";
+  const canEdit = permLevel === "edit";
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -536,7 +538,7 @@ export default function AttendancePage() {
                 </div>
               )}
             </div>
-            {canEdit && <Button icon={Plus} size="sm" onClick={openAdd}>Input Absen</Button>}
+            {canInput && <Button icon={Plus} size="sm" onClick={openAdd}>Input Absen</Button>}
           </div>
         }
       />

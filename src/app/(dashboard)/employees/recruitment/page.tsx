@@ -38,8 +38,10 @@ const SIM_OPTIONS = [
 ];
 
 export default function RecruitmentPage() {
-  const { hasPermission } = useAuth();
-  const canEdit = hasPermission("recruitment");
+  const { getPermissionLevel } = useAuth();
+  const permLevel = getPermissionLevel("recruitment");
+  const canInput = permLevel === "input" || permLevel === "edit";
+  const canEdit = permLevel === "edit";
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -393,7 +395,7 @@ export default function RecruitmentPage() {
     <RouteGuard permission="recruitment">
     <div className="space-y-6 animate-fade-in">
       <PageHeader title="Rekrutmen" description="Kelola data pelamar dan proses rekrutmen" icon={UserPlus}
-        actions={canEdit ? <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Pelamar</Button> : undefined} />
+        actions={canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Pelamar</Button> : undefined} />
 
       {toast.show && (
         <Portal>

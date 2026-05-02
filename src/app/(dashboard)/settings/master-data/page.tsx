@@ -67,8 +67,10 @@ type TabKey = (typeof tabs)[number]["key"];
 const MASTER_PAGE_SIZE = 10;
 
 export default function MasterDataPage() {
-  const { isSuperAdmin } = useAuth();
-  const canEdit = isSuperAdmin;
+  const { isSuperAdmin, getPermissionLevel } = useAuth();
+  const permLevel = isSuperAdmin ? "edit" as const : getPermissionLevel("settings");
+  const canInput = permLevel === "input" || permLevel === "edit";
+  const canEdit = permLevel === "edit";
   const [activeTab, setActiveTab] = useState<TabKey>("level");
   const [masterPage, setMasterPage] = useState(1);
 
@@ -740,7 +742,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari level..." value={levelSearch} onChange={(e) => { setLevelSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddLevel}>Tambah Level</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddLevel}>Tambah Level</Button>}
             </div>
             {/* Table */}
             <div className="overflow-x-auto">
@@ -801,7 +803,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari jabatan atau level..." value={jabatanSearch} onChange={(e) => { setJabatanSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddJabatan}>Tambah Jabatan</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddJabatan}>Tambah Jabatan</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -858,7 +860,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari divisi..." value={divisionSearch} onChange={(e) => { setDivisionSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddDivision}>Tambah Divisi</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddDivision}>Tambah Divisi</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -918,7 +920,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari lokasi atau divisi..." value={locationSearch} onChange={(e) => { setLocationSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddLocation}>Tambah Lokasi</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddLocation}>Tambah Lokasi</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -983,7 +985,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari divisi..." value={scheduleSearch} onChange={(e) => { setScheduleSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddSchedule} disabled={divisionsWithoutSchedule.length === 0}>
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddSchedule} disabled={divisionsWithoutSchedule.length === 0}>
                 {divisionsWithoutSchedule.length === 0 ? "Semua Divisi Sudah Ada" : "Tambah Jadwal"}
               </Button>}
             </div>
@@ -1044,7 +1046,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari divisi..." value={penaltySearch} onChange={(e) => { setPenaltySearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddPenalty} disabled={divisionsWithoutPenalty.length === 0}>Tambah Denda</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddPenalty} disabled={divisionsWithoutPenalty.length === 0}>Tambah Denda</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1101,7 +1103,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari divisi..." value={rateSearch} onChange={(e) => { setRateSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddRate} disabled={divisionsWithoutRate.length === 0}>
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddRate} disabled={divisionsWithoutRate.length === 0}>
                 {divisionsWithoutRate.length === 0 ? "Semua Divisi Sudah Ada" : "Tambah Harga Titik"}
               </Button>}
             </div>
@@ -1163,7 +1165,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari status..." value={dStatusSearch} onChange={(e) => { setDStatusSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddDStatus}>Tambah Status</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddDStatus}>Tambah Status</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1223,7 +1225,7 @@ export default function MasterDataPage() {
                 <input type="text" placeholder="Cari bank atau kode..." value={bankSearch} onChange={(e) => { setBankSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={handleOpenAddBank}>Tambah Bank</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddBank}>Tambah Bank</Button>}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">

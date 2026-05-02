@@ -49,8 +49,10 @@ function formatTanggal(d: string): string {
 }
 
 export default function LeavePage() {
-  const { hasPermission } = useAuth();
-  const canEdit = hasPermission("leave");
+  const { getPermissionLevel } = useAuth();
+  const permLevel = getPermissionLevel("leave");
+  const canInput = permLevel === "input" || permLevel === "edit";
+  const canEdit = permLevel === "edit";
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -364,7 +366,7 @@ export default function LeavePage() {
         title="Cuti & Izin"
         description="Kelola pengajuan cuti, izin, dan sakit pegawai"
         icon={CalendarDays}
-        actions={canEdit ? <Button icon={Plus} size="sm" onClick={openAdd}>Ajukan</Button> : undefined}
+        actions={canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Ajukan</Button> : undefined}
       />
 
       {/* Toast */}
