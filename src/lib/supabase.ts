@@ -299,7 +299,7 @@ export interface DbEmployeeDevice {
 export interface DbEmployeeFaceProfile {
   id: number;
   employee_id: string;
-  face_data_ref: string | null;
+  face_data_ref: string | null; // JSON array of 128 floats (face descriptor)
   status: "Aktif" | "Tidak Aktif";
   enrolled_at: string;
   created_at: string;
