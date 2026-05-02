@@ -610,13 +610,13 @@ export default function EmployeesPage() {
       if (jk && jk.length > 20) rowErrors.push(`JENIS_KELAMIN melebihi 20 karakter (${jk.length})`);
       if (agama && agama.length > 20) rowErrors.push(`AGAMA melebihi 20 karakter (${agama.length})`);
       if (status && status.length > 20) rowErrors.push(`STATUS melebihi 20 karakter (${status.length})`);
-      if (noTelp && noTelp.length > 20) rowErrors.push(`NO_TELP "${noTelp}" melebihi 20 karakter (${noTelp.length})`);
+      if (noTelp && noTelp.length > 30) rowErrors.push(`NO_TELP "${noTelp}" melebihi 30 karakter (${noTelp.length})`);
       if (tempatLahir && tempatLahir.length > 100) rowErrors.push(`TEMPAT_LAHIR melebihi 100 karakter (${tempatLahir.length})`);
       if (statusPernikahan && statusPernikahan.length > 20) rowErrors.push(`STATUS_PERNIKAHAN melebihi 20 karakter (${statusPernikahan.length})`);
       if (namaPasangan && namaPasangan.length > 200) rowErrors.push(`NAMA_PASANGAN melebihi 200 karakter (${namaPasangan.length})`);
-      if (noBpjsKes && noBpjsKes.length > 20) rowErrors.push(`NO_BPJS_KESEHATAN "${noBpjsKes}" melebihi 20 karakter (${noBpjsKes.length})`);
-      if (noBpjsKet && noBpjsKet.length > 20) rowErrors.push(`NO_BPJS_KETENAGAKERJAAN "${noBpjsKet}" melebihi 20 karakter (${noBpjsKet.length})`);
-      if (noRek && noRek.length > 30) rowErrors.push(`NO_REKENING "${noRek}" melebihi 30 karakter (${noRek.length})`);
+      if (noBpjsKes && noBpjsKes.length > 50) rowErrors.push(`NO_BPJS_KESEHATAN "${noBpjsKes}" melebihi 50 karakter (${noBpjsKes.length})`);
+      if (noBpjsKet && noBpjsKet.length > 50) rowErrors.push(`NO_BPJS_KETENAGAKERJAAN "${noBpjsKet}" melebihi 50 karakter (${noBpjsKet.length})`);
+      if (noRek && noRek.length > 50) rowErrors.push(`NO_REKENING "${noRek}" melebihi 50 karakter (${noRek.length})`);
       if (bank && bank.length > 50) rowErrors.push(`BANK melebihi 50 karakter (${bank.length})`);
       if (namaRek && namaRek.length > 200) rowErrors.push(`NAMA_REKENING melebihi 200 karakter (${namaRek.length})`);
 
