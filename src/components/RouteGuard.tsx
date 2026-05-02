@@ -10,47 +10,58 @@ interface RouteGuardProps {
   children: ReactNode;
 }
 
+// Skeleton loading component
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-xl bg-muted animate-pulse" />
+        <div className="h-6 w-48 rounded-lg bg-muted animate-pulse" />
+      </div>
+      <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-border">
+          <div className="h-10 w-72 rounded-xl bg-muted animate-pulse" />
+        </div>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div
+            key={i}
+            className="px-4 py-3.5 border-b border-border/50 flex items-center gap-4"
+            style={{ opacity: 1 - i * 0.15 }}
+          >
+            <div className="h-4 w-6 rounded bg-muted animate-pulse" />
+            <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
+            <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+            <div className="h-4 w-40 rounded bg-muted animate-pulse flex-1" />
+            <div className="h-6 w-20 rounded-full bg-muted animate-pulse" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * RouteGuard — blokir akses halaman jika user tidak punya permission.
  * Menerima "modul" key, lalu cek apakah user punya "modul" atau "modul.view".
  * Jika tidak punya keduanya → tampilkan "Akses Ditolak".
  */
 export default function RouteGuard({ permission, children }: RouteGuardProps) {
-  const { hasPermission, isLoading } = useAuth();
+  const { hasPermission, isLoading, user } = useAuth();
 
   // Saat auth masih loading, tampilkan skeleton
   if (isLoading) {
-    return (
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-muted animate-pulse" />
-          <div className="h-6 w-48 rounded-lg bg-muted animate-pulse" />
-        </div>
-        <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-border">
-            <div className="h-10 w-72 rounded-xl bg-muted animate-pulse" />
-          </div>
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div
-              key={i}
-              className="px-4 py-3.5 border-b border-border/50 flex items-center gap-4"
-              style={{ opacity: 1 - i * 0.15 }}
-            >
-              <div className="h-4 w-6 rounded bg-muted animate-pulse" />
-              <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
-              <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-              <div className="h-4 w-40 rounded bg-muted animate-pulse flex-1" />
-              <div className="h-6 w-20 rounded-full bg-muted animate-pulse" />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
-  // Cek: punya permission penuh ATAU view-only?
+  // Jika user sudah null (sedang logout / belum login),
+  // tampilkan skeleton saja — middleware akan redirect ke /login
+  if (!user) {
+    return <LoadingSkeleton />;
+  }
+
+  // Cek: punya permission penuh ATAU input-only ATAU view-only?
   const hasAccess =
-    hasPermission(permission) || hasPermission(permission + ".view");
+    hasPermission(permission) || hasPermission(permission + ".input") || hasPermission(permission + ".view");
 
   if (!hasAccess) {
     return (

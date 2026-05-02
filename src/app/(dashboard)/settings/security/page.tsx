@@ -40,8 +40,10 @@ type FaceRow = DbEmployeeFaceProfile & { employeeNama?: string };
 const PAGE_SIZE = 10;
 
 export default function SecuritySettingsPage() {
-  const { isSuperAdmin } = useAuth();
-  const canEdit = isSuperAdmin;
+  const { isSuperAdmin, getPermissionLevel } = useAuth();
+  const permLevel = isSuperAdmin ? "edit" as const : getPermissionLevel("settings");
+  const canInput = permLevel === "input" || permLevel === "edit";
+  const canEdit = permLevel === "edit";
   const [activeTab, setActiveTab] = useState<"device" | "face">("device");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -282,7 +284,7 @@ export default function SecuritySettingsPage() {
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
                 />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={openAddDevice} disabled={employeesWithoutDevice.length === 0}>
+              {canInput && <Button icon={Plus} size="sm" onClick={openAddDevice} disabled={employeesWithoutDevice.length === 0}>
                 {employeesWithoutDevice.length === 0 ? "Semua Pegawai Sudah Terdaftar" : "Tambah Device"}
               </Button>}
             </div>
@@ -344,7 +346,7 @@ export default function SecuritySettingsPage() {
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
                 />
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={openAddFace} disabled={employeesWithoutFace.length === 0}>
+              {canInput && <Button icon={Plus} size="sm" onClick={openAddFace} disabled={employeesWithoutFace.length === 0}>
                 {employeesWithoutFace.length === 0 ? "Semua Pegawai Sudah Terdaftar" : "Tambah Data Wajah"}
               </Button>}
             </div>

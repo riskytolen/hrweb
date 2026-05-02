@@ -80,7 +80,7 @@ const PERMISSION_OPTIONS = [
 export default function AccountsPage() {
   // Fix #4: Supabase instance dibuat sekali via useState
   const [supabase] = useState(() => createClient());
-  const { isSuperAdmin, profile: currentUser, isLoading: authLoading } = useAuth();
+  const { isSuperAdmin, profile: currentUser, isLoading: authLoading, user } = useAuth();
 
   const [tab, setTab] = useState<Tab>("users");
   const [users, setUsers] = useState<UserWithRole[]>([]);
@@ -395,22 +395,25 @@ export default function AccountsPage() {
     setDeleteConfirm(null);
   };
 
-  // Permission per modul: 3 keadaan
+  // Permission per modul: 4 keadaan
   // - tidak ada key → tidak tampil
   // - "key.view" → hanya lihat
+  // - "key.input" → lihat + tambah data baru (tidak bisa edit/hapus)
   // - "key" → CRUD penuh (edit)
-  const getPermissionState = (key: string): "none" | "view" | "edit" => {
+  const getPermissionState = (key: string): "none" | "view" | "input" | "edit" => {
     if (roleForm.permissions.includes(key)) return "edit";
+    if (roleForm.permissions.includes(key + ".input")) return "input";
     if (roleForm.permissions.includes(key + ".view")) return "view";
     return "none";
   };
 
-  const setPermissionState = (key: string, state: "none" | "view" | "edit") => {
+  const setPermissionState = (key: string, state: "none" | "view" | "input" | "edit") => {
     setRoleForm((prev) => {
       // Hapus semua varian key ini dulu
-      const cleaned = prev.permissions.filter((p) => p !== key && p !== key + ".view");
+      const cleaned = prev.permissions.filter((p) => p !== key && p !== key + ".view" && p !== key + ".input");
       // Tambah sesuai state baru
       if (state === "edit") return { ...prev, permissions: [...cleaned, key] };
+      if (state === "input") return { ...prev, permissions: [...cleaned, key + ".input"] };
       if (state === "view") return { ...prev, permissions: [...cleaned, key + ".view"] };
       return { ...prev, permissions: cleaned };
     });
@@ -491,6 +494,32 @@ export default function AccountsPage() {
                 <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
                 <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
               </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Jika user sudah null (sedang logout), tampilkan skeleton — middleware akan redirect ke /login
+  if (!user) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-muted animate-pulse" />
+          <div className="h-6 w-48 rounded-lg bg-muted animate-pulse" />
+        </div>
+        <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-border">
+            <div className="h-10 w-72 rounded-xl bg-muted animate-pulse" />
+          </div>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="px-4 py-3.5 border-b border-border/50 flex items-center gap-4" style={{ opacity: 1 - i * 0.15 }}>
+              <div className="h-4 w-6 rounded bg-muted animate-pulse" />
+              <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
+              <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+              <div className="h-4 w-40 rounded bg-muted animate-pulse flex-1" />
+              <div className="h-6 w-20 rounded-full bg-muted animate-pulse" />
             </div>
           ))}
         </div>
@@ -785,7 +814,8 @@ export default function AccountsPage() {
                     ) : r.permissions.length > 0 ? (
                       r.permissions.map((p) => {
                         const isView = p.endsWith(".view");
-                        const baseKey = isView ? p.replace(".view", "") : p;
+                        const isInput = p.endsWith(".input");
+                        const baseKey = isView ? p.replace(".view", "") : isInput ? p.replace(".input", "") : p;
                         const label = PERMISSION_OPTIONS.find((o) => o.key === baseKey)?.label || p;
                         return (
                           <span
@@ -794,10 +824,12 @@ export default function AccountsPage() {
                               "px-2 py-0.5 rounded-full text-[11px] font-medium",
                               isView
                                 ? "bg-amber-500/10 text-amber-600"
-                                : "bg-primary/10 text-primary"
+                                : isInput
+                                  ? "bg-emerald-500/10 text-emerald-600"
+                                  : "bg-primary/10 text-primary"
                             )}
                           >
-                            {label}{isView ? " (Lihat)" : ""}
+                            {label}{isView ? " (Lihat)" : isInput ? " (Input)" : ""}
                           </span>
                         );
                       })
@@ -1263,9 +1295,11 @@ export default function AccountsPage() {
                               "flex items-center justify-between p-2.5 rounded-xl border transition-all",
                               state === "edit"
                                 ? "border-primary/30 bg-primary/5"
-                                : state === "view"
-                                  ? "border-amber-500/30 bg-amber-500/5"
-                                  : "border-border"
+                                : state === "input"
+                                  ? "border-emerald-500/30 bg-emerald-500/5"
+                                  : state === "view"
+                                    ? "border-amber-500/30 bg-amber-500/5"
+                                    : "border-border"
                             )}
                           >
                             <span className="text-xs font-medium text-foreground">{opt.label}</span>
@@ -1273,6 +1307,7 @@ export default function AccountsPage() {
                               {([
                                 { value: "none" as const, label: "Tidak Tampil" },
                                 { value: "view" as const, label: "Lihat" },
+                                { value: "input" as const, label: "Input" },
                                 { value: "edit" as const, label: "Edit" },
                               ]).map((s) => (
                                 <button
@@ -1284,9 +1319,11 @@ export default function AccountsPage() {
                                     state === s.value
                                       ? s.value === "edit"
                                         ? "bg-primary text-white shadow-sm"
-                                        : s.value === "view"
-                                          ? "bg-amber-500 text-white shadow-sm"
-                                          : "bg-card text-muted-foreground shadow-sm"
+                                        : s.value === "input"
+                                          ? "bg-emerald-500 text-white shadow-sm"
+                                          : s.value === "view"
+                                            ? "bg-amber-500 text-white shadow-sm"
+                                            : "bg-card text-muted-foreground shadow-sm"
                                       : "text-muted-foreground/60 hover:text-muted-foreground"
                                   )}
                                 >

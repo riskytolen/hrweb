@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Bell,
@@ -8,8 +8,6 @@ import {
   Menu,
   ChevronDown,
   LogOut,
-  User,
-  Settings,
   Sun,
   Moon,
 } from "lucide-react";
@@ -53,6 +51,24 @@ export default function Header({ onMenuToggle }: HeaderProps) {
   const unreadCount = notifications.filter((n) => n.unread).length;
   const { theme, toggleTheme } = useTheme();
   const { profile, signOut } = useAuth();
+
+  const notifRef = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  // Tutup dropdown saat klik di luar
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (showNotif && notifRef.current && !notifRef.current.contains(target)) {
+        setShowNotif(false);
+      }
+      if (showProfile && profileRef.current && !profileRef.current.contains(target)) {
+        setShowProfile(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showNotif, showProfile]);
 
   const displayName = profile?.nama || "User";
   const displayEmail = profile?.email || "";
@@ -110,7 +126,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
         </button>
 
         {/* Notifications */}
-        <div className="relative">
+        <div className="relative" ref={notifRef}>
           <button
             onClick={() => {
               setShowNotif(!showNotif);
@@ -175,7 +191,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
         <div className="w-px h-8 bg-border mx-1" />
 
         {/* Profile */}
-        <div className="relative">
+        <div className="relative" ref={profileRef}>
           <button
             onClick={() => {
               setShowProfile(!showProfile);
@@ -207,21 +223,6 @@ export default function Header({ onMenuToggle }: HeaderProps) {
                 </span>
               </div>
               <div className="py-1">
-                {[
-                  { icon: User, label: "Profil Saya", href: "#" },
-                  { icon: Settings, label: "Pengaturan", href: "/settings/master-data" },
-                ].map((item) => (
-                  <a
-                    key={item.label}
-                    href={item.href}
-                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted"
-                  >
-                    <item.icon className="w-4 h-4 text-muted-foreground" />
-                    {item.label}
-                  </a>
-                ))}
-              </div>
-              <div className="border-t border-border py-1">
                 <button
                   onClick={handleLogout}
                   disabled={isLoggingOut}

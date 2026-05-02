@@ -82,8 +82,10 @@ function getCurrentPeriodKey(): string {
 }
 
 export default function IncomePage() {
-  const { hasPermission } = useAuth();
-  const canEdit = hasPermission("income");
+  const { getPermissionLevel } = useAuth();
+  const permLevel = getPermissionLevel("income");
+  const canInput = permLevel === "input" || permLevel === "edit";
+  const canEdit = permLevel === "edit";
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -850,7 +852,7 @@ export default function IncomePage() {
           <div className="flex items-center gap-2">
             <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowReport(true)}>Laporan Detail</Button>
             <Button variant="outline" icon={CalendarDays} size="sm" onClick={openCalendar}>Mode Kalender</Button>
-            {canEdit && <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
+            {canInput && <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
           </div>
         }
       />

@@ -257,8 +257,10 @@ function EditField({ label, value, field, editData, setEditData, full, type = "t
 // MAIN PAGE
 // ═══════════════════════════════════════════
 export default function EmployeesPage() {
-  const { hasPermission } = useAuth();
-  const canEdit = hasPermission("employees");
+  const { getPermissionLevel } = useAuth();
+  const permLevel = getPermissionLevel("employees");
+  const canInput = permLevel === "input" || permLevel === "edit";
+  const canEdit = permLevel === "edit";
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -1031,7 +1033,7 @@ export default function EmployeesPage() {
           icon={Users}
           actions={
             <div className="flex items-center gap-2">
-              {canEdit && <Button variant="outline" icon={Upload} size="sm" onClick={() => setShowImportCsv(true)}>Import CSV</Button>}
+              {canInput && <Button variant="outline" icon={Upload} size="sm" onClick={() => setShowImportCsv(true)}>Import CSV</Button>}
               <div ref={exportMenuRef} className="relative">
                 <Button variant="outline" icon={Download} size="sm" onClick={() => setShowExportMenu(!showExportMenu)}>Export</Button>
                 {showExportMenu && (
@@ -1054,7 +1056,7 @@ export default function EmployeesPage() {
                   </div>
                 )}
               </div>
-              {canEdit && <Button icon={Plus} size="sm" onClick={() => { setNewId(""); setAddForm(emptyForm); setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null }); setAddError(""); setAddErrors(new Set()); setShowAddForm(true); }}>Tambah Pegawai</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={() => { setNewId(""); setAddForm(emptyForm); setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null }); setAddError(""); setAddErrors(new Set()); setShowAddForm(true); }}>Tambah Pegawai</Button>}
             </div>
           }
         />
