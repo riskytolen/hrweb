@@ -284,6 +284,7 @@ export default function EmployeesPage() {
   const [csvImportSuccess, setCsvImportSuccess] = useState(false);
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvErrors, setCsvErrors] = useState<string[]>([]);
+  const [csvErrorRows, setCsvErrorRows] = useState<{ row: string[]; errors: string }[]>([]);
   const [csvImportedCount, setCsvImportedCount] = useState(0);
 
   // ─── Fetch pegawai dari Supabase ───
@@ -489,6 +490,7 @@ export default function EmployeesPage() {
   const handleCsvFile = (file: File) => {
     setCsvFileName(file.name);
     setCsvErrors([]);
+    setCsvErrorRows([]);
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
@@ -548,6 +550,7 @@ export default function EmployeesPage() {
 
     // ── Validate & map each row ──
     const errors: string[] = [];
+    const errorRows: { row: string[]; errors: string }[] = [];
     const validRows: Record<string, unknown>[] = [];
 
     for (let i = 0; i < rows.length; i++) {
@@ -605,6 +608,7 @@ export default function EmployeesPage() {
 
       if (rowErrors.length > 0) {
         errors.push(`Baris ${rowNum}: ${rowErrors.join(", ")}`);
+        errorRows.push({ row: r, errors: rowErrors.join("; ") });
       } else {
         existingIds.add(id); // Prevent duplicate within same CSV
         validRows.push({
@@ -638,6 +642,7 @@ export default function EmployeesPage() {
     // ── If there are validation errors, show them ──
     if (errors.length > 0) {
       setCsvErrors(errors);
+      setCsvErrorRows(errorRows);
       setCsvImporting(false);
       return;
     }
@@ -660,6 +665,7 @@ export default function EmployeesPage() {
       setCsvData([]);
       setCsvFileName("");
       setCsvErrors([]);
+      setCsvErrorRows([]);
       setCsvImportedCount(0);
       fetchEmployees();
     }, 2500);
@@ -672,7 +678,32 @@ export default function EmployeesPage() {
     setCsvImportSuccess(false);
     setCsvImporting(false);
     setCsvErrors([]);
+    setCsvErrorRows([]);
     setCsvImportedCount(0);
+  };
+
+  // ─── Export Error CSV ───
+  const exportErrorCsv = () => {
+    if (csvErrorRows.length === 0 || csvData.length === 0) return;
+    const originalHeaders = csvData[0];
+    const headerRow = ["KETERANGAN_ERROR", ...originalHeaders];
+    const csvRows = [headerRow.join(",")];
+    for (const { row, errors: errMsg } of csvErrorRows) {
+      const cells = [errMsg, ...row].map((cell) => {
+        const val = cell ?? "";
+        return val.includes(",") || val.includes('"') || val.includes("\n")
+          ? `"${val.replace(/"/g, '""')}"`
+          : val;
+      });
+      csvRows.push(cells.join(","));
+    }
+    const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `error_import_pegawai_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // ─── Export handlers ───
@@ -1806,15 +1837,33 @@ export default function EmployeesPage() {
               {/* Error Messages */}
               {csvErrors.length > 0 && (
                 <div className="rounded-xl border border-danger/20 bg-danger-light/50 overflow-hidden animate-fade-in">
-                  <div className="flex items-center gap-2 px-4 py-3 border-b border-danger/10">
-                    <X className="w-4 h-4 text-danger" />
-                    <p className="text-sm font-semibold text-danger">Ditemukan {csvErrors.length} error</p>
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-danger/10">
+                    <div className="flex items-center gap-2">
+                      <X className="w-4 h-4 text-danger" />
+                      <p className="text-sm font-semibold text-danger">Ditemukan {csvErrors.length} error</p>
+                    </div>
+                    {csvErrorRows.length > 0 && (
+                      <button
+                        onClick={exportErrorCsv}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-danger/10 hover:bg-danger/20 text-danger text-xs font-medium transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Export Error CSV
+                      </button>
+                    )}
                   </div>
                   <div className="max-h-40 overflow-y-auto px-4 py-2 space-y-1">
                     {csvErrors.map((err, i) => (
                       <p key={i} className="text-xs text-danger/80">{err}</p>
                     ))}
                   </div>
+                  {csvErrorRows.length > 0 && (
+                    <div className="px-4 py-2.5 border-t border-danger/10 bg-danger-light/30">
+                      <p className="text-[10px] text-danger/60">
+                        💡 Klik &quot;Export Error CSV&quot; untuk download baris yang bermasalah. Perbaiki datanya lalu import ulang.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
