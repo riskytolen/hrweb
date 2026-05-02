@@ -598,6 +598,21 @@ export default function EmployeesPage() {
       if (statusPernikahan && !validPernikahan.has(statusPernikahan)) rowErrors.push(`STATUS_PERNIKAHAN "${statusPernikahan}" tidak valid`);
       if (tglMulaiPkwt && !dateRegex.test(tglMulaiPkwt)) rowErrors.push("TANGGAL_MULAI_PKWT harus format YYYY-MM-DD");
       if (tglAkhirPkwt && !dateRegex.test(tglAkhirPkwt)) rowErrors.push("TANGGAL_BERAKHIR_PKWT harus format YYYY-MM-DD");
+      // Validasi panjang karakter (sesuai constraint database)
+      if (id && id.length > 20) rowErrors.push(`ID "${id}" melebihi 20 karakter (${id.length})`);
+      if (nama && nama.length > 200) rowErrors.push(`NAMA melebihi 200 karakter (${nama.length})`);
+      if (jk && jk.length > 20) rowErrors.push(`JENIS_KELAMIN melebihi 20 karakter (${jk.length})`);
+      if (agama && agama.length > 20) rowErrors.push(`AGAMA melebihi 20 karakter (${agama.length})`);
+      if (status && status.length > 20) rowErrors.push(`STATUS melebihi 20 karakter (${status.length})`);
+      if (noTelp && noTelp.length > 20) rowErrors.push(`NO_TELP "${noTelp}" melebihi 20 karakter (${noTelp.length})`);
+      if (tempatLahir && tempatLahir.length > 100) rowErrors.push(`TEMPAT_LAHIR melebihi 100 karakter (${tempatLahir.length})`);
+      if (statusPernikahan && statusPernikahan.length > 20) rowErrors.push(`STATUS_PERNIKAHAN melebihi 20 karakter (${statusPernikahan.length})`);
+      if (namaPasangan && namaPasangan.length > 200) rowErrors.push(`NAMA_PASANGAN melebihi 200 karakter (${namaPasangan.length})`);
+      if (noBpjsKes && noBpjsKes.length > 20) rowErrors.push(`NO_BPJS_KESEHATAN "${noBpjsKes}" melebihi 20 karakter (${noBpjsKes.length})`);
+      if (noBpjsKet && noBpjsKet.length > 20) rowErrors.push(`NO_BPJS_KETENAGAKERJAAN "${noBpjsKet}" melebihi 20 karakter (${noBpjsKet.length})`);
+      if (noRek && noRek.length > 30) rowErrors.push(`NO_REKENING "${noRek}" melebihi 30 karakter (${noRek.length})`);
+      if (bank && bank.length > 50) rowErrors.push(`BANK melebihi 50 karakter (${bank.length})`);
+      if (namaRek && namaRek.length > 200) rowErrors.push(`NAMA_REKENING melebihi 200 karakter (${namaRek.length})`);
 
       // Resolve jabatan
       let jabatanId: number | null = null;
@@ -647,16 +662,48 @@ export default function EmployeesPage() {
       return;
     }
 
-    // ── Batch insert to Supabase ──
-    const { error } = await supabase.from("pegawai").insert(validRows);
+    // ── Insert per-baris agar bisa deteksi baris mana yang gagal ──
+    const dbErrors: string[] = [];
+    const dbErrorRows: { row: string[]; errors: string }[] = [];
+    let successCount = 0;
 
-    if (error) {
-      setCsvErrors([`Gagal menyimpan ke database: ${error.message}`]);
+    // Map validRows back ke index baris CSV asli (skip error rows)
+    const validRowIndices: number[] = [];
+    let validIdx = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const rowNum = i + 2;
+      // Cek apakah baris ini ada di errors (skip)
+      if (errors.some((e) => e.startsWith(`Baris ${rowNum}:`))) continue;
+      validRowIndices.push(i);
+      validIdx++;
+    }
+
+    for (let vi = 0; vi < validRows.length; vi++) {
+      const { error: insertErr } = await supabase.from("pegawai").insert(validRows[vi]);
+      if (insertErr) {
+        const origIdx = validRowIndices[vi];
+        const rowNum = origIdx + 2;
+        const origRow = rows[origIdx];
+        const errMsg = `Database: ${insertErr.message}`;
+        dbErrors.push(`Baris ${rowNum}: ${errMsg}`);
+        dbErrorRows.push({ row: origRow, errors: errMsg });
+      } else {
+        successCount++;
+      }
+    }
+
+    if (dbErrors.length > 0) {
+      setCsvErrors([...errors, ...dbErrors]);
+      setCsvErrorRows([...errorRows, ...dbErrorRows]);
+      if (successCount > 0) {
+        setCsvImportedCount(successCount);
+      }
       setCsvImporting(false);
       return;
     }
 
-    setCsvImportedCount(validRows.length);
+    setCsvImportedCount(successCount);
     setCsvImporting(false);
     setCsvImportSuccess(true);
     setTimeout(() => {
