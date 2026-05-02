@@ -42,3 +42,6 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# opencode config (contains secrets)
+opencode.jsonc
