@@ -286,6 +286,7 @@ export default function EmployeesPage() {
   const [csvErrors, setCsvErrors] = useState<string[]>([]);
   const [csvErrorRows, setCsvErrorRows] = useState<{ row: string[]; errors: string }[]>([]);
   const [csvImportedCount, setCsvImportedCount] = useState(0);
+  const [csvImportProgress, setCsvImportProgress] = useState({ current: 0, total: 0, phase: "" });
 
   // ─── Fetch pegawai dari Supabase ───
   const fetchEmployees = async () => {
@@ -516,7 +517,9 @@ export default function EmployeesPage() {
   const handleImportConfirm = async () => {
     if (csvData.length < 2) return;
     setCsvErrors([]);
+    setCsvErrorRows([]);
     setCsvImporting(true);
+    setCsvImportProgress({ current: 0, total: 0, phase: "Mempersiapkan data..." });
 
     const headers = csvData[0].map((h) => h.toUpperCase().trim());
     const rows = csvData.slice(1);
@@ -533,6 +536,7 @@ export default function EmployeesPage() {
     const col = (name: string) => headers.indexOf(name);
 
     // ── Fetch jabatan lookup (nama -> id) ──
+    setCsvImportProgress({ current: 0, total: rows.length, phase: "Mengambil data referensi..." });
     const { data: jabatanData } = await supabase.from("jabatan").select("id, nama");
     const jabatanMap = new Map<string, number>();
     jabatanData?.forEach((j) => jabatanMap.set(j.nama.toLowerCase(), j.id));
@@ -553,10 +557,12 @@ export default function EmployeesPage() {
     const errorRows: { row: string[]; errors: string }[] = [];
     const validRows: Record<string, unknown>[] = [];
 
+    setCsvImportProgress({ current: 0, total: rows.length, phase: "Memvalidasi data..." });
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const rowNum = i + 2; // 1-indexed + header
       const rowErrors: string[] = [];
+      if (i % 10 === 0) setCsvImportProgress({ current: i + 1, total: rows.length, phase: "Memvalidasi data..." });
 
       const id = r[col("ID")]?.trim();
       const nama = r[col("NAMA")]?.trim();
@@ -680,6 +686,7 @@ export default function EmployeesPage() {
     }
 
     for (let vi = 0; vi < validRows.length; vi++) {
+      setCsvImportProgress({ current: vi + 1, total: validRows.length, phase: "Menyimpan ke database..." });
       const { error: insertErr } = await supabase.from("pegawai").insert(validRows[vi]);
       if (insertErr) {
         const origIdx = validRowIndices[vi];
@@ -714,6 +721,7 @@ export default function EmployeesPage() {
       setCsvErrors([]);
       setCsvErrorRows([]);
       setCsvImportedCount(0);
+      setCsvImportProgress({ current: 0, total: 0, phase: "" });
       fetchEmployees();
     }, 2500);
   };
@@ -727,6 +735,7 @@ export default function EmployeesPage() {
     setCsvErrors([]);
     setCsvErrorRows([]);
     setCsvImportedCount(0);
+    setCsvImportProgress({ current: 0, total: 0, phase: "" });
   };
 
   // ─── Export Error CSV ───
@@ -1873,6 +1882,57 @@ export default function EmployeesPage() {
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
 
+              {/* Import Loading */}
+              {csvImporting && (
+                <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary-light/30 via-background to-primary-light/10 p-6 animate-fade-in">
+                  <div className="flex flex-col items-center gap-5">
+                    {/* Animated icon */}
+                    <div className="relative">
+                      <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+                        <Upload className="w-7 h-7 text-primary animate-bounce" />
+                      </div>
+                      <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                        <div className="w-2 h-2 rounded-full bg-white animate-ping" />
+                      </div>
+                    </div>
+
+                    {/* Phase text */}
+                    <div className="text-center">
+                      <p className="text-sm font-semibold text-foreground">{csvImportProgress.phase || "Memproses..."}</p>
+                      {csvImportProgress.total > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {csvImportProgress.current} dari {csvImportProgress.total} data
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Progress bar */}
+                    {csvImportProgress.total > 0 && (
+                      <div className="w-full max-w-xs">
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-primary to-primary/70 transition-all duration-300 ease-out"
+                            style={{ width: `${Math.round((csvImportProgress.current / csvImportProgress.total) * 100)}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground text-center mt-2">
+                          {Math.round((csvImportProgress.current / csvImportProgress.total) * 100)}%
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Shimmer dots */}
+                    {csvImportProgress.total === 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Success Message */}
               {csvImportSuccess && (
                 <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-success-light border border-success/20 text-success text-sm font-medium animate-fade-in">
@@ -1915,7 +1975,7 @@ export default function EmployeesPage() {
               )}
 
               {/* Upload Area */}
-              {csvData.length === 0 && !csvImportSuccess && (
+              {csvData.length === 0 && !csvImportSuccess && !csvImporting && (
                 <>
                   <div
                     onDragOver={(e) => e.preventDefault()}
@@ -1962,7 +2022,7 @@ export default function EmployeesPage() {
               )}
 
               {/* Preview Data */}
-              {csvData.length > 0 && !csvImportSuccess && (
+              {csvData.length > 0 && !csvImportSuccess && !csvImporting && (
                 <>
                   {/* File info */}
                   <div className="flex items-center justify-between bg-muted/50 rounded-xl px-4 py-3 border border-border">
@@ -2050,10 +2110,10 @@ export default function EmployeesPage() {
                 * Foto & dokumen gambar diupload terpisah setelah data diimport
               </p>
               <div className="flex items-center gap-3">
-                <Button variant="outline" onClick={handleCloseImport}>Batal</Button>
-                {csvData.length > 0 && !csvImportSuccess && (
-                  <Button icon={Upload} onClick={handleImportConfirm} disabled={csvImporting}>
-                    {csvImporting ? "Mengimport..." : `Import ${csvData.length - 1} Pegawai`}
+                <Button variant="outline" onClick={handleCloseImport} disabled={csvImporting}>Batal</Button>
+                {csvData.length > 0 && !csvImportSuccess && !csvImporting && (
+                  <Button icon={Upload} onClick={handleImportConfirm}>
+                    {`Import ${csvData.length - 1} Pegawai`}
                   </Button>
                 )}
               </div>
