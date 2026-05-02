@@ -6,8 +6,7 @@
 
 -- ─── 1. Perlebar kolom yang terlalu pendek ───
 
--- no_ktp: dari varchar(16) ke varchar(30) — antisipasi format dengan spasi/dash
-ALTER TABLE public.pegawai ALTER COLUMN no_ktp TYPE varchar(30);
+-- no_ktp: tetap varchar(16) — NIK KTP Indonesia selalu 16 digit, sebagai validasi data
 
 -- no_telp: dari varchar(20) ke varchar(30) — antisipasi kode negara (+62xxx)
 ALTER TABLE public.pegawai ALTER COLUMN no_telp TYPE varchar(30);

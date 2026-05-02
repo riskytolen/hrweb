@@ -586,6 +586,7 @@ export default function EmployeesPage() {
       if (!nama) rowErrors.push("NAMA kosong");
       if (!noTelp) rowErrors.push("NO_TELP kosong");
       // Optional fields — validasi format jika diisi
+      if (noKtp && !/^\d{16}$/.test(noKtp)) rowErrors.push(`NO_KTP "${noKtp}" harus 16 digit angka`);
       if (jk && !validJk.has(jk)) rowErrors.push(`JENIS_KELAMIN "${jk}" tidak valid`);
       if (agama && !validAgama.has(agama)) rowErrors.push(`AGAMA "${agama}" tidak valid`);
       if (!validStatus.has(status)) rowErrors.push(`STATUS "${status}" tidak valid`);
