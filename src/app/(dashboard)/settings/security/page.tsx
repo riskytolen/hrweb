@@ -13,7 +13,6 @@ import {
   Check,
   CircleCheckBig,
   AlertTriangle,
-  Camera,
   Upload,
   RefreshCw,
   Loader2,
@@ -65,39 +64,26 @@ export default function SecuritySettingsPage() {
 
   const [showDeviceForm, setShowDeviceForm] = useState(false);
   const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null);
-
-  const [deviceForm, setDeviceForm] = useState({
-    employee_id: "",
-    device_id: "",
-    status: "Aktif",
-  });
+  const [deviceForm, setDeviceForm] = useState({ employee_id: "", device_id: "", status: "Aktif" });
 
   // Face registration
   const [showFaceForm, setShowFaceForm] = useState(false);
-  const [faceFormMode, setFaceFormMode] = useState<"webcam" | "upload" | "qr">("webcam");
+  const [faceFormMode, setFaceFormMode] = useState<"qr" | "upload">("qr");
   const [faceFormEmpId, setFaceFormEmpId] = useState("");
   const [faceFormSaving, setFaceFormSaving] = useState(false);
   const [faceFormError, setFaceFormError] = useState("");
   const [faceFormStep, setFaceFormStep] = useState<"select" | "capture" | "processing" | "done">("select");
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const faceApiRef = useRef<typeof import("face-api.js") | null>(null);
+
   // QR Code mode
   const [qrToken, setQrToken] = useState<string | null>(null);
   const [qrGenerating, setQrGenerating] = useState(false);
   const [qrPolling, setQrPolling] = useState(false);
   const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
-  const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [webcamActive, setWebcamActive] = useState(false);
-  const [webcamError, setWebcamError] = useState(false); // true jika kamera gagal diakses
-  const [faceDetected, setFaceDetected] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-  const detectAbortRef = useRef(false); // abort flag untuk detectFaceLoop
-  const faceApiRef = useRef<typeof import("face-api.js") | null>(null);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "device" | "face"; id: number; name: string } | null>(null);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
@@ -109,32 +95,22 @@ export default function SecuritySettingsPage() {
     toastTimer.current = setTimeout(() => setToast({ show: false, title: "", message: "", type: "success" }), 3500);
   }, []);
 
-  useEffect(() => {
-    return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
-  }, []);
+  useEffect(() => { return () => { if (toastTimer.current) clearTimeout(toastTimer.current); }; }, []);
 
   const fetchEmployees = async () => {
     const { data } = await supabase.from("pegawai").select("id, nama, status").order("nama");
     if (data) setEmployees(data as EmployeeLite[]);
   };
-
   const fetchDevices = async () => {
     const { data } = await supabase.from("employee_devices").select("*, pegawai(id, nama)").order("created_at", { ascending: false });
-    if (data) {
-      setDeviceList(data.map((d) => ({ ...d, employeeNama: d.pegawai?.nama || d.employee_id })) as DeviceRow[]);
-    }
+    if (data) setDeviceList(data.map((d) => ({ ...d, employeeNama: d.pegawai?.nama || d.employee_id })) as DeviceRow[]);
   };
-
   const fetchFaces = async () => {
     const { data } = await supabase.from("employee_face_profiles").select("*, pegawai(id, nama)").order("created_at", { ascending: false });
-    if (data) {
-      setFaceList(data.map((f) => ({ ...f, employeeNama: f.pegawai?.nama || f.employee_id })) as FaceRow[]);
-    }
+    if (data) setFaceList(data.map((f) => ({ ...f, employeeNama: f.pegawai?.nama || f.employee_id })) as FaceRow[]);
   };
 
-  useEffect(() => {
-    Promise.all([fetchEmployees(), fetchDevices(), fetchFaces()]).then(() => setLoading(false));
-  }, []);
+  useEffect(() => { Promise.all([fetchEmployees(), fetchDevices(), fetchFaces()]).then(() => setLoading(false)); }, []);
 
   useEffect(() => {
     if (showDeviceForm || showFaceForm) document.body.style.overflow = "hidden";
@@ -154,23 +130,12 @@ export default function SecuritySettingsPage() {
     (f.employeeNama || "").toLowerCase().includes(faceSearch.toLowerCase()) ||
     f.employee_id.toLowerCase().includes(faceSearch.toLowerCase())
   );
-
   const pagedDevices = filteredDevices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const pagedFaces = filteredFaces.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // ─── Device CRUD ───
-  const openAddDevice = () => {
-    setDeviceForm({ employee_id: employeesWithoutDevice[0]?.id || "", device_id: "", status: "Aktif" });
-    setEditingDeviceId(null);
-    setShowDeviceForm(true);
-  };
-
-  const openEditDevice = (row: DeviceRow) => {
-    setDeviceForm({ employee_id: row.employee_id, device_id: row.device_id, status: row.status });
-    setEditingDeviceId(row.id);
-    setShowDeviceForm(true);
-  };
-
+  const openAddDevice = () => { setDeviceForm({ employee_id: employeesWithoutDevice[0]?.id || "", device_id: "", status: "Aktif" }); setEditingDeviceId(null); setShowDeviceForm(true); };
+  const openEditDevice = (row: DeviceRow) => { setDeviceForm({ employee_id: row.employee_id, device_id: row.device_id, status: row.status }); setEditingDeviceId(row.id); setShowDeviceForm(true); };
   const saveDevice = async () => {
     if (!deviceForm.employee_id || !deviceForm.device_id.trim()) return;
     const payload = { employee_id: deviceForm.employee_id, device_id: deviceForm.device_id, status: deviceForm.status };
@@ -206,7 +171,7 @@ export default function SecuritySettingsPage() {
   const notRegisteredCount = activeEmployees - registeredCount;
 
   // ═══════════════════════════════════════════
-  // FACE REGISTRATION LOGIC
+  // FACE REGISTRATION LOGIC (QR + Upload only)
   // ═══════════════════════════════════════════
 
   const loadFaceModels = async () => {
@@ -231,164 +196,21 @@ export default function SecuritySettingsPage() {
     }
   };
 
-  const startWebcam = async () => {
-    setWebcamError(false);
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Browser tidak mendukung akses kamera. Gunakan HTTPS atau browser modern.");
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setWebcamActive(true);
-      detectAbortRef.current = false;
-      detectFaceLoop();
-    } catch (err) {
-      const msg = err instanceof Error && err.name === "NotAllowedError"
-        ? "Izin kamera ditolak. Berikan izin kamera di pengaturan browser, lalu coba lagi."
-        : err instanceof Error
-          ? err.message
-          : "Gagal mengakses kamera.";
-      setFaceFormError(msg);
-      setWebcamError(true);
-      console.error("Webcam error:", err);
-    }
-  };
-
-  const stopWebcam = () => {
-    detectAbortRef.current = true;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-    setWebcamActive(false);
-    setFaceDetected(false);
-  };
-
-  const detectFaceLoop = () => {
-    const faceapi = faceApiRef.current;
-    if (!faceapi || !videoRef.current) return;
-
-    const detect = async () => {
-      if (detectAbortRef.current) return;
-      if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) return;
-      try {
-        const detection = await faceapi
-          .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
-          .withFaceLandmarks();
-        // Cek lagi setelah await — mungkin sudah di-stop
-        if (detectAbortRef.current) return;
-        setFaceDetected(!!detection);
-      } catch {
-        // ignore detection errors during loop
-      }
-      if (!detectAbortRef.current) {
-        animFrameRef.current = requestAnimationFrame(detect);
-      }
-    };
-    detect();
-  };
-
-  const captureFromWebcam = async () => {
-    const faceapi = faceApiRef.current;
-    if (!faceapi || !videoRef.current || !canvasRef.current) return;
-
-    setFaceFormStep("processing");
-    setFaceFormError("");
-
-    try {
-      // Draw video frame to canvas
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Canvas context not available");
-      ctx.drawImage(video, 0, 0);
-
-      // Stop webcam
-      stopWebcam();
-
-      // Get image as blob
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((b) => b ? resolve(b) : reject(new Error("Failed to create blob")), "image/jpeg", 0.9);
-      });
-
-      // Set captured image preview
-      const imageUrl = URL.createObjectURL(blob);
-      setCapturedImage(imageUrl);
-
-      // Detect face and get descriptor
-      const img = await faceapi.fetchImage(imageUrl);
-      const detection = await faceapi
-        .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-
-      if (!detection) {
-        URL.revokeObjectURL(imageUrl);
-        setFaceFormError("Wajah tidak terdeteksi pada gambar. Silakan coba lagi dengan pencahayaan yang lebih baik.");
-        setCapturedImage(null);
-        setFaceFormStep("capture");
-        // Restart webcam agar user bisa langsung coba lagi
-        setTimeout(() => startWebcam(), 100);
-        return;
-      }
-
-      const descriptor = Array.from(detection.descriptor);
-      setFaceDescriptor(descriptor);
-      setFaceFormStep("done");
-    } catch (err) {
-      setFaceFormError("Gagal memproses gambar. Silakan coba lagi.");
-      setFaceFormStep("capture");
-      // Restart webcam agar user bisa langsung coba lagi
-      setTimeout(() => startWebcam(), 100);
-      console.error("Capture error:", err);
-    }
-  };
-
   const handleUploadFile = async (file: File) => {
     const faceapi = faceApiRef.current;
     if (!faceapi) return;
-
     setFaceFormStep("processing");
     setFaceFormError("");
-
     try {
-      // Validate file type
-      if (!file.type.startsWith("image/")) {
-        setFaceFormError("File harus berupa gambar (JPG, PNG, dll).");
-        setFaceFormStep("capture");
-        return;
-      }
-
-      // Validate file size (maks 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        setFaceFormError("Ukuran file maksimal 10MB.");
-        setFaceFormStep("capture");
-        return;
-      }
-
-      // Create image URL
+      if (!file.type.startsWith("image/")) { setFaceFormError("File harus berupa gambar (JPG, PNG, dll)."); setFaceFormStep("capture"); return; }
+      if (file.size > 10 * 1024 * 1024) { setFaceFormError("Ukuran file maksimal 10MB."); setFaceFormStep("capture"); return; }
       const imageUrl = URL.createObjectURL(file);
       setCapturedImage(imageUrl);
-
-      // Detect face and get descriptor
       const img = await faceapi.fetchImage(imageUrl);
       const detection = await faceapi
         .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
         .withFaceLandmarks()
         .withFaceDescriptor();
-
       if (!detection) {
         URL.revokeObjectURL(imageUrl);
         setFaceFormError("Wajah tidak terdeteksi pada gambar. Pastikan foto menampilkan wajah dengan jelas.");
@@ -396,9 +218,7 @@ export default function SecuritySettingsPage() {
         setFaceFormStep("capture");
         return;
       }
-
-      const descriptor = Array.from(detection.descriptor);
-      setFaceDescriptor(descriptor);
+      setFaceDescriptor(Array.from(detection.descriptor));
       setFaceFormStep("done");
     } catch (err) {
       setFaceFormError("Gagal memproses gambar. Silakan coba dengan foto lain.");
@@ -407,37 +227,22 @@ export default function SecuritySettingsPage() {
     }
   };
 
-  // ─── QR Code: generate token ───
+  // ─── QR Code ───
   const generateQrToken = async () => {
     if (!faceFormEmpId) return;
     setQrGenerating(true);
     setFaceFormError("");
-
     try {
-      // Expire in 10 minutes
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-
       const { data, error: insertErr } = await supabase
         .from("face_register_tokens")
-        .insert({
-          employee_id: faceFormEmpId,
-          status: "pending",
-          expires_at: expiresAt,
-        })
+        .insert({ employee_id: faceFormEmpId, status: "pending", expires_at: expiresAt })
         .select("id")
         .single();
-
-      if (insertErr || !data) {
-        setFaceFormError("Gagal membuat QR Code. Coba lagi.");
-        setQrGenerating(false);
-        return;
-      }
-
+      if (insertErr || !data) { setFaceFormError("Gagal membuat QR Code. Coba lagi."); setQrGenerating(false); return; }
       setQrToken(data.id);
       setFaceFormStep("capture");
       setQrGenerating(false);
-
-      // Start polling
       startQrPolling(data.id);
     } catch {
       setFaceFormError("Terjadi kesalahan.");
@@ -447,33 +252,15 @@ export default function SecuritySettingsPage() {
 
   const startQrPolling = (tokenId: string) => {
     setQrPolling(true);
-    // Poll setiap 3 detik
     qrPollRef.current = setInterval(async () => {
-      const { data } = await supabase
-        .from("face_register_tokens")
-        .select("status")
-        .eq("id", tokenId)
-        .single();
-
-      if (data?.status === "completed") {
-        stopQrPolling();
-        setFaceFormStep("done");
-        // Refresh face list
-        fetchFaces();
-      } else if (data?.status === "expired") {
-        stopQrPolling();
-        setFaceFormError("QR Code sudah kedaluwarsa. Generate ulang.");
-        setQrToken(null);
-        setFaceFormStep("select");
-      }
+      const { data } = await supabase.from("face_register_tokens").select("status").eq("id", tokenId).single();
+      if (data?.status === "completed") { stopQrPolling(); setFaceFormStep("done"); fetchFaces(); }
+      else if (data?.status === "expired") { stopQrPolling(); setFaceFormError("QR Code sudah kedaluwarsa. Generate ulang."); setQrToken(null); setFaceFormStep("select"); }
     }, 3000);
   };
 
   const stopQrPolling = () => {
-    if (qrPollRef.current) {
-      clearInterval(qrPollRef.current);
-      qrPollRef.current = null;
-    }
+    if (qrPollRef.current) { clearInterval(qrPollRef.current); qrPollRef.current = null; }
     setQrPolling(false);
   };
 
@@ -481,24 +268,11 @@ export default function SecuritySettingsPage() {
     if (!faceFormEmpId || !faceDescriptor) return;
     setFaceFormSaving(true);
     setFaceFormError("");
-
     try {
-      // Upsert face profile (hanya descriptor, tanpa foto)
       const { error: dbError } = await supabase
         .from("employee_face_profiles")
-        .upsert({
-          employee_id: faceFormEmpId,
-          face_data_ref: JSON.stringify(faceDescriptor),
-          status: "Aktif",
-          enrolled_at: new Date().toISOString(),
-        }, { onConflict: "employee_id" });
-
-      if (dbError) {
-        setFaceFormError(`Gagal menyimpan data: ${dbError.message}`);
-        setFaceFormSaving(false);
-        return;
-      }
-
+        .upsert({ employee_id: faceFormEmpId, face_data_ref: JSON.stringify(faceDescriptor), status: "Aktif", enrolled_at: new Date().toISOString() }, { onConflict: "employee_id" });
+      if (dbError) { setFaceFormError(`Gagal menyimpan data: ${dbError.message}`); setFaceFormSaving(false); return; }
       const empName = employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId;
       showToast("success", "Wajah Terdaftar", `Data wajah ${empName} berhasil disimpan.`);
       closeFaceForm();
@@ -511,9 +285,9 @@ export default function SecuritySettingsPage() {
     }
   };
 
-  const openFaceForm = async () => {
+  const openFaceForm = () => {
     setFaceFormEmpId(employeesWithoutFace[0]?.id || "");
-    setFaceFormMode("webcam");
+    setFaceFormMode("qr");
     setFaceFormStep("select");
     setFaceFormError("");
     setCapturedImage(null);
@@ -526,7 +300,6 @@ export default function SecuritySettingsPage() {
   };
 
   const closeFaceForm = () => {
-    stopWebcam();
     stopQrPolling();
     if (capturedImage) URL.revokeObjectURL(capturedImage);
     setCapturedImage(null);
@@ -538,16 +311,11 @@ export default function SecuritySettingsPage() {
 
   const startCapture = async () => {
     setFaceFormError("");
-    if (faceFormMode === "qr") {
-      await generateQrToken();
-      return;
-    }
+    if (faceFormMode === "qr") { await generateQrToken(); return; }
+    // Upload mode — load models then show upload UI
     const loaded = await loadFaceModels();
     if (!loaded) return;
     setFaceFormStep("capture");
-    if (faceFormMode === "webcam") {
-      setTimeout(() => startWebcam(), 100);
-    }
   };
 
   const retryCapture = () => {
@@ -556,46 +324,31 @@ export default function SecuritySettingsPage() {
     setFaceDescriptor(null);
     setFaceFormError("");
     setFaceFormStep("capture");
-    if (faceFormMode === "webcam") {
-      setTimeout(() => startWebcam(), 100);
-    }
   };
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      stopWebcam();
-      if (qrPollRef.current) clearInterval(qrPollRef.current);
-    };
-  }, []);
+  useEffect(() => { return () => { if (qrPollRef.current) clearInterval(qrPollRef.current); }; }, []);
+
+  // ═══════════════════════════════════════════
+  // RENDER
+  // ═══════════════════════════════════════════
 
   return (
     <RouteGuard permission="settings">
     <div className="space-y-6 animate-fade-in">
-      <PageHeader
-        title="Keamanan"
-        description="Kelola Device ID pegawai dan data wajah untuk kebutuhan absensi mobile"
-        icon={Shield}
-      />
+      <PageHeader title="Keamanan" description="Kelola Device ID pegawai dan data wajah untuk kebutuhan absensi mobile" icon={Shield} />
 
       {toast.show && (
         <Portal>
           <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
-            <div className={cn("flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border min-w-[360px] max-w-[480px]",
-              toast.type === "error" ? "border-danger/20" : "border-success/20")}>
-              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-                toast.type === "error" ? "bg-danger/10" : "bg-success/10")}>
-                {toast.type === "error"
-                  ? <AlertTriangle className="w-5 h-5 text-danger" />
-                  : <CircleCheckBig className="w-5 h-5 text-success" />}
+            <div className={cn("flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border min-w-[360px] max-w-[480px]", toast.type === "error" ? "border-danger/20" : "border-success/20")}>
+              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0", toast.type === "error" ? "bg-danger/10" : "bg-success/10")}>
+                {toast.type === "error" ? <AlertTriangle className="w-5 h-5 text-danger" /> : <CircleCheckBig className="w-5 h-5 text-success" />}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-foreground">{toast.title}</p>
                 {toast.message && <p className="text-xs text-muted-foreground mt-0.5">{toast.message}</p>}
               </div>
-              <button onClick={() => setToast({ show: false, title: "", message: "", type: "success" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground">
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <button onClick={() => setToast({ show: false, title: "", message: "", type: "success" })} className="p-1 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
             </div>
           </div>
         </Portal>
@@ -608,14 +361,8 @@ export default function SecuritySettingsPage() {
             const Icon = tab.icon;
             const count = tab.key === "device" ? deviceList.length : faceList.length;
             return (
-              <button
-                key={tab.key}
-                onClick={() => { setActiveTab(tab.key as "device" | "face"); setPage(1); }}
-                className={cn(
-                  "flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 -mb-px",
-                  isActive ? "border-primary text-primary bg-card" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                )}
-              >
+              <button key={tab.key} onClick={() => { setActiveTab(tab.key as "device" | "face"); setPage(1); }}
+                className={cn("flex items-center gap-2 px-5 py-3.5 text-sm font-medium border-b-2 -mb-px", isActive ? "border-primary text-primary bg-card" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50")}>
                 <Icon className="w-4 h-4" />
                 {tab.label}
                 <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-md", isActive ? "bg-primary-light text-primary" : "bg-muted text-muted-foreground")}>{count}</span>
@@ -630,19 +377,14 @@ export default function SecuritySettingsPage() {
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-72">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Cari nama, ID pegawai, atau device..."
-                  value={deviceSearch}
+                <input type="text" placeholder="Cari nama, ID pegawai, atau device..." value={deviceSearch}
                   onChange={(e) => { setDeviceSearch(e.target.value); setPage(1); }}
-                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
-                />
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
               {canInput && <Button icon={Plus} size="sm" onClick={openAddDevice} disabled={employeesWithoutDevice.length === 0}>
                 {employeesWithoutDevice.length === 0 ? "Semua Sudah Terdaftar" : "Tambah Device"}
               </Button>}
             </div>
-
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -655,31 +397,26 @@ export default function SecuritySettingsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {loading ? (
-                    <SkeletonTable rows={5} cols={5} />
-                  ) : pagedDevices.length === 0 ? (
+                  {loading ? <SkeletonTable rows={5} cols={5} /> : pagedDevices.length === 0 ? (
                     <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data device ditemukan</td></tr>
-                  ) : (
-                    pagedDevices.map((row, idx) => (
-                      <tr key={row.id} className="hover:bg-muted/30">
-                        <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                        <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p><p className="text-[11px] text-muted-foreground">{row.employee_id}</p></td>
-                        <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">{row.device_id}</span></td>
-                        <td className="px-5 py-3.5">
-                          <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg", row.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
-                            <span className={cn("w-1.5 h-1.5 rounded-full", row.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
-                            {row.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center justify-center gap-1">
-                            {canEdit && <button onClick={() => openEditDevice(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
-                            {canEdit && <button onClick={() => setDeleteConfirm({ type: "device", id: row.id, name: row.employeeNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ) : pagedDevices.map((row, idx) => (
+                    <tr key={row.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                      <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p><p className="text-[11px] text-muted-foreground">{row.employee_id}</p></td>
+                      <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">{row.device_id}</span></td>
+                      <td className="px-5 py-3.5">
+                        <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg", row.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                          <span className={cn("w-1.5 h-1.5 rounded-full", row.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />{row.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-center gap-1">
+                          {canEdit && <button onClick={() => openEditDevice(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "device", id: row.id, name: row.employeeNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -690,7 +427,6 @@ export default function SecuritySettingsPage() {
         {/* ═══ FACE TAB ═══ */}
         {activeTab === "face" && (
           <>
-            {/* Summary cards */}
             <div className="grid grid-cols-3 gap-3 px-5 mt-4">
               <div className="bg-muted/30 rounded-xl border border-border p-3 text-center">
                 <p className="text-lg font-bold text-foreground">{faceList.length}</p>
@@ -705,18 +441,12 @@ export default function SecuritySettingsPage() {
                 <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Belum Daftar</p>
               </div>
             </div>
-
-            {/* Search + Add button */}
             <div className="px-5 py-3 border-b border-border mt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-72">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Cari nama atau ID pegawai..."
-                  value={faceSearch}
+                <input type="text" placeholder="Cari nama atau ID pegawai..." value={faceSearch}
                   onChange={(e) => { setFaceSearch(e.target.value); setPage(1); }}
-                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
-                />
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
               {canInput && (
                 <Button icon={ScanFace} size="sm" onClick={openFaceForm} disabled={employeesWithoutFace.length === 0}>
@@ -724,7 +454,6 @@ export default function SecuritySettingsPage() {
                 </Button>
               )}
             </div>
-
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -738,62 +467,44 @@ export default function SecuritySettingsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {loading ? (
-                    <SkeletonTable rows={5} cols={canEdit ? 6 : 5} />
-                  ) : pagedFaces.length === 0 ? (
+                  {loading ? <SkeletonTable rows={5} cols={canEdit ? 6 : 5} /> : pagedFaces.length === 0 ? (
                     <tr><td colSpan={canEdit ? 6 : 5} className="text-center py-10 text-sm text-muted-foreground">
                       {faceList.length === 0 ? "Belum ada data wajah terdaftar." : "Tidak ada data ditemukan"}
                     </td></tr>
-                  ) : (
-                    pagedFaces.map((row, idx) => (
-                      <tr key={row.id} className="hover:bg-muted/30">
-                        <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                  ) : pagedFaces.map((row, idx) => (
+                    <tr key={row.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-[10px] font-bold">
+                            <ScanFace className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">{row.employeeNama}</p>
+                            <p className="text-[11px] text-muted-foreground">{row.employee_id}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        {row.face_data_ref ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-success bg-success-light px-2 py-1 rounded-lg"><Check className="w-3 h-3" />128-d vector</span>
+                        ) : (<span className="text-[11px] text-muted-foreground italic">Belum ada data</span>)}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg", row.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                          <span className={cn("w-1.5 h-1.5 rounded-full", row.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />{row.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{new Date(row.enrolled_at).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}</td>
+                      {canEdit && (
                         <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-[10px] font-bold">
-                              <ScanFace className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <p className="text-sm font-semibold text-foreground">{row.employeeNama}</p>
-                              <p className="text-[11px] text-muted-foreground">{row.employee_id}</p>
-                            </div>
+                          <div className="flex items-center justify-center">
+                            <button onClick={() => setDeleteConfirm({ type: "face", id: row.id, name: row.employeeNama || row.employee_id })} title="Hapus data wajah" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                           </div>
                         </td>
-                        <td className="px-5 py-3.5">
-                          {row.face_data_ref ? (
-                            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-success bg-success-light px-2 py-1 rounded-lg">
-                              <Check className="w-3 h-3" />
-                              128-d vector
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-muted-foreground italic">Belum ada data</span>
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg", row.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
-                            <span className={cn("w-1.5 h-1.5 rounded-full", row.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
-                            {row.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 text-xs text-muted-foreground">
-                          {new Date(row.enrolled_at).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}
-                        </td>
-                        {canEdit && (
-                          <td className="px-5 py-3.5">
-                            <div className="flex items-center justify-center">
-                              <button
-                                onClick={() => setDeleteConfirm({ type: "face", id: row.id, name: row.employeeNama || row.employee_id })}
-                                title="Hapus data wajah"
-                                className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-                    ))
-                  )}
+                      )}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -816,16 +527,9 @@ export default function SecuritySettingsPage() {
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Pegawai *</label>
                   {editingDeviceId !== null ? (
-                    <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">
-                      {employees.find((e) => e.id === deviceForm.employee_id)?.nama || deviceForm.employee_id}
-                    </div>
+                    <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">{employees.find((e) => e.id === deviceForm.employee_id)?.nama || deviceForm.employee_id}</div>
                   ) : (
-                    <Select
-                      value={deviceForm.employee_id}
-                      onChange={(val) => setDeviceForm({ ...deviceForm, employee_id: val })}
-                      options={employeesWithoutDevice.map((e) => ({ value: e.id, label: `${e.nama} (${e.id})` }))}
-                      placeholder="Pilih pegawai"
-                    />
+                    <Select value={deviceForm.employee_id} onChange={(val) => setDeviceForm({ ...deviceForm, employee_id: val })} options={employeesWithoutDevice.map((e) => ({ value: e.id, label: `${e.nama} (${e.id})` }))} placeholder="Pilih pegawai" />
                   )}
                 </div>
                 <div>
@@ -839,9 +543,7 @@ export default function SecuritySettingsPage() {
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
                 <Button variant="outline" size="sm" onClick={() => setShowDeviceForm(false)}>Batal</Button>
-                <Button size="sm" icon={editingDeviceId !== null ? Check : Plus} onClick={saveDevice} disabled={!deviceForm.employee_id || !deviceForm.device_id.trim()}>
-                  {editingDeviceId !== null ? "Simpan" : "Tambah"}
-                </Button>
+                <Button size="sm" icon={editingDeviceId !== null ? Check : Plus} onClick={saveDevice} disabled={!deviceForm.employee_id || !deviceForm.device_id.trim()}>{editingDeviceId !== null ? "Simpan" : "Tambah"}</Button>
               </div>
             </div>
           </div>
@@ -863,7 +565,7 @@ export default function SecuritySettingsPage() {
                   </div>
                   <div>
                     <h2 className="text-base font-bold text-foreground">Pendaftaran Wajah</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">Capture wajah pegawai untuk face recognition</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Daftarkan wajah pegawai untuk face recognition</p>
                   </div>
                 </div>
               </div>
@@ -881,42 +583,28 @@ export default function SecuritySettingsPage() {
                   <>
                     <div>
                       <label className="text-xs font-semibold text-foreground mb-1.5 block">Pegawai <span className="text-danger">*</span></label>
-                      <Select
-                        value={faceFormEmpId}
-                        onChange={(val) => setFaceFormEmpId(val)}
+                      <Select value={faceFormEmpId} onChange={(val) => setFaceFormEmpId(val)}
                         options={employeesWithoutFace.map((e) => ({ value: e.id, label: `${e.nama} (${e.id})` }))}
-                        placeholder="Pilih pegawai"
-                        searchable
-                      />
+                        placeholder="Pilih pegawai" searchable />
                     </div>
-
                     <div>
-                      <label className="text-xs font-semibold text-foreground mb-2 block">Metode Capture</label>
-                      <div className="grid grid-cols-3 gap-2">
+                      <label className="text-xs font-semibold text-foreground mb-2 block">Metode</label>
+                      <div className="grid grid-cols-2 gap-3">
                         {([
                           { key: "qr" as const, icon: QrCode, label: "Kamera HP", desc: "Scan QR Code" },
-                          { key: "webcam" as const, icon: Camera, label: "Webcam", desc: "Capture langsung" },
-                          { key: "upload" as const, icon: Upload, label: "Upload", desc: "Dari file gambar" },
+                          { key: "upload" as const, icon: Upload, label: "Upload Foto", desc: "Dari file gambar" },
                         ]).map((m) => {
                           const active = faceFormMode === m.key;
                           return (
-                            <button
-                              key={m.key}
-                              type="button"
-                              onClick={() => setFaceFormMode(m.key)}
-                              className={cn(
-                                "flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all",
-                                active
-                                  ? "border-primary bg-primary/5 shadow-sm"
-                                  : "border-border hover:border-primary/30 hover:bg-muted/30"
-                              )}
-                            >
-                              <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", active ? "bg-primary/10" : "bg-muted")}>
-                                <m.icon className={cn("w-4.5 h-4.5", active ? "text-primary" : "text-muted-foreground")} />
+                            <button key={m.key} type="button" onClick={() => setFaceFormMode(m.key)}
+                              className={cn("flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
+                                active ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-primary/30 hover:bg-muted/30")}>
+                              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", active ? "bg-primary/10" : "bg-muted")}>
+                                <m.icon className={cn("w-5 h-5", active ? "text-primary" : "text-muted-foreground")} />
                               </div>
                               <div className="text-center">
-                                <p className={cn("text-[11px] font-bold", active ? "text-primary" : "text-foreground")}>{m.label}</p>
-                                <p className="text-[9px] text-muted-foreground mt-0.5">{m.desc}</p>
+                                <p className={cn("text-xs font-bold", active ? "text-primary" : "text-foreground")}>{m.label}</p>
+                                <p className="text-[10px] text-muted-foreground mt-0.5">{m.desc}</p>
                               </div>
                             </button>
                           );
@@ -929,51 +617,6 @@ export default function SecuritySettingsPage() {
                 {/* Step 2: Capture */}
                 {faceFormStep === "capture" && (
                   <>
-                    {faceFormMode === "webcam" && (
-                      <div className="space-y-3">
-                        <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
-                          <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-                          {webcamActive && (
-                            <div className={cn(
-                              "absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold backdrop-blur-sm",
-                              faceDetected ? "bg-success/20 text-success" : "bg-warning/20 text-warning"
-                            )}>
-                              <span className={cn("w-2 h-2 rounded-full animate-pulse", faceDetected ? "bg-success" : "bg-warning")} />
-                              {faceDetected ? "Wajah Terdeteksi" : "Posisikan Wajah"}
-                            </div>
-                          )}
-                          {!webcamActive && !webcamError && (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <Loader2 className="w-8 h-8 text-white/50 animate-spin" />
-                            </div>
-                          )}
-                          {!webcamActive && webcamError && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
-                              <Camera className="w-10 h-10 text-white/30" />
-                              <p className="text-xs text-white/50 text-center">Kamera tidak tersedia</p>
-                              <button onClick={() => startWebcam()} className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 text-xs font-medium transition-colors">Coba Lagi</button>
-                            </div>
-                          )}
-                        </div>
-                        <canvas ref={canvasRef} className="hidden" />
-                        <div className="flex items-center justify-center">
-                          <button
-                            onClick={captureFromWebcam}
-                            disabled={!faceDetected}
-                            className={cn(
-                              "w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-lg",
-                              faceDetected
-                                ? "bg-primary hover:bg-primary/90 text-white shadow-primary/30 hover:scale-105"
-                                : "bg-muted text-muted-foreground cursor-not-allowed"
-                            )}
-                          >
-                            <Camera className="w-7 h-7" />
-                          </button>
-                        </div>
-                        <p className="text-center text-[11px] text-muted-foreground">Posisikan wajah di tengah frame, pastikan pencahayaan cukup</p>
-                      </div>
-                    )}
-
                     {faceFormMode === "upload" && (
                       <div className="space-y-3">
                         <label className="flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 cursor-pointer transition-all">
@@ -994,31 +637,20 @@ export default function SecuritySettingsPage() {
                       <div className="space-y-4">
                         <div className="flex flex-col items-center gap-4 p-6 bg-muted/30 rounded-xl border border-border">
                           <div className="bg-white p-3 rounded-xl shadow-sm">
-                            <QRCodeSVG
-                              value={`${typeof window !== "undefined" ? window.location.origin : ""}/face-register/${qrToken}`}
-                              size={180}
-                              level="M"
-                            />
+                            <QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/face-register/${qrToken}`} size={180} level="M" />
                           </div>
                           <div className="text-center">
                             <p className="text-sm font-bold text-foreground">Scan QR Code dengan HP</p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Buka kamera HP atau QR scanner, arahkan ke kode di atas
-                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">Buka kamera HP atau QR scanner, arahkan ke kode di atas</p>
                           </div>
                         </div>
-
-                        {/* Polling indicator */}
                         {qrPolling && (
                           <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
                             <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
                             <span>Menunggu capture dari HP...</span>
                           </div>
                         )}
-
-                        <p className="text-center text-[10px] text-muted-foreground">
-                          Link berlaku 10 menit. Halaman ini akan otomatis update setelah wajah berhasil di-capture dari HP.
-                        </p>
+                        <p className="text-center text-[10px] text-muted-foreground">Link berlaku 10 menit. Halaman ini akan otomatis update setelah wajah berhasil di-capture dari HP.</p>
                       </div>
                     )}
                   </>
@@ -1037,58 +669,43 @@ export default function SecuritySettingsPage() {
                   </div>
                 )}
 
-                {/* Step 4: Done - Preview */}
+                {/* Step 4: Done */}
                 {faceFormStep === "done" && (
                   <div className="space-y-4">
-                    {/* Preview image (webcam/upload only) */}
                     {capturedImage && (
                       <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
                         <img src={capturedImage} alt="Captured face" className="w-full h-full object-cover" />
                         <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-success/20 text-success text-[11px] font-semibold backdrop-blur-sm">
-                          <Check className="w-3 h-3" />
-                          Wajah Terdeteksi
+                          <Check className="w-3 h-3" />Wajah Terdeteksi
                         </div>
                       </div>
                     )}
-
-                    {/* Success info */}
                     <div className="bg-success/5 border border-success/10 rounded-xl p-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
                           <CircleCheckBig className="w-5 h-5 text-success" />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-foreground">
-                            {faceFormMode === "qr" ? "Wajah Berhasil Didaftarkan" : "Face Descriptor Berhasil"}
-                          </p>
+                          <p className="text-xs font-bold text-foreground">{faceFormMode === "qr" ? "Wajah Berhasil Didaftarkan" : "Face Descriptor Berhasil"}</p>
                           <p className="text-[11px] text-muted-foreground mt-0.5">
                             {faceFormMode === "qr"
                               ? `Wajah ${employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId} berhasil di-capture dari HP.`
-                              : `128-dimensional vector telah dihasilkan untuk ${employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId}`
-                            }
+                              : `128-dimensional vector telah dihasilkan untuk ${employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId}`}
                           </p>
                         </div>
                       </div>
                     </div>
-
-                    {/* Retry button (webcam/upload only) */}
                     {faceFormMode !== "qr" && (
-                      <button
-                        onClick={retryCapture}
-                        className="flex items-center gap-2 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        Ambil ulang foto
+                      <button onClick={retryCapture} className="flex items-center gap-2 text-xs font-medium text-primary hover:text-primary/80 transition-colors">
+                        <RefreshCw className="w-3.5 h-3.5" />Ambil ulang foto
                       </button>
                     )}
                   </div>
                 )}
 
-                {/* Models loading indicator */}
                 {modelsLoading && (
                   <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/10 text-primary text-xs font-medium">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Memuat model face detection...
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />Memuat model face detection...
                   </div>
                 )}
               </div>
@@ -1099,8 +716,8 @@ export default function SecuritySettingsPage() {
                   {faceFormStep === "done" && faceFormMode === "qr" ? "Selesai" : "Batal"}
                 </Button>
                 {faceFormStep === "select" && (
-                  <Button size="sm" icon={faceFormMode === "qr" ? QrCode : Camera} onClick={startCapture} disabled={!faceFormEmpId || modelsLoading || qrGenerating}>
-                    {modelsLoading ? "Memuat Model..." : qrGenerating ? "Membuat QR..." : faceFormMode === "qr" ? "Generate QR Code" : "Mulai Capture"}
+                  <Button size="sm" icon={faceFormMode === "qr" ? QrCode : Upload} onClick={startCapture} disabled={!faceFormEmpId || modelsLoading || qrGenerating}>
+                    {modelsLoading ? "Memuat Model..." : qrGenerating ? "Membuat QR..." : faceFormMode === "qr" ? "Generate QR Code" : "Mulai Upload"}
                   </Button>
                 )}
                 {faceFormStep === "done" && faceFormMode !== "qr" && (
@@ -1121,9 +738,7 @@ export default function SecuritySettingsPage() {
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
             <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
               <div className="p-6 text-center">
-                <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
-                  <Trash2 className="w-7 h-7 text-danger" />
-                </div>
+                <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4"><Trash2 className="w-7 h-7 text-danger" /></div>
                 <h3 className="text-base font-bold text-foreground">Hapus {deleteConfirm.type === "device" ? "Device" : "Data Wajah"}?</h3>
                 <p className="text-sm text-muted-foreground mt-2">
                   Data untuk <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.name}&rdquo;</span> akan dihapus permanen.
