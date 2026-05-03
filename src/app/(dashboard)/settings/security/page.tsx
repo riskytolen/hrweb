@@ -98,15 +98,18 @@ export default function SecuritySettingsPage() {
   useEffect(() => { return () => { if (toastTimer.current) clearTimeout(toastTimer.current); }; }, []);
 
   const fetchEmployees = async () => {
-    const { data } = await supabase.from("pegawai").select("id, nama, status").order("nama");
+    const { data, error } = await supabase.from("pegawai").select("id, nama, status").order("nama");
+    if (error) { showToast("error", "Gagal Memuat", "Data pegawai gagal dimuat. Coba refresh halaman."); return; }
     if (data) setEmployees(data as EmployeeLite[]);
   };
   const fetchDevices = async () => {
-    const { data } = await supabase.from("employee_devices").select("*, pegawai(id, nama)").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("employee_devices").select("*, pegawai(id, nama)").order("created_at", { ascending: false });
+    if (error) { showToast("error", "Gagal Memuat", "Data device gagal dimuat."); return; }
     if (data) setDeviceList(data.map((d) => ({ ...d, employeeNama: d.pegawai?.nama || d.employee_id })) as DeviceRow[]);
   };
   const fetchFaces = async () => {
-    const { data } = await supabase.from("employee_face_profiles").select("*, pegawai(id, nama)").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("employee_face_profiles").select("*, pegawai(id, nama)").order("created_at", { ascending: false });
+    if (error) { showToast("error", "Gagal Memuat", "Data wajah gagal dimuat."); return; }
     if (data) setFaceList(data.map((f) => ({ ...f, employeeNama: f.pegawai?.nama || f.employee_id })) as FaceRow[]);
   };
 
@@ -140,10 +143,12 @@ export default function SecuritySettingsPage() {
     if (!deviceForm.employee_id || !deviceForm.device_id.trim()) return;
     const payload = { employee_id: deviceForm.employee_id, device_id: deviceForm.device_id, status: deviceForm.status };
     if (editingDeviceId !== null) {
-      await supabase.from("employee_devices").update(payload).eq("id", editingDeviceId);
+      const { error } = await supabase.from("employee_devices").update(payload).eq("id", editingDeviceId);
+      if (error) { showToast("error", "Gagal Memperbarui", "Terjadi kesalahan saat menyimpan data perangkat."); return; }
       showToast("success", "Device Diperbarui", "Data perangkat pegawai telah disimpan.");
     } else {
-      await supabase.from("employee_devices").insert(payload);
+      const { error } = await supabase.from("employee_devices").insert(payload);
+      if (error) { showToast("error", "Gagal Menambahkan", "Terjadi kesalahan saat menambahkan perangkat."); return; }
       showToast("success", "Device Ditambahkan", "Data perangkat pegawai berhasil ditambahkan.");
     }
     setShowDeviceForm(false);
@@ -151,17 +156,22 @@ export default function SecuritySettingsPage() {
   };
 
   // ─── Delete ───
+  const [deleting, setDeleting] = useState(false);
   const deleteRow = async () => {
     if (!deleteConfirm) return;
+    setDeleting(true);
     if (deleteConfirm.type === "device") {
-      await supabase.from("employee_devices").delete().eq("id", deleteConfirm.id);
+      const { error } = await supabase.from("employee_devices").delete().eq("id", deleteConfirm.id);
+      if (error) { showToast("error", "Gagal Menghapus", "Terjadi kesalahan saat menghapus data perangkat."); setDeleting(false); setDeleteConfirm(null); return; }
       showToast("success", "Device Dihapus", "Data perangkat pegawai telah dihapus.");
       fetchDevices();
     } else {
-      await supabase.from("employee_face_profiles").delete().eq("id", deleteConfirm.id);
+      const { error } = await supabase.from("employee_face_profiles").delete().eq("id", deleteConfirm.id);
+      if (error) { showToast("error", "Gagal Menghapus", "Terjadi kesalahan saat menghapus data wajah."); setDeleting(false); setDeleteConfirm(null); return; }
       showToast("success", "Data Wajah Dihapus", "Profil wajah pegawai telah dihapus.");
       fetchFaces();
     }
+    setDeleting(false);
     setDeleteConfirm(null);
   };
 
@@ -252,10 +262,15 @@ export default function SecuritySettingsPage() {
 
   const startQrPolling = (tokenId: string) => {
     setQrPolling(true);
+    let failCount = 0;
     qrPollRef.current = setInterval(async () => {
-      const { data } = await supabase.from("face_register_tokens").select("status").eq("id", tokenId).single();
-      if (data?.status === "completed") { stopQrPolling(); setFaceFormStep("done"); fetchFaces(); }
-      else if (data?.status === "expired") { stopQrPolling(); setFaceFormError("QR Code sudah kedaluwarsa. Generate ulang."); setQrToken(null); setFaceFormStep("select"); }
+      try {
+        const { data, error } = await supabase.from("face_register_tokens").select("status").eq("id", tokenId).single();
+        if (error) { failCount++; if (failCount >= 3) { stopQrPolling(); setFaceFormError("Koneksi terputus. Silakan generate QR Code baru."); setQrToken(null); setFaceFormStep("select"); } return; }
+        failCount = 0;
+        if (data?.status === "completed") { stopQrPolling(); setFaceFormStep("done"); fetchFaces(); showToast("success", "Wajah Terdaftar", `Wajah ${employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId} berhasil didaftarkan dari HP.`); }
+        else if (data?.status === "expired") { stopQrPolling(); setFaceFormError("QR Code sudah kedaluwarsa. Generate ulang."); setQrToken(null); setFaceFormStep("select"); }
+      } catch { failCount++; }
     }, 3000);
   };
 
@@ -746,8 +761,10 @@ export default function SecuritySettingsPage() {
                 </p>
               </div>
               <div className="flex items-center gap-3 px-6 pb-6">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)}>Batal</Button>
-                <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={deleteRow}>Hapus</Button>
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)} disabled={deleting}>Batal</Button>
+                <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={deleteRow} disabled={deleting}>
+                  {deleting ? "Menghapus..." : "Hapus"}
+                </Button>
               </div>
             </div>
           </div>
