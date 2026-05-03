@@ -25,6 +25,7 @@ export default function FaceRegisterPage() {
   const [state, setState] = useState<PageState>("loading");
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
   const [error, setError] = useState("");
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [webcamActive, setWebcamActive] = useState(false);
   const [webcamError, setWebcamError] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
@@ -38,6 +39,12 @@ export default function FaceRegisterPage() {
   const animFrameRef = useRef<number | null>(null);
   const detectAbortRef = useRef(false);
   const faceApiRef = useRef<typeof import("face-api.js") | null>(null);
+
+  const showError = (msg: string) => {
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    setError(msg);
+    errorTimerRef.current = setTimeout(() => setError(""), 5000);
+  };
 
   // ─── Validate token ───
   useEffect(() => {
@@ -78,7 +85,7 @@ export default function FaceRegisterPage() {
       return true;
     } catch {
       setModelsLoading(false);
-      setError("Gagal memuat model. Periksa koneksi internet.");
+      showError("Gagal memuat model. Periksa koneksi internet dan coba lagi.");
       return false;
     }
   };
@@ -117,7 +124,7 @@ export default function FaceRegisterPage() {
       const msg = err instanceof Error && err.name === "NotAllowedError"
         ? "Izin kamera ditolak. Berikan izin di pengaturan browser."
         : err instanceof Error ? err.message : "Gagal mengakses kamera.";
-      setError(msg);
+      showError(msg);
       setWebcamError(true);
     }
   }, [facingMode]);
@@ -204,7 +211,7 @@ export default function FaceRegisterPage() {
       URL.revokeObjectURL(imageUrl);
 
       if (!detection) {
-        setError("Wajah tidak terdeteksi. Coba lagi dengan pencahayaan lebih baik.");
+        showError("Wajah tidak terdeteksi. Coba lagi dengan pencahayaan lebih baik.");
         setState("capturing");
         setTimeout(() => startWebcam(), 200);
         return;
@@ -221,7 +228,7 @@ export default function FaceRegisterPage() {
         }, { onConflict: "employee_id" });
 
       if (dbErr) {
-        setError(`Gagal menyimpan: ${dbErr.message}`);
+        showError("Gagal menyimpan data wajah. Silakan coba lagi.");
         setState("capturing");
         setTimeout(() => startWebcam(), 200);
         return;
@@ -230,14 +237,14 @@ export default function FaceRegisterPage() {
       await supabase.from("face_register_tokens").update({ status: "completed" }).eq("id", token);
       setState("success");
     } catch (err) {
-      setError("Terjadi kesalahan. Silakan coba lagi.");
+      showError("Terjadi kesalahan. Silakan coba lagi.");
       setState("capturing");
       setTimeout(() => startWebcam(), 200);
       console.error(err);
     }
   };
 
-  useEffect(() => { return () => { stopWebcam(); }; }, [stopWebcam]);
+  useEffect(() => { return () => { stopWebcam(); if (errorTimerRef.current) clearTimeout(errorTimerRef.current); }; }, [stopWebcam]);
 
   // ═══════════════════════════════════════════
   // RENDER — Status pages (non-camera)
@@ -337,6 +344,11 @@ export default function FaceRegisterPage() {
             ))}
           </div>
         </div>
+        {error && (
+          <div className="mt-4 w-full max-w-[280px] px-4 py-3 bg-red-50 border border-red-100 rounded-xl">
+            <p className="text-xs text-red-600 text-center">{error}</p>
+          </div>
+        )}
         <button
           onClick={handleStart}
           disabled={modelsLoading}
