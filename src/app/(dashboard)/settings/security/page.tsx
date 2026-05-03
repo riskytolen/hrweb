@@ -13,6 +13,11 @@ import {
   Check,
   CircleCheckBig,
   AlertTriangle,
+  Camera,
+  Upload,
+  RefreshCw,
+  Loader2,
+  Image as ImageIcon, // used for upload area icon
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -65,6 +70,28 @@ export default function SecuritySettingsPage() {
     status: "Aktif",
   });
 
+  // Face registration
+  const [showFaceForm, setShowFaceForm] = useState(false);
+  const [faceFormMode, setFaceFormMode] = useState<"webcam" | "upload">("webcam");
+  const [faceFormEmpId, setFaceFormEmpId] = useState("");
+  const [faceFormSaving, setFaceFormSaving] = useState(false);
+  const [faceFormError, setFaceFormError] = useState("");
+  const [faceFormStep, setFaceFormStep] = useState<"select" | "capture" | "processing" | "done">("select");
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+
+  const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [webcamActive, setWebcamActive] = useState(false);
+  const [webcamError, setWebcamError] = useState(false); // true jika kamera gagal diakses
+  const [faceDetected, setFaceDetected] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const detectAbortRef = useRef(false); // abort flag untuk detectFaceLoop
+  const faceApiRef = useRef<typeof import("face-api.js") | null>(null);
+
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "device" | "face"; id: number; name: string } | null>(null);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -103,12 +130,13 @@ export default function SecuritySettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (showDeviceForm) document.body.style.overflow = "hidden";
+    if (showDeviceForm || showFaceForm) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showDeviceForm]);
+  }, [showDeviceForm, showFaceForm]);
 
   const employeesWithoutDevice = employees.filter((e) => !deviceList.some((d) => d.employee_id === e.id));
+  const employeesWithoutFace = employees.filter((e) => e.status === "Aktif" && !faceList.some((f) => f.employee_id === e.id));
 
   const filteredDevices = deviceList.filter((d) =>
     (d.employeeNama || "").toLowerCase().includes(deviceSearch.toLowerCase()) ||
@@ -169,6 +197,291 @@ export default function SecuritySettingsPage() {
   const registeredCount = faceList.filter((f) => f.face_data_ref).length;
   const activeEmployees = employees.filter((e) => e.status === "Aktif").length;
   const notRegisteredCount = activeEmployees - registeredCount;
+
+  // ═══════════════════════════════════════════
+  // FACE REGISTRATION LOGIC
+  // ═══════════════════════════════════════════
+
+  const loadFaceModels = async () => {
+    if (modelsLoaded) return true;
+    setModelsLoading(true);
+    try {
+      const faceapi = await import("face-api.js");
+      faceApiRef.current = faceapi;
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri("/models"),
+        faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
+        faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
+      ]);
+      setModelsLoaded(true);
+      setModelsLoading(false);
+      return true;
+    } catch (err) {
+      setModelsLoading(false);
+      setFaceFormError("Gagal memuat model face detection. Pastikan koneksi internet stabil.");
+      console.error("Failed to load face-api models:", err);
+      return false;
+    }
+  };
+
+  const startWebcam = async () => {
+    setWebcamError(false);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Browser tidak mendukung akses kamera. Gunakan HTTPS atau browser modern.");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setWebcamActive(true);
+      detectAbortRef.current = false;
+      detectFaceLoop();
+    } catch (err) {
+      const msg = err instanceof Error && err.name === "NotAllowedError"
+        ? "Izin kamera ditolak. Berikan izin kamera di pengaturan browser, lalu coba lagi."
+        : err instanceof Error
+          ? err.message
+          : "Gagal mengakses kamera.";
+      setFaceFormError(msg);
+      setWebcamError(true);
+      console.error("Webcam error:", err);
+    }
+  };
+
+  const stopWebcam = () => {
+    detectAbortRef.current = true;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    setWebcamActive(false);
+    setFaceDetected(false);
+  };
+
+  const detectFaceLoop = () => {
+    const faceapi = faceApiRef.current;
+    if (!faceapi || !videoRef.current) return;
+
+    const detect = async () => {
+      if (detectAbortRef.current) return;
+      if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) return;
+      try {
+        const detection = await faceapi
+          .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
+          .withFaceLandmarks();
+        // Cek lagi setelah await — mungkin sudah di-stop
+        if (detectAbortRef.current) return;
+        setFaceDetected(!!detection);
+      } catch {
+        // ignore detection errors during loop
+      }
+      if (!detectAbortRef.current) {
+        animFrameRef.current = requestAnimationFrame(detect);
+      }
+    };
+    detect();
+  };
+
+  const captureFromWebcam = async () => {
+    const faceapi = faceApiRef.current;
+    if (!faceapi || !videoRef.current || !canvasRef.current) return;
+
+    setFaceFormStep("processing");
+    setFaceFormError("");
+
+    try {
+      // Draw video frame to canvas
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas context not available");
+      ctx.drawImage(video, 0, 0);
+
+      // Stop webcam
+      stopWebcam();
+
+      // Get image as blob
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((b) => b ? resolve(b) : reject(new Error("Failed to create blob")), "image/jpeg", 0.9);
+      });
+
+      // Set captured image preview
+      const imageUrl = URL.createObjectURL(blob);
+      setCapturedImage(imageUrl);
+
+      // Detect face and get descriptor
+      const img = await faceapi.fetchImage(imageUrl);
+      const detection = await faceapi
+        .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        URL.revokeObjectURL(imageUrl);
+        setFaceFormError("Wajah tidak terdeteksi pada gambar. Silakan coba lagi dengan pencahayaan yang lebih baik.");
+        setCapturedImage(null);
+        setFaceFormStep("capture");
+        // Restart webcam agar user bisa langsung coba lagi
+        setTimeout(() => startWebcam(), 100);
+        return;
+      }
+
+      const descriptor = Array.from(detection.descriptor);
+      setFaceDescriptor(descriptor);
+      setFaceFormStep("done");
+    } catch (err) {
+      setFaceFormError("Gagal memproses gambar. Silakan coba lagi.");
+      setFaceFormStep("capture");
+      // Restart webcam agar user bisa langsung coba lagi
+      setTimeout(() => startWebcam(), 100);
+      console.error("Capture error:", err);
+    }
+  };
+
+  const handleUploadFile = async (file: File) => {
+    const faceapi = faceApiRef.current;
+    if (!faceapi) return;
+
+    setFaceFormStep("processing");
+    setFaceFormError("");
+
+    try {
+      // Validate file type
+      if (!file.type.startsWith("image/")) {
+        setFaceFormError("File harus berupa gambar (JPG, PNG, dll).");
+        setFaceFormStep("capture");
+        return;
+      }
+
+      // Validate file size (maks 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setFaceFormError("Ukuran file maksimal 10MB.");
+        setFaceFormStep("capture");
+        return;
+      }
+
+      // Create image URL
+      const imageUrl = URL.createObjectURL(file);
+      setCapturedImage(imageUrl);
+
+      // Detect face and get descriptor
+      const img = await faceapi.fetchImage(imageUrl);
+      const detection = await faceapi
+        .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        URL.revokeObjectURL(imageUrl);
+        setFaceFormError("Wajah tidak terdeteksi pada gambar. Pastikan foto menampilkan wajah dengan jelas.");
+        setCapturedImage(null);
+        setFaceFormStep("capture");
+        return;
+      }
+
+      const descriptor = Array.from(detection.descriptor);
+      setFaceDescriptor(descriptor);
+      setFaceFormStep("done");
+    } catch (err) {
+      setFaceFormError("Gagal memproses gambar. Silakan coba dengan foto lain.");
+      setFaceFormStep("capture");
+      console.error("Upload process error:", err);
+    }
+  };
+
+  const saveFaceProfile = async () => {
+    if (!faceFormEmpId || !faceDescriptor) return;
+    setFaceFormSaving(true);
+    setFaceFormError("");
+
+    try {
+      // Upsert face profile (hanya descriptor, tanpa foto)
+      const { error: dbError } = await supabase
+        .from("employee_face_profiles")
+        .upsert({
+          employee_id: faceFormEmpId,
+          face_data_ref: JSON.stringify(faceDescriptor),
+          status: "Aktif",
+          enrolled_at: new Date().toISOString(),
+        }, { onConflict: "employee_id" });
+
+      if (dbError) {
+        setFaceFormError(`Gagal menyimpan data: ${dbError.message}`);
+        setFaceFormSaving(false);
+        return;
+      }
+
+      const empName = employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId;
+      showToast("success", "Wajah Terdaftar", `Data wajah ${empName} berhasil disimpan.`);
+      closeFaceForm();
+      fetchFaces();
+    } catch (err) {
+      setFaceFormError("Terjadi kesalahan saat menyimpan.");
+      console.error("Save face error:", err);
+    } finally {
+      setFaceFormSaving(false);
+    }
+  };
+
+  const openFaceForm = async () => {
+    setFaceFormEmpId(employeesWithoutFace[0]?.id || "");
+    setFaceFormMode("webcam");
+    setFaceFormStep("select");
+    setFaceFormError("");
+    setCapturedImage(null);
+    setFaceDescriptor(null);
+    setFaceFormSaving(false);
+    setShowFaceForm(true);
+  };
+
+  const closeFaceForm = () => {
+    stopWebcam();
+    if (capturedImage) URL.revokeObjectURL(capturedImage);
+    setCapturedImage(null);
+    setFaceDescriptor(null);
+    setFaceFormError("");
+    setShowFaceForm(false);
+  };
+
+  const startCapture = async () => {
+    setFaceFormError("");
+    const loaded = await loadFaceModels();
+    if (!loaded) return;
+    setFaceFormStep("capture");
+    if (faceFormMode === "webcam") {
+      // Small delay to let DOM render video element
+      setTimeout(() => startWebcam(), 100);
+    }
+  };
+
+  const retryCapture = () => {
+    if (capturedImage) URL.revokeObjectURL(capturedImage);
+    setCapturedImage(null);
+    setFaceDescriptor(null);
+    setFaceFormError("");
+    setFaceFormStep("capture");
+    if (faceFormMode === "webcam") {
+      setTimeout(() => startWebcam(), 100);
+    }
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopWebcam();
+    };
+  }, []);
 
   return (
     <RouteGuard permission="settings">
@@ -288,24 +601,11 @@ export default function SecuritySettingsPage() {
           </>
         )}
 
-        {/* ═══ FACE TAB — Read-only monitoring ═══ */}
+        {/* ═══ FACE TAB ═══ */}
         {activeTab === "face" && (
           <>
-            {/* Info banner */}
-            <div className="mx-5 mt-4 flex items-start gap-3 bg-primary/5 border border-primary/10 rounded-xl p-3.5">
-              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <Smartphone className="w-4 h-4 text-primary" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-foreground">Pendaftaran via Aplikasi Android</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Data wajah didaftarkan melalui aplikasi Android khusus. Halaman ini hanya untuk monitoring status pendaftaran wajah pegawai.
-                </p>
-              </div>
-            </div>
-
             {/* Summary cards */}
-            <div className="grid grid-cols-3 gap-3 px-5 mt-3">
+            <div className="grid grid-cols-3 gap-3 px-5 mt-4">
               <div className="bg-muted/30 rounded-xl border border-border p-3 text-center">
                 <p className="text-lg font-bold text-foreground">{faceList.length}</p>
                 <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Total Terdaftar</p>
@@ -320,8 +620,8 @@ export default function SecuritySettingsPage() {
               </div>
             </div>
 
-            {/* Search */}
-            <div className="px-5 py-3 border-b border-border mt-2">
+            {/* Search + Add button */}
+            <div className="px-5 py-3 border-b border-border mt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-72">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
                 <input
@@ -332,6 +632,11 @@ export default function SecuritySettingsPage() {
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
                 />
               </div>
+              {canInput && (
+                <Button icon={ScanFace} size="sm" onClick={openFaceForm} disabled={employeesWithoutFace.length === 0}>
+                  {employeesWithoutFace.length === 0 ? "Semua Sudah Terdaftar" : "Daftarkan Wajah"}
+                </Button>
+              )}
             </div>
 
             <div className="overflow-x-auto">
@@ -351,7 +656,7 @@ export default function SecuritySettingsPage() {
                     <SkeletonTable rows={5} cols={canEdit ? 6 : 5} />
                   ) : pagedFaces.length === 0 ? (
                     <tr><td colSpan={canEdit ? 6 : 5} className="text-center py-10 text-sm text-muted-foreground">
-                      {faceList.length === 0 ? "Belum ada data wajah terdaftar. Gunakan aplikasi Android untuk mendaftarkan wajah pegawai." : "Tidak ada data ditemukan"}
+                      {faceList.length === 0 ? "Belum ada data wajah terdaftar." : "Tidak ada data ditemukan"}
                     </td></tr>
                   ) : (
                     pagedFaces.map((row, idx) => (
@@ -457,6 +762,254 @@ export default function SecuritySettingsPage() {
         </Portal>
       )}
 
+      {/* ═══ FACE REGISTRATION MODAL ═══ */}
+      {showFaceForm && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !faceFormSaving && closeFaceForm()} />
+            <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+              {/* Header */}
+              <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent flex-shrink-0">
+                <button onClick={() => !faceFormSaving && closeFaceForm()} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/20">
+                    <ScanFace className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Pendaftaran Wajah</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">Capture wajah pegawai untuk face recognition</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="px-6 py-5 space-y-5 flex-1 overflow-y-auto">
+                {faceFormError && (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{faceFormError}
+                  </div>
+                )}
+
+                {/* Step 1: Select employee & mode */}
+                {faceFormStep === "select" && (
+                  <>
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1.5 block">Pegawai <span className="text-danger">*</span></label>
+                      <Select
+                        value={faceFormEmpId}
+                        onChange={(val) => setFaceFormEmpId(val)}
+                        options={employeesWithoutFace.map((e) => ({ value: e.id, label: `${e.nama} (${e.id})` }))}
+                        placeholder="Pilih pegawai"
+                        searchable
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-2 block">Metode Capture</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setFaceFormMode("webcam")}
+                          className={cn(
+                            "flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
+                            faceFormMode === "webcam"
+                              ? "border-primary bg-primary/5 shadow-sm"
+                              : "border-border hover:border-primary/30 hover:bg-muted/30"
+                          )}
+                        >
+                          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", faceFormMode === "webcam" ? "bg-primary/10" : "bg-muted")}>
+                            <Camera className={cn("w-5 h-5", faceFormMode === "webcam" ? "text-primary" : "text-muted-foreground")} />
+                          </div>
+                          <div className="text-center">
+                            <p className={cn("text-xs font-bold", faceFormMode === "webcam" ? "text-primary" : "text-foreground")}>Webcam</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Capture langsung</p>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFaceFormMode("upload")}
+                          className={cn(
+                            "flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
+                            faceFormMode === "upload"
+                              ? "border-primary bg-primary/5 shadow-sm"
+                              : "border-border hover:border-primary/30 hover:bg-muted/30"
+                          )}
+                        >
+                          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", faceFormMode === "upload" ? "bg-primary/10" : "bg-muted")}>
+                            <Upload className={cn("w-5 h-5", faceFormMode === "upload" ? "text-primary" : "text-muted-foreground")} />
+                          </div>
+                          <div className="text-center">
+                            <p className={cn("text-xs font-bold", faceFormMode === "upload" ? "text-primary" : "text-foreground")}>Upload Foto</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Dari file gambar</p>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Step 2: Capture */}
+                {faceFormStep === "capture" && (
+                  <>
+                    {faceFormMode === "webcam" ? (
+                      <div className="space-y-3">
+                        <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
+                          <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
+                          {/* Face detection indicator */}
+                          {webcamActive && (
+                            <div className={cn(
+                              "absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold backdrop-blur-sm",
+                              faceDetected ? "bg-success/20 text-success" : "bg-warning/20 text-warning"
+                            )}>
+                              <span className={cn("w-2 h-2 rounded-full animate-pulse", faceDetected ? "bg-success" : "bg-warning")} />
+                              {faceDetected ? "Wajah Terdeteksi" : "Posisikan Wajah"}
+                            </div>
+                          )}
+                          {!webcamActive && !webcamError && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <Loader2 className="w-8 h-8 text-white/50 animate-spin" />
+                            </div>
+                          )}
+                          {!webcamActive && webcamError && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
+                              <Camera className="w-10 h-10 text-white/30" />
+                              <p className="text-xs text-white/50 text-center">Kamera tidak tersedia</p>
+                              <button
+                                onClick={() => startWebcam()}
+                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 text-xs font-medium transition-colors"
+                              >
+                                Coba Lagi
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <canvas ref={canvasRef} className="hidden" />
+                        <div className="flex items-center justify-center">
+                          <button
+                            onClick={captureFromWebcam}
+                            disabled={!faceDetected}
+                            className={cn(
+                              "w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-lg",
+                              faceDetected
+                                ? "bg-primary hover:bg-primary/90 text-white shadow-primary/30 hover:scale-105"
+                                : "bg-muted text-muted-foreground cursor-not-allowed"
+                            )}
+                          >
+                            <Camera className="w-7 h-7" />
+                          </button>
+                        </div>
+                        <p className="text-center text-[11px] text-muted-foreground">
+                          Posisikan wajah di tengah frame, pastikan pencahayaan cukup
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <label
+                          className="flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 cursor-pointer transition-all"
+                        >
+                          <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center">
+                            <ImageIcon className="w-7 h-7 text-muted-foreground" />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm font-semibold text-foreground">Pilih foto</p>
+                            <p className="text-xs text-muted-foreground mt-1">JPG, PNG (maks 10MB)</p>
+                          </div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleUploadFile(file);
+                            }}
+                          />
+                        </label>
+                        <p className="text-center text-[11px] text-muted-foreground">
+                          Pastikan foto menampilkan wajah dengan jelas (frontal, pencahayaan baik)
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Step 3: Processing */}
+                {faceFormStep === "processing" && (
+                  <div className="flex flex-col items-center justify-center py-10 gap-4">
+                    <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-bold text-foreground">Memproses Wajah...</p>
+                      <p className="text-xs text-muted-foreground mt-1">Mendeteksi wajah dan menghasilkan face descriptor</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 4: Done - Preview */}
+                {faceFormStep === "done" && capturedImage && (
+                  <div className="space-y-4">
+                    <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
+                      <img src={capturedImage} alt="Captured face" className="w-full h-full object-cover" />
+                      <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-success/20 text-success text-[11px] font-semibold backdrop-blur-sm">
+                        <Check className="w-3 h-3" />
+                        Wajah Terdeteksi
+                      </div>
+                    </div>
+
+                    {/* Descriptor info */}
+                    <div className="bg-success/5 border border-success/10 rounded-xl p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
+                          <CircleCheckBig className="w-5 h-5 text-success" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-foreground">Face Descriptor Berhasil</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            128-dimensional vector telah dihasilkan untuk {employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Retry button */}
+                    <button
+                      onClick={retryCapture}
+                      className="flex items-center gap-2 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Ambil ulang foto
+                    </button>
+                  </div>
+                )}
+
+                {/* Models loading indicator */}
+                {modelsLoading && (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/10 text-primary text-xs font-medium">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Memuat model face detection...
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
+                <Button variant="outline" size="sm" onClick={closeFaceForm} disabled={faceFormSaving}>Batal</Button>
+                {faceFormStep === "select" && (
+                  <Button size="sm" icon={Camera} onClick={startCapture} disabled={!faceFormEmpId || modelsLoading}>
+                    {modelsLoading ? "Memuat Model..." : "Mulai Capture"}
+                  </Button>
+                )}
+                {faceFormStep === "done" && (
+                  <Button size="sm" icon={Check} onClick={saveFaceProfile} disabled={faceFormSaving}>
+                    {faceFormSaving ? "Menyimpan..." : "Simpan Data Wajah"}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
       {/* ═══ DELETE CONFIRM ═══ */}
       {deleteConfirm && (
         <Portal>
@@ -470,7 +1023,7 @@ export default function SecuritySettingsPage() {
                 <h3 className="text-base font-bold text-foreground">Hapus {deleteConfirm.type === "device" ? "Device" : "Data Wajah"}?</h3>
                 <p className="text-sm text-muted-foreground mt-2">
                   Data untuk <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.name}&rdquo;</span> akan dihapus permanen.
-                  {deleteConfirm.type === "face" && <span className="block mt-1 text-xs">Pegawai perlu mendaftar ulang melalui aplikasi Android.</span>}
+                  {deleteConfirm.type === "face" && <span className="block mt-1 text-xs">Pegawai perlu didaftarkan ulang.</span>}
                 </p>
               </div>
               <div className="flex items-center gap-3 px-6 pb-6">
