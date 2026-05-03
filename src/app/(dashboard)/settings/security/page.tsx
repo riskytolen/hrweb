@@ -758,60 +758,62 @@ export default function SecuritySettingsPage() {
                 {/* ── Step 2: Capture ── */}
                 {faceFormStep === "capture" && (
                   <>
-                    {/* Selected employee card */}
-                    {selectedEmp && (
-                      <div className="flex items-center gap-3 px-4 py-3 bg-muted/30 rounded-xl border border-border">
-                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">{empInitials}</div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-foreground truncate">{selectedEmp.nama}</p>
-                          <p className="text-[10px] text-muted-foreground">{selectedEmp.id}</p>
-                        </div>
-                      </div>
-                    )}
-
                     {faceFormMode === "upload" && (
-                      <div className="space-y-3">
-                        <label className="group flex flex-col items-center justify-center gap-4 p-10 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/[0.02] cursor-pointer transition-all">
-                          <div className="w-16 h-16 rounded-2xl bg-muted group-hover:bg-primary/10 flex items-center justify-center transition-colors">
-                            <ImageIcon className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
+                      <>
+                        {/* Selected employee card */}
+                        {selectedEmp && (
+                          <div className="flex items-center gap-3 px-3 py-2.5 bg-muted/30 rounded-xl border border-border">
+                            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-[11px] font-bold text-primary flex-shrink-0">{empInitials}</div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-foreground truncate">{selectedEmp.nama}</p>
+                              <p className="text-[10px] text-muted-foreground">{selectedEmp.id}</p>
+                            </div>
                           </div>
-                          <div className="text-center">
-                            <p className="text-sm font-semibold text-foreground">Pilih foto wajah</p>
-                            <p className="text-xs text-muted-foreground mt-1">JPG, PNG — maksimal 10MB</p>
+                        )}
+                        <div className="space-y-3">
+                          <label className="group flex flex-col items-center justify-center gap-4 p-10 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/[0.02] cursor-pointer transition-all">
+                            <div className="w-16 h-16 rounded-2xl bg-muted group-hover:bg-primary/10 flex items-center justify-center transition-colors">
+                              <ImageIcon className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
+                            </div>
+                            <div className="text-center">
+                              <p className="text-sm font-semibold text-foreground">Pilih foto wajah</p>
+                              <p className="text-xs text-muted-foreground mt-1">JPG, PNG — maksimal 10MB</p>
+                            </div>
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) handleUploadFile(file); }} />
+                          </label>
+                          <div className="flex items-start gap-2 px-3 py-2 bg-muted/30 rounded-lg">
+                            <AlertTriangle className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">Pastikan foto wajah jelas — frontal, pencahayaan baik, tanpa masker.</p>
                           </div>
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) handleUploadFile(file); }} />
-                        </label>
-                        <div className="flex items-start gap-2 px-3 py-2.5 bg-muted/30 rounded-lg">
-                          <AlertTriangle className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
-                          <p className="text-[11px] text-muted-foreground leading-relaxed">Pastikan foto menampilkan wajah dengan jelas — frontal, pencahayaan baik, tanpa masker atau kacamata hitam.</p>
                         </div>
-                      </div>
+                      </>
                     )}
 
                     {faceFormMode === "qr" && qrToken && (
-                      <div className="space-y-4">
-                        <div className="flex flex-col items-center gap-5 p-6 bg-gradient-to-b from-muted/40 to-muted/10 rounded-xl border border-border">
-                          <div className="bg-white p-4 rounded-2xl shadow-md shadow-black/5">
-                            <QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/face-register/${qrToken}`} size={180} level="M" />
-                          </div>
-                          <div className="text-center space-y-1.5">
-                            <p className="text-sm font-bold text-foreground">Scan dengan Kamera HP</p>
-                            <p className="text-xs text-muted-foreground leading-relaxed max-w-[260px]">Arahkan kamera HP ke QR Code di atas untuk membuka halaman capture wajah</p>
-                          </div>
-                        </div>
-                        {qrPolling && (
-                          <div className="flex items-center justify-center gap-2.5 py-2">
-                            <div className="relative">
-                              <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                              <div className="absolute inset-0 w-4 h-4 rounded-full bg-primary/20 animate-ping" />
-                            </div>
-                            <span className="text-xs font-medium text-muted-foreground">Menunggu capture dari HP...</span>
+                      <div className="flex flex-col items-center gap-3">
+                        {/* Employee info inline */}
+                        {selectedEmp && (
+                          <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/40 rounded-lg">
+                            <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary flex-shrink-0">{empInitials}</div>
+                            <p className="text-xs font-semibold text-foreground">{selectedEmp.nama}</p>
+                            <p className="text-[10px] text-muted-foreground">({selectedEmp.id})</p>
                           </div>
                         )}
-                        <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 rounded-lg">
-                          <div className="w-1.5 h-1.5 rounded-full bg-warning flex-shrink-0" />
-                          <p className="text-[10px] text-muted-foreground">Link berlaku 10 menit. Halaman ini otomatis update setelah wajah berhasil di-capture.</p>
+                        {/* QR Code */}
+                        <div className="bg-white p-3 rounded-xl shadow-sm border border-border/50">
+                          <QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/face-register/${qrToken}`} size={160} level="M" />
                         </div>
+                        {/* Instructions */}
+                        <p className="text-xs font-semibold text-foreground">Scan QR Code dengan Kamera HP</p>
+                        {/* Polling */}
+                        {qrPolling && (
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                            <span className="text-[11px] text-muted-foreground">Menunggu capture dari HP...</span>
+                          </div>
+                        )}
+                        {/* Info */}
+                        <p className="text-[10px] text-muted-foreground text-center">Link berlaku 10 menit &middot; Otomatis update setelah wajah di-capture</p>
                       </div>
                     )}
                   </>
