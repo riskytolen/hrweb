@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Upload,
   RefreshCw,
+  ChevronDown,
   Loader2,
   Image as ImageIcon,
   QrCode,
@@ -71,6 +72,9 @@ export default function SecuritySettingsPage() {
   const [faceFormMode, setFaceFormMode] = useState<"qr" | "upload">("qr");
   const [faceFormEmpId, setFaceFormEmpId] = useState("");
   const [faceEmpSearch, setFaceEmpSearch] = useState("");
+  const [faceEmpOpen, setFaceEmpOpen] = useState(false);
+  const faceEmpRef = useRef<HTMLDivElement>(null);
+  const faceEmpSearchRef = useRef<HTMLInputElement>(null);
   const [faceFormSaving, setFaceFormSaving] = useState(false);
   const [faceFormError, setFaceFormError] = useState("");
   const [faceFormStep, setFaceFormStep] = useState<"select" | "capture" | "processing" | "done">("select");
@@ -121,6 +125,17 @@ export default function SecuritySettingsPage() {
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
   }, [showDeviceForm, showFaceForm]);
+
+  // Close employee picker on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (faceEmpRef.current && !faceEmpRef.current.contains(e.target as Node)) {
+        setFaceEmpOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const employeesWithoutDevice = employees.filter((e) => !deviceList.some((d) => d.employee_id === e.id));
   const employeesWithoutFace = employees.filter((e) => e.status === "Aktif" && !faceList.some((f) => f.employee_id === e.id));
@@ -305,6 +320,7 @@ export default function SecuritySettingsPage() {
     setFaceFormEmpId(employeesWithoutFace[0]?.id || "");
     setFaceFormMode("qr");
     setFaceEmpSearch("");
+    setFaceEmpOpen(false);
     setFaceFormStep("select");
     setFaceFormError("");
     setCapturedImage(null);
@@ -623,59 +639,87 @@ export default function SecuritySettingsPage() {
                 {/* ── Step 1: Select employee & mode ── */}
                 {faceFormStep === "select" && (
                   <>
-                    {/* Employee picker — custom visual */}
-                    <div>
-                      <label className="text-xs font-semibold text-foreground mb-2 block">Pilih Pegawai <span className="text-danger">*</span></label>
-                      {/* Search box */}
-                      <div className="relative mb-2">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                        <input
-                          type="text"
-                          placeholder="Cari nama atau ID pegawai..."
-                          value={faceEmpSearch}
-                          onChange={(e) => setFaceEmpSearch(e.target.value)}
-                          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground"
-                        />
-                      </div>
-                      {/* Employee list */}
-                      <div className="max-h-44 overflow-y-auto rounded-xl border border-border divide-y divide-border/50">
-                        {employeesWithoutFace
-                          .filter((e) => !faceEmpSearch || e.nama.toLowerCase().includes(faceEmpSearch.toLowerCase()) || e.id.toLowerCase().includes(faceEmpSearch.toLowerCase()))
-                          .map((emp) => {
-                            const isSelected = faceFormEmpId === emp.id;
-                            const initials = emp.nama.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-                            return (
-                              <button
-                                key={emp.id}
-                                type="button"
-                                onClick={() => setFaceFormEmpId(emp.id)}
-                                className={cn(
-                                  "w-full flex items-center gap-3 px-3 py-2.5 text-left transition-all",
-                                  isSelected ? "bg-primary/5" : "hover:bg-muted/50"
-                                )}
-                              >
-                                <div className={cn(
-                                  "w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all",
-                                  isSelected ? "bg-primary text-white shadow-sm shadow-primary/25" : "bg-muted text-muted-foreground"
-                                )}>
-                                  {initials}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className={cn("text-sm font-semibold truncate", isSelected ? "text-primary" : "text-foreground")}>{emp.nama}</p>
-                                  <p className="text-[10px] text-muted-foreground">{emp.id}</p>
-                                </div>
-                                {isSelected && (
-                                  <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-                                    <Check className="w-3.5 h-3.5 text-white" />
-                                  </div>
-                                )}
-                              </button>
-                            );
-                          })}
-                        {employeesWithoutFace.filter((e) => !faceEmpSearch || e.nama.toLowerCase().includes(faceEmpSearch.toLowerCase()) || e.id.toLowerCase().includes(faceEmpSearch.toLowerCase())).length === 0 && (
-                          <div className="px-4 py-6 text-center text-xs text-muted-foreground">Tidak ditemukan</div>
+                    {/* Employee picker — dropdown style */}
+                    <div ref={faceEmpRef} className="relative">
+                      <label className="text-xs font-semibold text-foreground mb-1.5 block">Pilih Pegawai <span className="text-danger">*</span></label>
+                      {/* Trigger button */}
+                      <button
+                        type="button"
+                        onClick={() => { setFaceEmpOpen(!faceEmpOpen); setFaceEmpSearch(""); setTimeout(() => faceEmpSearchRef.current?.focus(), 50); }}
+                        className={cn(
+                          "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-all",
+                          faceEmpOpen ? "border-primary ring-2 ring-primary/10" : "border-border hover:border-primary/40",
+                          "bg-muted/30"
                         )}
-                      </div>
+                      >
+                        {selectedEmp ? (
+                          <>
+                            <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center text-[11px] font-bold flex-shrink-0">
+                              {empInitials}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-foreground truncate">{selectedEmp.nama}</p>
+                              <p className="text-[10px] text-muted-foreground">{selectedEmp.id}</p>
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-sm text-muted-foreground/50 py-1">Pilih pegawai...</span>
+                        )}
+                        <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform flex-shrink-0", faceEmpOpen && "rotate-180 text-primary")} />
+                      </button>
+
+                      {/* Dropdown */}
+                      {faceEmpOpen && (
+                        <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-xl shadow-black/8 overflow-hidden animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-150">
+                          {/* Search */}
+                          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border bg-muted/30">
+                            <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                            <input
+                              ref={faceEmpSearchRef}
+                              type="text"
+                              placeholder="Cari nama atau ID..."
+                              value={faceEmpSearch}
+                              onChange={(e) => setFaceEmpSearch(e.target.value)}
+                              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/50 text-foreground"
+                            />
+                          </div>
+                          {/* List */}
+                          <div className="max-h-52 overflow-y-auto overscroll-contain py-1">
+                            {employeesWithoutFace
+                              .filter((e) => !faceEmpSearch || e.nama.toLowerCase().includes(faceEmpSearch.toLowerCase()) || e.id.toLowerCase().includes(faceEmpSearch.toLowerCase()))
+                              .map((emp) => {
+                                const isSelected = faceFormEmpId === emp.id;
+                                const initials = emp.nama.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+                                return (
+                                  <button
+                                    key={emp.id}
+                                    type="button"
+                                    onClick={() => { setFaceFormEmpId(emp.id); setFaceEmpOpen(false); }}
+                                    className={cn(
+                                      "w-full flex items-center gap-3 px-3 py-2 text-left transition-colors",
+                                      isSelected ? "bg-primary/5" : "hover:bg-muted/50"
+                                    )}
+                                  >
+                                    <div className={cn(
+                                      "w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold flex-shrink-0",
+                                      isSelected ? "bg-primary text-white" : "bg-muted text-muted-foreground"
+                                    )}>
+                                      {initials}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className={cn("text-sm font-medium truncate", isSelected ? "text-primary" : "text-foreground")}>{emp.nama}</p>
+                                      <p className="text-[10px] text-muted-foreground">{emp.id}</p>
+                                    </div>
+                                    {isSelected && <Check className="w-4 h-4 text-primary flex-shrink-0" />}
+                                  </button>
+                                );
+                              })}
+                            {employeesWithoutFace.filter((e) => !faceEmpSearch || e.nama.toLowerCase().includes(faceEmpSearch.toLowerCase()) || e.id.toLowerCase().includes(faceEmpSearch.toLowerCase())).length === 0 && (
+                              <div className="px-4 py-6 text-center text-xs text-muted-foreground">Tidak ditemukan</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Method selector */}
