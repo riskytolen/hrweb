@@ -17,8 +17,10 @@ import {
   Upload,
   RefreshCw,
   Loader2,
-  Image as ImageIcon, // used for upload area icon
+  Image as ImageIcon,
+  QrCode,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
@@ -72,12 +74,17 @@ export default function SecuritySettingsPage() {
 
   // Face registration
   const [showFaceForm, setShowFaceForm] = useState(false);
-  const [faceFormMode, setFaceFormMode] = useState<"webcam" | "upload">("webcam");
+  const [faceFormMode, setFaceFormMode] = useState<"webcam" | "upload" | "qr">("webcam");
   const [faceFormEmpId, setFaceFormEmpId] = useState("");
   const [faceFormSaving, setFaceFormSaving] = useState(false);
   const [faceFormError, setFaceFormError] = useState("");
   const [faceFormStep, setFaceFormStep] = useState<"select" | "capture" | "processing" | "done">("select");
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  // QR Code mode
+  const [qrToken, setQrToken] = useState<string | null>(null);
+  const [qrGenerating, setQrGenerating] = useState(false);
+  const [qrPolling, setQrPolling] = useState(false);
+  const qrPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -400,6 +407,76 @@ export default function SecuritySettingsPage() {
     }
   };
 
+  // ─── QR Code: generate token ───
+  const generateQrToken = async () => {
+    if (!faceFormEmpId) return;
+    setQrGenerating(true);
+    setFaceFormError("");
+
+    try {
+      // Expire in 10 minutes
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+      const { data, error: insertErr } = await supabase
+        .from("face_register_tokens")
+        .insert({
+          employee_id: faceFormEmpId,
+          status: "pending",
+          expires_at: expiresAt,
+        })
+        .select("id")
+        .single();
+
+      if (insertErr || !data) {
+        setFaceFormError("Gagal membuat QR Code. Coba lagi.");
+        setQrGenerating(false);
+        return;
+      }
+
+      setQrToken(data.id);
+      setFaceFormStep("capture");
+      setQrGenerating(false);
+
+      // Start polling
+      startQrPolling(data.id);
+    } catch {
+      setFaceFormError("Terjadi kesalahan.");
+      setQrGenerating(false);
+    }
+  };
+
+  const startQrPolling = (tokenId: string) => {
+    setQrPolling(true);
+    // Poll setiap 3 detik
+    qrPollRef.current = setInterval(async () => {
+      const { data } = await supabase
+        .from("face_register_tokens")
+        .select("status")
+        .eq("id", tokenId)
+        .single();
+
+      if (data?.status === "completed") {
+        stopQrPolling();
+        setFaceFormStep("done");
+        // Refresh face list
+        fetchFaces();
+      } else if (data?.status === "expired") {
+        stopQrPolling();
+        setFaceFormError("QR Code sudah kedaluwarsa. Generate ulang.");
+        setQrToken(null);
+        setFaceFormStep("select");
+      }
+    }, 3000);
+  };
+
+  const stopQrPolling = () => {
+    if (qrPollRef.current) {
+      clearInterval(qrPollRef.current);
+      qrPollRef.current = null;
+    }
+    setQrPolling(false);
+  };
+
   const saveFaceProfile = async () => {
     if (!faceFormEmpId || !faceDescriptor) return;
     setFaceFormSaving(true);
@@ -442,25 +519,33 @@ export default function SecuritySettingsPage() {
     setCapturedImage(null);
     setFaceDescriptor(null);
     setFaceFormSaving(false);
+    setQrToken(null);
+    setQrGenerating(false);
+    stopQrPolling();
     setShowFaceForm(true);
   };
 
   const closeFaceForm = () => {
     stopWebcam();
+    stopQrPolling();
     if (capturedImage) URL.revokeObjectURL(capturedImage);
     setCapturedImage(null);
     setFaceDescriptor(null);
+    setQrToken(null);
     setFaceFormError("");
     setShowFaceForm(false);
   };
 
   const startCapture = async () => {
     setFaceFormError("");
+    if (faceFormMode === "qr") {
+      await generateQrToken();
+      return;
+    }
     const loaded = await loadFaceModels();
     if (!loaded) return;
     setFaceFormStep("capture");
     if (faceFormMode === "webcam") {
-      // Small delay to let DOM render video element
       setTimeout(() => startWebcam(), 100);
     }
   };
@@ -480,6 +565,7 @@ export default function SecuritySettingsPage() {
   useEffect(() => {
     return () => {
       stopWebcam();
+      if (qrPollRef.current) clearInterval(qrPollRef.current);
     };
   }, []);
 
@@ -806,43 +892,35 @@ export default function SecuritySettingsPage() {
 
                     <div>
                       <label className="text-xs font-semibold text-foreground mb-2 block">Metode Capture</label>
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setFaceFormMode("webcam")}
-                          className={cn(
-                            "flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
-                            faceFormMode === "webcam"
-                              ? "border-primary bg-primary/5 shadow-sm"
-                              : "border-border hover:border-primary/30 hover:bg-muted/30"
-                          )}
-                        >
-                          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", faceFormMode === "webcam" ? "bg-primary/10" : "bg-muted")}>
-                            <Camera className={cn("w-5 h-5", faceFormMode === "webcam" ? "text-primary" : "text-muted-foreground")} />
-                          </div>
-                          <div className="text-center">
-                            <p className={cn("text-xs font-bold", faceFormMode === "webcam" ? "text-primary" : "text-foreground")}>Webcam</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">Capture langsung</p>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setFaceFormMode("upload")}
-                          className={cn(
-                            "flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
-                            faceFormMode === "upload"
-                              ? "border-primary bg-primary/5 shadow-sm"
-                              : "border-border hover:border-primary/30 hover:bg-muted/30"
-                          )}
-                        >
-                          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", faceFormMode === "upload" ? "bg-primary/10" : "bg-muted")}>
-                            <Upload className={cn("w-5 h-5", faceFormMode === "upload" ? "text-primary" : "text-muted-foreground")} />
-                          </div>
-                          <div className="text-center">
-                            <p className={cn("text-xs font-bold", faceFormMode === "upload" ? "text-primary" : "text-foreground")}>Upload Foto</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">Dari file gambar</p>
-                          </div>
-                        </button>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          { key: "qr" as const, icon: QrCode, label: "Kamera HP", desc: "Scan QR Code" },
+                          { key: "webcam" as const, icon: Camera, label: "Webcam", desc: "Capture langsung" },
+                          { key: "upload" as const, icon: Upload, label: "Upload", desc: "Dari file gambar" },
+                        ]).map((m) => {
+                          const active = faceFormMode === m.key;
+                          return (
+                            <button
+                              key={m.key}
+                              type="button"
+                              onClick={() => setFaceFormMode(m.key)}
+                              className={cn(
+                                "flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all",
+                                active
+                                  ? "border-primary bg-primary/5 shadow-sm"
+                                  : "border-border hover:border-primary/30 hover:bg-muted/30"
+                              )}
+                            >
+                              <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", active ? "bg-primary/10" : "bg-muted")}>
+                                <m.icon className={cn("w-4.5 h-4.5", active ? "text-primary" : "text-muted-foreground")} />
+                              </div>
+                              <div className="text-center">
+                                <p className={cn("text-[11px] font-bold", active ? "text-primary" : "text-foreground")}>{m.label}</p>
+                                <p className="text-[9px] text-muted-foreground mt-0.5">{m.desc}</p>
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   </>
@@ -851,11 +929,10 @@ export default function SecuritySettingsPage() {
                 {/* Step 2: Capture */}
                 {faceFormStep === "capture" && (
                   <>
-                    {faceFormMode === "webcam" ? (
+                    {faceFormMode === "webcam" && (
                       <div className="space-y-3">
                         <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
                           <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-                          {/* Face detection indicator */}
                           {webcamActive && (
                             <div className={cn(
                               "absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold backdrop-blur-sm",
@@ -874,12 +951,7 @@ export default function SecuritySettingsPage() {
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6">
                               <Camera className="w-10 h-10 text-white/30" />
                               <p className="text-xs text-white/50 text-center">Kamera tidak tersedia</p>
-                              <button
-                                onClick={() => startWebcam()}
-                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 text-xs font-medium transition-colors"
-                              >
-                                Coba Lagi
-                              </button>
+                              <button onClick={() => startWebcam()} className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 text-xs font-medium transition-colors">Coba Lagi</button>
                             </div>
                           )}
                         </div>
@@ -898,15 +970,13 @@ export default function SecuritySettingsPage() {
                             <Camera className="w-7 h-7" />
                           </button>
                         </div>
-                        <p className="text-center text-[11px] text-muted-foreground">
-                          Posisikan wajah di tengah frame, pastikan pencahayaan cukup
-                        </p>
+                        <p className="text-center text-[11px] text-muted-foreground">Posisikan wajah di tengah frame, pastikan pencahayaan cukup</p>
                       </div>
-                    ) : (
+                    )}
+
+                    {faceFormMode === "upload" && (
                       <div className="space-y-3">
-                        <label
-                          className="flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 cursor-pointer transition-all"
-                        >
+                        <label className="flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 cursor-pointer transition-all">
                           <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center">
                             <ImageIcon className="w-7 h-7 text-muted-foreground" />
                           </div>
@@ -914,18 +984,40 @@ export default function SecuritySettingsPage() {
                             <p className="text-sm font-semibold text-foreground">Pilih foto</p>
                             <p className="text-xs text-muted-foreground mt-1">JPG, PNG (maks 10MB)</p>
                           </div>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handleUploadFile(file);
-                            }}
-                          />
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) handleUploadFile(file); }} />
                         </label>
-                        <p className="text-center text-[11px] text-muted-foreground">
-                          Pastikan foto menampilkan wajah dengan jelas (frontal, pencahayaan baik)
+                        <p className="text-center text-[11px] text-muted-foreground">Pastikan foto menampilkan wajah dengan jelas (frontal, pencahayaan baik)</p>
+                      </div>
+                    )}
+
+                    {faceFormMode === "qr" && qrToken && (
+                      <div className="space-y-4">
+                        <div className="flex flex-col items-center gap-4 p-6 bg-muted/30 rounded-xl border border-border">
+                          <div className="bg-white p-3 rounded-xl shadow-sm">
+                            <QRCodeSVG
+                              value={`${typeof window !== "undefined" ? window.location.origin : ""}/face-register/${qrToken}`}
+                              size={180}
+                              level="M"
+                            />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm font-bold text-foreground">Scan QR Code dengan HP</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Buka kamera HP atau QR scanner, arahkan ke kode di atas
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Polling indicator */}
+                        {qrPolling && (
+                          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                            <span>Menunggu capture dari HP...</span>
+                          </div>
+                        )}
+
+                        <p className="text-center text-[10px] text-muted-foreground">
+                          Link berlaku 10 menit. Halaman ini akan otomatis update setelah wajah berhasil di-capture dari HP.
                         </p>
                       </div>
                     )}
@@ -946,39 +1038,49 @@ export default function SecuritySettingsPage() {
                 )}
 
                 {/* Step 4: Done - Preview */}
-                {faceFormStep === "done" && capturedImage && (
+                {faceFormStep === "done" && (
                   <div className="space-y-4">
-                    <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
-                      <img src={capturedImage} alt="Captured face" className="w-full h-full object-cover" />
-                      <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-success/20 text-success text-[11px] font-semibold backdrop-blur-sm">
-                        <Check className="w-3 h-3" />
-                        Wajah Terdeteksi
+                    {/* Preview image (webcam/upload only) */}
+                    {capturedImage && (
+                      <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
+                        <img src={capturedImage} alt="Captured face" className="w-full h-full object-cover" />
+                        <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-success/20 text-success text-[11px] font-semibold backdrop-blur-sm">
+                          <Check className="w-3 h-3" />
+                          Wajah Terdeteksi
+                        </div>
                       </div>
-                    </div>
+                    )}
 
-                    {/* Descriptor info */}
+                    {/* Success info */}
                     <div className="bg-success/5 border border-success/10 rounded-xl p-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
                           <CircleCheckBig className="w-5 h-5 text-success" />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-foreground">Face Descriptor Berhasil</p>
+                          <p className="text-xs font-bold text-foreground">
+                            {faceFormMode === "qr" ? "Wajah Berhasil Didaftarkan" : "Face Descriptor Berhasil"}
+                          </p>
                           <p className="text-[11px] text-muted-foreground mt-0.5">
-                            128-dimensional vector telah dihasilkan untuk {employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId}
+                            {faceFormMode === "qr"
+                              ? `Wajah ${employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId} berhasil di-capture dari HP.`
+                              : `128-dimensional vector telah dihasilkan untuk ${employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId}`
+                            }
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    {/* Retry button */}
-                    <button
-                      onClick={retryCapture}
-                      className="flex items-center gap-2 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      Ambil ulang foto
-                    </button>
+                    {/* Retry button (webcam/upload only) */}
+                    {faceFormMode !== "qr" && (
+                      <button
+                        onClick={retryCapture}
+                        className="flex items-center gap-2 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Ambil ulang foto
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -993,13 +1095,15 @@ export default function SecuritySettingsPage() {
 
               {/* Footer */}
               <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
-                <Button variant="outline" size="sm" onClick={closeFaceForm} disabled={faceFormSaving}>Batal</Button>
+                <Button variant="outline" size="sm" onClick={closeFaceForm} disabled={faceFormSaving}>
+                  {faceFormStep === "done" && faceFormMode === "qr" ? "Selesai" : "Batal"}
+                </Button>
                 {faceFormStep === "select" && (
-                  <Button size="sm" icon={Camera} onClick={startCapture} disabled={!faceFormEmpId || modelsLoading}>
-                    {modelsLoading ? "Memuat Model..." : "Mulai Capture"}
+                  <Button size="sm" icon={faceFormMode === "qr" ? QrCode : Camera} onClick={startCapture} disabled={!faceFormEmpId || modelsLoading || qrGenerating}>
+                    {modelsLoading ? "Memuat Model..." : qrGenerating ? "Membuat QR..." : faceFormMode === "qr" ? "Generate QR Code" : "Mulai Capture"}
                   </Button>
                 )}
-                {faceFormStep === "done" && (
+                {faceFormStep === "done" && faceFormMode !== "qr" && (
                   <Button size="sm" icon={Check} onClick={saveFaceProfile} disabled={faceFormSaving}>
                     {faceFormSaving ? "Menyimpan..." : "Simpan Data Wajah"}
                   </Button>

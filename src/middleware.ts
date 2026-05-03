@@ -39,6 +39,11 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // Halaman publik (tidak perlu login)
+  if (pathname.startsWith("/face-register")) {
+    return supabaseResponse;
+  }
+
   // Jika user belum login dan bukan di halaman login → redirect ke login
   if (!user && pathname !== "/login") {
     const url = request.nextUrl.clone();
