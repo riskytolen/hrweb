@@ -70,6 +70,7 @@ export default function SecuritySettingsPage() {
   const [showFaceForm, setShowFaceForm] = useState(false);
   const [faceFormMode, setFaceFormMode] = useState<"qr" | "upload">("qr");
   const [faceFormEmpId, setFaceFormEmpId] = useState("");
+  const [faceEmpSearch, setFaceEmpSearch] = useState("");
   const [faceFormSaving, setFaceFormSaving] = useState(false);
   const [faceFormError, setFaceFormError] = useState("");
   const [faceFormStep, setFaceFormStep] = useState<"select" | "capture" | "processing" | "done">("select");
@@ -303,6 +304,7 @@ export default function SecuritySettingsPage() {
   const openFaceForm = () => {
     setFaceFormEmpId(employeesWithoutFace[0]?.id || "");
     setFaceFormMode("qr");
+    setFaceEmpSearch("");
     setFaceFormStep("select");
     setFaceFormError("");
     setCapturedImage(null);
@@ -566,13 +568,17 @@ export default function SecuritySettingsPage() {
       )}
 
       {/* ═══ FACE REGISTRATION MODAL ═══ */}
-      {showFaceForm && (
+      {showFaceForm && (() => {
+        const selectedEmp = employees.find((e) => e.id === faceFormEmpId);
+        const empInitials = selectedEmp ? selectedEmp.nama.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase() : "";
+        return (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !faceFormSaving && closeFaceForm()} />
             <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
-              {/* Header */}
-              <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent flex-shrink-0">
+
+              {/* Header — step indicator */}
+              <div className="relative px-6 pt-5 pb-4 bg-gradient-to-br from-primary/[0.06] via-transparent to-transparent flex-shrink-0">
                 <button onClick={() => !faceFormSaving && closeFaceForm()} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
                 <div className="flex items-center gap-3">
                   <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/20">
@@ -580,46 +586,122 @@ export default function SecuritySettingsPage() {
                   </div>
                   <div>
                     <h2 className="text-base font-bold text-foreground">Pendaftaran Wajah</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">Daftarkan wajah pegawai untuk face recognition</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {faceFormStep === "select" ? "Pilih pegawai dan metode capture" :
+                       faceFormStep === "capture" ? (faceFormMode === "qr" ? "Scan QR Code dari HP" : "Upload foto wajah") :
+                       faceFormStep === "processing" ? "Memproses data wajah..." : "Pendaftaran selesai"}
+                    </p>
                   </div>
+                </div>
+                {/* Step progress */}
+                <div className="flex items-center gap-1.5 mt-4">
+                  {["select", "capture", "done"].map((s, i) => {
+                    const steps = ["select", "capture", "done"];
+                    const currentIdx = steps.indexOf(faceFormStep === "processing" ? "capture" : faceFormStep);
+                    const isDone = i < currentIdx;
+                    const isActive = i === currentIdx;
+                    return (
+                      <div key={s} className={cn("h-1 rounded-full flex-1 transition-all duration-500",
+                        isDone ? "bg-primary" : isActive ? "bg-primary/60" : "bg-border"
+                      )} />
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Body */}
               <div className="px-6 py-5 space-y-5 flex-1 overflow-y-auto">
                 {faceFormError && (
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{faceFormError}
+                  <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-danger/5 border border-danger/15 animate-fade-in">
+                    <div className="w-8 h-8 rounded-lg bg-danger/10 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="w-4 h-4 text-danger" />
+                    </div>
+                    <p className="text-xs font-medium text-danger">{faceFormError}</p>
                   </div>
                 )}
 
-                {/* Step 1: Select employee & mode */}
+                {/* ── Step 1: Select employee & mode ── */}
                 {faceFormStep === "select" && (
                   <>
+                    {/* Employee picker — custom visual */}
                     <div>
-                      <label className="text-xs font-semibold text-foreground mb-1.5 block">Pegawai <span className="text-danger">*</span></label>
-                      <Select value={faceFormEmpId} onChange={(val) => setFaceFormEmpId(val)}
-                        options={employeesWithoutFace.map((e) => ({ value: e.id, label: `${e.nama} (${e.id})` }))}
-                        placeholder="Pilih pegawai" searchable />
+                      <label className="text-xs font-semibold text-foreground mb-2 block">Pilih Pegawai <span className="text-danger">*</span></label>
+                      {/* Search box */}
+                      <div className="relative mb-2">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                        <input
+                          type="text"
+                          placeholder="Cari nama atau ID pegawai..."
+                          value={faceEmpSearch}
+                          onChange={(e) => setFaceEmpSearch(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground"
+                        />
+                      </div>
+                      {/* Employee list */}
+                      <div className="max-h-44 overflow-y-auto rounded-xl border border-border divide-y divide-border/50">
+                        {employeesWithoutFace
+                          .filter((e) => !faceEmpSearch || e.nama.toLowerCase().includes(faceEmpSearch.toLowerCase()) || e.id.toLowerCase().includes(faceEmpSearch.toLowerCase()))
+                          .map((emp) => {
+                            const isSelected = faceFormEmpId === emp.id;
+                            const initials = emp.nama.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+                            return (
+                              <button
+                                key={emp.id}
+                                type="button"
+                                onClick={() => setFaceFormEmpId(emp.id)}
+                                className={cn(
+                                  "w-full flex items-center gap-3 px-3 py-2.5 text-left transition-all",
+                                  isSelected ? "bg-primary/5" : "hover:bg-muted/50"
+                                )}
+                              >
+                                <div className={cn(
+                                  "w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all",
+                                  isSelected ? "bg-primary text-white shadow-sm shadow-primary/25" : "bg-muted text-muted-foreground"
+                                )}>
+                                  {initials}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className={cn("text-sm font-semibold truncate", isSelected ? "text-primary" : "text-foreground")}>{emp.nama}</p>
+                                  <p className="text-[10px] text-muted-foreground">{emp.id}</p>
+                                </div>
+                                {isSelected && (
+                                  <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+                                    <Check className="w-3.5 h-3.5 text-white" />
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        {employeesWithoutFace.filter((e) => !faceEmpSearch || e.nama.toLowerCase().includes(faceEmpSearch.toLowerCase()) || e.id.toLowerCase().includes(faceEmpSearch.toLowerCase())).length === 0 && (
+                          <div className="px-4 py-6 text-center text-xs text-muted-foreground">Tidak ditemukan</div>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Method selector */}
                     <div>
-                      <label className="text-xs font-semibold text-foreground mb-2 block">Metode</label>
+                      <label className="text-xs font-semibold text-foreground mb-2 block">Metode Capture</label>
                       <div className="grid grid-cols-2 gap-3">
                         {([
-                          { key: "qr" as const, icon: QrCode, label: "Kamera HP", desc: "Scan QR Code" },
-                          { key: "upload" as const, icon: Upload, label: "Upload Foto", desc: "Dari file gambar" },
+                          { key: "qr" as const, icon: QrCode, label: "Kamera HP", desc: "Scan QR Code dari HP", badge: "Disarankan" },
+                          { key: "upload" as const, icon: Upload, label: "Upload Foto", desc: "Pilih file gambar", badge: null },
                         ]).map((m) => {
                           const active = faceFormMode === m.key;
                           return (
                             <button key={m.key} type="button" onClick={() => setFaceFormMode(m.key)}
-                              className={cn("flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
+                              className={cn("relative flex flex-col items-center gap-2.5 p-4 rounded-xl border-2 transition-all",
                                 active ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-primary/30 hover:bg-muted/30")}>
-                              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", active ? "bg-primary/10" : "bg-muted")}>
+                              {m.badge && (
+                                <span className={cn("absolute -top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full",
+                                  active ? "bg-primary text-white" : "bg-muted text-muted-foreground"
+                                )}>{m.badge}</span>
+                              )}
+                              <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center transition-all", active ? "bg-primary/10" : "bg-muted")}>
                                 <m.icon className={cn("w-5 h-5", active ? "text-primary" : "text-muted-foreground")} />
                               </div>
                               <div className="text-center">
                                 <p className={cn("text-xs font-bold", active ? "text-primary" : "text-foreground")}>{m.label}</p>
-                                <p className="text-[10px] text-muted-foreground mt-0.5">{m.desc}</p>
+                                <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{m.desc}</p>
                               </div>
                             </button>
                           );
@@ -629,62 +711,87 @@ export default function SecuritySettingsPage() {
                   </>
                 )}
 
-                {/* Step 2: Capture */}
+                {/* ── Step 2: Capture ── */}
                 {faceFormStep === "capture" && (
                   <>
+                    {/* Selected employee card */}
+                    {selectedEmp && (
+                      <div className="flex items-center gap-3 px-4 py-3 bg-muted/30 rounded-xl border border-border">
+                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">{empInitials}</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground truncate">{selectedEmp.nama}</p>
+                          <p className="text-[10px] text-muted-foreground">{selectedEmp.id}</p>
+                        </div>
+                      </div>
+                    )}
+
                     {faceFormMode === "upload" && (
                       <div className="space-y-3">
-                        <label className="flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 cursor-pointer transition-all">
-                          <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center">
-                            <ImageIcon className="w-7 h-7 text-muted-foreground" />
+                        <label className="group flex flex-col items-center justify-center gap-4 p-10 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/[0.02] cursor-pointer transition-all">
+                          <div className="w-16 h-16 rounded-2xl bg-muted group-hover:bg-primary/10 flex items-center justify-center transition-colors">
+                            <ImageIcon className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
                           </div>
                           <div className="text-center">
-                            <p className="text-sm font-semibold text-foreground">Pilih foto</p>
-                            <p className="text-xs text-muted-foreground mt-1">JPG, PNG (maks 10MB)</p>
+                            <p className="text-sm font-semibold text-foreground">Pilih foto wajah</p>
+                            <p className="text-xs text-muted-foreground mt-1">JPG, PNG — maksimal 10MB</p>
                           </div>
                           <input type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) handleUploadFile(file); }} />
                         </label>
-                        <p className="text-center text-[11px] text-muted-foreground">Pastikan foto menampilkan wajah dengan jelas (frontal, pencahayaan baik)</p>
+                        <div className="flex items-start gap-2 px-3 py-2.5 bg-muted/30 rounded-lg">
+                          <AlertTriangle className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">Pastikan foto menampilkan wajah dengan jelas — frontal, pencahayaan baik, tanpa masker atau kacamata hitam.</p>
+                        </div>
                       </div>
                     )}
 
                     {faceFormMode === "qr" && qrToken && (
                       <div className="space-y-4">
-                        <div className="flex flex-col items-center gap-4 p-6 bg-muted/30 rounded-xl border border-border">
-                          <div className="bg-white p-3 rounded-xl shadow-sm">
+                        <div className="flex flex-col items-center gap-5 p-6 bg-gradient-to-b from-muted/40 to-muted/10 rounded-xl border border-border">
+                          <div className="bg-white p-4 rounded-2xl shadow-md shadow-black/5">
                             <QRCodeSVG value={`${typeof window !== "undefined" ? window.location.origin : ""}/face-register/${qrToken}`} size={180} level="M" />
                           </div>
-                          <div className="text-center">
-                            <p className="text-sm font-bold text-foreground">Scan QR Code dengan HP</p>
-                            <p className="text-xs text-muted-foreground mt-1">Buka kamera HP atau QR scanner, arahkan ke kode di atas</p>
+                          <div className="text-center space-y-1.5">
+                            <p className="text-sm font-bold text-foreground">Scan dengan Kamera HP</p>
+                            <p className="text-xs text-muted-foreground leading-relaxed max-w-[260px]">Arahkan kamera HP ke QR Code di atas untuk membuka halaman capture wajah</p>
                           </div>
                         </div>
                         {qrPolling && (
-                          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
-                            <span>Menunggu capture dari HP...</span>
+                          <div className="flex items-center justify-center gap-2.5 py-2">
+                            <div className="relative">
+                              <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                              <div className="absolute inset-0 w-4 h-4 rounded-full bg-primary/20 animate-ping" />
+                            </div>
+                            <span className="text-xs font-medium text-muted-foreground">Menunggu capture dari HP...</span>
                           </div>
                         )}
-                        <p className="text-center text-[10px] text-muted-foreground">Link berlaku 10 menit. Halaman ini akan otomatis update setelah wajah berhasil di-capture dari HP.</p>
+                        <div className="flex items-center gap-2 px-3 py-2 bg-muted/30 rounded-lg">
+                          <div className="w-1.5 h-1.5 rounded-full bg-warning flex-shrink-0" />
+                          <p className="text-[10px] text-muted-foreground">Link berlaku 10 menit. Halaman ini otomatis update setelah wajah berhasil di-capture.</p>
+                        </div>
                       </div>
                     )}
                   </>
                 )}
 
-                {/* Step 3: Processing */}
+                {/* ── Step 3: Processing ── */}
                 {faceFormStep === "processing" && (
-                  <div className="flex flex-col items-center justify-center py-10 gap-4">
-                    <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-                      <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                  <div className="flex flex-col items-center justify-center py-12 gap-5">
+                    <div className="relative">
+                      <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center">
+                        <ScanFace className="w-9 h-9 text-primary" />
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-card border-2 border-primary/20 flex items-center justify-center">
+                        <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                      </div>
                     </div>
                     <div className="text-center">
-                      <p className="text-sm font-bold text-foreground">Memproses Wajah...</p>
-                      <p className="text-xs text-muted-foreground mt-1">Mendeteksi wajah dan menghasilkan face descriptor</p>
+                      <p className="text-sm font-bold text-foreground">Memproses Wajah</p>
+                      <p className="text-xs text-muted-foreground mt-1">Mendeteksi wajah dan menghasilkan face descriptor...</p>
                     </div>
                   </div>
                 )}
 
-                {/* Step 4: Done */}
+                {/* ── Step 4: Done ── */}
                 {faceFormStep === "done" && (
                   <div className="space-y-4">
                     {capturedImage && (
@@ -695,17 +802,17 @@ export default function SecuritySettingsPage() {
                         </div>
                       </div>
                     )}
-                    <div className="bg-success/5 border border-success/10 rounded-xl p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
-                          <CircleCheckBig className="w-5 h-5 text-success" />
+                    <div className="bg-success/5 border border-success/15 rounded-xl p-5">
+                      <div className="flex items-start gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
+                          <CircleCheckBig className="w-6 h-6 text-success" />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-foreground">{faceFormMode === "qr" ? "Wajah Berhasil Didaftarkan" : "Face Descriptor Berhasil"}</p>
-                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                          <p className="text-sm font-bold text-foreground">{faceFormMode === "qr" ? "Wajah Berhasil Didaftarkan" : "Face Descriptor Berhasil"}</p>
+                          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                             {faceFormMode === "qr"
-                              ? `Wajah ${employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId} berhasil di-capture dari HP.`
-                              : `128-dimensional vector telah dihasilkan untuk ${employees.find((e) => e.id === faceFormEmpId)?.nama || faceFormEmpId}`}
+                              ? <>Wajah <span className="font-semibold text-foreground">{selectedEmp?.nama || faceFormEmpId}</span> berhasil di-capture dari HP dan tersimpan ke sistem.</>
+                              : <>128-dimensional face vector telah dihasilkan untuk <span className="font-semibold text-foreground">{selectedEmp?.nama || faceFormEmpId}</span>.</>}
                           </p>
                         </div>
                       </div>
@@ -719,32 +826,41 @@ export default function SecuritySettingsPage() {
                 )}
 
                 {modelsLoading && (
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/5 border border-primary/10 text-primary text-xs font-medium">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />Memuat model face detection...
+                  <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-primary/5 border border-primary/10">
+                    <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+                    <p className="text-xs font-medium text-primary">Memuat model face detection...</p>
                   </div>
                 )}
               </div>
 
               {/* Footer */}
-              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
-                <Button variant="outline" size="sm" onClick={closeFaceForm} disabled={faceFormSaving}>
-                  {faceFormStep === "done" && faceFormMode === "qr" ? "Selesai" : "Batal"}
-                </Button>
-                {faceFormStep === "select" && (
-                  <Button size="sm" icon={faceFormMode === "qr" ? QrCode : Upload} onClick={startCapture} disabled={!faceFormEmpId || modelsLoading || qrGenerating}>
-                    {modelsLoading ? "Memuat Model..." : qrGenerating ? "Membuat QR..." : faceFormMode === "qr" ? "Generate QR Code" : "Mulai Upload"}
+              <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
+                <div className="text-[10px] text-muted-foreground">
+                  {faceFormStep === "select" && faceFormEmpId && selectedEmp && (
+                    <span>Terpilih: <span className="font-semibold text-foreground">{selectedEmp.nama}</span></span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={closeFaceForm} disabled={faceFormSaving}>
+                    {faceFormStep === "done" && faceFormMode === "qr" ? "Selesai" : "Batal"}
                   </Button>
-                )}
-                {faceFormStep === "done" && faceFormMode !== "qr" && (
-                  <Button size="sm" icon={Check} onClick={saveFaceProfile} disabled={faceFormSaving}>
-                    {faceFormSaving ? "Menyimpan..." : "Simpan Data Wajah"}
-                  </Button>
-                )}
+                  {faceFormStep === "select" && (
+                    <Button size="sm" icon={faceFormMode === "qr" ? QrCode : Upload} onClick={startCapture} disabled={!faceFormEmpId || modelsLoading || qrGenerating}>
+                      {modelsLoading ? "Memuat Model..." : qrGenerating ? "Membuat QR..." : faceFormMode === "qr" ? "Generate QR Code" : "Mulai Upload"}
+                    </Button>
+                  )}
+                  {faceFormStep === "done" && faceFormMode !== "qr" && (
+                    <Button size="sm" icon={Check} onClick={saveFaceProfile} disabled={faceFormSaving}>
+                      {faceFormSaving ? "Menyimpan..." : "Simpan Data Wajah"}
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         </Portal>
-      )}
+        );
+      })()}
 
       {/* ═══ DELETE CONFIRM ═══ */}
       {deleteConfirm && (
