@@ -287,11 +287,13 @@ export interface DbEmployeeDevice {
   id: number;
   employee_id: string;
   device_id: string;
+  device_name: string | null;
   status: "Aktif" | "Tidak Aktif";
   registered_at: string;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
+  device_platform: string | null;
   // joined
   pegawai?: DbPegawai;
 }
