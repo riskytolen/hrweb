@@ -65,7 +65,7 @@ export default function SecuritySettingsPage() {
 
   const [showDeviceForm, setShowDeviceForm] = useState(false);
   const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null);
-  const [deviceForm, setDeviceForm] = useState({ employee_id: "", device_id: "", status: "Aktif" });
+  const [deviceForm, setDeviceForm] = useState({ employee_id: "", device_id: "", device_name: "", status: "Aktif" });
 
   // Face registration
   const [showFaceForm, setShowFaceForm] = useState(false);
@@ -143,7 +143,8 @@ export default function SecuritySettingsPage() {
   const filteredDevices = deviceList.filter((d) =>
     (d.employeeNama || "").toLowerCase().includes(deviceSearch.toLowerCase()) ||
     d.employee_id.toLowerCase().includes(deviceSearch.toLowerCase()) ||
-    d.device_id.toLowerCase().includes(deviceSearch.toLowerCase())
+    d.device_id.toLowerCase().includes(deviceSearch.toLowerCase()) ||
+    (d.device_name || "").toLowerCase().includes(deviceSearch.toLowerCase())
   );
   const filteredFaces = faceList.filter((f) =>
     (f.employeeNama || "").toLowerCase().includes(faceSearch.toLowerCase()) ||
@@ -153,11 +154,11 @@ export default function SecuritySettingsPage() {
   const pagedFaces = filteredFaces.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // ─── Device CRUD ───
-  const openAddDevice = () => { setDeviceForm({ employee_id: employeesWithoutDevice[0]?.id || "", device_id: "", status: "Aktif" }); setEditingDeviceId(null); setShowDeviceForm(true); };
-  const openEditDevice = (row: DeviceRow) => { setDeviceForm({ employee_id: row.employee_id, device_id: row.device_id, status: row.status }); setEditingDeviceId(row.id); setShowDeviceForm(true); };
+  const openAddDevice = () => { setDeviceForm({ employee_id: employeesWithoutDevice[0]?.id || "", device_id: "", device_name: "", status: "Aktif" }); setEditingDeviceId(null); setShowDeviceForm(true); };
+  const openEditDevice = (row: DeviceRow) => { setDeviceForm({ employee_id: row.employee_id, device_id: row.device_id, device_name: row.device_name || "", status: row.status }); setEditingDeviceId(row.id); setShowDeviceForm(true); };
   const saveDevice = async () => {
     if (!deviceForm.employee_id || !deviceForm.device_id.trim()) return;
-    const payload = { employee_id: deviceForm.employee_id, device_id: deviceForm.device_id, status: deviceForm.status };
+    const payload = { employee_id: deviceForm.employee_id, device_id: deviceForm.device_id, device_name: deviceForm.device_name || null, status: deviceForm.status };
     if (editingDeviceId !== null) {
       const { error } = await supabase.from("employee_devices").update(payload).eq("id", editingDeviceId);
       if (error) { showToast("error", "Gagal Memperbarui", "Terjadi kesalahan saat menyimpan data perangkat."); return; }
@@ -425,18 +426,20 @@ export default function SecuritySettingsPage() {
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Pegawai</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Device ID</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Perangkat</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Status</th>
                     <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {loading ? <SkeletonTable rows={5} cols={5} /> : pagedDevices.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data device ditemukan</td></tr>
+                  {loading ? <SkeletonTable rows={5} cols={6} /> : pagedDevices.length === 0 ? (
+                    <tr><td colSpan={6} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data device ditemukan</td></tr>
                   ) : pagedDevices.map((row, idx) => (
                     <tr key={row.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
                       <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p><p className="text-[11px] text-muted-foreground">{row.employee_id}</p></td>
                       <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">{row.device_id}</span></td>
+                      <td className="px-5 py-3.5"><span className="text-sm text-foreground">{row.device_name || <span className="text-muted-foreground italic">-</span>}</span></td>
                       <td className="px-5 py-3.5">
                         <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg", row.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
                           <span className={cn("w-1.5 h-1.5 rounded-full", row.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />{row.status}
@@ -568,6 +571,10 @@ export default function SecuritySettingsPage() {
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Device ID *</label>
                   <input type="text" value={deviceForm.device_id} onChange={(e) => setDeviceForm({ ...deviceForm, device_id: e.target.value })} className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary" placeholder="Contoh: android-3f9b-7cd2" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Perangkat</label>
+                  <input type="text" value={deviceForm.device_name} onChange={(e) => setDeviceForm({ ...deviceForm, device_name: e.target.value })} className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary" placeholder="Contoh: Samsung Galaxy A12" />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
