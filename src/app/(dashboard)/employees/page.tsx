@@ -1010,7 +1010,9 @@ export default function EmployeesPage() {
     const { error } = await supabase.storage.from("pegawai-docs").upload(path, file);
     if (error) return null;
     const { data } = supabase.storage.from("pegawai-docs").getPublicUrl(path);
-    return data.publicUrl;
+    // Add cache busting parameter with timestamp to force fresh load
+    const urlWithCacheBust = `${data.publicUrl}?t=${Date.now()}`;
+    return urlWithCacheBust;
   };
 
   const handleAddEmployee = async () => {
