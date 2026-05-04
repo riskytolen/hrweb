@@ -977,10 +977,37 @@ export default function EmployeesPage() {
     }
   };
 
+  const deleteOldFile = async (pegawaiId: string, docType: string): Promise<void> => {
+    try {
+      // List all files for this document type
+      const { data: files } = await supabase.storage
+        .from("pegawai-docs")
+        .list(pegawaiId, { search: `${docType}.` });
+      
+      if (files && files.length > 0) {
+        // Delete all old files with this docType
+        const filesToDelete = files
+          .filter(f => f.name.startsWith(`${docType}.`))
+          .map(f => `${pegawaiId}/${f.name}`);
+        
+        if (filesToDelete.length > 0) {
+          await supabase.storage.from("pegawai-docs").remove(filesToDelete);
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to delete old file for ${docType}:`, err);
+      // Don't throw - continue with upload even if delete fails
+    }
+  };
+
   const uploadFile = async (file: File, pegawaiId: string, docType: string): Promise<string | null> => {
     const ext = file.name.split(".").pop();
     const path = `${pegawaiId}/${docType}.${ext}`;
-    const { error } = await supabase.storage.from("pegawai-docs").upload(path, file, { upsert: true });
+    
+    // Delete old file first
+    await deleteOldFile(pegawaiId, docType);
+    
+    const { error } = await supabase.storage.from("pegawai-docs").upload(path, file);
     if (error) return null;
     const { data } = supabase.storage.from("pegawai-docs").getPublicUrl(path);
     return data.publicUrl;
