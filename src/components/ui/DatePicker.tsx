@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import {
   ChevronLeft,
@@ -34,7 +35,9 @@ function getFirstDayOfMonth(year: number, month: number) {
 export default function DatePicker({ value, onChange, placeholder = "Pilih tanggal", className }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"days" | "months" | "years">("days");
-  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; direction: "down" | "up" }>({ top: 0, left: 0, direction: "down" });
 
   const parsed = value ? new Date(value) : null;
   const today = new Date();
@@ -43,17 +46,61 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
   const [viewMonth, setViewMonth] = useState(parsed?.getMonth() || today.getMonth());
   const [yearRangeStart, setYearRangeStart] = useState(Math.floor((parsed?.getFullYear() || today.getFullYear()) / 12) * 12);
 
+  // Calculate position when opening
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const dropdownHeight = 340; // approximate max height of calendar
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const minTopMargin = 8; // minimum margin from top of viewport
+
+    if (spaceBelow >= dropdownHeight) {
+      // Enough space below - show below
+      setPos({ top: rect.bottom + 6, left: rect.left, direction: "down" });
+    } else {
+      // Not enough space below - show above but clamp to not go above viewport
+      const idealTop = rect.top - dropdownHeight - 6;
+      setPos({ top: Math.max(idealTop, minTopMargin), left: rect.left, direction: "up" });
+    }
+  }, []);
+
   // Close on outside click
   useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        triggerRef.current && !triggerRef.current.contains(target) &&
+        dropdownRef.current && !dropdownRef.current.contains(target)
+      ) {
         setOpen(false);
         setViewMode("days");
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [open]);
+
+  // Update position on scroll/resize while open
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const handleUpdate = () => updatePosition();
+    window.addEventListener("resize", handleUpdate);
+    window.addEventListener("scroll", handleUpdate, true);
+    return () => {
+      window.removeEventListener("resize", handleUpdate);
+      window.removeEventListener("scroll", handleUpdate, true);
+    };
+  }, [open, updatePosition]);
+
+  const handleOpen = () => {
+    if (!open) {
+      updatePosition();
+    }
+    setOpen(!open);
+    setViewMode("days");
+  };
 
   const selectDate = (day: number) => {
     const m = String(viewMonth + 1).padStart(2, "0");
@@ -86,12 +133,17 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
     ? `${parsed.getDate()} ${MONTHS[parsed.getMonth()]} ${parsed.getFullYear()}`
     : "";
 
+  // Clamp dropdown left so it doesn't overflow viewport
+  const dropdownWidth = 280;
+  const clampedLeft = Math.min(pos.left, window.innerWidth - dropdownWidth - 8);
+
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       {/* Input trigger */}
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => { setOpen(!open); setViewMode("days"); }}
+        onClick={handleOpen}
         className={cn(
           "w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none text-left",
           "focus:border-primary focus:ring-2 focus:ring-primary/10",
@@ -103,9 +155,13 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
         <span className="flex-1 truncate">{displayValue || placeholder}</span>
       </button>
 
-      {/* Dropdown */}
-      {open && (
-        <div className="absolute top-full left-0 mt-1.5 z-50 bg-card rounded-xl shadow-2xl border border-border p-3 w-[280px] animate-scale-in">
+      {/* Dropdown via Portal */}
+      {open && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-[200] bg-card rounded-xl shadow-2xl border border-border p-3 w-[280px] animate-scale-in"
+          style={{ top: pos.top, left: clampedLeft }}
+        >
 
           {/* ── DAYS VIEW ── */}
           {viewMode === "days" && (
@@ -244,7 +300,8 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
               </div>
             </>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
