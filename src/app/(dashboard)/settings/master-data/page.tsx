@@ -154,10 +154,10 @@ export default function MasterDataPage() {
   const [companyForm, setCompanyForm] = useState({ nilai: "" });
   const [showCompanyForm, setShowCompanyForm] = useState(false);
   // Leave settings
-  type LeaveSetting = { id: number; kuota_cuti_tahunan: number; tahun_berlaku: number; prorata: boolean; keterangan: string | null };
+  type LeaveSetting = { id: number; kuota_cuti_tahunan: number; maks_hari_per_pengajuan: number; tahun_berlaku: number; prorata: boolean; keterangan: string | null };
   const [leaveSetting, setLeaveSetting] = useState<LeaveSetting | null>(null);
   const [showLeaveSettingForm, setShowLeaveSettingForm] = useState(false);
-  const [leaveSettingForm, setLeaveSettingForm] = useState({ kuota_cuti_tahunan: "12", prorata: true });
+  const [leaveSettingForm, setLeaveSettingForm] = useState({ kuota_cuti_tahunan: "12", maks_hari_per_pengajuan: "3", prorata: true });
 
   // ─── Delete Confirm Dialog ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
@@ -750,19 +750,21 @@ export default function MasterDataPage() {
 
   const handleOpenEditLeave = () => {
     if (!leaveSetting) return;
-    setLeaveSettingForm({ kuota_cuti_tahunan: String(leaveSetting.kuota_cuti_tahunan), prorata: leaveSetting.prorata });
+    setLeaveSettingForm({ kuota_cuti_tahunan: String(leaveSetting.kuota_cuti_tahunan), maks_hari_per_pengajuan: String(leaveSetting.maks_hari_per_pengajuan), prorata: leaveSetting.prorata });
     setShowLeaveSettingForm(true);
   };
 
   const handleSaveLeave = async () => {
     if (!leaveSetting) return;
     const kuota = parseInt(leaveSettingForm.kuota_cuti_tahunan) || 12;
+    const maks = parseInt(leaveSettingForm.maks_hari_per_pengajuan) || 3;
     await supabase.from("leave_settings").update({
       kuota_cuti_tahunan: kuota,
+      maks_hari_per_pengajuan: maks,
       prorata: leaveSettingForm.prorata,
       updated_at: new Date().toISOString(),
     }).eq("id", leaveSetting.id);
-    showSuccess("Pengaturan Cuti Diperbarui", `Kuota cuti tahunan: ${kuota} hari.`);
+    showSuccess("Pengaturan Cuti Diperbarui", `Kuota: ${kuota} hari/tahun, Maks per pengajuan: ${maks} hari.`);
     setShowLeaveSettingForm(false);
     fetchLeaveSettings();
   };
@@ -1467,12 +1469,19 @@ export default function MasterDataPage() {
             </div>
             <div className="px-5 py-4">
               {leaveSetting ? (
-                <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap">
                   <div className="flex items-center gap-3 bg-primary/[0.06] border border-primary/20 rounded-xl px-4 py-3">
                     <CalendarDays className="w-5 h-5 text-primary" />
                     <div>
                       <p className="text-lg font-bold text-primary">{leaveSetting.kuota_cuti_tahunan} hari</p>
                       <p className="text-[10px] text-muted-foreground">per tahun</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 bg-warning/[0.06] border border-warning/20 rounded-xl px-4 py-3">
+                    <Clock className="w-5 h-5 text-warning" />
+                    <div>
+                      <p className="text-lg font-bold text-warning">{leaveSetting.maks_hari_per_pengajuan} hari</p>
+                      <p className="text-[10px] text-muted-foreground">maks per pengajuan</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-4 py-3">
@@ -1551,6 +1560,13 @@ export default function MasterDataPage() {
                   onChange={(e) => setLeaveSettingForm({ ...leaveSettingForm, kuota_cuti_tahunan: e.target.value })}
                   className={inputClass} placeholder="12" />
                 <p className="text-[10px] text-muted-foreground mt-1">Jumlah hari cuti yang diberikan per tahun untuk semua pegawai</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Maks Hari Per Pengajuan <span className="text-danger">*</span></label>
+                <input type="number" min={1} max={30} value={leaveSettingForm.maks_hari_per_pengajuan}
+                  onChange={(e) => setLeaveSettingForm({ ...leaveSettingForm, maks_hari_per_pengajuan: e.target.value })}
+                  className={inputClass} placeholder="3" />
+                <p className="text-[10px] text-muted-foreground mt-1">Batas maksimal hari cuti dalam satu kali pengajuan</p>
               </div>
               <div>
                 <label className="flex items-center gap-2.5 cursor-pointer">
