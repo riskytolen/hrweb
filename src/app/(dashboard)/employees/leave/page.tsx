@@ -20,7 +20,7 @@ import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
 type EmployeeLite = { id: string; nama: string; tanggal_bergabung?: string };
-type DivisionLite = { id: number };
+
 type LeaveRow = DbLeaveRequest & { employeeNama?: string };
 type LeaveSetting = { kuota_cuti_tahunan: number; maks_hari_per_pengajuan: number; prorata: boolean };
 
@@ -60,7 +60,6 @@ export default function LeavePage() {
   const [filterStatus, setFilterStatus] = useState("Semua");
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
-  const [divisions, setDivisions] = useState<DivisionLite[]>([]);
   const [list, setList] = useState<LeaveRow[]>([]);
   const [leaveSetting, setLeaveSetting] = useState<LeaveSetting | null>(null);
 
@@ -110,10 +109,7 @@ export default function LeavePage() {
     const { data } = await supabase.from("leave_settings").select("kuota_cuti_tahunan, maks_hari_per_pengajuan, prorata").order("id", { ascending: false }).limit(1).single();
     if (data) setLeaveSetting(data);
   };
-  const fetchDivisions = async () => {
-    const { data } = await supabase.from("divisions").select("id").eq("status", "Aktif").order("id").limit(1);
-    if (data) setDivisions(data);
-  };
+
 
   const fetchList = useCallback(async () => {
     const { data, error } = await supabase
@@ -127,7 +123,7 @@ export default function LeavePage() {
   }, [showToast]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchDivisions(), fetchList(), fetchLeaveSetting()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchList(), fetchLeaveSetting()]).then(() => setLoading(false));
   }, []);
 
   // Helper: hitung kuota cuti pegawai (prorata jika pegawai baru)
@@ -339,8 +335,6 @@ export default function LeavePage() {
             dates.push(`${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`);
           }
 
-          const defaultDivId = divisions[0]?.id || 1;
-
           for (const tanggal of dates) {
             // Skip hari libur (kecuali ada override masuk)
             const [ty, tm, td] = tanggal.split("-").map(Number);
@@ -357,7 +351,7 @@ export default function LeavePage() {
 
             const attPayload = {
               employee_id: req.employee_id,
-              division_id: defaultDivId,
+              division_id: null,
               tanggal,
               jam_masuk: "00:00",
               schedule_jam_masuk: "00:00",
@@ -370,7 +364,7 @@ export default function LeavePage() {
 
             if (existRec) {
               await supabase.from("attendance_records").update({
-                status: req.jenis, jam_masuk: "00:00", durasi_telat: 0, denda: 0,
+                status: req.jenis, division_id: null, jam_masuk: "00:00", durasi_telat: 0, denda: 0,
                 catatan: `${req.jenis}: ${req.alasan || "-"}`,
               }).eq("id", existRec.id);
             } else {
