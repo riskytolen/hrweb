@@ -60,7 +60,7 @@ const allMenuGroups: MenuGroup[] = [
       { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck, permission: "attendance" },
       { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays, permission: "leave" },
       { name: "Rekap Titik", href: "/employees/income", icon: Wallet, permission: "income" },
-      { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, permission: "payroll" },
+      { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, comingSoon: true, permission: "payroll" },
       { name: "Kinerja", href: "/employees/performance", icon: Award, permission: "performance" },
       { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, permission: "legal" },
       { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus, permission: "recruitment" },
