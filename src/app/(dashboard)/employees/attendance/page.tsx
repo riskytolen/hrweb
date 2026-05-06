@@ -116,9 +116,19 @@ export default function AttendancePage() {
   // ─── Add/Edit Form ───
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const ALASAN_MANUAL_OPTIONS = [
+    "Lupa ID Card",
+    "HP Rusak/Mati",
+    "Aplikasi Error",
+    "Tidak Ada Sinyal",
+    "ID Card Hilang",
+    "Baterai HP Habis",
+    "Lainnya",
+  ];
   const [form, setForm] = useState({
     employee_id: "", division_id: 0, tanggal: "", jam_masuk: "",
     specialStatus: "" as "" | "Izin" | "Sakit" | "Alpha" | "Cuti" | "Libur", catatan: "",
+    alasan_manual: "",
   });
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -261,7 +271,7 @@ export default function AttendancePage() {
 
   // ─── Open Add ───
   const openAdd = () => {
-    setForm({ employee_id: "", division_id: 0, tanggal: dateFilter, jam_masuk: "", specialStatus: "", catatan: "" });
+    setForm({ employee_id: "", division_id: 0, tanggal: dateFilter, jam_masuk: "", specialStatus: "", catatan: "", alasan_manual: "" });
     setFormError("");
     setEditingId(null);
     fetchFormExisting(dateFilter);
@@ -278,6 +288,7 @@ export default function AttendancePage() {
       jam_masuk: isSpec ? "" : row.jam_masuk.slice(0, 5),
       specialStatus: isSpec ? row.status as "Izin" | "Sakit" | "Alpha" | "Cuti" | "Libur" : "",
       catatan: row.catatan || "",
+      alasan_manual: (row as any).alasan_manual || "",
     });
     setFormError("");
     setEditingId(row.id);
@@ -293,6 +304,7 @@ export default function AttendancePage() {
     if (!form.division_id) { setFormError("Pilih divisi terlebih dahulu."); return; }
     if (!form.tanggal) { setFormError("Pilih tanggal terlebih dahulu."); return; }
     if (!isSpecial && !form.jam_masuk) { setFormError("Isi jam masuk atau pilih status Alpha."); return; }
+    if (!form.alasan_manual) { setFormError("Pilih alasan input manual."); return; }
 
     // Cek duplikat sebelum insert (hanya mode tambah)
     if (!editingId) {
@@ -341,6 +353,8 @@ export default function AttendancePage() {
       durasi_telat: durasi,
       denda,
       catatan: form.catatan || null,
+      is_manual: true,
+      alasan_manual: form.alasan_manual || null,
     };
 
     try {
@@ -649,7 +663,14 @@ export default function AttendancePage() {
                 return (
                   <tr key={row.id} className="hover:bg-muted/30">
                     <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                    <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p></td>
+                    <td className="px-5 py-3.5">
+                      <p className="text-sm font-semibold text-foreground">{row.employeeNama}</p>
+                      {(row as any).is_manual && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-medium text-warning bg-warning/10 px-1.5 py-0.5 rounded mt-0.5">
+                          Manual{(row as any).alasan_manual ? `: ${(row as any).alasan_manual}` : ""}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-5 py-3.5">
                       <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${row.divisionColor}15`, color: row.divisionColor }}>
                         <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: row.divisionColor }} />
@@ -920,12 +941,36 @@ export default function AttendancePage() {
                   </div>
                 )}
 
+                {/* Alasan Input Manual */}
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Alasan Input Manual <span className="text-danger">*</span></label>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {ALASAN_MANUAL_OPTIONS.map((alasan) => (
+                      <button key={alasan} type="button" onClick={() => setForm({ ...form, alasan_manual: alasan })}
+                        className={cn("px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all",
+                          form.alasan_manual === alasan
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-muted/30 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        )}>
+                        {alasan}
+                      </button>
+                    ))}
+                  </div>
+                  {form.alasan_manual === "Lainnya" && (
+                    <input type="text" placeholder="Tulis alasan lainnya..." value={form.catatan}
+                      onChange={(e) => setForm({ ...form, catatan: e.target.value })} className={inputClass} />
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-1">Wajib dipilih karena absen diinput manual (bukan dari aplikasi)</p>
+                </div>
+
                 {/* Catatan */}
+                {form.alasan_manual !== "Lainnya" && (
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan <span className="text-muted-foreground font-normal">(opsional)</span></label>
                   <input type="text" placeholder="Keterangan tambahan..." value={form.catatan}
                     onChange={(e) => setForm({ ...form, catatan: e.target.value })} className={inputClass} />
                 </div>
+                )}
               </div>
 
               {/* Footer */}
