@@ -76,6 +76,9 @@ export default function LeavePage() {
   const [approvalNote, setApprovalNote] = useState("");
   const [approving, setApproving] = useState(false);
 
+  // Catatan detail
+  const [catatanDetail, setCatatanDetail] = useState<{ nama: string; status: string; catatan: string } | null>(null);
+
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -488,9 +491,10 @@ export default function LeavePage() {
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{row.status}</span>
                       {row.catatan_approval && (
-                        <p className="text-[10px] text-muted-foreground mt-1 max-w-[120px] mx-auto truncate" title={row.catatan_approval}>
+                        <button onClick={() => setCatatanDetail({ nama: row.employeeNama || "-", status: row.status, catatan: row.catatan_approval || "" })}
+                          className="block text-[10px] text-primary/80 hover:text-primary mt-1 max-w-[120px] mx-auto truncate hover:underline cursor-pointer">
                           &ldquo;{row.catatan_approval}&rdquo;
-                        </p>
+                        </button>
                       )}
                     </td>
                     <td className="px-5 py-3.5">
@@ -720,6 +724,37 @@ export default function LeavePage() {
                     {approving ? "Memproses..." : "Tolak"}
                   </Button>
                 )}
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ CATATAN DETAIL ═══ */}
+      {catatanDetail && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setCatatanDetail(null)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center",
+                      catatanDetail.status === "Disetujui" ? "bg-success/10" : "bg-danger/10")}>
+                      {catatanDetail.status === "Disetujui"
+                        ? <Check className="w-4.5 h-4.5 text-success" />
+                        : <X className="w-4.5 h-4.5 text-danger" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-foreground">{catatanDetail.status === "Disetujui" ? "Catatan Persetujuan" : "Alasan Penolakan"}</p>
+                      <p className="text-[10px] text-muted-foreground">{catatanDetail.nama}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setCatatanDetail(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="bg-muted/30 rounded-xl px-4 py-3 border border-border">
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{catatanDetail.catatan}</p>
+                </div>
               </div>
             </div>
           </div>
