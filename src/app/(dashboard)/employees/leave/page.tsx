@@ -19,9 +19,10 @@ import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
-type EmployeeLite = { id: string; nama: string };
+type EmployeeLite = { id: string; nama: string; tanggal_bergabung?: string };
 type DivisionLite = { id: number };
 type LeaveRow = DbLeaveRequest & { employeeNama?: string };
+type LeaveSetting = { kuota_cuti_tahunan: number; prorata: boolean };
 
 const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -61,6 +62,7 @@ export default function LeavePage() {
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [divisions, setDivisions] = useState<DivisionLite[]>([]);
   const [list, setList] = useState<LeaveRow[]>([]);
+  const [leaveSetting, setLeaveSetting] = useState<LeaveSetting | null>(null);
 
   // Form
   const [showForm, setShowForm] = useState(false);
@@ -101,8 +103,12 @@ export default function LeavePage() {
 
   // Fetch
   const fetchEmployees = async () => {
-    const { data } = await supabase.from("pegawai").select("id, nama").in("status", ["Aktif", "Training"]).order("nama");
+    const { data } = await supabase.from("pegawai").select("id, nama, tanggal_bergabung").in("status", ["Aktif", "Training"]).order("nama");
     if (data) setEmployees(data);
+  };
+  const fetchLeaveSetting = async () => {
+    const { data } = await supabase.from("leave_settings").select("kuota_cuti_tahunan, prorata").order("id", { ascending: false }).limit(1).single();
+    if (data) setLeaveSetting(data);
   };
   const fetchDivisions = async () => {
     const { data } = await supabase.from("divisions").select("id").eq("status", "Aktif").order("id").limit(1);
@@ -121,8 +127,40 @@ export default function LeavePage() {
   }, [showToast]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchDivisions(), fetchList()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchDivisions(), fetchList(), fetchLeaveSetting()]).then(() => setLoading(false));
   }, []);
+
+  // Helper: hitung kuota cuti pegawai (prorata jika pegawai baru)
+  const getKuotaCuti = (employeeId: string): number => {
+    if (!leaveSetting) return 0;
+    const emp = employees.find(e => e.id === employeeId);
+    if (!emp?.tanggal_bergabung || !leaveSetting.prorata) return leaveSetting.kuota_cuti_tahunan;
+    
+    const now = new Date();
+    const tahunIni = now.getFullYear();
+    const bergabung = new Date(emp.tanggal_bergabung + "T00:00:00");
+    
+    // Jika bergabung sebelum tahun ini, kuota penuh
+    if (bergabung.getFullYear() < tahunIni) return leaveSetting.kuota_cuti_tahunan;
+    
+    // Prorata: sisa bulan di tahun ini
+    const bulanBergabung = bergabung.getMonth(); // 0-11
+    const sisaBulan = 12 - bulanBergabung;
+    return Math.ceil((leaveSetting.kuota_cuti_tahunan / 12) * sisaBulan);
+  };
+
+  // Helper: hitung cuti terpakai tahun ini
+  const getCutiTerpakai = (employeeId: string): number => {
+    const tahunIni = new Date().getFullYear();
+    return list
+      .filter(r => r.employee_id === employeeId && r.jenis === "Cuti" && r.status !== "Ditolak" && r.tanggal_mulai.startsWith(String(tahunIni)))
+      .reduce((total, r) => total + countDays(r.tanggal_mulai, r.tanggal_selesai), 0);
+  };
+
+  // Helper: sisa cuti
+  const getSisaCuti = (employeeId: string): number => {
+    return getKuotaCuti(employeeId) - getCutiTerpakai(employeeId);
+  };
 
   // Summary
   const statusCounts: Record<string, number> = { Menunggu: 0, Disetujui: 0, Ditolak: 0 };
@@ -173,6 +211,16 @@ export default function LeavePage() {
       if (!form.tanggal_mulai) { setFormError("Pilih tanggal mulai."); return; }
       if (!form.tanggal_selesai) { setFormError("Pilih tanggal selesai."); return; }
       if (form.tanggal_selesai < form.tanggal_mulai) { setFormError("Tanggal selesai harus >= tanggal mulai."); return; }
+    }
+
+    // Validasi kuota cuti (hanya untuk jenis Cuti, saat tambah baru)
+    if (form.jenis === "Cuti" && !editingId && leaveSetting) {
+      const hariDiajukan = countDays(effectiveMulai, effectiveSelesai);
+      const sisaCuti = getSisaCuti(form.employee_id);
+      if (hariDiajukan > sisaCuti) {
+        setFormError(`Kuota cuti tidak mencukupi. Sisa cuti: ${sisaCuti} hari, diajukan: ${hariDiajukan} hari.`);
+        return;
+      }
     }
 
     // Cek overlap tanggal dengan pengajuan lain (hanya saat tambah baru)
@@ -578,6 +626,18 @@ export default function LeavePage() {
                     })}
                   </div>
                 </div>
+
+                {/* Info kuota cuti */}
+                {form.jenis === "Cuti" && form.employee_id && leaveSetting && (
+                  <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-primary/[0.06] border border-primary/20">
+                    <CalendarDays className="w-4 h-4 text-primary" />
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="text-muted-foreground">Kuota: <span className="font-bold text-foreground">{getKuotaCuti(form.employee_id)} hari</span></span>
+                      <span className="text-muted-foreground">Terpakai: <span className="font-bold text-foreground">{getCutiTerpakai(form.employee_id)} hari</span></span>
+                      <span className="text-muted-foreground">Sisa: <span className={cn("font-bold", getSisaCuti(form.employee_id) > 0 ? "text-success" : "text-danger")}>{getSisaCuti(form.employee_id)} hari</span></span>
+                    </div>
+                  </div>
+                )}
 
                 {form.jenis === "Sakit" ? (
                   /* Sakit: otomatis hari ini, 1 hari per pengajuan */

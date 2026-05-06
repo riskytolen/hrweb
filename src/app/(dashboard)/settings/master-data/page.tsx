@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Scale,
+  CalendarDays,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -152,6 +153,11 @@ export default function MasterDataPage() {
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
   const [companyForm, setCompanyForm] = useState({ nilai: "" });
   const [showCompanyForm, setShowCompanyForm] = useState(false);
+  // Leave settings
+  type LeaveSetting = { id: number; kuota_cuti_tahunan: number; tahun_berlaku: number; prorata: boolean; keterangan: string | null };
+  const [leaveSetting, setLeaveSetting] = useState<LeaveSetting | null>(null);
+  const [showLeaveSettingForm, setShowLeaveSettingForm] = useState(false);
+  const [leaveSettingForm, setLeaveSettingForm] = useState({ kuota_cuti_tahunan: "12", prorata: true });
 
   // ─── Delete Confirm Dialog ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
@@ -227,12 +233,12 @@ export default function MasterDataPage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm) {
+    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -734,6 +740,31 @@ export default function MasterDataPage() {
     showSuccess("Pengaturan Diperbarui", "Data perusahaan berhasil disimpan.");
     setShowCompanyForm(false);
     fetchCompanySettings();
+  };
+
+  // ─── Leave Settings Handlers ───
+  const fetchLeaveSettings = async () => {
+    const { data } = await supabase.from("leave_settings").select("*").order("id", { ascending: false }).limit(1).single();
+    if (data) setLeaveSetting(data);
+  };
+
+  const handleOpenEditLeave = () => {
+    if (!leaveSetting) return;
+    setLeaveSettingForm({ kuota_cuti_tahunan: String(leaveSetting.kuota_cuti_tahunan), prorata: leaveSetting.prorata });
+    setShowLeaveSettingForm(true);
+  };
+
+  const handleSaveLeave = async () => {
+    if (!leaveSetting) return;
+    const kuota = parseInt(leaveSettingForm.kuota_cuti_tahunan) || 12;
+    await supabase.from("leave_settings").update({
+      kuota_cuti_tahunan: kuota,
+      prorata: leaveSettingForm.prorata,
+      updated_at: new Date().toISOString(),
+    }).eq("id", leaveSetting.id);
+    showSuccess("Pengaturan Cuti Diperbarui", `Kuota cuti tahunan: ${kuota} hari.`);
+    setShowLeaveSettingForm(false);
+    fetchLeaveSettings();
   };
 
   return (
@@ -1428,6 +1459,34 @@ export default function MasterDataPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Section: Kuota Cuti */}
+            <div className="px-5 py-3 border-b border-t border-border mt-2">
+              <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Kuota Cuti Tahunan</h3>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Pengaturan kuota cuti untuk semua pegawai. Reset setiap tahun.</p>
+            </div>
+            <div className="px-5 py-4">
+              {leaveSetting ? (
+                <div className="flex items-center gap-4 flex-wrap">
+                  <div className="flex items-center gap-3 bg-primary/[0.06] border border-primary/20 rounded-xl px-4 py-3">
+                    <CalendarDays className="w-5 h-5 text-primary" />
+                    <div>
+                      <p className="text-lg font-bold text-primary">{leaveSetting.kuota_cuti_tahunan} hari</p>
+                      <p className="text-[10px] text-muted-foreground">per tahun</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-4 py-3">
+                    <div className={cn("w-2 h-2 rounded-full", leaveSetting.prorata ? "bg-success" : "bg-muted-foreground")} />
+                    <p className="text-xs text-foreground">{leaveSetting.prorata ? "Prorata untuk pegawai baru" : "Tidak prorata"}</p>
+                  </div>
+                  {canEdit && (
+                    <Button variant="outline" size="sm" icon={Pencil} onClick={handleOpenEditLeave}>Edit</Button>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Memuat...</p>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -1464,6 +1523,50 @@ export default function MasterDataPage() {
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
               <Button variant="outline" size="sm" onClick={() => setShowCompanyForm(false)}>Batal</Button>
               <Button size="sm" icon={Check} onClick={handleSaveCompany}>Simpan</Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {/* ═══ LEAVE SETTINGS FORM MODAL ═══ */}
+      {showLeaveSettingForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLeaveSettingForm(false)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <CalendarDays className="w-4 h-4 text-primary" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">Edit Kuota Cuti</h2>
+              </div>
+              <button onClick={() => setShowLeaveSettingForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Kuota Cuti Tahunan (hari) <span className="text-danger">*</span></label>
+                <input type="number" min={1} max={30} value={leaveSettingForm.kuota_cuti_tahunan}
+                  onChange={(e) => setLeaveSettingForm({ ...leaveSettingForm, kuota_cuti_tahunan: e.target.value })}
+                  className={inputClass} placeholder="12" />
+                <p className="text-[10px] text-muted-foreground mt-1">Jumlah hari cuti yang diberikan per tahun untuk semua pegawai</p>
+              </div>
+              <div>
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input type="checkbox" checked={leaveSettingForm.prorata}
+                    onChange={(e) => setLeaveSettingForm({ ...leaveSettingForm, prorata: e.target.checked })}
+                    className="rounded border-border text-primary focus:ring-primary" />
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Prorata untuk pegawai baru</p>
+                    <p className="text-[10px] text-muted-foreground">Kuota dihitung proporsional berdasarkan bulan bergabung</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
+              <Button variant="outline" size="sm" onClick={() => setShowLeaveSettingForm(false)}>Batal</Button>
+              <Button size="sm" icon={Check} onClick={handleSaveLeave}>Simpan</Button>
             </div>
           </div>
         </div>
