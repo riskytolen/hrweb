@@ -232,6 +232,33 @@ export default function LegalPage() {
     if (form.tanggal_berakhir < form.tanggal_terbit) { setFormError("Tanggal berakhir harus setelah tanggal terbit."); return; }
     if (form.kategori === "SP" && !form.pelanggaran.trim()) { setFormError("Isi deskripsi pelanggaran."); return; }
 
+    // Validasi struktur SP (hanya saat tambah baru)
+    if (form.kategori === "SP" && !editingId) {
+      const empSPs = list.filter(r => r.employee_id === form.employee_id && r.kategori === "SP" && r.status === "Aktif");
+      const hasSP1Aktif = empSPs.some(r => r.tingkat_sp === "SP-1");
+      const hasSP2Aktif = empSPs.some(r => r.tingkat_sp === "SP-2");
+      const hasSP3Aktif = empSPs.some(r => r.tingkat_sp === "SP-3");
+
+      if (form.tingkat_sp === "SP-2" && !hasSP1Aktif) {
+        setFormError("Tidak bisa menerbitkan SP-2. Pegawai ini belum memiliki SP-1 yang masih aktif.");
+        return;
+      }
+      if (form.tingkat_sp === "SP-3" && !hasSP2Aktif) {
+        setFormError("Tidak bisa menerbitkan SP-3. Pegawai ini belum memiliki SP-2 yang masih aktif.");
+        return;
+      }
+      if (form.tingkat_sp === "SP-3" && hasSP3Aktif) {
+        setFormError("Pegawai ini sudah memiliki SP-3 yang masih aktif.");
+        return;
+      }
+      // Cek duplikat tingkat SP aktif yang sama
+      const hasSameSPAktif = empSPs.some(r => r.tingkat_sp === form.tingkat_sp);
+      if (hasSameSPAktif) {
+        setFormError(`Pegawai ini sudah memiliki ${form.tingkat_sp} yang masih aktif.`);
+        return;
+      }
+    }
+
     setFormSaving(true);
     const status = computeStatus(form.tanggal_berakhir);
     const payload: Record<string, unknown> = {
