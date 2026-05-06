@@ -202,12 +202,13 @@ export default function LeavePage() {
     setFormError("");
     if (!form.employee_id) { setFormError("Pilih pegawai."); return; }
 
-    // Untuk Sakit: otomatis hari ini, 1 hari
-    const today = new Date().toISOString().split("T")[0];
-    const effectiveMulai = form.jenis === "Sakit" ? today : form.tanggal_mulai;
-    const effectiveSelesai = form.jenis === "Sakit" ? today : (form.tanggal_selesai || form.tanggal_mulai);
+    // Untuk Sakit: 1 hari (tanggal_mulai = tanggal_selesai)
+    const effectiveMulai = form.jenis === "Sakit" ? form.tanggal_mulai : form.tanggal_mulai;
+    const effectiveSelesai = form.jenis === "Sakit" ? form.tanggal_mulai : (form.tanggal_selesai || form.tanggal_mulai);
 
-    if (form.jenis !== "Sakit") {
+    if (form.jenis === "Sakit") {
+      if (!form.tanggal_mulai) { setFormError("Pilih tanggal sakit."); return; }
+    } else {
       if (!form.tanggal_mulai) { setFormError("Pilih tanggal mulai."); return; }
       if (!form.tanggal_selesai) { setFormError("Pilih tanggal selesai."); return; }
       if (form.tanggal_selesai < form.tanggal_mulai) { setFormError("Tanggal selesai harus >= tanggal mulai."); return; }
@@ -242,7 +243,7 @@ export default function LeavePage() {
         .limit(1);
       if (overlap && overlap.length > 0) {
         setFormError(form.jenis === "Sakit"
-          ? `Sudah ada pengajuan ${overlap[0].jenis} untuk hari ini.`
+          ? `Sudah ada pengajuan ${overlap[0].jenis} untuk tanggal tersebut.`
           : `Tanggal bentrok dengan pengajuan ${overlap[0].jenis} (${overlap[0].tanggal_mulai} s/d ${overlap[0].tanggal_selesai}).`);
         return;
       }
@@ -649,14 +650,11 @@ export default function LeavePage() {
                 )}
 
                 {form.jenis === "Sakit" ? (
-                  /* Sakit: otomatis hari ini, 1 hari per pengajuan */
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger/[0.06] border border-danger/20">
-                    <CalendarDays className="w-4 h-4 text-danger" />
-                    <span className="text-xs font-semibold text-danger">Hari ini</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      ({formatTanggal(new Date().toISOString().split("T")[0])})
-                    </span>
-                    <span className="text-[10px] text-muted-foreground ml-auto">Otomatis 1 hari</span>
+                  /* Sakit: pilih tanggal, 1 hari per pengajuan */
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Sakit <span className="text-danger">*</span></label>
+                    <DatePicker value={form.tanggal_mulai} onChange={(val) => { setForm({ ...form, tanggal_mulai: val }); setFormError(""); }} placeholder="Pilih tanggal" />
+                    <p className="text-[10px] text-muted-foreground mt-1">1 hari per pengajuan. Jika besok masih sakit, ajukan lagi.</p>
                   </div>
                 ) : (
                   /* Izin & Cuti: range tanggal */
