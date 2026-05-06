@@ -56,24 +56,24 @@ const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
-const CUT_OFF_DAY = 7; // Tutup buku tanggal 7
+const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
 
-/** Hitung periode tutup buku: tgl 7 bulan ini s/d tgl 8 bulan berikutnya */
+/** Hitung periode tutup buku: tgl 8 bulan ini s/d tgl 7 bulan berikutnya */
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
   const [year, month] = periodKey.split("-").map(Number);
-  // Periode: tgl 7 bulan ini → tgl 8 bulan berikutnya
-  const startDate = new Date(year, month - 1, CUT_OFF_DAY);
-  const endDate = new Date(year, month, CUT_OFF_DAY + 1); // tgl 8 bulan berikutnya
+  // Periode: tgl 8 bulan ini → tgl 7 bulan berikutnya
+  const startDate = new Date(year, month - 1, CUT_OFF_DAY); // tgl 8
+  const endDate = new Date(year, month, CUT_OFF_DAY - 1); // tgl 7 bulan berikutnya
   const start = startDate.toISOString().slice(0, 10);
   const end = endDate.toISOString().slice(0, 10);
-  const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY + 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
+  const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY - 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
   return { start, end, label };
 }
 
 /** Tentukan periode aktif berdasarkan tanggal hari ini */
 function getCurrentPeriodKey(): string {
   const now = new Date();
-  // Jika hari ini < tgl 7, berarti masih periode bulan lalu
+  // Jika hari ini < tgl 8, berarti masih periode bulan lalu
   if (now.getDate() < CUT_OFF_DAY) {
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
@@ -557,7 +557,7 @@ export default function IncomePage() {
 
   // ─── Calendar data (periode tutup buku) ───
   const calPeriod = getPeriodRange(calMonth);
-  // Generate array of dates for the period (tgl 7 bulan ini s/d tgl 8 bulan berikutnya)
+  // Generate array of dates for the period (tgl 8 bulan ini s/d tgl 7 bulan berikutnya)
   const calDateList: Date[] = [];
   {
     const startD = new Date(calPeriod.start);

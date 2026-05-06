@@ -64,20 +64,22 @@ interface ReportDetailProps {
   dStatuses: StatusLite[];
 }
 
-const CUT_OFF_DAY = 7;
+const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
 
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
   const [year, month] = periodKey.split("-").map(Number);
+  // Periode: tgl 8 bulan ini → tgl 7 bulan berikutnya
   const startDate = new Date(year, month - 1, CUT_OFF_DAY);
-  const endDate = new Date(year, month, CUT_OFF_DAY + 1);
+  const endDate = new Date(year, month, CUT_OFF_DAY - 1); // tgl 7 bulan berikutnya
   const start = startDate.toISOString().slice(0, 10);
   const end = endDate.toISOString().slice(0, 10);
-  const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY + 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
+  const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY - 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
   return { start, end, label };
 }
 
 function getCurrentPeriodKey(): string {
   const now = new Date();
+  // Jika hari ini < tgl 8, berarti masih periode bulan lalu
   if (now.getDate() < CUT_OFF_DAY) {
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
