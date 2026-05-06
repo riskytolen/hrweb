@@ -16,7 +16,7 @@ import RouteGuard from "@/components/RouteGuard";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; jabatan_id: number | null; status: string };
-type AttendanceRecord = { employee_id: string; tanggal: string; status: string; durasi_telat: number };
+type AttendanceRecord = { employee_id: string; tanggal: string; status: string; durasi_telat: number; is_manual: boolean };
 type LegalDoc = { employee_id: string; kategori: string; tingkat_sp: string | null; status: string; tanggal_terbit: string };
 
 type PerformanceRow = {
@@ -27,6 +27,7 @@ type PerformanceRow = {
   telat: number;
   totalMenitTelat: number;
   alpha: number;
+  manual: number;
   izin: number;
   sakit: number;
   cuti: number;
@@ -37,6 +38,7 @@ type PerformanceRow = {
   skorKehadiran: number;
   skorKeterlambatan: number;
   skorAlpha: number;
+  skorManual: number;
   skorSP: number;
   skorTotal: number;
   grade: string;
@@ -51,6 +53,7 @@ const PENALTY = {
   ALPHA_PER_HARI: 5,       // -5 poin per alpha
   TELAT_PER_KEJADIAN: 1,   // -1 poin per kejadian telat
   TELAT_PER_30_MENIT: 1,   // -1 poin tambahan per 30 menit telat
+  MANUAL_PER_KEJADIAN: 2,  // -2 poin per absen manual (lupa ID card dll)
   SP1: 10,                  // -10 poin per SP-1
   SP2: 20,                  // -20 poin per SP-2
   SP3: 40,                  // -40 poin per SP-3
@@ -125,7 +128,7 @@ export default function PerformancePage() {
     // Fetch attendance records for period
     const { data: attData } = await supabase
       .from("attendance_records")
-      .select("employee_id, tanggal, status, durasi_telat")
+      .select("employee_id, tanggal, status, durasi_telat, is_manual")
       .gte("tanggal", period.start)
       .lte("tanggal", period.end);
     const attendance: AttendanceRecord[] = attData || [];
@@ -143,12 +146,13 @@ export default function PerformancePage() {
       const empAtt = attendance.filter((a) => a.employee_id === emp.id);
       const empSP = spDocs.filter((s) => s.employee_id === emp.id);
 
-      // Hitung hari kerja dalam periode (approx 30 hari - libur)
+      // Hitung hari kerja dalam periode
       const totalHariKerja = empAtt.length || 0;
       const hadir = empAtt.filter((a) => a.status === "Hadir" || a.status === "Terlambat").length;
       const telat = empAtt.filter((a) => a.status === "Terlambat").length;
       const totalMenitTelat = empAtt.filter((a) => a.status === "Terlambat").reduce((s, a) => s + (a.durasi_telat || 0), 0);
       const alpha = empAtt.filter((a) => a.status === "Alpha").length;
+      const manual = empAtt.filter((a) => a.is_manual && (a.status === "Hadir" || a.status === "Terlambat")).length;
       const izin = empAtt.filter((a) => a.status === "Izin").length;
       const sakit = empAtt.filter((a) => a.status === "Sakit").length;
       const cuti = empAtt.filter((a) => a.status === "Cuti").length;
@@ -161,7 +165,7 @@ export default function PerformancePage() {
       // Hitung skor (mulai dari 100)
       let skor = 100;
 
-      // Pengurangan kehadiran: jika ada hari kerja tapi tidak hadir (selain izin/sakit/cuti)
+      // Pengurangan kehadiran
       const skorKehadiran = totalHariKerja > 0 ? Math.round((hadir / totalHariKerja) * 100) : 100;
 
       // Pengurangan alpha
@@ -170,10 +174,13 @@ export default function PerformancePage() {
       // Pengurangan keterlambatan
       const penaltyTelat = (telat * PENALTY.TELAT_PER_KEJADIAN) + (Math.floor(totalMenitTelat / 30) * PENALTY.TELAT_PER_30_MENIT);
 
+      // Pengurangan absen manual (lupa ID card dll)
+      const penaltyManual = manual * PENALTY.MANUAL_PER_KEJADIAN;
+
       // Pengurangan SP
       const penaltySP = (sp1 * PENALTY.SP1) + (sp2 * PENALTY.SP2) + (sp3 * PENALTY.SP3);
 
-      skor = skor - penaltyAlpha - penaltyTelat - penaltySP;
+      skor = skor - penaltyAlpha - penaltyTelat - penaltyManual - penaltySP;
       skor = Math.max(0, Math.min(100, skor));
 
       return {
@@ -184,6 +191,7 @@ export default function PerformancePage() {
         telat,
         totalMenitTelat,
         alpha,
+        manual,
         izin,
         sakit,
         cuti,
@@ -192,6 +200,7 @@ export default function PerformancePage() {
         skorKehadiran,
         skorKeterlambatan: Math.max(0, 100 - penaltyTelat),
         skorAlpha: Math.max(0, 100 - penaltyAlpha),
+        skorManual: Math.max(0, 100 - penaltyManual),
         skorSP: Math.max(0, 100 - penaltySP),
         skorTotal: skor,
         grade: getGrade(skor),
@@ -434,6 +443,7 @@ export default function PerformancePage() {
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Hadir</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Telat</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Alpha</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Manual</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Izin</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Sakit</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">SP</th>
@@ -442,8 +452,8 @@ export default function PerformancePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={8} cols={10} /> : paged.length === 0 ? (
-                <tr><td colSpan={10} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data kinerja</td></tr>
+              {loading ? <SkeletonTable rows={8} cols={11} /> : paged.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data kinerja</td></tr>
               ) : paged.map((row, idx) => {
                 const rank = filtered.indexOf(row) + 1;
                 const gradeColor = getGradeColor(row.grade);
@@ -468,6 +478,11 @@ export default function PerformancePage() {
                     <td className="px-4 py-3 text-center">
                       {row.alpha > 0 ? (
                         <span className="text-sm font-semibold text-danger">{row.alpha}x</span>
+                      ) : <span className="text-sm text-muted-foreground">-</span>}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {row.manual > 0 ? (
+                        <span className="text-sm font-semibold text-warning">{row.manual}x</span>
                       ) : <span className="text-sm text-muted-foreground">-</span>}
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -510,7 +525,7 @@ export default function PerformancePage() {
       {/* Scoring Info */}
       <div className="bg-card rounded-2xl border border-border p-5">
         <h3 className="text-xs font-bold text-foreground uppercase tracking-wider mb-3">Sistem Penilaian</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="bg-muted/30 rounded-xl p-3 border border-border">
             <div className="flex items-center gap-2 mb-2">
               <XCircle className="w-4 h-4 text-danger" />
@@ -524,6 +539,13 @@ export default function PerformancePage() {
               <p className="text-xs font-bold text-foreground">Keterlambatan</p>
             </div>
             <p className="text-[10px] text-muted-foreground">-{PENALTY.TELAT_PER_KEJADIAN} poin per kejadian, -{PENALTY.TELAT_PER_30_MENIT} poin per 30 menit</p>
+          </div>
+          <div className="bg-muted/30 rounded-xl p-3 border border-border">
+            <div className="flex items-center gap-2 mb-2">
+              <CalendarCheck className="w-4 h-4 text-warning" />
+              <p className="text-xs font-bold text-foreground">Absen Manual</p>
+            </div>
+            <p className="text-[10px] text-muted-foreground">-{PENALTY.MANUAL_PER_KEJADIAN} poin per kejadian (lupa ID card, HP rusak, dll)</p>
           </div>
           <div className="bg-muted/30 rounded-xl p-3 border border-border">
             <div className="flex items-center gap-2 mb-2">
