@@ -105,6 +105,7 @@ export default function PerformancePage() {
   const [customEnd, setCustomEnd] = useState("");
   const [search, setSearch] = useState("");
   const [filterGrade, setFilterGrade] = useState("Semua");
+  const [sortOrder, setSortOrder] = useState<"best" | "worst">("best");
   const [page, setPage] = useState(1);
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
@@ -208,12 +209,12 @@ export default function PerformancePage() {
     else if (customStart && customEnd) { fetchData(); }
   }, [periodKey, dateMode, customStart, customEnd]);
 
-  // Filter
+  // Filter & Sort
   const filtered = performanceData.filter((r) => {
     const matchSearch = r.nama.toLowerCase().includes(search.toLowerCase());
     const matchGrade = filterGrade === "Semua" || r.grade === filterGrade;
     return matchSearch && matchGrade;
-  });
+  }).sort((a, b) => sortOrder === "best" ? b.skorTotal - a.skorTotal : a.skorTotal - b.skorTotal);
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Summary stats
@@ -393,19 +394,33 @@ export default function PerformancePage() {
         </div>
       )}
 
-      {/* Filter Grade */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {["Semua", "A", "B", "C", "D", "E"].map((g) => {
-          const isActive = filterGrade === g;
-          return (
-            <button key={g} onClick={() => { setFilterGrade(g); setPage(1); }}
-              className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                isActive ? "bg-primary/10 text-primary ring-1 ring-primary/20" : "text-muted-foreground hover:bg-muted")}>
-              {g === "Semua" ? "Semua" : `Grade ${g}`}
-              {g !== "Semua" && <span className="ml-1 text-[9px] opacity-70">({gradeDistribution[g as keyof typeof gradeDistribution]})</span>}
-            </button>
-          );
-        })}
+      {/* Filter Grade + Sort */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          {["Semua", "A", "B", "C", "D", "E"].map((g) => {
+            const isActive = filterGrade === g;
+            return (
+              <button key={g} onClick={() => { setFilterGrade(g); setPage(1); }}
+                className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  isActive ? "bg-primary/10 text-primary ring-1 ring-primary/20" : "text-muted-foreground hover:bg-muted")}>
+                {g === "Semua" ? "Semua" : `Grade ${g}`}
+                {g !== "Semua" && <span className="ml-1 text-[9px] opacity-70">({gradeDistribution[g as keyof typeof gradeDistribution]})</span>}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+          <button onClick={() => { setSortOrder("best"); setPage(1); }}
+            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+              sortOrder === "best" ? "bg-card text-success shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+            <TrendingUp className="w-3.5 h-3.5" />Terbaik
+          </button>
+          <button onClick={() => { setSortOrder("worst"); setPage(1); }}
+            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+              sortOrder === "worst" ? "bg-card text-danger shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+            <TrendingDown className="w-3.5 h-3.5" />Terendah
+          </button>
+        </div>
       </div>
 
       {/* Table */}
