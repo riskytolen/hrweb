@@ -99,7 +99,10 @@ export default function PerformancePage() {
   const permLevel = getPermissionLevel("performance");
 
   const [loading, setLoading] = useState(true);
+  const [dateMode, setDateMode] = useState<"periode" | "custom">("periode");
   const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [search, setSearch] = useState("");
   const [filterGrade, setFilterGrade] = useState("Semua");
   const [page, setPage] = useState(1);
@@ -107,7 +110,7 @@ export default function PerformancePage() {
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [performanceData, setPerformanceData] = useState<PerformanceRow[]>([]);
 
-  const period = getPeriodRange(periodKey);
+  const period = dateMode === "periode" ? getPeriodRange(periodKey) : { start: customStart, end: customEnd, label: customStart && customEnd ? `${customStart} – ${customEnd}` : "Pilih tanggal" };
 
   // Fetch
   const fetchData = useCallback(async () => {
@@ -200,7 +203,10 @@ export default function PerformancePage() {
     setLoading(false);
   }, [period.start, period.end]);
 
-  useEffect(() => { fetchData(); }, [periodKey]);
+  useEffect(() => {
+    if (dateMode === "periode") { fetchData(); }
+    else if (customStart && customEnd) { fetchData(); }
+  }, [periodKey, dateMode, customStart, customEnd]);
 
   // Filter
   const filtered = performanceData.filter((r) => {
@@ -228,9 +234,33 @@ export default function PerformancePage() {
       />
 
       {/* Period Navigator */}
-      <div className="bg-card rounded-2xl border border-border p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+      <div className="bg-card rounded-2xl border border-border p-4 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          {/* Mode toggle */}
+          <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+            <button onClick={() => { setDateMode("periode"); setPage(1); }}
+              className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                dateMode === "periode" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              Periode
+            </button>
+            <button onClick={() => { setDateMode("custom"); setPage(1); }}
+              className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                dateMode === "custom" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              Custom
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-56">
+            <Search className="w-3.5 h-3.5 text-muted-foreground" />
+            <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+          </div>
+        </div>
+
+        {/* Periode mode */}
+        {dateMode === "periode" && (
+          <div className="flex items-center gap-2 justify-center">
             <button onClick={() => {
               const [y, m] = periodKey.split("-").map(Number);
               const prev = new Date(y, m - 2, 1);
@@ -239,7 +269,7 @@ export default function PerformancePage() {
             }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronLeft className="w-4 h-4" /></button>
             <div className="text-center min-w-[240px]">
               <p className="text-sm font-bold text-foreground">{period.label}</p>
-              <p className="text-[10px] text-muted-foreground">Periode Penilaian</p>
+              <p className="text-[10px] text-muted-foreground">Periode Penilaian (tgl 8 - tgl 7)</p>
             </div>
             <button onClick={() => {
               const [y, m] = periodKey.split("-").map(Number);
@@ -248,12 +278,28 @@ export default function PerformancePage() {
               setPage(1);
             }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronRight className="w-4 h-4" /></button>
           </div>
-          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-56">
-            <Search className="w-3.5 h-3.5 text-muted-foreground" />
-            <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+        )}
+
+        {/* Custom mode */}
+        {dateMode === "custom" && (
+          <div className="flex items-center gap-3 justify-center flex-wrap">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground">Dari:</label>
+              <input type="date" value={customStart} onChange={(e) => { setCustomStart(e.target.value); setPage(1); }}
+                className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 text-foreground" />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground">Sampai:</label>
+              <input type="date" value={customEnd} onChange={(e) => { setCustomEnd(e.target.value); setPage(1); }}
+                className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 text-foreground" />
+            </div>
+            {customStart && customEnd && (
+              <p className="text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-lg">
+                {Math.floor((new Date(customEnd).getTime() - new Date(customStart).getTime()) / 86400000) + 1} hari
+              </p>
+            )}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Summary Cards */}
