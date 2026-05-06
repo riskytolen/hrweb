@@ -337,3 +337,29 @@ export interface DbUserProfile {
   // joined
   roles?: DbRole;
 }
+
+export interface DbLegalDocument {
+  id: number;
+  employee_id: string;
+  kategori: "PKWT" | "SP";
+  nomor_kontrak: string | null;
+  kontrak_ke: number | null;
+  tingkat_sp: "SP-1" | "SP-2" | "SP-3" | null;
+  pelanggaran: string | null;
+  tanggal_terbit: string;
+  tanggal_berakhir: string | null;
+  catatan: string | null;
+  lampiran_url: string | null;
+  status: "Aktif" | "Segera Berakhir" | "Berakhir";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbLegalSetting {
+  id: number;
+  kode: string;
+  label: string;
+  masa_berlaku_bulan: number;
+  keterangan: string | null;
+  updated_at: string;
+}
