@@ -22,7 +22,7 @@ import RouteGuard from "@/components/RouteGuard";
 type EmployeeLite = { id: string; nama: string; tanggal_bergabung?: string };
 type DivisionLite = { id: number };
 type LeaveRow = DbLeaveRequest & { employeeNama?: string };
-type LeaveSetting = { kuota_cuti_tahunan: number; prorata: boolean };
+type LeaveSetting = { kuota_cuti_tahunan: number; maks_hari_per_pengajuan: number; prorata: boolean };
 
 const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -107,7 +107,7 @@ export default function LeavePage() {
     if (data) setEmployees(data);
   };
   const fetchLeaveSetting = async () => {
-    const { data } = await supabase.from("leave_settings").select("kuota_cuti_tahunan, prorata").order("id", { ascending: false }).limit(1).single();
+    const { data } = await supabase.from("leave_settings").select("kuota_cuti_tahunan, maks_hari_per_pengajuan, prorata").order("id", { ascending: false }).limit(1).single();
     if (data) setLeaveSetting(data);
   };
   const fetchDivisions = async () => {
@@ -213,13 +213,21 @@ export default function LeavePage() {
       if (form.tanggal_selesai < form.tanggal_mulai) { setFormError("Tanggal selesai harus >= tanggal mulai."); return; }
     }
 
-    // Validasi kuota cuti (hanya untuk jenis Cuti, saat tambah baru)
-    if (form.jenis === "Cuti" && !editingId && leaveSetting) {
+    // Validasi kuota cuti (hanya untuk jenis Cuti)
+    if (form.jenis === "Cuti" && leaveSetting) {
       const hariDiajukan = countDays(effectiveMulai, effectiveSelesai);
-      const sisaCuti = getSisaCuti(form.employee_id);
-      if (hariDiajukan > sisaCuti) {
-        setFormError(`Kuota cuti tidak mencukupi. Sisa cuti: ${sisaCuti} hari, diajukan: ${hariDiajukan} hari.`);
+      // Validasi maks hari per pengajuan
+      if (hariDiajukan > leaveSetting.maks_hari_per_pengajuan) {
+        setFormError(`Maksimal ${leaveSetting.maks_hari_per_pengajuan} hari per pengajuan. Anda mengajukan ${hariDiajukan} hari.`);
         return;
+      }
+      // Validasi sisa kuota (hanya saat tambah baru)
+      if (!editingId) {
+        const sisaCuti = getSisaCuti(form.employee_id);
+        if (hariDiajukan > sisaCuti) {
+          setFormError(`Kuota cuti tidak mencukupi. Sisa cuti: ${sisaCuti} hari, diajukan: ${hariDiajukan} hari.`);
+          return;
+        }
       }
     }
 
@@ -630,11 +638,12 @@ export default function LeavePage() {
                 {/* Info kuota cuti */}
                 {form.jenis === "Cuti" && form.employee_id && leaveSetting && (
                   <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-primary/[0.06] border border-primary/20">
-                    <CalendarDays className="w-4 h-4 text-primary" />
-                    <div className="flex items-center gap-3 text-xs">
+                    <CalendarDays className="w-4 h-4 text-primary flex-shrink-0" />
+                    <div className="flex items-center gap-3 text-xs flex-wrap">
                       <span className="text-muted-foreground">Kuota: <span className="font-bold text-foreground">{getKuotaCuti(form.employee_id)} hari</span></span>
                       <span className="text-muted-foreground">Terpakai: <span className="font-bold text-foreground">{getCutiTerpakai(form.employee_id)} hari</span></span>
                       <span className="text-muted-foreground">Sisa: <span className={cn("font-bold", getSisaCuti(form.employee_id) > 0 ? "text-success" : "text-danger")}>{getSisaCuti(form.employee_id)} hari</span></span>
+                      <span className="text-muted-foreground">Maks: <span className="font-bold text-warning">{leaveSetting.maks_hari_per_pengajuan} hari/pengajuan</span></span>
                     </div>
                   </div>
                 )}
