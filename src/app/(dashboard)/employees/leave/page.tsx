@@ -487,6 +487,11 @@ export default function LeavePage() {
                     </td>
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{row.status}</span>
+                      {row.catatan_approval && (
+                        <p className="text-[10px] text-muted-foreground mt-1 max-w-[120px] mx-auto truncate" title={row.catatan_approval}>
+                          &ldquo;{row.catatan_approval}&rdquo;
+                        </p>
+                      )}
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-center gap-1">
@@ -694,9 +699,14 @@ export default function LeavePage() {
                   </p>
                 )}
                 <div className="mt-3">
-                  <input type="text" placeholder="Catatan (opsional)" value={approvalNote}
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5 text-left">
+                    {approvalConfirm.action === "approve" ? "Catatan Persetujuan" : "Alasan Penolakan"}
+                  </label>
+                  <textarea rows={2}
+                    placeholder={approvalConfirm.action === "approve" ? "Catatan persetujuan (opsional)..." : "Tuliskan alasan penolakan..."}
+                    value={approvalNote}
                     onChange={(e) => setApprovalNote(e.target.value)}
-                    className={cn(inputClass, "text-center text-xs")} />
+                    className={cn(inputClass, "text-xs resize-none")} />
                 </div>
               </div>
               <div className="flex items-center gap-3 px-6 pb-6">
