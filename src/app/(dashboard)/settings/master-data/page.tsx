@@ -28,7 +28,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
-import { cn, generateDivisionColor } from "@/lib/utils";
+import { cn, generateDivisionColor, toTitleCase, toUpperTrim } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -251,12 +251,13 @@ export default function MasterDataPage() {
   };
   const handleSaveLevel = async () => {
     if (!levelForm.nama.trim()) return;
+    const cleanNama = toTitleCase(levelForm.nama.trim());
     if (editingLevelId !== null) {
-      await supabase.from("levels").update({ nama: levelForm.nama, urutan: levelForm.urutan, status: levelForm.status }).eq("id", editingLevelId);
-      showSuccess("Level Diperbarui", `Data level "${levelForm.nama}" telah disimpan.`);
+      await supabase.from("levels").update({ nama: cleanNama, urutan: levelForm.urutan, status: levelForm.status }).eq("id", editingLevelId);
+      showSuccess("Level Diperbarui", `Data level "${cleanNama}" telah disimpan.`);
     } else {
-      await supabase.from("levels").insert({ nama: levelForm.nama, urutan: levelForm.urutan, status: levelForm.status });
-      showSuccess("Level Ditambahkan", `Level "${levelForm.nama}" berhasil ditambahkan ke sistem.`);
+      await supabase.from("levels").insert({ nama: cleanNama, urutan: levelForm.urutan, status: levelForm.status });
+      showSuccess("Level Ditambahkan", `Level "${cleanNama}" berhasil ditambahkan ke sistem.`);
     }
     setShowLevelForm(false);
     fetchLevels();
@@ -294,12 +295,13 @@ export default function MasterDataPage() {
   };
   const handleSaveJabatan = async () => {
     if (!jabatanForm.nama.trim() || !jabatanForm.level_id) return;
+    const cleanNama = toTitleCase(jabatanForm.nama.trim());
     if (editingJabatanId !== null) {
-      await supabase.from("jabatan").update({ nama: jabatanForm.nama, deskripsi: jabatanForm.deskripsi || null, level_id: jabatanForm.level_id, status: jabatanForm.status }).eq("id", editingJabatanId);
-      showSuccess("Jabatan Diperbarui", `Data jabatan "${jabatanForm.nama}" telah disimpan.`);
+      await supabase.from("jabatan").update({ nama: cleanNama, deskripsi: jabatanForm.deskripsi || null, level_id: jabatanForm.level_id, status: jabatanForm.status }).eq("id", editingJabatanId);
+      showSuccess("Jabatan Diperbarui", `Data jabatan "${cleanNama}" telah disimpan.`);
     } else {
-      await supabase.from("jabatan").insert({ nama: jabatanForm.nama, deskripsi: jabatanForm.deskripsi || null, level_id: jabatanForm.level_id, status: jabatanForm.status });
-      showSuccess("Jabatan Ditambahkan", `Jabatan "${jabatanForm.nama}" berhasil ditambahkan ke sistem.`);
+      await supabase.from("jabatan").insert({ nama: cleanNama, deskripsi: jabatanForm.deskripsi || null, level_id: jabatanForm.level_id, status: jabatanForm.status });
+      showSuccess("Jabatan Ditambahkan", `Jabatan "${cleanNama}" berhasil ditambahkan ke sistem.`);
     }
     setShowJabatanForm(false);
     fetchJabatan();
@@ -336,12 +338,13 @@ export default function MasterDataPage() {
   };
   const handleSaveDivision = async () => {
     if (!divisionForm.nama.trim()) return;
+    const cleanNama = toTitleCase(divisionForm.nama.trim());
     if (editingDivisionId !== null) {
-      await supabase.from("divisions").update({ nama: divisionForm.nama, deskripsi: divisionForm.deskripsi || null, color: divisionForm.color, status: divisionForm.status }).eq("id", editingDivisionId);
-      showSuccess("Divisi Diperbarui", `Data divisi "${divisionForm.nama}" telah disimpan.`);
+      await supabase.from("divisions").update({ nama: cleanNama, deskripsi: divisionForm.deskripsi || null, color: divisionForm.color, status: divisionForm.status }).eq("id", editingDivisionId);
+      showSuccess("Divisi Diperbarui", `Data divisi "${cleanNama}" telah disimpan.`);
     } else {
-      await supabase.from("divisions").insert({ nama: divisionForm.nama, deskripsi: divisionForm.deskripsi || null, color: divisionForm.color, status: divisionForm.status });
-      showSuccess("Divisi Ditambahkan", `Divisi "${divisionForm.nama}" berhasil ditambahkan ke sistem.`);
+      await supabase.from("divisions").insert({ nama: cleanNama, deskripsi: divisionForm.deskripsi || null, color: divisionForm.color, status: divisionForm.status });
+      showSuccess("Divisi Ditambahkan", `Divisi "${cleanNama}" berhasil ditambahkan ke sistem.`);
     }
     setShowDivisionForm(false);
     fetchDivisions();
@@ -382,7 +385,8 @@ export default function MasterDataPage() {
   };
   const handleSaveLocation = async () => {
     if (!locationForm.nama.trim() || !locationForm.latitude || !locationForm.longitude) return;
-    const locPayload = { nama: locationForm.nama, latitude: parseFloat(locationForm.latitude), longitude: parseFloat(locationForm.longitude), radius: parseInt(locationForm.radius) || 100, status: locationForm.status };
+    const cleanNama = toTitleCase(locationForm.nama.trim());
+    const locPayload = { nama: cleanNama, latitude: parseFloat(locationForm.latitude), longitude: parseFloat(locationForm.longitude), radius: parseInt(locationForm.radius) || 100, status: locationForm.status };
 
     let locationId = editingLocationId;
     if (editingLocationId !== null) {
@@ -593,13 +597,14 @@ export default function MasterDataPage() {
   };
   const handleSaveDStatus = async () => {
     if (!dStatusForm.nama.trim() || !dStatusForm.kode.trim()) return;
-    const payload = { nama: dStatusForm.nama, kode: dStatusForm.kode.toUpperCase(), color: dStatusForm.color, status: dStatusForm.status };
+    const cleanNama = toTitleCase(dStatusForm.nama.trim());
+    const payload = { nama: cleanNama, kode: dStatusForm.kode.toUpperCase(), color: dStatusForm.color, status: dStatusForm.status };
     if (editingDStatusId !== null) {
       await supabase.from("delivery_statuses").update(payload).eq("id", editingDStatusId);
-      showSuccess("Status Diperbarui", `Status "${dStatusForm.nama}" telah disimpan.`);
+      showSuccess("Status Diperbarui", `Status "${cleanNama}" telah disimpan.`);
     } else {
       await supabase.from("delivery_statuses").insert(payload);
-      showSuccess("Status Ditambahkan", `Status "${dStatusForm.nama}" berhasil ditambahkan.`);
+      showSuccess("Status Ditambahkan", `Status "${cleanNama}" berhasil ditambahkan.`);
     }
     setShowDStatusForm(false);
     fetchDStatuses();
@@ -634,12 +639,13 @@ export default function MasterDataPage() {
   };
   const handleSaveBank = async () => {
     if (!bankForm.nama.trim()) return;
+    const cleanNama = toUpperTrim(bankForm.nama.trim());
     if (editingBankId !== null) {
-      await supabase.from("banks").update({ nama: bankForm.nama, kode: bankForm.kode || null, status: bankForm.status }).eq("id", editingBankId);
-      showSuccess("Bank Diperbarui", `Data bank "${bankForm.nama}" telah disimpan.`);
+      await supabase.from("banks").update({ nama: cleanNama, kode: bankForm.kode || null, status: bankForm.status }).eq("id", editingBankId);
+      showSuccess("Bank Diperbarui", `Data bank "${cleanNama}" telah disimpan.`);
     } else {
-      await supabase.from("banks").insert({ nama: bankForm.nama, kode: bankForm.kode || null, status: bankForm.status });
-      showSuccess("Bank Ditambahkan", `Bank "${bankForm.nama}" berhasil ditambahkan ke sistem.`);
+      await supabase.from("banks").insert({ nama: cleanNama, kode: bankForm.kode || null, status: bankForm.status });
+      showSuccess("Bank Ditambahkan", `Bank "${cleanNama}" berhasil ditambahkan ke sistem.`);
     }
     setShowBankForm(false);
     fetchBanks();
