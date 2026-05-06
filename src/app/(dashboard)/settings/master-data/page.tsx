@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Scale,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -33,7 +34,7 @@ import Portal from "@/components/ui/Portal";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbAttendancePenaltyRate } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbAttendancePenaltyRate, type DbLegalSetting } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -60,6 +61,7 @@ const tabs = [
   { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
   { key: "status-titik", label: "Status Titik", icon: Tag },
   { key: "bank", label: "Bank", icon: Landmark },
+  { key: "legal", label: "Legal", icon: Scale },
 ] as const;
 
 type TabKey = (typeof tabs)[number]["key"];
@@ -139,6 +141,18 @@ export default function MasterDataPage() {
   const [editingDStatusId, setEditingDStatusId] = useState<number | null>(null);
   const [dStatusForm, setDStatusForm] = useState({ nama: "", kode: "", color: "#6b7280", status: "Aktif" });
 
+  // ─── Legal Settings State ───
+  const [legalSettings, setLegalSettings] = useState<DbLegalSetting[]>([]);
+  const [editingLegalSettingId, setEditingLegalSettingId] = useState<number | null>(null);
+  const [legalSettingForm, setLegalSettingForm] = useState({ masa_berlaku_bulan: "", keterangan: "" });
+  const [showLegalSettingForm, setShowLegalSettingForm] = useState(false);
+  // Company settings
+  type CompanySetting = { id: number; kode: string; nilai: string; label: string; kategori: string };
+  const [companySettings, setCompanySettings] = useState<CompanySetting[]>([]);
+  const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
+  const [companyForm, setCompanyForm] = useState({ nilai: "" });
+  const [showCompanyForm, setShowCompanyForm] = useState(false);
+
   // ─── Delete Confirm Dialog ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
 
@@ -213,12 +227,12 @@ export default function MasterDataPage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates(), fetchDStatuses(), fetchPenalties()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm || showDStatusForm || showPenaltyForm) {
+    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -674,6 +688,54 @@ export default function MasterDataPage() {
     fetchBanks();
   };
 
+  // ─── Masa Berlaku Legal Handlers ───
+  const fetchLegalSettings = async () => {
+    const { data } = await supabase.from("legal_settings").select("*").order("id");
+    if (data) setLegalSettings(data);
+  };
+
+  const handleOpenEditLegalSetting = (s: DbLegalSetting) => {
+    setLegalSettingForm({ masa_berlaku_bulan: String(s.masa_berlaku_bulan), keterangan: s.keterangan || "" });
+    setEditingLegalSettingId(s.id);
+    setShowLegalSettingForm(true);
+  };
+
+  const handleSaveLegalSetting = async () => {
+    if (!editingLegalSettingId) return;
+    const bulan = parseInt(legalSettingForm.masa_berlaku_bulan) || 1;
+    await supabase.from("legal_settings").update({
+      masa_berlaku_bulan: bulan,
+      keterangan: legalSettingForm.keterangan.trim() || null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", editingLegalSettingId);
+    showSuccess("Pengaturan Diperbarui", `Masa berlaku berhasil diubah menjadi ${bulan} bulan.`);
+    setShowLegalSettingForm(false);
+    fetchLegalSettings();
+  };
+
+  // ─── Company Settings Handlers ───
+  const fetchCompanySettings = async () => {
+    const { data } = await supabase.from("company_settings").select("*").order("id");
+    if (data) setCompanySettings(data);
+  };
+
+  const handleOpenEditCompany = (s: CompanySetting) => {
+    setCompanyForm({ nilai: s.nilai });
+    setEditingCompanyId(s.id);
+    setShowCompanyForm(true);
+  };
+
+  const handleSaveCompany = async () => {
+    if (!editingCompanyId) return;
+    await supabase.from("company_settings").update({
+      nilai: companyForm.nilai.trim(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", editingCompanyId);
+    showSuccess("Pengaturan Diperbarui", "Data perusahaan berhasil disimpan.");
+    setShowCompanyForm(false);
+    fetchCompanySettings();
+  };
+
   return (
     <RouteGuard permission="settings">
     <div className="space-y-6 animate-fade-in">
@@ -717,7 +779,7 @@ export default function MasterDataPage() {
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.key;
                 const Icon = tab.icon;
-                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : bankList.length;
+                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
                 return (
                   <button
                     key={tab.key}
@@ -1286,7 +1348,172 @@ export default function MasterDataPage() {
             <Pagination currentPage={masterPage} totalItems={filteredBanks.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
+
+        {/* ═══ TAB: LEGAL ═══ */}
+        {activeTab === "legal" && (
+          <>
+            {/* Section: Masa Berlaku */}
+            <div className="px-5 py-3 border-b border-border">
+              <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Masa Berlaku Dokumen</h3>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Pengaturan ini digunakan saat membuat dokumen baru di menu Legal & Administrasi.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Jenis Dokumen</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-40">Masa Berlaku</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Keterangan</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <SkeletonTable rows={4} cols={5} />
+                  ) : legalSettings.map((s, idx) => (
+                    <tr key={s.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-5 py-3.5">
+                        <p className="text-sm font-semibold text-foreground">{s.label}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">{s.kode}</p>
+                      </td>
+                      <td className="px-5 py-3.5 text-center">
+                        <span className="text-sm font-bold text-primary bg-primary/10 px-3 py-1 rounded-lg">{s.masa_berlaku_bulan} bulan</span>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{s.keterangan || "-"}</td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-center">
+                          {canEdit && <button onClick={() => handleOpenEditLegalSetting(s)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Section: Info Perusahaan */}
+            <div className="px-5 py-3 border-b border-t border-border mt-2">
+              <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Info Perusahaan & Penandatangan</h3>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Data ini digunakan untuk generate surat PKWT dan SP.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-48">Pengaturan</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nilai</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <SkeletonTable rows={8} cols={4} />
+                  ) : companySettings.map((s, idx) => (
+                    <tr key={s.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-5 py-3.5">
+                        <p className="text-sm font-semibold text-foreground">{s.label}</p>
+                      </td>
+                      <td className="px-5 py-3.5 text-sm text-foreground">{s.nilai || <span className="italic text-muted-foreground">Belum diisi</span>}</td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-center">
+                          {canEdit && <button onClick={() => handleOpenEditCompany(s)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
+
+      {/* ═══ COMPANY SETTINGS FORM MODAL ═══ */}
+      {showCompanyForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowCompanyForm(false)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Pencil className="w-4 h-4 text-primary" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">Edit {companySettings.find((s) => s.id === editingCompanyId)?.label || ""}</h2>
+              </div>
+              <button onClick={() => setShowCompanyForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">{companySettings.find((s) => s.id === editingCompanyId)?.label || "Nilai"}</label>
+                {(companySettings.find((s) => s.id === editingCompanyId)?.kode === "alamat") ? (
+                  <textarea rows={3} value={companyForm.nilai}
+                    onChange={(e) => setCompanyForm({ nilai: e.target.value })}
+                    className={cn(inputClass, "resize-none")} placeholder="Isi nilai..." />
+                ) : (
+                  <input type="text" value={companyForm.nilai}
+                    onChange={(e) => setCompanyForm({ nilai: e.target.value })}
+                    className={inputClass} placeholder="Isi nilai..." autoFocus />
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
+              <Button variant="outline" size="sm" onClick={() => setShowCompanyForm(false)}>Batal</Button>
+              <Button size="sm" icon={Check} onClick={handleSaveCompany}>Simpan</Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {/* ═══ MASA BERLAKU FORM MODAL ═══ */}
+      {showLegalSettingForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLegalSettingForm(false)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Scale className="w-4 h-4 text-primary" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">Edit Masa Berlaku</h2>
+              </div>
+              <button onClick={() => setShowLegalSettingForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Jenis Dokumen</label>
+                <div className="px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-foreground">
+                  {legalSettings.find((s) => s.id === editingLegalSettingId)?.label || "-"}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Masa Berlaku (bulan) <span className="text-danger">*</span></label>
+                <input type="number" min={1} max={60} value={legalSettingForm.masa_berlaku_bulan}
+                  onChange={(e) => setLegalSettingForm({ ...legalSettingForm, masa_berlaku_bulan: e.target.value })}
+                  className={inputClass} placeholder="12" />
+                <p className="text-[10px] text-muted-foreground mt-1">Contoh: 12 = 1 tahun, 6 = 6 bulan</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Keterangan</label>
+                <input type="text" value={legalSettingForm.keterangan}
+                  onChange={(e) => setLegalSettingForm({ ...legalSettingForm, keterangan: e.target.value })}
+                  className={inputClass} placeholder="Keterangan opsional" />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
+              <Button variant="outline" size="sm" onClick={() => setShowLegalSettingForm(false)}>Batal</Button>
+              <Button size="sm" icon={Check} onClick={handleSaveLegalSetting}>Simpan</Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
 
       {/* ═══ LEVEL FORM MODAL ═══ */}
       {showLevelForm && (
