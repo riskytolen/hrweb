@@ -122,7 +122,7 @@ export default function MasterDataPage() {
   const [penaltySearch, setPenaltySearch] = useState("");
   const [showPenaltyForm, setShowPenaltyForm] = useState(false);
   const [editingPenaltyId, setEditingPenaltyId] = useState<number | null>(null);
-  const [penaltyForm, setPenaltyForm] = useState({ division_id: 0, denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", denda_alpha: "100000", status: "Aktif" });
+  const [penaltyForm, setPenaltyForm] = useState<{ division_ids: number[]; denda_per_menit: string; batas_menit: string; denda_maksimum: string; denda_alpha: string; status: string }>({ division_ids: [], denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", denda_alpha: "100000", status: "Aktif" });
 
   // ─── Harga Titik State ───
   type RateRow = { division_id: number; divisionNama: string; driverRate: number | null; driverRateId: number | null; helperRate: number | null; helperRateId: number | null };
@@ -483,35 +483,45 @@ export default function MasterDataPage() {
   const divisionsWithoutPenalty = activeDivisions.filter((d) => !penaltyList.some((p) => p.division_id === d.id));
 
   const handleOpenAddPenalty = () => {
-    setPenaltyForm({ division_id: divisionsWithoutPenalty[0]?.id || 0, denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", denda_alpha: "100000", status: "Aktif" });
+    setPenaltyForm({ division_ids: divisionsWithoutPenalty.length > 0 ? [divisionsWithoutPenalty[0].id] : [], denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", denda_alpha: "100000", status: "Aktif" });
     setEditingPenaltyId(null);
     setShowPenaltyForm(true);
   };
 
   const handleOpenEditPenalty = (p: PenaltyRate) => {
-    setPenaltyForm({ division_id: p.division_id, denda_per_menit: String(p.denda_per_menit), batas_menit: String(p.batas_menit), denda_maksimum: String(p.denda_maksimum), denda_alpha: String(p.denda_alpha), status: p.status });
+    setPenaltyForm({ division_ids: [p.division_id], denda_per_menit: String(p.denda_per_menit), batas_menit: String(p.batas_menit), denda_maksimum: String(p.denda_maksimum), denda_alpha: String(p.denda_alpha), status: p.status });
     setEditingPenaltyId(p.id);
     setShowPenaltyForm(true);
   };
 
   const handleSavePenalty = async () => {
-    if (!penaltyForm.division_id) return;
-    const payload = {
-      division_id: penaltyForm.division_id,
-      denda_per_menit: parseInt(penaltyForm.denda_per_menit) || 3000,
-      batas_menit: parseInt(penaltyForm.batas_menit) || 20,
-      denda_maksimum: parseInt(penaltyForm.denda_maksimum) || 60000,
-      denda_alpha: parseInt(penaltyForm.denda_alpha) || 100000,
-      status: penaltyForm.status,
-    };
+    if (penaltyForm.division_ids.length === 0) return;
+    
     if (editingPenaltyId) {
+      const payload = {
+        division_id: penaltyForm.division_ids[0],
+        denda_per_menit: parseInt(penaltyForm.denda_per_menit) || 3000,
+        batas_menit: parseInt(penaltyForm.batas_menit) || 20,
+        denda_maksimum: parseInt(penaltyForm.denda_maksimum) || 60000,
+        denda_alpha: parseInt(penaltyForm.denda_alpha) || 100000,
+        status: penaltyForm.status,
+      };
       await supabase.from("attendance_penalty_rates").update(payload).eq("id", editingPenaltyId);
+      showSuccess("Denda Diperbarui", "Data denda telat telah disimpan.");
     } else {
-      await supabase.from("attendance_penalty_rates").insert(payload);
+      const payloads = penaltyForm.division_ids.map(divId => ({
+        division_id: divId,
+        denda_per_menit: parseInt(penaltyForm.denda_per_menit) || 3000,
+        batas_menit: parseInt(penaltyForm.batas_menit) || 20,
+        denda_maksimum: parseInt(penaltyForm.denda_maksimum) || 60000,
+        denda_alpha: parseInt(penaltyForm.denda_alpha) || 100000,
+        status: penaltyForm.status,
+      }));
+      await supabase.from("attendance_penalty_rates").insert(payloads);
+      showSuccess("Denda Ditambahkan", `Denda telat untuk ${penaltyForm.division_ids.length} divisi telah ditambahkan.`);
     }
     setShowPenaltyForm(false);
     fetchPenalties();
-    setToast({ show: true, title: editingPenaltyId ? "Denda Diperbarui" : "Denda Ditambahkan", message: "" });
   };
 
   const handleDeletePenalty = async (id: number) => {
@@ -1807,21 +1817,49 @@ export default function MasterDataPage() {
               <button onClick={() => setShowPenaltyForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4 flex-1 overflow-y-auto">
-              <div>
-                <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi</label>
-                {editingPenaltyId ? (
-                  <div className="px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-foreground">
-                    {penaltyList.find((p) => p.id === editingPenaltyId)?.divisionNama || "-"}
-                  </div>
-                ) : (
-                  <Select
-                    value={String(penaltyForm.division_id || "")}
-                    onChange={(val) => setPenaltyForm({ ...penaltyForm, division_id: parseInt(val) || 0 })}
-                    options={divisionsWithoutPenalty.map((d) => ({ value: String(d.id), label: d.nama }))}
-                    placeholder="Pilih divisi"
-                  />
-                )}
-              </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi</label>
+                  {editingPenaltyId ? (
+                    <div className="px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-foreground">
+                      {penaltyList.find((p) => p.id === editingPenaltyId)?.divisionNama || "-"}
+                    </div>
+                  ) : (
+                    <div className="border border-border rounded-xl bg-card overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b border-border">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" 
+                            checked={penaltyForm.division_ids.length === divisionsWithoutPenalty.length && divisionsWithoutPenalty.length > 0}
+                            onChange={(e) => {
+                              if (e.target.checked) setPenaltyForm({ ...penaltyForm, division_ids: divisionsWithoutPenalty.map(d => d.id) });
+                              else setPenaltyForm({ ...penaltyForm, division_ids: [] });
+                            }}
+                            className="rounded border-border text-primary focus:ring-primary"
+                          />
+                          <span className="text-xs font-semibold text-foreground">Pilih Semua ({divisionsWithoutPenalty.length})</span>
+                        </label>
+                      </div>
+                      <div className="max-h-40 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {divisionsWithoutPenalty.map(d => (
+                          <label key={d.id} className={cn("flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-colors", 
+                            penaltyForm.division_ids.includes(d.id) ? "border-primary bg-primary/[0.05]" : "border-transparent hover:bg-muted/50"
+                          )}>
+                            <input type="checkbox"
+                              checked={penaltyForm.division_ids.includes(d.id)}
+                              onChange={(e) => {
+                                const newIds = e.target.checked 
+                                  ? [...penaltyForm.division_ids, d.id]
+                                  : penaltyForm.division_ids.filter(id => id !== d.id);
+                                setPenaltyForm({ ...penaltyForm, division_ids: newIds });
+                              }}
+                              className="rounded border-border text-primary focus:ring-primary"
+                            />
+                            <span className="text-xs text-foreground truncate">{d.nama}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               <div>
                 <label className="text-xs font-semibold text-foreground mb-1.5 block">Denda Per Menit</label>
                 <div className="relative">
@@ -1880,8 +1918,8 @@ export default function MasterDataPage() {
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30 flex-shrink-0">
               <Button variant="outline" size="sm" onClick={() => setShowPenaltyForm(false)}>Batal</Button>
-              <Button size="sm" icon={editingPenaltyId ? Check : Plus} onClick={handleSavePenalty} disabled={!penaltyForm.division_id && !editingPenaltyId}>
-                {editingPenaltyId ? "Simpan" : "Tambah"}
+              <Button size="sm" icon={editingPenaltyId ? Check : Plus} onClick={handleSavePenalty} disabled={penaltyForm.division_ids.length === 0 && !editingPenaltyId}>
+                {editingPenaltyId ? "Simpan" : `Tambah (${penaltyForm.division_ids.length})`}
               </Button>
             </div>
           </div>
