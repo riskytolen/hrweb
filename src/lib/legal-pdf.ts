@@ -65,6 +65,7 @@ export function generateNomorSP(tingkatSp: string, nomorUrut: number, tanggalTer
 
 /**
  * Generate PDF Surat PKWT (Perjanjian Kerja Waktu Tertentu)
+ * Design profesional dengan layout rapi
  */
 export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo) {
   const { default: jsPDF } = await import("jspdf");
@@ -74,20 +75,41 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
   const pageHeight = pdf.internal.pageSize.getHeight();
   const margin = 20;
   const contentWidth = pageWidth - margin * 2;
-  let y = 20;
+  let y = 15;
 
-  // ═══ KOP SURAT (logo komplit di tengah) ═══
+  // Helper: add footer on each page
+  const addFooter = () => {
+    const fy = pageHeight - 12;
+    pdf.setFontSize(7);
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(130);
+    pdf.setDrawColor(41, 128, 185);
+    pdf.setLineWidth(0.4);
+    pdf.line(margin, fy - 4, pageWidth - margin, fy - 4);
+    const footerLines = pdf.splitTextToSize(company.alamat, contentWidth);
+    pdf.text(footerLines[0] || "", margin, fy);
+    pdf.text(`Hp : ${company.no_telp} | Email : ${company.email}`, margin, fy + 3.5);
+  };
+
+  // Helper: check page break
+  const checkPage = (needed: number) => {
+    if (y > pageHeight - needed) {
+      addFooter();
+      pdf.addPage();
+      y = 20;
+    }
+  };
+
+  // ═══ KOP SURAT (logo di tengah) ═══
   try {
     const logoImg = new Image();
     logoImg.src = "/jamslogistics.png";
     await new Promise((resolve, reject) => { logoImg.onload = resolve; logoImg.onerror = reject; });
-    // Logo sudah berisi nama perusahaan + CV, tampilkan proporsional di tengah
     const logoW = 70;
     const logoH = 25;
     pdf.addImage(logoImg, "PNG", (pageWidth - logoW) / 2, y, logoW, logoH);
     y += logoH + 4;
   } catch {
-    // Fallback text jika logo gagal
     pdf.setFontSize(16);
     pdf.setFont("helvetica", "bold");
     pdf.setTextColor(41, 128, 185);
@@ -99,6 +121,7 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
     y += 22;
   }
 
+  // Garis header
   pdf.setDrawColor(41, 128, 185);
   pdf.setLineWidth(1);
   pdf.line(margin, y, pageWidth - margin, y);
@@ -106,107 +129,174 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
   pdf.line(margin, y + 1.5, pageWidth - margin, y + 1.5);
 
   // ═══ JUDUL ═══
-  y += 14;
+  y += 12;
   pdf.setTextColor(0);
-  pdf.setFontSize(14);
+  pdf.setFontSize(13);
   pdf.setFont("helvetica", "bold");
-  pdf.text("PERJANJIAN KERJA WAKTU TERTENTU", pageWidth / 2, y, { align: "center" });
+  pdf.text("PERJANJIAN KERJA WAKTU TERTENTU (PKWT)", pageWidth / 2, y, { align: "center" });
   y += 6;
   pdf.setFontSize(10);
   pdf.setFont("helvetica", "normal");
-  pdf.text(`No: ${doc.nomor_kontrak || "-"}`, pageWidth / 2, y, { align: "center" });
+  pdf.text(`Nomor : ${doc.nomor_kontrak || "-"}`, pageWidth / 2, y, { align: "center" });
 
-  // ═══ ISI ═══
-  y += 12;
+  // ═══ PEMBUKAAN ═══
+  y += 10;
   pdf.setFontSize(10);
 
   const addParagraph = (text: string, indent = 0) => {
     const lines = pdf.splitTextToSize(text, contentWidth - indent);
     for (const line of lines) {
-      if (y > pageHeight - 30) { pdf.addPage(); y = 20; }
+      checkPage(25);
       pdf.text(line, margin + indent, y);
-      y += 5;
+      y += 4.8;
     }
     y += 2;
   };
 
-  addParagraph(`Yang bertanda tangan di bawah ini, pada hari ini tanggal ${formatTanggalShort(doc.tanggal_terbit)}, telah sepakat untuk mengadakan Perjanjian Kerja Waktu Tertentu dengan ketentuan sebagai berikut:`);
+  const addSectionTitle = (title: string) => {
+    checkPage(20);
+    y += 4;
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10);
+    pdf.text(title, margin, y);
+    y += 6;
+    pdf.setFont("helvetica", "normal");
+  };
 
+  addParagraph(`Pada hari ini, tanggal ${formatTanggalShort(doc.tanggal_terbit)}, yang bertanda tangan di bawah ini :`);
+
+  // ═══ PIHAK PERTAMA ═══
   y += 3;
   pdf.setFont("helvetica", "bold");
-  pdf.text("PIHAK PERTAMA (Perusahaan):", margin, y); y += 6;
+  pdf.text("PIHAK PERTAMA", margin, y); y += 5.5;
   pdf.setFont("helvetica", "normal");
-  addParagraph(`Nama : ${company.nama_badan_hukum}`, 5);
-  addParagraph(`Alamat : ${company.alamat}`, 5);
 
-  y += 3;
+  const labelW = 30;
+  pdf.text("Nama", margin + 5, y);
+  pdf.text(`: ${company.nama_badan_hukum}`, margin + labelW, y); y += 5;
+  pdf.text("Alamat", margin + 5, y);
+  const alamatLines = pdf.splitTextToSize(`: ${company.alamat}`, contentWidth - labelW - 5);
+  for (const line of alamatLines) { pdf.text(line, margin + labelW, y); y += 4.5; }
+  y += 1;
+  pdf.text("Jabatan", margin + 5, y);
+  pdf.text(`: ${company.penandatangan_jabatan}`, margin + labelW, y); y += 5;
+
+  pdf.text("Dalam hal ini bertindak untuk dan atas nama perusahaan, selanjutnya disebut", margin + 5, y); y += 5;
   pdf.setFont("helvetica", "bold");
-  pdf.text("PIHAK KEDUA (Pekerja):", margin, y); y += 6;
-  pdf.setFont("helvetica", "normal");
-  addParagraph(`Nama : ${employee.nama}`, 5);
-  if (employee.no_ktp) addParagraph(`No. KTP : ${employee.no_ktp}`, 5);
-  if (employee.alamat) addParagraph(`Alamat : ${employee.alamat}`, 5);
-  if (employee.jabatan) addParagraph(`Jabatan : ${employee.jabatan}`, 5);
+  pdf.text("PIHAK PERTAMA.", margin + 5, y); y += 3;
 
+  // ═══ PIHAK KEDUA ═══
   y += 5;
   pdf.setFont("helvetica", "bold");
-  pdf.text("Pasal 1 - Jangka Waktu", margin, y); y += 6;
+  pdf.text("PIHAK KEDUA", margin, y); y += 5.5;
   pdf.setFont("helvetica", "normal");
-  addParagraph(`Perjanjian kerja ini berlaku sejak tanggal ${formatTanggalShort(doc.tanggal_terbit)} sampai dengan tanggal ${formatTanggalShort(doc.tanggal_berakhir || doc.tanggal_terbit)}.`);
-  addParagraph(`Kontrak ini merupakan kontrak ke-${doc.kontrak_ke || 1}.`);
 
-  y += 3;
+  pdf.text("Nama", margin + 5, y);
+  pdf.text(`: ${employee.nama}`, margin + labelW, y); y += 5;
+  if (employee.id) {
+    pdf.text("ID Pegawai", margin + 5, y);
+    pdf.text(`: ${employee.id}`, margin + labelW, y); y += 5;
+  }
+  if (employee.no_ktp) {
+    pdf.text("No. KTP", margin + 5, y);
+    pdf.text(`: ${employee.no_ktp}`, margin + labelW, y); y += 5;
+  }
+  if (employee.jabatan) {
+    pdf.text("Jabatan", margin + 5, y);
+    pdf.text(`: ${employee.jabatan}`, margin + labelW, y); y += 5;
+  }
+  if (employee.alamat) {
+    pdf.text("Alamat", margin + 5, y);
+    const empAlamatLines = pdf.splitTextToSize(`: ${employee.alamat}`, contentWidth - labelW - 5);
+    for (const line of empAlamatLines) { pdf.text(line, margin + labelW, y); y += 4.5; }
+    y += 1;
+  }
+
+  pdf.text("Selanjutnya disebut ", margin + 5, y);
   pdf.setFont("helvetica", "bold");
-  pdf.text("Pasal 2 - Tugas dan Tanggung Jawab", margin, y); y += 6;
+  pdf.text("PIHAK KEDUA.", margin + 42, y);
   pdf.setFont("helvetica", "normal");
-  addParagraph(`PIHAK KEDUA bersedia melaksanakan tugas dan tanggung jawab sesuai dengan jabatan${employee.jabatan ? ` sebagai ${employee.jabatan}` : ""} yang diberikan oleh PIHAK PERTAMA.`);
+  y += 7;
 
-  y += 3;
-  pdf.setFont("helvetica", "bold");
-  pdf.text("Pasal 3 - Hak dan Kewajiban", margin, y); y += 6;
-  pdf.setFont("helvetica", "normal");
-  addParagraph("1. PIHAK KEDUA berhak menerima upah/gaji sesuai ketentuan perusahaan.");
-  addParagraph("2. PIHAK KEDUA wajib mematuhi seluruh peraturan perusahaan.");
-  addParagraph("3. PIHAK KEDUA wajib menjaga kerahasiaan informasi perusahaan.");
+  addParagraph("Kedua belah pihak sepakat untuk mengikatkan diri dalam Perjanjian Kerja Waktu Tertentu (PKWT) dengan ketentuan dan syarat-syarat sebagai berikut :");
 
+  // ═══ PASAL 1 ═══
+  addSectionTitle("Pasal 1 – Jangka Waktu Perjanjian");
+  addParagraph(`1. Perjanjian kerja ini berlaku untuk jangka waktu tertentu, terhitung mulai tanggal ${formatTanggalShort(doc.tanggal_terbit)} sampai dengan tanggal ${formatTanggalShort(doc.tanggal_berakhir || doc.tanggal_terbit)}.`);
+  addParagraph(`2. Perjanjian ini merupakan kontrak ke-${doc.kontrak_ke || 1} (${["satu", "dua", "tiga", "empat", "lima"][((doc.kontrak_ke || 1) - 1)] || doc.kontrak_ke}).`);
+  addParagraph("3. Apabila jangka waktu perjanjian ini berakhir dan tidak diperpanjang, maka hubungan kerja antara kedua belah pihak berakhir dengan sendirinya.");
+
+  // ═══ PASAL 2 ═══
+  addSectionTitle("Pasal 2 – Tugas dan Tanggung Jawab");
+  addParagraph(`1. PIHAK KEDUA ditempatkan pada jabatan ${employee.jabatan || "-"} dan bersedia melaksanakan tugas serta tanggung jawab yang diberikan oleh PIHAK PERTAMA.`);
+  addParagraph("2. PIHAK KEDUA bersedia ditempatkan di lokasi kerja yang ditentukan oleh PIHAK PERTAMA.");
+  addParagraph("3. PIHAK KEDUA wajib melaksanakan pekerjaan dengan penuh tanggung jawab dan dedikasi.");
+
+  // ═══ PASAL 3 ═══
+  addSectionTitle("Pasal 3 – Hak dan Kewajiban");
+  addParagraph("1. PIHAK KEDUA berhak menerima upah/gaji sesuai dengan ketentuan yang berlaku di perusahaan.");
+  addParagraph("2. PIHAK KEDUA berhak mendapatkan perlindungan keselamatan dan kesehatan kerja.");
+  addParagraph("3. PIHAK KEDUA wajib mematuhi seluruh peraturan perusahaan dan tata tertib yang berlaku.");
+  addParagraph("4. PIHAK KEDUA wajib menjaga kerahasiaan seluruh informasi perusahaan.");
+
+  // ═══ PASAL 4 ═══
+  addSectionTitle("Pasal 4 – Berakhirnya Perjanjian");
+  addParagraph("Perjanjian kerja ini berakhir apabila :");
+  addParagraph("a. Jangka waktu perjanjian telah berakhir.", 5);
+  addParagraph("b. Adanya pelanggaran berat oleh salah satu pihak.", 5);
+  addParagraph("c. Pekerja meninggal dunia.", 5);
+  addParagraph("d. Adanya putusan pengadilan yang berkekuatan hukum tetap.", 5);
+  addParagraph("e. Adanya keadaan memaksa (force majeure).", 5);
+
+  // ═══ CATATAN ═══
   if (doc.catatan) {
-    y += 3;
-    pdf.setFont("helvetica", "bold");
-    pdf.text("Catatan:", margin, y); y += 6;
-    pdf.setFont("helvetica", "normal");
+    addSectionTitle("Catatan Tambahan");
     addParagraph(doc.catatan);
   }
 
+  // ═══ PENUTUP ═══
+  checkPage(70);
+  y += 5;
+  addParagraph("Demikian Perjanjian Kerja Waktu Tertentu ini dibuat dan ditandatangani oleh kedua belah pihak dalam keadaan sadar tanpa adanya paksaan dari pihak manapun, dibuat dalam rangkap 2 (dua) yang masing-masing mempunyai kekuatan hukum yang sama.");
+
   // ═══ TANDA TANGAN ═══
-  if (y > pageHeight - 60) { pdf.addPage(); y = 20; }
-  y += 10;
-  addParagraph(`Demikian perjanjian ini dibuat dalam rangkap 2 (dua) yang masing-masing mempunyai kekuatan hukum yang sama.`);
-  y += 3;
+  checkPage(55);
+  y += 6;
+  pdf.setFontSize(10);
   pdf.text(`${company.kota_surat}, ${formatTanggalShort(doc.tanggal_terbit)}`, pageWidth - margin, y, { align: "right" });
 
   y += 10;
-  const colLeft = margin + 25;
-  const colRight = pageWidth - margin - 35;
+  const colLeft = margin + 30;
+  const colRight = pageWidth - margin - 30;
 
   pdf.setFont("helvetica", "bold");
-  pdf.text(company.penandatangan_jabatan, colLeft, y, { align: "center" });
-  pdf.text("Karyawan", colRight, y, { align: "center" });
+  pdf.text("PIHAK PERTAMA", colLeft, y, { align: "center" });
+  pdf.text("PIHAK KEDUA", colRight, y, { align: "center" });
 
   y += 25;
   pdf.setFont("helvetica", "normal");
   pdf.text(`(${company.penandatangan_nama || "________________"})`, colLeft, y, { align: "center" });
   pdf.text(`(${employee.nama})`, colRight, y, { align: "center" });
+  y += 4;
+  pdf.setFontSize(8);
+  pdf.setTextColor(100);
+  pdf.text(company.penandatangan_jabatan, colLeft, y, { align: "center" });
+  if (employee.jabatan) pdf.text(employee.jabatan, colRight, y, { align: "center" });
+
+  // Mengetahui
+  pdf.setTextColor(0);
+  pdf.setFontSize(10);
+  y += 10;
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Mengetahui,", pageWidth / 2, y, { align: "center" });
+  y += 5;
+  pdf.setFont("helvetica", "normal");
+  pdf.text(company.mengetahui_jabatan, pageWidth / 2, y, { align: "center" });
+  y += 22;
+  pdf.text(`(${company.mengetahui_nama || "________________"})`, pageWidth / 2, y, { align: "center" });
 
   // ═══ FOOTER ═══
-  const footerY = pageHeight - 15;
-  pdf.setFontSize(7);
-  pdf.setTextColor(100);
-  pdf.setDrawColor(41, 128, 185);
-  pdf.setLineWidth(0.5);
-  pdf.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
-  pdf.text(company.nama_perusahaan, margin, footerY);
-  pdf.text(company.alamat, margin, footerY + 3.5);
-  pdf.text(`Hp: ${company.no_telp} | Email: ${company.email}`, margin, footerY + 7);
+  addFooter();
 
   pdf.save(`PKWT_${employee.nama.replace(/\s+/g, "_")}_${doc.tanggal_terbit}.pdf`);
 }

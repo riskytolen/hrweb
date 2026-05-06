@@ -86,6 +86,10 @@ export default function LegalPage() {
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
+  // PDF Loading
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState("");
+
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -264,26 +268,43 @@ export default function LegalPage() {
 
   // Download PDF
   const handleDownloadPDF = async (row: LegalRow) => {
-    // Fetch data pegawai lengkap dengan jabatan via join
-    const { data: emp } = await supabase
-      .from("pegawai")
-      .select("id, nama, no_ktp, alamat_domisili, jabatan_id, jabatan:jabatan_id(nama)")
-      .eq("id", row.employee_id)
-      .single();
-    const employeeInfo = {
-      id: emp?.id || row.employee_id,
-      nama: emp?.nama || row.employeeNama || "-",
-      no_ktp: emp?.no_ktp || undefined,
-      alamat: emp?.alamat_domisili || undefined,
-      jabatan: (emp?.jabatan as any)?.nama || undefined,
-    };
+    setPdfLoading(true);
+    setPdfProgress("Mengambil data pegawai...");
 
-    if (row.kategori === "PKWT") {
-      await generatePKWT(row, employeeInfo);
-    } else {
-      await generateSP(row, employeeInfo);
+    try {
+      // Fetch data pegawai lengkap dengan jabatan via join
+      const { data: emp } = await supabase
+        .from("pegawai")
+        .select("id, nama, no_ktp, alamat_domisili, jabatan_id, jabatan:jabatan_id(nama)")
+        .eq("id", row.employee_id)
+        .single();
+      const employeeInfo = {
+        id: emp?.id || row.employee_id,
+        nama: emp?.nama || row.employeeNama || "-",
+        no_ktp: emp?.no_ktp || undefined,
+        alamat: emp?.alamat_domisili || undefined,
+        jabatan: (emp?.jabatan as any)?.nama || undefined,
+      };
+
+      setPdfProgress("Menyiapkan dokumen...");
+      await new Promise(r => setTimeout(r, 300));
+
+      setPdfProgress("Membuat PDF...");
+      if (row.kategori === "PKWT") {
+        await generatePKWT(row, employeeInfo);
+      } else {
+        await generateSP(row, employeeInfo);
+      }
+
+      setPdfProgress("Selesai!");
+      await new Promise(r => setTimeout(r, 500));
+      showToast("success", "PDF Berhasil Dibuat", `File ${row.kategori === "SP" ? row.tingkat_sp : "PKWT"} telah diunduh.`);
+    } catch (err) {
+      showToast("error", "Gagal Membuat PDF", err instanceof Error ? err.message : "Terjadi kesalahan.");
+    } finally {
+      setPdfLoading(false);
+      setPdfProgress("");
     }
-    showToast("success", "PDF Berhasil Dibuat", `File ${row.kategori === "SP" ? row.tingkat_sp : "PKWT"} telah diunduh.`);
   };
 
   // Delete
@@ -642,6 +663,42 @@ export default function LegalPage() {
                 <Button size="sm" icon={editingId ? Check : Plus} onClick={handleSave} disabled={formSaving}>
                   {formSaving ? "Menyimpan..." : editingId ? "Simpan" : "Tambah"}
                 </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ PDF LOADING OVERLAY ═══ */}
+      {pdfLoading && (
+        <Portal>
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+            <div className="relative bg-card rounded-2xl shadow-2xl p-8 w-full max-w-xs animate-scale-in">
+              <div className="flex flex-col items-center text-center">
+                {/* Animated icon */}
+                <div className="relative w-16 h-16 mb-5">
+                  <div className="absolute inset-0 rounded-2xl bg-primary/10 animate-pulse" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <FileText className="w-7 h-7 text-primary" />
+                  </div>
+                  <svg className="absolute inset-0 w-16 h-16 -rotate-90" viewBox="0 0 64 64">
+                    <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="3" className="text-border" />
+                    <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="3" className="text-primary" strokeDasharray="176" strokeDashoffset="44" strokeLinecap="round">
+                      <animateTransform attributeName="transform" type="rotate" from="0 32 32" to="360 32 32" dur="1.2s" repeatCount="indefinite" />
+                    </circle>
+                  </svg>
+                </div>
+
+                <h3 className="text-sm font-bold text-foreground mb-1">Membuat Dokumen PDF</h3>
+                <p className="text-xs text-muted-foreground mb-4">{pdfProgress}</p>
+
+                {/* Progress dots */}
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
               </div>
             </div>
           </div>
