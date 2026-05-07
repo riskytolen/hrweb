@@ -103,6 +103,7 @@ export default function AttendancePage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Semua");
+  const [filterDivision, setFilterDivision] = useState("Semua");
   const [dateFilter, setDateFilter] = useState(() => localDateStr());
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
@@ -313,7 +314,8 @@ export default function AttendancePage() {
     const q = search.toLowerCase();
     const matchSearch = (r.employeeNama || "").toLowerCase().includes(q) || (r.divisionNama || "").toLowerCase().includes(q);
     const matchStatus = filterStatus === "Semua" || r.status === filterStatus;
-    return matchSearch && matchStatus;
+    const matchDivision = filterDivision === "Semua" || (r.divisionNama || "-") === filterDivision;
+    return matchSearch && matchStatus && matchDivision;
   });
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -721,6 +723,24 @@ export default function AttendancePage() {
             </>
           )}
         </div>
+        {/* Row 3: Divisi filter */}
+        {!loading && divisions.length > 0 && (
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <span className="text-[10px] text-muted-foreground font-semibold uppercase">Divisi:</span>
+            {["Semua", ...divisions.map(d => d.nama)].map((divName) => {
+              const isActive = filterDivision === divName;
+              const div = divisions.find(d => d.nama === divName);
+              return (
+                <button key={divName} onClick={() => { setFilterDivision(divName); setPage(1); }}
+                  className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all",
+                    isActive ? "bg-primary/10 text-primary ring-1 ring-primary/20" : "text-muted-foreground hover:bg-muted")}>
+                  {div && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: div.color }} />}
+                  <span>{divName}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Table */}
