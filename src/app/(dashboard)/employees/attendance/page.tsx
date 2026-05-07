@@ -224,11 +224,81 @@ export default function AttendancePage() {
     }
   }, [dateFilter, showToast]);
 
+  // Auto-generate record "Libur" untuk pegawai yang libur di tanggal ini
+  const autoGenerateLibur = useCallback(async () => {
+    if (!dateFilter || employees.length === 0) return;
+
+    // Hari apa tanggal ini (0=Minggu, 6=Sabtu)
+    const [y, m, d] = dateFilter.split("-").map(Number);
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+
+    // Fetch off days & overrides
+    const { data: allOffDays } = await supabase.from("employee_off_days").select("employee_id, day_of_week");
+    const { data: dayOverrides } = await supabase.from("employee_leave_overrides").select("employee_id, type").eq("tanggal", dateFilter);
+
+    const offDayMap = new Map<string, Set<number>>();
+    allOffDays?.forEach((od) => {
+      if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
+      offDayMap.get(od.employee_id)!.add(od.day_of_week);
+    });
+
+    const overrideMap = new Map<string, string>();
+    dayOverrides?.forEach((ov) => overrideMap.set(ov.employee_id, ov.type));
+
+    // Fetch existing records untuk tanggal ini
+    const { data: existingRecs } = await supabase.from("attendance_records").select("employee_id").eq("tanggal", dateFilter);
+    const existingSet = new Set(existingRecs?.map((r) => r.employee_id) || []);
+
+    // Cek setiap pegawai
+    const liburInserts: { employee_id: string; division_id: null; tanggal: string; jam_masuk: string; schedule_jam_masuk: string; toleransi_menit: number; status: string; durasi_telat: number; denda: number; catatan: string }[] = [];
+
+    for (const emp of employees) {
+      if (existingSet.has(emp.id)) continue; // sudah ada record
+
+      const override = overrideMap.get(emp.id);
+      const empOffDays = offDayMap.get(emp.id);
+
+      // Tentukan apakah libur
+      const isLibur = override === "libur" || (!override && empOffDays?.has(dow));
+      const isMasukOverride = override === "masuk";
+
+      if (isLibur && !isMasukOverride) {
+        liburInserts.push({
+          employee_id: emp.id,
+          division_id: null,
+          tanggal: dateFilter,
+          jam_masuk: "00:00",
+          schedule_jam_masuk: "00:00",
+          toleransi_menit: 0,
+          status: "Libur",
+          durasi_telat: 0,
+          denda: 0,
+          catatan: "Hari libur",
+        });
+      }
+    }
+
+    if (liburInserts.length > 0) {
+      await supabase.from("attendance_records").insert(liburInserts);
+      await fetchRecords(); // refresh data
+    }
+  }, [dateFilter, employees, fetchRecords]);
+
   useEffect(() => {
     Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchOffDays(), fetchOverrides(), fetchRecords()]).then(() => setLoading(false));
   }, []);
 
-  useEffect(() => { fetchRecords(); }, [dateFilter, fetchRecords]);
+  // Saat dateFilter berubah: fetch records lalu auto-generate libur
+  useEffect(() => {
+    fetchRecords().then(() => {
+      if (employees.length > 0) autoGenerateLibur();
+    });
+  }, [dateFilter]);
+
+  // Setelah employees loaded pertama kali, generate libur
+  useEffect(() => {
+    if (!loading && employees.length > 0) autoGenerateLibur();
+  }, [loading]);
 
   // ─── Summary ───
   const statusCounts: Record<string, number> = { Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpha: 0, Libur: 0, Cuti: 0 };
@@ -305,6 +375,19 @@ export default function AttendancePage() {
     if (!form.tanggal) { setFormError("Pilih tanggal terlebih dahulu."); return; }
     if (!isSpecial && !form.jam_masuk) { setFormError("Isi jam masuk atau pilih status Alpha."); return; }
     if (!form.alasan_manual) { setFormError("Pilih alasan input manual."); return; }
+
+    // Cek apakah pegawai libur di tanggal ini
+    if (!editingId && form.employee_id && form.tanggal) {
+      const [fy, fm, fd] = form.tanggal.split("-").map(Number);
+      const formDow = new Date(Date.UTC(fy, fm - 1, fd)).getUTCDay();
+      const empOff = offDays.filter(od => od.employee_id === form.employee_id);
+      const empOverride = overrides.find(ov => ov.employee_id === form.employee_id && ov.tanggal === form.tanggal);
+      const isLibur = empOverride?.type === "libur" || (!empOverride && empOff.some(od => od.day_of_week === formDow));
+      if (isLibur) {
+        setFormError("Pegawai ini libur di tanggal tersebut. Tidak perlu input absen.");
+        return;
+      }
+    }
 
     // Cek duplikat sebelum insert (hanya mode tambah)
     if (!editingId) {
