@@ -22,6 +22,7 @@ import {
   UsersRound,
   Shield,
   UserCog,
+  Megaphone,
   type LucideIcon,
 } from "lucide-react";
 
@@ -63,6 +64,7 @@ const allMenuGroups: MenuGroup[] = [
       { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, comingSoon: true, permission: "payroll" },
       { name: "Kinerja", href: "/employees/performance", icon: Award, permission: "performance" },
       { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, permission: "legal" },
+      { name: "Pengumuman", href: "/employees/announcements", icon: Megaphone, permission: "employees" },
       { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus, permission: "recruitment" },
     ],
   },
