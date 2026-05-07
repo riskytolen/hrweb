@@ -279,7 +279,10 @@ export default function AttendancePage() {
     }
 
     if (liburInserts.length > 0) {
-      await supabase.from("attendance_records").insert(liburInserts);
+      await supabase.from("attendance_records").upsert(liburInserts, {
+        onConflict: "employee_id,tanggal",
+        ignoreDuplicates: true,
+      });
       await fetchRecords(); // refresh data
     }
   }, [dateFilter, employees, fetchRecords]);

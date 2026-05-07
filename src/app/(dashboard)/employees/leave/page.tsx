@@ -368,7 +368,10 @@ export default function LeavePage() {
                 catatan: `${req.jenis}: ${req.alasan || "-"}`,
               }).eq("id", existRec.id);
             } else {
-              await supabase.from("attendance_records").insert(attPayload);
+              await supabase.from("attendance_records").upsert(attPayload, {
+                onConflict: "employee_id,tanggal",
+                ignoreDuplicates: false,
+              });
             }
           }
         }
