@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Megaphone, Plus, Search, Pencil, Trash2, X, Check, Pin, PinOff,
-  AlertTriangle, CircleCheckBig, Clock, Eye, Users, Building2,
+  AlertTriangle, CircleCheckBig, Clock, Eye, Users, Briefcase,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -17,7 +17,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
-type DivisionLite = { id: number; nama: string };
+type JabatanLite = { id: number; nama: string };
 type Announcement = {
   id: number; judul: string; konten: string; kategori: string;
   target: string; target_ids: string[] | null;
@@ -37,7 +37,7 @@ const KATEGORI_OPTIONS = [
 
 const TARGET_OPTIONS = [
   { value: "Semua", label: "Semua Pegawai" },
-  { value: "Divisi", label: "Divisi Tertentu" },
+  { value: "Jabatan", label: "Jabatan Tertentu" },
 ];
 
 const STATUS_OPTIONS = [
@@ -68,7 +68,7 @@ export default function AnnouncementsPage() {
   const [filterStatus, setFilterStatus] = useState("Semua");
 
   const [list, setList] = useState<Announcement[]>([]);
-  const [divisions, setDivisions] = useState<DivisionLite[]>([]);
+  const [jabatanList, setJabatanList] = useState<JabatanLite[]>([]);
 
   // Form
   const [showForm, setShowForm] = useState(false);
@@ -116,13 +116,13 @@ export default function AnnouncementsPage() {
     if (data) setList(data);
   }, [showToast]);
 
-  const fetchDivisions = async () => {
-    const { data } = await supabase.from("divisions").select("id, nama").eq("status", "Aktif").order("nama");
-    if (data) setDivisions(data);
+  const fetchJabatan = async () => {
+    const { data } = await supabase.from("jabatan").select("id, nama").eq("status", "Aktif").order("nama");
+    if (data) setJabatanList(data);
   };
 
   useEffect(() => {
-    Promise.all([fetchList(), fetchDivisions()]).then(() => setLoading(false));
+    Promise.all([fetchList(), fetchJabatan()]).then(() => setLoading(false));
   }, []);
 
   // Summary
@@ -167,7 +167,7 @@ export default function AnnouncementsPage() {
     if (!form.judul.trim()) { setFormError("Judul wajib diisi."); return; }
     if (!form.konten.trim()) { setFormError("Konten wajib diisi."); return; }
     if (!form.tanggal_mulai) { setFormError("Pilih tanggal mulai."); return; }
-    if (form.target === "Divisi" && form.target_ids.length === 0) { setFormError("Pilih minimal 1 divisi."); return; }
+    if (form.target === "Jabatan" && form.target_ids.length === 0) { setFormError("Pilih minimal 1 jabatan."); return; }
 
     setFormSaving(true);
     const payload = {
@@ -227,8 +227,8 @@ export default function AnnouncementsPage() {
   // Helper: get target label
   const getTargetLabel = (row: Announcement): string => {
     if (row.target === "Semua") return "Semua Pegawai";
-    if (row.target === "Divisi" && row.target_ids) {
-      const names = row.target_ids.map(id => divisions.find(d => d.id === Number(id))?.nama || id).join(", ");
+    if (row.target === "Jabatan" && row.target_ids) {
+      const names = row.target_ids.map(id => jabatanList.find(j => j.id === Number(id))?.nama || id).join(", ");
       return names;
     }
     return row.target;
@@ -349,7 +349,7 @@ export default function AnnouncementsPage() {
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{row.status}</span>
                       {expired && <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-danger/10 text-danger">Berakhir</span>}
                       <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                        {row.target === "Semua" ? <Users className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                        {row.target === "Semua" ? <Users className="w-3 h-3" /> : <Briefcase className="w-3 h-3" />}
                         {getTargetLabel(row)}
                       </span>
                     </div>
@@ -391,7 +391,7 @@ export default function AnnouncementsPage() {
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: `${kc?.color}20`, color: kc?.color }}>{viewDetail.kategori}</span>
                   ); })()}
                   <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                    {viewDetail.target === "Semua" ? <Users className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+                    {viewDetail.target === "Semua" ? <Users className="w-3 h-3" /> : <Briefcase className="w-3 h-3" />}
                     {getTargetLabel(viewDetail)}
                   </span>
                 </div>
@@ -487,14 +487,14 @@ export default function AnnouncementsPage() {
                       );
                     })}
                   </div>
-                  {form.target === "Divisi" && (
+                  {form.target === "Jabatan" && (
                     <div className="border border-border rounded-xl bg-card overflow-hidden">
                       <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b border-border">
                         <label className="flex items-center gap-2 cursor-pointer">
                           <input type="checkbox"
-                            checked={form.target_ids.length === divisions.length && divisions.length > 0}
+                            checked={form.target_ids.length === jabatanList.length && jabatanList.length > 0}
                             onChange={(e) => {
-                              if (e.target.checked) setForm({ ...form, target_ids: divisions.map(d => d.id) });
+                              if (e.target.checked) setForm({ ...form, target_ids: jabatanList.map(j => j.id) });
                               else setForm({ ...form, target_ids: [] });
                             }}
                             className="rounded border-border text-primary focus:ring-primary" />
@@ -502,18 +502,18 @@ export default function AnnouncementsPage() {
                         </label>
                       </div>
                       <div className="max-h-32 overflow-y-auto p-2 grid grid-cols-2 gap-1.5">
-                        {divisions.map(d => (
-                          <label key={d.id} className={cn("flex items-center gap-2 p-1.5 rounded-lg cursor-pointer border transition-colors",
-                            form.target_ids.includes(d.id) ? "border-primary bg-primary/[0.05]" : "border-transparent hover:bg-muted/50"
+                        {jabatanList.map(j => (
+                          <label key={j.id} className={cn("flex items-center gap-2 p-1.5 rounded-lg cursor-pointer border transition-colors",
+                            form.target_ids.includes(j.id) ? "border-primary bg-primary/[0.05]" : "border-transparent hover:bg-muted/50"
                           )}>
                             <input type="checkbox"
-                              checked={form.target_ids.includes(d.id)}
+                              checked={form.target_ids.includes(j.id)}
                               onChange={(e) => {
-                                const newIds = e.target.checked ? [...form.target_ids, d.id] : form.target_ids.filter(id => id !== d.id);
+                                const newIds = e.target.checked ? [...form.target_ids, j.id] : form.target_ids.filter(id => id !== j.id);
                                 setForm({ ...form, target_ids: newIds });
                               }}
                               className="rounded border-border text-primary focus:ring-primary" />
-                            <span className="text-[11px] text-foreground truncate">{d.nama}</span>
+                            <span className="text-[11px] text-foreground truncate">{j.nama}</span>
                           </label>
                         ))}
                       </div>
