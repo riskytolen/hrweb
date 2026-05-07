@@ -90,6 +90,12 @@ export default function LegalPage() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfProgress, setPdfProgress] = useState("");
 
+  // Approval
+  const [approvalConfirm, setApprovalConfirm] = useState<{ id: number; nama: string; action: "approve" | "reject" } | null>(null);
+  const [approvalNote, setApprovalNote] = useState("");
+  const [approving, setApproving] = useState(false);
+  const [filterApproval, setFilterApproval] = useState("Semua");
+
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -167,7 +173,8 @@ export default function LegalPage() {
       (r.pelanggaran || "").toLowerCase().includes(q);
     const matchKategori = filterKategori === "Semua" || r.kategori === filterKategori;
     const matchStatus = filterStatus === "Semua" || r.status === filterStatus;
-    return matchSearch && matchKategori && matchStatus;
+    const matchApproval = filterApproval === "Semua" || r.status_approval === filterApproval;
+    return matchSearch && matchKategori && matchStatus && matchApproval;
   });
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -334,6 +341,27 @@ export default function LegalPage() {
     }
   };
 
+  // Approval
+  const handleApproval = async () => {
+    if (!approvalConfirm) return;
+    setApproving(true);
+    const isApprove = approvalConfirm.action === "approve";
+    const { error } = await supabase.from("legal_documents").update({
+      status_approval: isApprove ? "Disetujui" : "Ditolak",
+      catatan_approval: approvalNote || null,
+      approved_at: new Date().toISOString(),
+    }).eq("id", approvalConfirm.id);
+    if (error) {
+      showToast("error", "Gagal", error.message);
+    } else {
+      showToast("success", isApprove ? "Dokumen Disetujui" : "Dokumen Ditolak", approvalConfirm.nama);
+      await fetchList();
+    }
+    setApproving(false);
+    setApprovalConfirm(null);
+    setApprovalNote("");
+  };
+
   // Delete
   const handleDelete = async () => {
     if (!deleteConfirm) return;
@@ -483,6 +511,19 @@ export default function LegalPage() {
               </button>
             );
           })}
+          <div className="h-4 w-px bg-border" />
+          {/* Approval filter */}
+          {[{ label: "Semua", color: "#6b7280" }, { label: "Menunggu", color: "#f59e0b" }, { label: "Disetujui", color: "#10b981" }, { label: "Ditolak", color: "#ef4444" }].map((item) => {
+            const isActive = filterApproval === item.label;
+            return (
+              <button key={`a-${item.label}`} onClick={() => { setFilterApproval(item.label); setPage(1); }}
+                className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all",
+                  isActive ? "bg-primary/10 text-primary ring-1 ring-primary/20" : "text-muted-foreground hover:bg-muted")}>
+                {item.label !== "Semua" && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />}
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -497,13 +538,14 @@ export default function LegalPage() {
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Kategori</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Detail</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Periode</th>
-                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-32">Status</th>
-                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Aksi</th>
+                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Berlaku</th>
+                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Approval</th>
+                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-36">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={5} cols={7} /> : paged.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-10 text-sm text-muted-foreground">Tidak ada dokumen legal</td></tr>
+              {loading ? <SkeletonTable rows={5} cols={8} /> : paged.length === 0 ? (
+                <tr><td colSpan={8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada dokumen legal</td></tr>
               ) : paged.map((row, idx) => {
                 const kc = KATEGORI_OPTIONS.find((k) => k.value === row.kategori);
                 const sc = STATUS_OPTIONS.find((s) => s.value === row.status);
@@ -536,9 +578,32 @@ export default function LegalPage() {
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{row.status}</span>
                     </td>
+                    <td className="px-5 py-3.5 text-center">
+                      {(() => {
+                        const ac = row.status_approval === "Disetujui" ? "#10b981" : row.status_approval === "Ditolak" ? "#ef4444" : "#f59e0b";
+                        return (
+                          <div>
+                            <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${ac}20`, color: ac }}>{row.status_approval}</span>
+                            {row.catatan_approval && (
+                              <p className="text-[9px] text-muted-foreground mt-1 max-w-[100px] mx-auto truncate" title={row.catatan_approval}>&ldquo;{row.catatan_approval}&rdquo;</p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => handleDownloadPDF(row)} title="Download PDF" className="p-1.5 rounded-lg hover:bg-success-light text-muted-foreground hover:text-success"><Download className="w-3.5 h-3.5" /></button>
+                        {canEdit && row.status_approval === "Menunggu" && (
+                          <>
+                            <button onClick={() => setApprovalConfirm({ id: row.id, nama: `${row.employeeNama} (${row.kategori === "SP" ? row.tingkat_sp : "PKWT"})`, action: "approve" })}
+                              title="Setujui" className="p-1.5 rounded-lg hover:bg-success-light text-muted-foreground hover:text-success"><Check className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => setApprovalConfirm({ id: row.id, nama: `${row.employeeNama} (${row.kategori === "SP" ? row.tingkat_sp : "PKWT"})`, action: "reject" })}
+                              title="Tolak" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><X className="w-3.5 h-3.5" /></button>
+                          </>
+                        )}
+                        {row.status_approval === "Disetujui" && (
+                          <button onClick={() => handleDownloadPDF(row)} title="Download PDF" className="p-1.5 rounded-lg hover:bg-success-light text-muted-foreground hover:text-success"><Download className="w-3.5 h-3.5" /></button>
+                        )}
                         {canEdit && (
                           <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
                         )}
@@ -726,6 +791,58 @@ export default function LegalPage() {
                   <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "150ms" }} />
                   <span className="w-2 h-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "300ms" }} />
                 </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ APPROVAL CONFIRM ═══ */}
+      {approvalConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !approving && setApprovalConfirm(null)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="p-6 text-center">
+                <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4",
+                  approvalConfirm.action === "approve" ? "bg-success/10" : "bg-danger/10")}>
+                  {approvalConfirm.action === "approve"
+                    ? <Check className="w-7 h-7 text-success" />
+                    : <X className="w-7 h-7 text-danger" />}
+                </div>
+                <h3 className="text-base font-bold text-foreground">
+                  {approvalConfirm.action === "approve" ? "Setujui Dokumen?" : "Tolak Dokumen?"}
+                </h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  <span className="font-semibold text-foreground">{approvalConfirm.nama}</span>
+                </p>
+                {approvalConfirm.action === "approve" && (
+                  <p className="text-xs text-muted-foreground mt-1 bg-muted/50 rounded-lg px-3 py-2">
+                    Dokumen yang disetujui bisa di-download sebagai PDF
+                  </p>
+                )}
+                <div className="mt-3">
+                  <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5 text-left">
+                    {approvalConfirm.action === "approve" ? "Catatan Persetujuan" : "Alasan Penolakan"}
+                  </label>
+                  <textarea rows={2}
+                    placeholder={approvalConfirm.action === "approve" ? "Catatan persetujuan (opsional)..." : "Tuliskan alasan penolakan..."}
+                    value={approvalNote}
+                    onChange={(e) => setApprovalNote(e.target.value)}
+                    className={cn("w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 text-foreground resize-none")} />
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => { setApprovalConfirm(null); setApprovalNote(""); }} disabled={approving}>Batal</Button>
+                {approvalConfirm.action === "approve" ? (
+                  <Button size="sm" icon={Check} className="flex-1" onClick={handleApproval} disabled={approving}>
+                    {approving ? "Memproses..." : "Setujui"}
+                  </Button>
+                ) : (
+                  <Button variant="danger" size="sm" icon={X} className="flex-1" onClick={handleApproval} disabled={approving}>
+                    {approving ? "Memproses..." : "Tolak"}
+                  </Button>
+                )}
               </div>
             </div>
           </div>

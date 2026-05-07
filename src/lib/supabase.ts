@@ -351,6 +351,10 @@ export interface DbLegalDocument {
   catatan: string | null;
   lampiran_url: string | null;
   status: "Aktif" | "Segera Berakhir" | "Berakhir";
+  status_approval: "Menunggu" | "Disetujui" | "Ditolak";
+  catatan_approval: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
   created_at: string;
   updated_at: string;
 }
