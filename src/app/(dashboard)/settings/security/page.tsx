@@ -427,19 +427,31 @@ export default function SecuritySettingsPage() {
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Pegawai</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Device ID</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Perangkat</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-24">Platform</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-36">Terdaftar</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Status</th>
                     <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {loading ? <SkeletonTable rows={5} cols={6} /> : pagedDevices.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data device ditemukan</td></tr>
+                  {loading ? <SkeletonTable rows={5} cols={8} /> : pagedDevices.length === 0 ? (
+                    <tr><td colSpan={8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data device ditemukan</td></tr>
                   ) : pagedDevices.map((row, idx) => (
                     <tr key={row.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
                       <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p><p className="text-[11px] text-muted-foreground">{row.employee_id}</p></td>
                       <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">{row.device_id}</span></td>
                       <td className="px-5 py-3.5"><span className="text-sm text-foreground">{row.device_name || <span className="text-muted-foreground italic">-</span>}</span></td>
+                      <td className="px-5 py-3.5">
+                        {row.platform ? (
+                          <span className={cn("text-[10px] font-bold px-2 py-1 rounded-md", row.platform.toLowerCase().includes("android") ? "bg-green-500/10 text-green-600" : row.platform.toLowerCase().includes("ios") ? "bg-blue-500/10 text-blue-600" : "bg-muted text-muted-foreground")}>{row.platform}</span>
+                        ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        {row.registered_at ? (
+                          <p className="text-xs text-foreground">{new Date(row.registered_at).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}</p>
+                        ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                      </td>
                       <td className="px-5 py-3.5">
                         <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg", row.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
                           <span className={cn("w-1.5 h-1.5 rounded-full", row.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />{row.status}
