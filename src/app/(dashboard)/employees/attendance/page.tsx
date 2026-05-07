@@ -103,7 +103,7 @@ export default function AttendancePage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Semua");
-  const [filterDivision, setFilterDivision] = useState("Semua");
+
   const [dateFilter, setDateFilter] = useState(() => localDateStr());
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
@@ -314,8 +314,7 @@ export default function AttendancePage() {
     const q = search.toLowerCase();
     const matchSearch = (r.employeeNama || "").toLowerCase().includes(q) || (r.divisionNama || "").toLowerCase().includes(q);
     const matchStatus = filterStatus === "Semua" || r.status === filterStatus;
-    const matchDivision = filterDivision === "Semua" || (r.divisionNama || "-") === filterDivision;
-    return matchSearch && matchStatus && matchDivision;
+    return matchSearch && matchStatus;
   });
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -723,14 +722,7 @@ export default function AttendancePage() {
             </>
           )}
         </div>
-        {/* Row 3: Divisi filter dropdown */}
-        {!loading && divisions.length > 0 && (
-          <div className="mt-2">
-            <Select value={filterDivision} onChange={(val) => { setFilterDivision(val); setPage(1); }}
-              options={[{ value: "Semua", label: "Semua Divisi" }, ...divisions.map(d => ({ value: d.nama, label: d.nama }))]}
-              placeholder="Filter divisi" />
-          </div>
-        )}
+
       </div>
 
       {/* Table */}
