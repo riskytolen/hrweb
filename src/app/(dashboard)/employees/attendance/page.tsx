@@ -4,9 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   ClipboardCheck, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   ChevronLeft, ChevronRight, ChevronUp, Download, FileText, ChevronDown, Clock, User,
-  CalendarOff,
-  ArrowRightLeft,
-  UserCheck,
+  CalendarOff, ArrowRightLeft, UserCheck, LayoutList, CalendarDays,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -100,11 +98,25 @@ export default function AttendancePage() {
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<"tabel" | "kalender">("tabel");
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Semua");
 
   const [dateFilter, setDateFilter] = useState(() => localDateStr());
+
+  // Kalender state (periode 8 bulan ini - 7 bulan berikutnya)
+  const [calPeriodKey, setCalPeriodKey] = useState(() => {
+    const now = new Date();
+    if (now.getDate() < 8) {
+      const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    }
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [calRecords, setCalRecords] = useState<AttendanceRow[]>([]);
+  const [calLoading, setCalLoading] = useState(false);
+  const [calSearch, setCalSearch] = useState("");
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [divisions, setDivisions] = useState<DivisionLite[]>([]);
@@ -287,6 +299,45 @@ export default function AttendancePage() {
       await fetchRecords(); // refresh data
     }
   }, [dateFilter, employees, fetchRecords]);
+
+  // Hitung range periode 8-7 (timezone safe)
+  const getCalPeriod = useCallback((key: string) => {
+    const [y, m] = key.split("-").map(Number);
+    const start = `${y}-${String(m).padStart(2, "0")}-08`;
+    const endDt = new Date(y, m, 7); // 7 bulan berikutnya
+    const end = `${endDt.getFullYear()}-${String(endDt.getMonth() + 1).padStart(2, "0")}-${String(endDt.getDate()).padStart(2, "0")}`;
+    const startLabel = new Date(y, m - 1, 8).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+    const endLabel = endDt.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+    const label = `8 ${startLabel} – 7 ${endLabel}`;
+    return { start, end, label };
+  }, []);
+
+  // Fetch kalender data (periode 8-7)
+  const fetchCalendar = useCallback(async () => {
+    setCalLoading(true);
+    const { start, end } = getCalPeriod(calPeriodKey);
+
+    const { data } = await supabase
+      .from("attendance_records")
+      .select("*, pegawai(nama), divisions(nama, color)")
+      .gte("tanggal", start)
+      .lte("tanggal", end)
+      .order("tanggal", { ascending: true });
+
+    if (data) {
+      setCalRecords(data.map((d) => ({
+        ...d,
+        employeeNama: d.pegawai?.nama || d.employee_id,
+        divisionNama: d.divisions?.nama || "-",
+        divisionColor: d.divisions?.color || "#3b82f6",
+      })) as AttendanceRow[]);
+    }
+    setCalLoading(false);
+  }, [calPeriodKey, getCalPeriod]);
+
+  useEffect(() => {
+    if (viewMode === "kalender") fetchCalendar();
+  }, [calPeriodKey, viewMode]);
 
   useEffect(() => {
     Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchOffDays(), fetchOverrides(), fetchRecords()]).then(() => setLoading(false));
@@ -662,7 +713,21 @@ export default function AttendancePage() {
         </Portal>
       )}
 
-      {/* Compact toolbar: date nav + search + status filter + info badges */}
+      {/* View toggle + toolbar */}
+      <div className="flex items-center gap-1 bg-muted rounded-xl p-1 w-fit">
+        <button onClick={() => setViewMode("tabel")}
+          className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+            viewMode === "tabel" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+          <LayoutList className="w-3.5 h-3.5" />Tabel
+        </button>
+        <button onClick={() => setViewMode("kalender")}
+          className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+            viewMode === "kalender" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+          <CalendarDays className="w-3.5 h-3.5" />Kalender
+        </button>
+      </div>
+
+      {viewMode === "tabel" && (<>
       <div className="bg-card rounded-2xl border border-border p-3">
         {/* Row 1: Date navigator + search + tutup absen */}
         <div className="flex items-center gap-3">
@@ -731,6 +796,7 @@ export default function AttendancePage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-muted/50">
+
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Divisi</th>
@@ -799,6 +865,142 @@ export default function AttendancePage() {
         </div>
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </div>
+      </>)}
+
+      {/* ═══ KALENDER VIEW ═══ */}
+      {viewMode === "kalender" && (() => {
+        const calPeriod = getCalPeriod(calPeriodKey);
+
+        // Generate array tanggal dari 8 bulan ini s/d 7 bulan berikutnya (timezone safe)
+        const calDates: { dateStr: string; day: number; dow: number; monthLabel: string }[] = [];
+        const [sy, sm, sd] = calPeriod.start.split("-").map(Number);
+        const [ey, em, ed] = calPeriod.end.split("-").map(Number);
+        const startMs = Date.UTC(sy, sm - 1, sd);
+        const endMs = Date.UTC(ey, em - 1, ed);
+        for (let ms = startMs; ms <= endMs; ms += 86400000) {
+          const dt = new Date(ms);
+          const dateStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+          calDates.push({
+            dateStr,
+            day: dt.getUTCDate(),
+            dow: dt.getUTCDay(),
+            monthLabel: new Date(dt.getUTCFullYear(), dt.getUTCMonth()).toLocaleDateString("id-ID", { month: "short" }),
+          });
+        }
+
+        // Semua pegawai aktif
+        const calEmps = employees
+          .map(e => ({ id: e.id, nama: e.nama }))
+          .filter(e => !calSearch || e.nama.toLowerCase().includes(calSearch.toLowerCase()));
+
+        // Map: employee_id -> dateStr -> status
+        const calMap = new Map<string, Map<string, { status: string; color: string }>>();
+        calRecords.forEach(r => {
+          if (!calMap.has(r.employee_id)) calMap.set(r.employee_id, new Map());
+          const sc = STATUS_OPTIONS.find(s => s.value === r.status);
+          calMap.get(r.employee_id)!.set(r.tanggal, { status: r.status, color: sc?.color || "#6b7280" });
+        });
+
+        const todayStr = new Date().toISOString().slice(0, 10);
+
+        return (
+          <>
+            {/* Kalender toolbar */}
+            <div className="bg-card rounded-2xl border border-border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <button onClick={() => {
+                    const [py, pm] = calPeriodKey.split("-").map(Number);
+                    const prev = new Date(py, pm - 2, 1);
+                    setCalPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
+                  }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronLeft className="w-4 h-4" /></button>
+                  <div className="text-center min-w-[260px]">
+                    <p className="text-sm font-bold text-foreground">{calPeriod.label}</p>
+                    <p className="text-[10px] text-muted-foreground">Periode tgl 8 - tgl 7</p>
+                  </div>
+                  <button onClick={() => {
+                    const [ny, nm] = calPeriodKey.split("-").map(Number);
+                    const next = new Date(ny, nm, 1);
+                    setCalPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+                  }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronRight className="w-4 h-4" /></button>
+                </div>
+                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-56">
+                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                  <input type="text" placeholder="Cari pegawai..." value={calSearch} onChange={(e) => setCalSearch(e.target.value)}
+                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+                </div>
+              </div>
+              {/* Legend */}
+              <div className="flex items-center gap-3 mt-2.5 flex-wrap">
+                {STATUS_OPTIONS.map(s => (
+                  <div key={s.value} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: s.color }} />
+                    <span>{s.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Kalender grid */}
+            <div className="bg-card rounded-2xl border border-border overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-muted/50">
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 sticky left-0 bg-muted/50 z-10 min-w-[140px] border-r border-border">Pegawai</th>
+                      {calDates.map((d, i) => {
+                        const isWeekend = d.dow === 0 || d.dow === 6;
+                        const isToday = d.dateStr === todayStr;
+                        const showMonth = i === 0 || d.day === 1;
+                        return (
+                          <th key={d.dateStr} className={cn("text-center text-[10px] font-bold uppercase tracking-wider px-1 py-2 min-w-[32px]",
+                            isToday ? "bg-primary/10 text-primary" : isWeekend ? "text-danger/60 bg-danger/[0.03]" : "text-muted-foreground")}>
+                            {showMonth && <div className="text-[7px] font-semibold text-primary">{d.monthLabel}</div>}
+                            <div>{d.day}</div>
+                            <div className="text-[8px] font-normal">{["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][d.dow]}</div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/30">
+                    {calLoading ? (
+                      <tr><td colSpan={calDates.length + 1} className="text-center py-10 text-sm text-muted-foreground">Memuat data...</td></tr>
+                    ) : calEmps.length === 0 ? (
+                      <tr><td colSpan={calDates.length + 1} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data</td></tr>
+                    ) : calEmps.map(emp => {
+                      const empMap = calMap.get(emp.id);
+                      return (
+                        <tr key={emp.id} className="hover:bg-muted/20">
+                          <td className="px-3 py-2 text-xs font-semibold text-foreground sticky left-0 bg-card z-10 border-r border-border truncate max-w-[140px]">{emp.nama}</td>
+                          {calDates.map(d => {
+                            const entry = empMap?.get(d.dateStr);
+                            const isWeekend = d.dow === 0 || d.dow === 6;
+                            const isToday = d.dateStr === todayStr;
+                            return (
+                              <td key={d.dateStr} className={cn("text-center px-0.5 py-1.5", isToday && "bg-primary/[0.04]", isWeekend && !entry && "bg-danger/[0.02]")}>
+                                {entry ? (
+                                  <span className="inline-block w-6 h-6 rounded-md text-[8px] font-bold text-white leading-6"
+                                    style={{ backgroundColor: entry.color }}
+                                    title={`${emp.nama} - ${entry.status} (${d.dateStr})`}>
+                                    {entry.status.charAt(0)}
+                                  </span>
+                                ) : (
+                                  <span className="inline-block w-6 h-6 rounded-md text-[8px] text-muted-foreground/30 leading-6">-</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* ═══ ADD/EDIT FORM MODAL ═══ */}
       {showForm && (
