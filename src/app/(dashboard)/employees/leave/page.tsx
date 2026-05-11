@@ -79,6 +79,8 @@ export default function LeavePage() {
 
   // Catatan detail
   const [catatanDetail, setCatatanDetail] = useState<{ nama: string; status: string; catatan: string } | null>(null);
+  // Alasan detail
+  const [alasanDetail, setAlasanDetail] = useState<{ nama: string; jenis: string; periode: string; alasan: string } | null>(null);
 
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -533,7 +535,24 @@ export default function LeavePage() {
                     <td className="px-5 py-3.5 text-center text-sm font-semibold text-foreground">
                       {days}
                     </td>
-                    <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[200px] truncate">{row.alasan || <span className="italic">-</span>}</td>
+                    <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[200px]">
+                      {row.alasan ? (
+                        <button
+                          onClick={() => setAlasanDetail({
+                            nama: row.employeeNama || "-",
+                            jenis: row.jenis,
+                            periode: row.tanggal_mulai === row.tanggal_selesai
+                              ? formatTanggal(row.tanggal_mulai)
+                              : `${formatTanggal(row.tanggal_mulai)} — ${formatTanggal(row.tanggal_selesai)}`,
+                            alasan: row.alasan || "",
+                          })}
+                          className="text-left truncate block max-w-[200px] hover:text-primary transition-colors cursor-pointer"
+                          title="Klik untuk lihat selengkapnya"
+                        >
+                          {row.alasan}
+                        </button>
+                      ) : <span className="italic">-</span>}
+                    </td>
                     <td className="px-5 py-3.5 text-center">
                       {row.lampiran_url ? (
                         <a href={row.lampiran_url} target="_blank" rel="noopener noreferrer"
@@ -788,6 +807,34 @@ export default function LeavePage() {
                     {approving ? "Memproses..." : "Tolak"}
                   </Button>
                 )}
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ ALASAN DETAIL ═══ */}
+      {alasanDetail && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setAlasanDetail(null)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                      <FileText className="w-4 h-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-foreground">Alasan {alasanDetail.jenis}</p>
+                      <p className="text-[10px] text-muted-foreground">{alasanDetail.nama} — {alasanDetail.periode}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setAlasanDetail(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="bg-muted/30 rounded-xl px-4 py-3 border border-border">
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{alasanDetail.alasan}</p>
+                </div>
               </div>
             </div>
           </div>
