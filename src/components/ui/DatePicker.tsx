@@ -16,6 +16,7 @@ interface DatePickerProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  minDate?: string; // YYYY-MM-DD — tanggal minimum yang bisa dipilih
 }
 
 const MONTHS = [
@@ -32,7 +33,7 @@ function getFirstDayOfMonth(year: number, month: number) {
   return new Date(year, month, 1).getDay();
 }
 
-export default function DatePicker({ value, onChange, placeholder = "Pilih tanggal", className }: DatePickerProps) {
+export default function DatePicker({ value, onChange, placeholder = "Pilih tanggal", className, minDate }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"days" | "months" | "years">("days");
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -129,6 +130,17 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
   const isSelected = (day: number) =>
     parsed?.getDate() === day && parsed?.getMonth() === viewMonth && parsed?.getFullYear() === viewYear;
 
+  // MinDate: check if a day is before the minimum allowed date
+  const isBeforeMin = (day: number) => {
+    if (!minDate) return false;
+    const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return dateStr < minDate;
+  };
+
+  // Check if entire view month is before minDate month
+  const canGoPrevMonth = !minDate || `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}` > minDate.slice(0, 7);
+  const canGoPrevYear = !minDate || viewYear > parseInt(minDate.slice(0, 4));
+
   const displayValue = parsed
     ? `${parsed.getDate()} ${MONTHS[parsed.getMonth()]} ${parsed.getFullYear()}`
     : "";
@@ -168,8 +180,9 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
             <>
               {/* Header */}
               <div className="flex items-center justify-between mb-2">
-                <button type="button" onClick={() => { if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); } else setViewMonth(viewMonth - 1); }}
-                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><ChevronLeft className="w-4 h-4" /></button>
+                <button type="button" onClick={() => { if (canGoPrevMonth) { if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear - 1); } else setViewMonth(viewMonth - 1); } }}
+                  disabled={!canGoPrevMonth}
+                  className={cn("p-1.5 rounded-lg", canGoPrevMonth ? "hover:bg-muted text-muted-foreground" : "opacity-30 cursor-not-allowed text-muted-foreground")}><ChevronLeft className="w-4 h-4" /></button>
                 <button type="button" onClick={() => setViewMode("months")}
                   className="text-sm font-bold text-foreground hover:text-primary px-2 py-1 rounded-lg hover:bg-primary-light/50">
                   {MONTHS[viewMonth]} {viewYear}
@@ -190,26 +203,32 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
                 {Array.from({ length: firstDay }).map((_, i) => (
                   <div key={`empty-${i}`} />
                 ))}
-                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => (
+                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+                  const disabled = isBeforeMin(day);
+                  return (
                   <button
                     key={day}
                     type="button"
-                    onClick={() => selectDate(day)}
+                    disabled={disabled}
+                    onClick={() => !disabled && selectDate(day)}
                     className={cn(
                       "w-full aspect-square rounded-lg text-xs font-medium flex items-center justify-center relative",
-                      isSelected(day)
-                        ? "bg-primary text-white shadow-md shadow-primary/25"
-                        : isToday(day)
-                          ? "bg-primary/10 text-primary font-bold"
-                          : "text-foreground hover:bg-muted"
+                      disabled
+                        ? "text-muted-foreground/25 cursor-not-allowed"
+                        : isSelected(day)
+                          ? "bg-primary text-white shadow-md shadow-primary/25"
+                          : isToday(day)
+                            ? "bg-primary/10 text-primary font-bold"
+                            : "text-foreground hover:bg-muted"
                     )}
                   >
                     {day}
-                    {isToday(day) && !isSelected(day) && (
+                    {isToday(day) && !isSelected(day) && !disabled && (
                       <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary" />
                     )}
                   </button>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Today shortcut */}
@@ -236,8 +255,9 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
           {viewMode === "months" && (
             <>
               <div className="flex items-center justify-between mb-3">
-                <button type="button" onClick={() => setViewYear(viewYear - 1)}
-                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><ChevronLeft className="w-4 h-4" /></button>
+                <button type="button" onClick={() => { if (canGoPrevYear) setViewYear(viewYear - 1); }}
+                  disabled={!canGoPrevYear}
+                  className={cn("p-1.5 rounded-lg", canGoPrevYear ? "hover:bg-muted text-muted-foreground" : "opacity-30 cursor-not-allowed text-muted-foreground")}><ChevronLeft className="w-4 h-4" /></button>
                 <button type="button" onClick={() => { setYearRangeStart(Math.floor(viewYear / 12) * 12); setViewMode("years"); }}
                   className="text-sm font-bold text-foreground hover:text-primary px-2 py-1 rounded-lg hover:bg-primary-light/50">
                   {viewYear}

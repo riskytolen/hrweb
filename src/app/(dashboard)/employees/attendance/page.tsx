@@ -50,6 +50,7 @@ const NO_JAM_STATUSES = ["Izin", "Sakit", "Alpha", "Libur", "Cuti"];
 const MANUAL_SPECIAL = ["Alpha"];
 const DAY_NAMES = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 const DAY_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+const MIN_DATE = "2026-05-08"; // Tanggal mulai sistem HRM
 
 /** Get local date string YYYY-MM-DD (timezone safe) */
 function localDateStr(d?: Date): string {
@@ -61,7 +62,10 @@ function localDateStr(d?: Date): string {
 function addDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const dt = new Date(y, m - 1, d + days);
-  return localDateStr(dt);
+  const result = localDateStr(dt);
+  // Clamp: tidak bisa mundur sebelum MIN_DATE
+  if (result < MIN_DATE) return MIN_DATE;
+  return result;
 }
 
 function timeToMinutes(t: string): number {
@@ -152,6 +156,7 @@ export default function AttendancePage() {
   const [offDaySearch, setOffDaySearch] = useState("");
   const [offDaySaving, setOffDaySaving] = useState(false);
   const [offDayLocal, setOffDayLocal] = useState<Map<string, Set<number>>>(new Map());
+  const [offDayProgress, setOffDayProgress] = useState<{ step: number; total: number; label: string } | null>(null);
   const [offDayTab, setOffDayTab] = useState<"mingguan" | "custom">("mingguan");
   // Custom override form
   const [overrideEmpId, setOverrideEmpId] = useState("");
@@ -238,6 +243,7 @@ export default function AttendancePage() {
   }, [dateFilter, showToast]);
 
   // Auto-generate record "Libur" untuk pegawai yang libur di tanggal ini
+  // + Hapus record Libur auto-generated yang sudah tidak valid (jadwal berubah)
   const autoGenerateLibur = useCallback(async () => {
     if (!dateFilter || employees.length === 0) return;
 
@@ -258,24 +264,30 @@ export default function AttendancePage() {
     const overrideMap = new Map<string, string>();
     dayOverrides?.forEach((ov) => overrideMap.set(ov.employee_id, ov.type));
 
-    // Fetch existing records untuk tanggal ini
-    const { data: existingRecs } = await supabase.from("attendance_records").select("employee_id").eq("tanggal", dateFilter);
-    const existingSet = new Set(existingRecs?.map((r) => r.employee_id) || []);
+    // Fetch existing records untuk tanggal ini (termasuk id, status, catatan untuk deteksi stale)
+    const { data: existingRecs } = await supabase
+      .from("attendance_records")
+      .select("id, employee_id, status, catatan")
+      .eq("tanggal", dateFilter);
 
-    // Cek setiap pegawai
+    const existingMap = new Map<string, { id: number; status: string; catatan: string | null }>();
+    existingRecs?.forEach((r) => existingMap.set(r.employee_id, { id: r.id, status: r.status, catatan: r.catatan }));
+
+    // Cek setiap pegawai: buat Libur baru ATAU hapus Libur yang sudah salah
     const liburInserts: { employee_id: string; division_id: null; tanggal: string; jam_masuk: string; schedule_jam_masuk: string; toleransi_menit: number; status: string; durasi_telat: number; denda: number; catatan: string }[] = [];
+    const staleLiburIds: number[] = [];
 
     for (const emp of employees) {
-      if (existingSet.has(emp.id)) continue; // sudah ada record
-
       const override = overrideMap.get(emp.id);
       const empOffDays = offDayMap.get(emp.id);
-
-      // Tentukan apakah libur
       const isLibur = override === "libur" || (!override && empOffDays?.has(dow));
       const isMasukOverride = override === "masuk";
+      const shouldBeLibur = isLibur && !isMasukOverride;
 
-      if (isLibur && !isMasukOverride) {
+      const existing = existingMap.get(emp.id);
+
+      if (shouldBeLibur && !existing) {
+        // Seharusnya libur tapi belum ada record → insert
         liburInserts.push({
           employee_id: emp.id,
           division_id: null,
@@ -288,17 +300,102 @@ export default function AttendancePage() {
           denda: 0,
           catatan: "Hari libur",
         });
+      } else if (!shouldBeLibur && existing && existing.status === "Libur" && existing.catatan === "Hari libur") {
+        // Seharusnya TIDAK libur tapi ada record auto-generated "Libur" → hapus (jadwal sudah berubah)
+        staleLiburIds.push(existing.id);
       }
     }
 
+    let changed = false;
+
+    // Hapus record Libur yang sudah tidak valid
+    if (staleLiburIds.length > 0) {
+      await supabase.from("attendance_records").delete().in("id", staleLiburIds);
+      changed = true;
+    }
+
+    // Insert record Libur baru
     if (liburInserts.length > 0) {
       await supabase.from("attendance_records").upsert(liburInserts, {
         onConflict: "employee_id,tanggal",
         ignoreDuplicates: true,
       });
-      await fetchRecords(); // refresh data
+      changed = true;
     }
+
+    if (changed) await fetchRecords();
   }, [dateFilter, employees, fetchRecords]);
+
+  // Auto-generate record "Alpha" untuk pegawai yang seharusnya kerja tapi tidak ada record
+  // Hanya untuk tanggal SEBELUM hari ini (bukan hari ini — pegawai masih bisa datang)
+  const autoGenerateAlpha = useCallback(async () => {
+    if (!dateFilter || employees.length === 0) return;
+
+    // Hanya generate Alpha untuk tanggal yang sudah lewat
+    const today = localDateStr();
+    if (dateFilter >= today) return;
+
+    const [y, m, d] = dateFilter.split("-").map(Number);
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+
+    // Fetch off days & overrides
+    const { data: allOffDays } = await supabase.from("employee_off_days").select("employee_id, day_of_week");
+    const { data: dayOverrides } = await supabase.from("employee_leave_overrides").select("employee_id, type").eq("tanggal", dateFilter);
+
+    const offDayMap = new Map<string, Set<number>>();
+    allOffDays?.forEach((od) => {
+      if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
+      offDayMap.get(od.employee_id)!.add(od.day_of_week);
+    });
+
+    const overrideMap = new Map<string, string>();
+    dayOverrides?.forEach((ov) => overrideMap.set(ov.employee_id, ov.type));
+
+    // Fetch existing records
+    const { data: existingRecs } = await supabase
+      .from("attendance_records")
+      .select("employee_id")
+      .eq("tanggal", dateFilter);
+    const existingSet = new Set(existingRecs?.map((r) => r.employee_id) || []);
+
+    // Cari pegawai yang seharusnya kerja tapi TIDAK ada record
+    const alphaInserts: { employee_id: string; division_id: null; tanggal: string; jam_masuk: string; schedule_jam_masuk: string; toleransi_menit: number; status: string; durasi_telat: number; denda: number; catatan: string }[] = [];
+
+    for (const emp of employees) {
+      if (existingSet.has(emp.id)) continue; // sudah ada record
+
+      const override = overrideMap.get(emp.id);
+      const empOffDays = offDayMap.get(emp.id);
+      const isLibur = override === "libur" || (!override && empOffDays?.has(dow));
+      const isMasukOverride = override === "masuk";
+      const shouldBeLibur = isLibur && !isMasukOverride;
+
+      if (!shouldBeLibur) {
+        // Seharusnya kerja tapi tidak ada record → Alpha
+        const dendaAlpha = penalties.length > 0 ? (penalties[0]?.denda_alpha ?? 100000) : 100000;
+        alphaInserts.push({
+          employee_id: emp.id,
+          division_id: null,
+          tanggal: dateFilter,
+          jam_masuk: "00:00",
+          schedule_jam_masuk: "00:00",
+          toleransi_menit: 0,
+          status: "Alpha",
+          durasi_telat: 0,
+          denda: dendaAlpha,
+          catatan: "Alpha otomatis — tidak ada record kehadiran",
+        });
+      }
+    }
+
+    if (alphaInserts.length > 0) {
+      await supabase.from("attendance_records").upsert(alphaInserts, {
+        onConflict: "employee_id,tanggal",
+        ignoreDuplicates: true,
+      });
+      await fetchRecords();
+    }
+  }, [dateFilter, employees, penalties, fetchRecords]);
 
   // Hitung range periode 8-7 (timezone safe)
   const getCalPeriod = useCallback((key: string) => {
@@ -343,16 +440,21 @@ export default function AttendancePage() {
     Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchOffDays(), fetchOverrides(), fetchRecords()]).then(() => setLoading(false));
   }, []);
 
-  // Saat dateFilter berubah: fetch records lalu auto-generate libur
+  // Saat dateFilter berubah: fetch records → auto-generate libur → auto-generate alpha
   useEffect(() => {
-    fetchRecords().then(() => {
-      if (employees.length > 0) autoGenerateLibur();
+    fetchRecords().then(async () => {
+      if (employees.length > 0) {
+        await autoGenerateLibur();
+        await autoGenerateAlpha();
+      }
     });
   }, [dateFilter]);
 
-  // Setelah employees loaded pertama kali, generate libur
+  // Setelah employees loaded pertama kali
   useEffect(() => {
-    if (!loading && employees.length > 0) autoGenerateLibur();
+    if (!loading && employees.length > 0) {
+      autoGenerateLibur().then(() => autoGenerateAlpha());
+    }
   }, [loading]);
 
   // ─── Summary ───
@@ -561,22 +663,46 @@ export default function AttendancePage() {
 
   const handleSaveOffDays = async () => {
     setOffDaySaving(true);
-    // Per employee: delete existing lalu insert baru
-    for (const emp of employees) {
-      const newDays = offDayLocal.get(emp.id) || new Set<number>();
-      // Hapus semua off-day pegawai ini
-      await supabase.from("employee_off_days").delete().eq("employee_id", emp.id);
-      // Insert yang baru
-      const inserts = Array.from(newDays).map((d) => ({ employee_id: emp.id, day_of_week: d }));
-      if (inserts.length > 0) {
-        await supabase.from("employee_off_days").insert(inserts);
-      }
-    }
-    await fetchOffDays();
-    setOffDaySaving(false);
-    setShowOffDay(false);
     const totalDays = Array.from(offDayLocal.values()).reduce((s, days) => s + days.size, 0);
-    showToast("success", "Jadwal Libur Disimpan", `${totalDays} hari libur untuk ${employees.length} pegawai.`);
+    const empIds = employees.map(e => e.id);
+
+    try {
+      // Step 1: Hapus semua jadwal libur lama secara batch (1 query)
+      setOffDayProgress({ step: 1, total: 3, label: "Menghapus jadwal lama..." });
+      const { error: delError } = await supabase
+        .from("employee_off_days")
+        .delete()
+        .in("employee_id", empIds);
+      if (delError) throw delError;
+
+      // Step 2: Kumpulkan & insert semua jadwal baru secara batch (1 query)
+      setOffDayProgress({ step: 2, total: 3, label: `Menyimpan ${totalDays} jadwal libur...` });
+      const allInserts: { employee_id: string; day_of_week: number }[] = [];
+      for (const [empId, days] of offDayLocal) {
+        for (const d of days) {
+          allInserts.push({ employee_id: empId, day_of_week: d });
+        }
+      }
+      if (allInserts.length > 0) {
+        const { error: insError } = await supabase
+          .from("employee_off_days")
+          .insert(allInserts);
+        if (insError) throw insError;
+      }
+
+      // Step 3: Refresh data lokal
+      setOffDayProgress({ step: 3, total: 3, label: "Memperbarui data..." });
+      await fetchOffDays();
+
+      setShowOffDay(false);
+      showToast("success", "Jadwal Libur Disimpan", `${totalDays} hari libur untuk ${employees.length} pegawai.`);
+    } catch (err) {
+      showToast("error", "Gagal Menyimpan", err instanceof Error ? err.message : "Terjadi kesalahan.");
+      await fetchOffDays();
+    } finally {
+      setOffDaySaving(false);
+      setOffDayProgress(null);
+    }
   };
 
   // ─── Custom Override Handlers ───
@@ -733,7 +859,8 @@ export default function AttendancePage() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 bg-muted rounded-xl p-0.5 flex-shrink-0">
             <button onClick={() => { setDateFilter(addDays(dateFilter, -1)); setPage(1); }}
-              className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+              disabled={dateFilter <= MIN_DATE}
+              className={`p-1.5 rounded-lg transition-colors ${dateFilter <= MIN_DATE ? "opacity-30 cursor-not-allowed" : "hover:bg-card text-muted-foreground hover:text-foreground"}`}>
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
             <div className="px-2 py-1 text-center min-w-[170px]">
@@ -1068,7 +1195,7 @@ export default function AttendancePage() {
                   </div>
                   <div>
                     <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal <span className="text-danger">*</span></label>
-                    <DatePicker value={form.tanggal} onChange={(val) => { setForm({ ...form, tanggal: val, employee_id: "" }); if (!editingId) fetchFormExisting(val); }} placeholder="Pilih tanggal" />
+                    <DatePicker value={form.tanggal} onChange={(val) => { setForm({ ...form, tanggal: val, employee_id: "" }); if (!editingId) fetchFormExisting(val); }} placeholder="Pilih tanggal" minDate={MIN_DATE} />
                   </div>
                 </div>
 
@@ -1524,11 +1651,31 @@ export default function AttendancePage() {
 
             {/* Footer (hanya untuk tab mingguan) */}
             {offDayTab === "mingguan" && (
-              <div className="px-5 py-3 border-t border-border bg-card flex items-center justify-end gap-2 flex-shrink-0">
-                <Button variant="outline" size="sm" onClick={() => setShowOffDay(false)} disabled={offDaySaving}>Batal</Button>
-                <Button size="sm" icon={Check} onClick={handleSaveOffDays} disabled={offDaySaving}>
-                  {offDaySaving ? "Menyimpan..." : "Simpan Jadwal"}
-                </Button>
+              <div className="px-5 py-3 border-t border-border bg-card flex-shrink-0">
+                {offDayProgress ? (
+                  <div className="space-y-2.5 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-full border-2 border-violet-500 border-t-transparent animate-spin" />
+                        <span className="text-xs font-semibold text-foreground">{offDayProgress.label}</span>
+                      </div>
+                      <span className="text-[10px] font-bold text-muted-foreground bg-muted px-2 py-0.5 rounded-md">
+                        {offDayProgress.step}/{offDayProgress.total}
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-violet-500 to-primary transition-all duration-500 ease-out"
+                        style={{ width: `${(offDayProgress.step / offDayProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setShowOffDay(false)} disabled={offDaySaving}>Batal</Button>
+                    <Button size="sm" icon={Check} onClick={handleSaveOffDays} disabled={offDaySaving}>Simpan Jadwal</Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
