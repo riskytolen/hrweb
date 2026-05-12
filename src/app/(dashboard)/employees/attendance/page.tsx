@@ -342,6 +342,14 @@ export default function AttendancePage() {
     const { data: allOffDays } = await supabase.from("employee_off_days").select("employee_id, day_of_week");
     const { data: dayOverrides } = await supabase.from("employee_leave_overrides").select("employee_id, type").eq("tanggal", dateFilter);
 
+    // Fetch approved leaves
+    const { data: approvedLeaves } = await supabase
+      .from("leave_requests")
+      .select("employee_id, jenis, alasan")
+      .eq("status", "Disetujui")
+      .lte("tanggal_mulai", dateFilter)
+      .gte("tanggal_selesai", dateFilter);
+
     const offDayMap = new Map<string, Set<number>>();
     allOffDays?.forEach((od) => {
       if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
@@ -350,6 +358,9 @@ export default function AttendancePage() {
 
     const overrideMap = new Map<string, string>();
     dayOverrides?.forEach((ov) => overrideMap.set(ov.employee_id, ov.type));
+
+    const leaveMap = new Map<string, { jenis: string, alasan: string }>();
+    approvedLeaves?.forEach((l) => leaveMap.set(l.employee_id, { jenis: l.jenis, alasan: l.alasan || "" }));
 
     // Fetch existing records
     const { data: existingRecs } = await supabase
@@ -370,7 +381,23 @@ export default function AttendancePage() {
       const isMasukOverride = override === "masuk";
       const shouldBeLibur = isLibur && !isMasukOverride;
 
-      if (!shouldBeLibur) {
+      const leave = leaveMap.get(emp.id);
+
+      if (leave) {
+        // Sedang cuti/izin/sakit, tidak perlu Alpha
+        alphaInserts.push({
+          employee_id: emp.id,
+          division_id: null,
+          tanggal: dateFilter,
+          jam_masuk: "00:00",
+          schedule_jam_masuk: "00:00",
+          toleransi_menit: 0,
+          status: leave.jenis,
+          durasi_telat: 0,
+          denda: 0,
+          catatan: `${leave.jenis} otomatis — sudah disetujui`,
+        });
+      } else if (!shouldBeLibur) {
         // Seharusnya kerja tapi tidak ada record → Alpha
         const dendaAlpha = penalties.length > 0 ? (penalties[0]?.denda_alpha ?? 100000) : 100000;
         alphaInserts.push({
