@@ -382,6 +382,11 @@ export async function generateSP(doc: DbLegalDocument, employee: EmployeeInfo) {
   pdf.text(`: ${employee.id || "-"}`, margin + 25, y);
   y += 5.5;
   pdf.setFont("helvetica", "normal");
+  pdf.text("NO. KTP", margin, y);
+  pdf.setFont("helvetica", "bold");
+  pdf.text(`: ${employee.no_ktp || "-"}`, margin + 25, y);
+  y += 5.5;
+  pdf.setFont("helvetica", "normal");
   pdf.text("JABATAN", margin, y);
   pdf.setFont("helvetica", "bold");
   pdf.text(`: ${employee.jabatan || "-"}`, margin + 25, y);
@@ -477,3 +482,150 @@ export async function generateSP(doc: DbLegalDocument, employee: EmployeeInfo) {
 
   pdf.save(`${doc.tingkat_sp}_${employee.nama.replace(/\s+/g, "_")}_${doc.tanggal_terbit}.pdf`);
 }
+
+/**
+ * Generate PDF Surat Pernyataan
+ * Surat pernyataan bebas narkoba / tidak terlibat pidana
+ * Desain: 1 halaman A4, font compact, tanda tangan rapi sejajar
+ */
+export async function generateSuratPernyataan(
+  doc: DbLegalDocument,
+  employee: EmployeeInfo & { tempat_lahir?: string; tanggal_lahir?: string }
+) {
+  const { default: jsPDF } = await import("jspdf");
+  const company = await getCompanyInfo();
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 18;
+  const contentWidth = pageWidth - margin * 2;
+  let y = 12;
+  const fs = 9;
+  const lh = 3.8;
+
+  // ═══ KOP SURAT ═══
+  try {
+    const logoImg = new Image();
+    logoImg.src = "/jamslogistics.png";
+    await new Promise((resolve, reject) => { logoImg.onload = resolve; logoImg.onerror = reject; });
+    pdf.addImage(logoImg, "PNG", (pageWidth - 60) / 2, y, 60, 21);
+    y += 24;
+  } catch {
+    pdf.setFontSize(14);
+    pdf.setFont("helvetica", "bold");
+    pdf.setTextColor(41, 128, 185);
+    pdf.text(company.nama_perusahaan, pageWidth / 2, y + 7, { align: "center" });
+    pdf.setFontSize(9);
+    pdf.setTextColor(60);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(company.nama_badan_hukum, pageWidth / 2, y + 12, { align: "center" });
+    y += 18;
+  }
+
+  pdf.setDrawColor(41, 128, 185);
+  pdf.setLineWidth(0.8);
+  pdf.line(margin, y, pageWidth - margin, y);
+  pdf.setLineWidth(0.2);
+  pdf.line(margin, y + 1.2, pageWidth - margin, y + 1.2);
+
+  // ═══ JUDUL ═══
+  y += 8;
+  pdf.setTextColor(0);
+  pdf.setFontSize(12);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("SURAT PERNYATAAN", pageWidth / 2, y, { align: "center" });
+  y += 5;
+  pdf.setFontSize(fs);
+  pdf.setFont("helvetica", "normal");
+  pdf.text(`Nomor : ${doc.nomor_kontrak || "-"}`, pageWidth / 2, y, { align: "center" });
+
+  // ═══ ISI ═══
+  y += 7;
+  pdf.setFontSize(fs);
+
+  const ttl = employee.tempat_lahir && employee.tanggal_lahir
+    ? `${employee.tempat_lahir}, ${formatTanggalShort(employee.tanggal_lahir)}`
+    : employee.tempat_lahir || (employee.tanggal_lahir ? formatTanggalShort(employee.tanggal_lahir) : "-");
+
+  pdf.text("Yang bertanda tangan di bawah ini:", margin, y);
+  y += 5;
+
+  const labelW = 42;
+  const items = [
+    ["Nama", employee.nama],
+    ["Tempat/Tanggal Lahir", ttl],
+    ["Alamat", employee.alamat || "-"],
+    ["No. KTP", employee.no_ktp || "-"],
+    ["Jabatan", employee.jabatan || "-"],
+  ];
+  for (const [label, value] of items) {
+    pdf.text(label, margin, y);
+    pdf.text(":", margin + labelW, y);
+    if (label === "Alamat") {
+      const lines = pdf.splitTextToSize(value, contentWidth - labelW - 5);
+      for (let i = 0; i < lines.length; i++) { pdf.text(lines[i], margin + labelW + 3, y); if (i < lines.length - 1) y += lh; }
+    } else {
+      pdf.text(value, margin + labelW + 3, y);
+    }
+    y += 4.5;
+  }
+
+  y += 2;
+  pdf.text("Dengan ini menyatakan dengan sebenar-benarnya bahwa:", margin, y);
+  y += 5;
+
+  const addPt = (num: string, text: string, ind = 7) => {
+    pdf.text(num, margin + 2, y);
+    const lines = pdf.splitTextToSize(text, contentWidth - ind - 2);
+    for (const l of lines) { pdf.text(l, margin + ind, y); y += lh; }
+    y += 1;
+  };
+
+  addPt("1.", "Saya tidak pernah terlibat dalam tindak pidana apa pun seperti penyalahgunaan narkotika, obat-obatan terlarang, penganiayaan, pencurian, penipuan, perjudian, maupun tindak kriminal lainnya.");
+  addPt("2.", "Saya tidak menggunakan, menyimpan, mengedarkan, maupun terlibat dalam aktivitas yang berhubungan dengan narkotika dan obat-obatan terlarang.");
+  addPt("3.", "Saya bersedia apabila sewaktu-waktu perusahaan melakukan pemeriksaan atau tes urine/narkoba guna memastikan lingkungan kerja yang aman, sehat, dan bebas narkoba.");
+  addPt("4.", "Apabila hasil tes urine/narkoba saya dinyatakan positif, atau di kemudian hari terbukti saya terlibat dalam tindak pidana maupun pelanggaran hukum, maka:");
+
+  const subs = [
+    ["a.", "seluruh risiko dan konsekuensi hukum menjadi tanggung jawab pribadi saya sepenuhnya;"],
+    ["b.", "saya tidak akan melibatkan maupun menuntut perusahaan dalam bentuk apa pun;"],
+    ["c.", "perusahaan berhak memberikan sanksi tegas, termasuk pemberhentian kerja / Pemutusan Hubungan Kerja (PHK) sesuai ketentuan perusahaan yang berlaku."],
+  ];
+  for (const [sl, st] of subs) {
+    pdf.text(sl, margin + 7, y);
+    const lines = pdf.splitTextToSize(st, contentWidth - 15);
+    for (const l of lines) { pdf.text(l, margin + 13, y); y += lh; }
+    y += 0.5;
+  }
+
+  addPt("5.", "Saya bersedia menjaga nama baik perusahaan serta menaati seluruh peraturan perusahaan dan peraturan perundang-undangan yang berlaku di Negara Republik Indonesia.");
+
+  y += 1;
+  const penutup = pdf.splitTextToSize("Demikian surat pernyataan ini saya buat dengan sebenar-benarnya, dalam keadaan sadar, sehat jasmani dan rohani, tanpa adanya paksaan dari pihak mana pun, untuk dipergunakan sebagaimana mestinya.", contentWidth);
+  for (const l of penutup) { pdf.text(l, margin, y); y += lh; }
+
+  // ═══ TANDA TANGAN (pegawai saja, kanan) ═══
+  y += 6;
+  const colRight = pageWidth - margin - 28;
+
+  pdf.text(`${company.kota_surat}, ${formatTanggalShort(doc.tanggal_terbit)}`, colRight, y, { align: "center" });
+  y += 6;
+  pdf.text("Yang Membuat Pernyataan,", colRight, y, { align: "center" });
+  y += 24;
+  pdf.setFont("helvetica", "bold");
+  pdf.text(`(${employee.nama})`, colRight, y, { align: "center" });
+
+  // ═══ FOOTER ═══
+  const fy = pageHeight - 10;
+  pdf.setFontSize(6.5);
+  pdf.setFont("helvetica", "normal");
+  pdf.setTextColor(130);
+  pdf.setDrawColor(41, 128, 185);
+  pdf.setLineWidth(0.3);
+  pdf.line(margin, fy - 3, pageWidth - margin, fy - 3);
+  pdf.text(pdf.splitTextToSize(company.alamat, contentWidth)[0] || "", margin, fy);
+  pdf.text(`Hp : ${company.no_telp} | Email : ${company.email}`, margin, fy + 3);
+
+  pdf.save(`Surat_Pernyataan_${employee.nama.replace(/\s+/g, "_")}_${doc.tanggal_terbit}.pdf`);
+}
+

@@ -72,7 +72,8 @@ const COMPLETENESS_FIELDS: { key: keyof DbPegawai; label: string; group: string 
   // Dokumen
   { key: "foto_ktp", label: "Foto KTP", group: "Dokumen" },
   { key: "foto_diri", label: "Foto Diri", group: "Dokumen" },
-  { key: "foto_sim", label: "Foto SIM", group: "Dokumen" },
+  { key: "foto_sim", label: "SIM A/A UMUM/B1 dll", group: "Dokumen" },
+  { key: "foto_skck", label: "SKCK", group: "Dokumen" },
   { key: "kartu_keluarga", label: "Kartu Keluarga", group: "Dokumen" },
 ];
 
@@ -352,7 +353,7 @@ export default function EmployeesPage() {
       no_bpjs_ketenagakerjaan: selectedEmployee.no_bpjs_ketenagakerjaan,
       jabatan_id: selectedEmployee.jabatan_id ? String(selectedEmployee.jabatan_id) : "",
     });
-    setEditFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null });
+    setEditFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, foto_skck: null, kartu_keluarga: null });
     setIsEditing(true);
   };
 
@@ -378,6 +379,10 @@ export default function EmployeesPage() {
     if (editFiles.foto_sim) {
       const url = await uploadFile(editFiles.foto_sim, selectedEmployee.id, "sim");
       if (url) fileUpdates.foto_sim = url;
+    }
+    if (editFiles.foto_skck) {
+      const url = await uploadFile(editFiles.foto_skck, selectedEmployee.id, "skck");
+      if (url) fileUpdates.foto_skck = url;
     }
     if (editFiles.kartu_keluarga) {
       const url = await uploadFile(editFiles.kartu_keluarga, selectedEmployee.id, "kk");
@@ -897,12 +902,12 @@ export default function EmployeesPage() {
     no_rekening: "", bank: "", nama_rekening: "", tanggal_mulai_pkwt: "", tanggal_berakhir_pkwt: "",
   };
   const [addForm, setAddForm] = useState(emptyForm);
-  const [addFiles, setAddFiles] = useState<Record<string, File | null>>({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null });
+  const [addFiles, setAddFiles] = useState<Record<string, File | null>>({ foto_ktp: null, foto_diri: null, foto_sim: null, foto_skck: null, kartu_keluarga: null });
   const [addError, setAddError] = useState("");
   const [addErrors, setAddErrors] = useState<Set<string>>(new Set());
   const [addSaving, setAddSaving] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ url: string; label: string } | null>(null);
-  const [editFiles, setEditFiles] = useState<Record<string, File | null>>({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null });
+  const [editFiles, setEditFiles] = useState<Record<string, File | null>>({ foto_ktp: null, foto_diri: null, foto_sim: null, foto_skck: null, kartu_keluarga: null });
   const [compressingField, setCompressingField] = useState<string | null>(null);
   const [jabatanOptions, setJabatanOptions] = useState<{ id: number; nama: string }[]>([]);
   const [bankOptions, setBankOptions] = useState<{ id: number; nama: string }[]>([]);
@@ -1047,11 +1052,13 @@ export default function EmployeesPage() {
     let foto_ktp: string | null = null;
     let foto_diri: string | null = null;
     let foto_sim: string | null = null;
+    let foto_skck: string | null = null;
     let kartu_keluarga: string | null = null;
 
     if (addFiles.foto_ktp) foto_ktp = await uploadFile(addFiles.foto_ktp, addForm.id, "ktp");
     if (addFiles.foto_diri) foto_diri = await uploadFile(addFiles.foto_diri, addForm.id, "foto");
     if (addFiles.foto_sim) foto_sim = await uploadFile(addFiles.foto_sim, addForm.id, "sim");
+    if (addFiles.foto_skck) foto_skck = await uploadFile(addFiles.foto_skck, addForm.id, "skck");
     if (addFiles.kartu_keluarga) kartu_keluarga = await uploadFile(addFiles.kartu_keluarga, addForm.id, "kk");
 
     const { error } = await supabase.from("pegawai").insert({
@@ -1081,6 +1088,7 @@ export default function EmployeesPage() {
       foto_ktp,
       foto_diri,
       foto_sim,
+      foto_skck,
       kartu_keluarga,
     });
 
@@ -1093,7 +1101,7 @@ export default function EmployeesPage() {
 
     setShowAddForm(false);
     setAddForm(emptyForm);
-    setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null });
+    setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, foto_skck: null, kartu_keluarga: null });
     showSuccessToast("Pegawai Berhasil Ditambahkan", `Data pegawai ${addForm.nama} (${addForm.id}) telah tersimpan ke sistem.`);
     fetchEmployees();
   };
@@ -1173,7 +1181,7 @@ export default function EmployeesPage() {
                   </div>
                 )}
               </div>
-              {canInput && <Button icon={Plus} size="sm" onClick={() => { setNewId(""); setAddForm(emptyForm); setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, kartu_keluarga: null }); setAddError(""); setAddErrors(new Set()); setShowAddForm(true); }}>Tambah Pegawai</Button>}
+              {canInput && <Button icon={Plus} size="sm" onClick={() => { setNewId(""); setAddForm(emptyForm); setAddFiles({ foto_ktp: null, foto_diri: null, foto_sim: null, foto_skck: null, kartu_keluarga: null }); setAddError(""); setAddErrors(new Set()); setShowAddForm(true); }}>Tambah Pegawai</Button>}
             </div>
           }
         />
@@ -1534,7 +1542,8 @@ export default function EmployeesPage() {
                         {([
                           { label: "Foto KTP", key: "foto_ktp", current: selectedEmployee.foto_ktp },
                           { label: "Foto Diri", key: "foto_diri", current: selectedEmployee.foto_diri },
-                          { label: "Foto SIM", key: "foto_sim", current: selectedEmployee.foto_sim },
+                          { label: "SIM A/A UMUM/B1 dll", key: "foto_sim", current: selectedEmployee.foto_sim },
+                          { label: "SKCK", key: "foto_skck", current: selectedEmployee.foto_skck },
                           { label: "Kartu Keluarga", key: "kartu_keluarga", current: selectedEmployee.kartu_keluarga },
                         ] as const).map((doc) => {
                           const newFile = editFiles[doc.key];
@@ -1641,7 +1650,8 @@ export default function EmployeesPage() {
                     <div className="sm:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
                       <DocBadge exists={!!selectedEmployee.foto_ktp} label="Foto KTP" url={selectedEmployee.foto_ktp} onPreview={handleOpenPreview} />
                       <DocBadge exists={!!selectedEmployee.foto_diri} label="Foto Diri" url={selectedEmployee.foto_diri} onPreview={handleOpenPreview} />
-                      <DocBadge exists={!!selectedEmployee.foto_sim} label="Foto SIM" url={selectedEmployee.foto_sim} onPreview={handleOpenPreview} />
+                      <DocBadge exists={!!selectedEmployee.foto_sim} label="SIM A/A UMUM/B1 dll" url={selectedEmployee.foto_sim} onPreview={handleOpenPreview} />
+                      <DocBadge exists={!!selectedEmployee.foto_skck} label="SKCK" url={selectedEmployee.foto_skck} onPreview={handleOpenPreview} />
                       <DocBadge exists={!!selectedEmployee.kartu_keluarga} label="Kartu Keluarga" url={selectedEmployee.kartu_keluarga} onPreview={handleOpenPreview} />
                     </div>
                   </Section>
@@ -1833,7 +1843,8 @@ export default function EmployeesPage() {
                   {([
                     { label: "Foto KTP", key: "foto_ktp" },
                     { label: "Foto Diri", key: "foto_diri" },
-                    { label: "Foto SIM", key: "foto_sim" },
+                    { label: "SIM A/A UMUM/B1 dll", key: "foto_sim" },
+                    { label: "SKCK", key: "foto_skck" },
                     { label: "Kartu Keluarga", key: "kartu_keluarga" },
                   ] as const).map((doc) => {
                     const isCompressing = compressingField === doc.key;

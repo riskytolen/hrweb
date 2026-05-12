@@ -103,6 +103,7 @@ export interface DbPegawai {
   no_bpjs_kesehatan: string | null;
   no_bpjs_ketenagakerjaan: string | null;
   foto_sim: string | null;
+  foto_skck: string | null;
   no_rekening: string | null;
   bank: string | null;
   nama_rekening: string | null;
@@ -341,7 +342,7 @@ export interface DbUserProfile {
 export interface DbLegalDocument {
   id: number;
   employee_id: string;
-  kategori: "PKWT" | "SP";
+  kategori: "PKWT" | "SP" | "PERNYATAAN";
   nomor_kontrak: string | null;
   kontrak_ke: number | null;
   tingkat_sp: "SP-1" | "SP-2" | "SP-3" | null;

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Scale, Plus, Search, Pencil, Trash2, X, Check, FileText,
   AlertTriangle, CircleCheckBig, Clock, ShieldCheck,
-  CalendarDays, Download,
+  CalendarDays, Download, Users, CheckSquare,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { supabase, type DbLegalDocument, type DbLegalSetting } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
-import { generatePKWT, generateSP, generateNomorSP } from "@/lib/legal-pdf";
+import { generatePKWT, generateSP, generateSuratPernyataan, generateNomorSP } from "@/lib/legal-pdf";
 
 type EmployeeLite = { id: string; nama: string };
 type LegalRow = DbLegalDocument & { employeeNama?: string };
@@ -28,6 +28,7 @@ const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/
 const KATEGORI_OPTIONS = [
   { value: "PKWT", label: "PKWT", color: "#3b82f6" },
   { value: "SP", label: "Surat Peringatan", color: "#ef4444" },
+  { value: "PERNYATAAN", label: "Surat Pernyataan", color: "#8b5cf6" },
 ];
 
 const STATUS_OPTIONS = [
@@ -77,7 +78,7 @@ export default function LegalPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
-    employee_id: "", kategori: "PKWT" as "PKWT" | "SP",
+    employee_id: "", kategori: "PKWT" as "PKWT" | "SP" | "PERNYATAAN",
     nomor_kontrak: "", kontrak_ke: "1",
     tingkat_sp: "SP-1", pelanggaran: "",
     tanggal_terbit: "", tanggal_berakhir: "",
@@ -85,6 +86,7 @@ export default function LegalPage() {
   });
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [bulkMode, setBulkMode] = useState(false);
 
   // PDF Loading
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -99,6 +101,13 @@ export default function LegalPage() {
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Bulk
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDownloadProgress, setBulkDownloadProgress] = useState("");
 
   // Toast
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
@@ -164,6 +173,7 @@ export default function LegalPage() {
   list.forEach((r) => { if (r.status in statusCounts) statusCounts[r.status]++; });
   const pkwtCount = list.filter((r) => r.kategori === "PKWT").length;
   const spCount = list.filter((r) => r.kategori === "SP").length;
+  const pernyataanCount = list.filter((r) => r.kategori === "PERNYATAAN").length;
 
   // Filter
   const filtered = list.filter((r) => {
@@ -209,8 +219,13 @@ export default function LegalPage() {
 
   // Open form
   const openAdd = () => {
-    const autoNomor = getAutoNomor("PKWT");
-    setForm({ employee_id: "", kategori: "PKWT", nomor_kontrak: autoNomor, kontrak_ke: "1", tingkat_sp: "SP-1", pelanggaran: "", tanggal_terbit: "", tanggal_berakhir: "", catatan: "" });
+    setForm({
+      employee_id: "", kategori: "PKWT", nomor_kontrak: getAutoNomor("PKWT"), kontrak_ke: "1",
+      tingkat_sp: "SP-1", pelanggaran: "",
+      tanggal_terbit: "", tanggal_berakhir: "",
+      catatan: "",
+    });
+    setBulkMode(false);
     setFormError("");
     setEditingId(null);
     setShowForm(true);
@@ -232,11 +247,51 @@ export default function LegalPage() {
   // Save
   const handleSave = async () => {
     setFormError("");
+
+    // Bulk mode: buat Surat Pernyataan untuk semua karyawan
+    if (bulkMode && form.kategori === "PERNYATAAN" && !editingId) {
+      if (!form.tanggal_terbit) { setFormError("Pilih tanggal terbit."); return; }
+      setFormSaving(true);
+      try {
+        const today = form.tanggal_terbit;
+        const existingIds = new Set(list.filter(r => r.kategori === "PERNYATAAN").map(r => r.employee_id));
+        const toCreate = employees.filter(e => !existingIds.has(e.id));
+        if (toCreate.length === 0) {
+          showToast("success", "Semua Sudah Dibuat", "Seluruh karyawan sudah memiliki Surat Pernyataan.");
+          setFormSaving(false);
+          return;
+        }
+        const rows = toCreate.map((emp, idx) => ({
+          employee_id: emp.id,
+          kategori: "PERNYATAAN",
+          nomor_kontrak: generateNomorSP("SP-PERNYATAAN", idx + 1, today),
+          kontrak_ke: null,
+          tingkat_sp: null,
+          pelanggaran: null,
+          tanggal_terbit: today,
+          tanggal_berakhir: null,
+          catatan: form.catatan.trim() || "Dibuat secara massal",
+          status: "Aktif",
+          status_approval: "Menunggu",
+        }));
+        const { error } = await supabase.from("legal_documents").insert(rows);
+        if (error) throw error;
+        showToast("success", "Berhasil", `${toCreate.length} Surat Pernyataan berhasil dibuat. Lakukan approval sebelum download PDF.`);
+        setShowForm(false);
+        await fetchList();
+      } catch (err: any) {
+        setFormError(err?.message || "Terjadi kesalahan.");
+      } finally {
+        setFormSaving(false);
+      }
+      return;
+    }
+
     if (!form.employee_id) { setFormError("Pilih pegawai."); return; }
     if (!form.nomor_kontrak.trim()) { setFormError("Nomor surat wajib diisi."); return; }
     if (!form.tanggal_terbit) { setFormError("Pilih tanggal terbit."); return; }
-    if (!form.tanggal_berakhir) { setFormError("Pilih tanggal berakhir."); return; }
-    if (form.tanggal_berakhir < form.tanggal_terbit) { setFormError("Tanggal berakhir harus setelah tanggal terbit."); return; }
+    if (form.kategori !== "PERNYATAAN" && !form.tanggal_berakhir) { setFormError("Pilih tanggal berakhir."); return; }
+    if (form.kategori !== "PERNYATAAN" && form.tanggal_berakhir && form.tanggal_berakhir < form.tanggal_terbit) { setFormError("Tanggal berakhir harus setelah tanggal terbit."); return; }
     if (form.kategori === "SP" && !form.pelanggaran.trim()) { setFormError("Isi deskripsi pelanggaran."); return; }
 
     // Validasi struktur SP (hanya saat tambah baru)
@@ -258,7 +313,6 @@ export default function LegalPage() {
         setFormError("Pegawai ini sudah memiliki SP-3 yang masih aktif.");
         return;
       }
-      // Cek duplikat tingkat SP aktif yang sama
       const hasSameSPAktif = empSPs.some(r => r.tingkat_sp === form.tingkat_sp);
       if (hasSameSPAktif) {
         setFormError(`Pegawai ini sudah memiliki ${form.tingkat_sp} yang masih aktif.`);
@@ -276,9 +330,9 @@ export default function LegalPage() {
       tingkat_sp: form.kategori === "SP" ? form.tingkat_sp : null,
       pelanggaran: form.kategori === "SP" ? (form.pelanggaran.trim() || null) : null,
       tanggal_terbit: form.tanggal_terbit,
-      tanggal_berakhir: form.tanggal_berakhir,
+      tanggal_berakhir: form.kategori === "PERNYATAAN" ? null : form.tanggal_berakhir,
       catatan: form.catatan.trim() || null,
-      status,
+      status: form.kategori === "PERNYATAAN" ? "Aktif" : status,
     };
 
     try {
@@ -289,7 +343,7 @@ export default function LegalPage() {
       } else {
         const { error } = await supabase.from("legal_documents").insert(payload);
         if (error) { setFormError(error.message); setFormSaving(false); return; }
-        showToast("success", "Dokumen Ditambahkan", `${form.kategori === "PKWT" ? "PKWT" : form.tingkat_sp} berhasil ditambahkan.`);
+        showToast("success", "Dokumen Ditambahkan", `${form.kategori === "PKWT" ? "PKWT" : form.kategori === "PERNYATAAN" ? "Surat Pernyataan" : form.tingkat_sp} berhasil ditambahkan.`);
       }
       setShowForm(false);
       await fetchList();
@@ -326,13 +380,25 @@ export default function LegalPage() {
       setPdfProgress("Membuat PDF...");
       if (row.kategori === "PKWT") {
         await generatePKWT(row, employeeInfo);
-      } else {
+      } else if (row.kategori === "SP") {
         await generateSP(row, employeeInfo);
+      } else {
+        // Fetch extra fields for Surat Pernyataan
+        const { data: empFull } = await supabase
+          .from("pegawai")
+          .select("tempat_lahir, tanggal_lahir")
+          .eq("id", row.employee_id)
+          .single();
+        await generateSuratPernyataan(row, {
+          ...employeeInfo,
+          tempat_lahir: empFull?.tempat_lahir || undefined,
+          tanggal_lahir: empFull?.tanggal_lahir || undefined,
+        });
       }
 
       setPdfProgress("Selesai!");
       await new Promise(r => setTimeout(r, 500));
-      showToast("success", "PDF Berhasil Dibuat", `File ${row.kategori === "SP" ? row.tingkat_sp : "PKWT"} telah diunduh.`);
+      showToast("success", "PDF Berhasil Dibuat", `File ${row.kategori === "SP" ? row.tingkat_sp : row.kategori === "PERNYATAAN" ? "Surat Pernyataan" : "PKWT"} telah diunduh.`);
     } catch (err) {
       showToast("error", "Gagal Membuat PDF", err instanceof Error ? err.message : "Terjadi kesalahan.");
     } finally {
@@ -376,12 +442,94 @@ export default function LegalPage() {
     setDeleteConfirm(null);
   };
 
+  // Bulk download (sequential, one by one)
+  const handleBulkDownload = async () => {
+    const selectedDocs = list.filter(r => selectedIds.has(r.id) && r.status_approval === "Disetujui");
+    if (selectedDocs.length === 0) {
+      showToast("error", "Tidak Ada Dokumen", "Pilih dokumen yang sudah disetujui untuk diunduh.");
+      return;
+    }
+    setBulkDownloading(true);
+    let downloaded = 0;
+    try {
+      for (const row of selectedDocs) {
+        downloaded++;
+        setBulkDownloadProgress(`Mengunduh ${downloaded}/${selectedDocs.length}: ${row.employeeNama}`);
+        await handleDownloadPDF(row);
+        // Small delay between downloads to prevent browser blocking
+        if (downloaded < selectedDocs.length) {
+          await new Promise(r => setTimeout(r, 800));
+        }
+      }
+      showToast("success", "Download Selesai", `${downloaded} PDF berhasil diunduh.`);
+    } catch (err: any) {
+      showToast("error", "Gagal Download", err?.message || "Terjadi kesalahan.");
+    } finally {
+      setBulkDownloading(false);
+      setBulkDownloadProgress("");
+    }
+  };
+
+  // Bulk approval
+  const handleBulkApproval = async (action: "approve" | "reject") => {
+    if (selectedIds.size === 0) return;
+    setApproving(true);
+    const isApprove = action === "approve";
+    const { error } = await supabase.from("legal_documents").update({
+      status_approval: isApprove ? "Disetujui" : "Ditolak",
+      approved_at: new Date().toISOString(),
+    }).in("id", Array.from(selectedIds));
+    if (error) {
+      showToast("error", "Gagal", error.message);
+    } else {
+      showToast("success", isApprove ? "Dokumen Disetujui" : "Dokumen Ditolak", `${selectedIds.size} dokumen telah di-${isApprove ? "approve" : "reject"}.`);
+      await fetchList();
+    }
+    setApproving(false);
+    setSelectedIds(new Set());
+  };
+
+  // Toggle select
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const allFilteredSelected = filtered.length > 0 && filtered.every(r => selectedIds.has(r.id));
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(r => r.id)));
+    }
+  };
+  const selectedPendingCount = Array.from(selectedIds).filter(id => list.find(r => r.id === id)?.status_approval === "Menunggu").length;
+  const selectedApprovedCount = Array.from(selectedIds).filter(id => list.find(r => r.id === id)?.status_approval === "Disetujui").length;
+
+  // Bulk delete
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    const { error } = await supabase.from("legal_documents").delete().in("id", Array.from(selectedIds));
+    if (error) {
+      showToast("error", "Gagal Menghapus", error.message);
+    } else {
+      showToast("success", "Berhasil Dihapus", `${selectedIds.size} dokumen telah dihapus.`);
+      setList(prev => prev.filter(r => !selectedIds.has(r.id)));
+    }
+    setBulkDeleting(false);
+    setSelectedIds(new Set());
+    setShowBulkDeleteConfirm(false);
+  };
+
   return (
     <RouteGuard permission="legal">
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Legal & Administrasi"
-        description="Kelola PKWT dan Surat Peringatan pegawai"
+        description="Kelola PKWT, Surat Peringatan, dan Surat Pernyataan pegawai"
         icon={Scale}
         actions={canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Dokumen</Button> : undefined}
       />
@@ -405,7 +553,7 @@ export default function LegalPage() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         <div className="bg-card rounded-2xl border border-border p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -436,6 +584,17 @@ export default function LegalPage() {
             <div>
               <p className="text-[10px] text-muted-foreground font-medium uppercase">SP</p>
               <p className="text-lg font-bold text-danger">{loading ? "-" : spCount}</p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-card rounded-2xl border border-border p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center">
+              <ShieldCheck className="w-5 h-5 text-violet-500" />
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground font-medium uppercase">Pernyataan</p>
+              <p className="text-lg font-bold text-violet-600">{loading ? "-" : pernyataanCount}</p>
             </div>
           </div>
         </div>
@@ -527,12 +686,64 @@ export default function LegalPage() {
         </div>
       </div>
 
+      {/* Bulk Action Bar */}
+      {canEdit && selectedIds.size > 0 && (
+      <div className="bg-primary/5 border border-primary/20 rounded-2xl px-5 py-3 flex items-center justify-between animate-fade-in">
+          <div className="flex items-center gap-2">
+            <CheckSquare className="w-4 h-4 text-primary" />
+            <span className="text-sm font-semibold text-foreground">{selectedIds.size} dokumen dipilih</span>
+            {selectedPendingCount > 0 && (
+              <span className="text-xs text-muted-foreground">({selectedPendingCount} menunggu approval)</span>
+            )}
+            {bulkDownloading && bulkDownloadProgress && (
+              <span className="text-xs text-primary font-medium animate-pulse ml-2">⏳ {bulkDownloadProgress}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {selectedApprovedCount > 0 && (
+              <button onClick={handleBulkDownload} disabled={bulkDownloading || approving}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/90 transition-all disabled:opacity-50">
+                <Download className="w-3.5 h-3.5" /> {bulkDownloading ? "Mengunduh..." : `Download (${selectedApprovedCount})`}
+              </button>
+            )}
+            {selectedPendingCount > 0 && (
+              <>
+                <button onClick={() => handleBulkApproval("approve")} disabled={approving || bulkDownloading}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-success text-white text-xs font-bold hover:bg-success/90 transition-all disabled:opacity-50">
+                  <Check className="w-3.5 h-3.5" /> Approve ({selectedPendingCount})
+                </button>
+                <button onClick={() => handleBulkApproval("reject")} disabled={approving || bulkDownloading}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-warning text-white text-xs font-bold hover:bg-warning/90 transition-all disabled:opacity-50">
+                  <X className="w-3.5 h-3.5" /> Reject ({selectedPendingCount})
+                </button>
+              </>
+            )}
+            <button onClick={() => setShowBulkDeleteConfirm(true)} disabled={approving || bulkDownloading}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-danger text-white text-xs font-bold hover:bg-danger/90 transition-all disabled:opacity-50">
+              <Trash2 className="w-3.5 h-3.5" /> Hapus ({selectedIds.size})
+            </button>
+            <button onClick={() => setSelectedIds(new Set())} disabled={bulkDownloading}
+              className="px-3 py-2 rounded-xl text-xs font-semibold text-muted-foreground hover:bg-muted transition-all disabled:opacity-50">
+              Batal
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-muted/50">
+                {canEdit && (
+                  <th className="px-3 py-3.5 w-10">
+                    <input type="checkbox" checked={allFilteredSelected && filtered.length > 0}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-border accent-primary cursor-pointer"
+                      title="Pilih semua" />
+                  </th>
+                )}
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Kategori</th>
@@ -544,18 +755,25 @@ export default function LegalPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={5} cols={8} /> : paged.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada dokumen legal</td></tr>
+              {loading ? <SkeletonTable rows={5} cols={canEdit ? 9 : 8} /> : paged.length === 0 ? (
+                <tr><td colSpan={canEdit ? 9 : 8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada dokumen legal</td></tr>
               ) : paged.map((row, idx) => {
                 const kc = KATEGORI_OPTIONS.find((k) => k.value === row.kategori);
                 const sc = STATUS_OPTIONS.find((s) => s.value === row.status);
                 return (
-                  <tr key={row.id} className="hover:bg-muted/30">
+                  <tr key={row.id} className={cn("hover:bg-muted/30", selectedIds.has(row.id) && "bg-primary/5")}>
+                    {canEdit && (
+                      <td className="px-3 py-3.5">
+                        <input type="checkbox" checked={selectedIds.has(row.id)}
+                          onChange={() => toggleSelect(row.id)}
+                          className="w-4 h-4 rounded border-border accent-primary cursor-pointer" />
+                      </td>
+                    )}
                     <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
                     <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p></td>
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${kc?.color}20`, color: kc?.color }}>
-                        {row.kategori === "SP" ? row.tingkat_sp : "PKWT"}
+                        {row.kategori === "SP" ? row.tingkat_sp : row.kategori === "PERNYATAAN" ? "Pernyataan" : "PKWT"}
                       </span>
                     </td>
                     <td className="px-5 py-3.5">
@@ -564,8 +782,13 @@ export default function LegalPage() {
                           <p className="text-sm text-foreground">{row.nomor_kontrak || <span className="italic text-muted-foreground">Tanpa nomor</span>}</p>
                           <p className="text-[10px] text-muted-foreground">Kontrak ke-{row.kontrak_ke || 1}</p>
                         </div>
-                      ) : (
+                      ) : row.kategori === "SP" ? (
                         <p className="text-sm text-foreground max-w-[200px] truncate">{row.pelanggaran || "-"}</p>
+                      ) : (
+                        <div>
+                          <p className="text-sm text-foreground">{row.nomor_kontrak || <span className="italic text-muted-foreground">Tanpa nomor</span>}</p>
+                          <p className="text-[10px] text-muted-foreground">Surat Pernyataan</p>
+                        </div>
                       )}
                     </td>
                     <td className="px-5 py-3.5">
@@ -595,9 +818,9 @@ export default function LegalPage() {
                       <div className="flex items-center justify-center gap-1">
                         {canEdit && row.status_approval === "Menunggu" && (
                           <>
-                            <button onClick={() => setApprovalConfirm({ id: row.id, nama: `${row.employeeNama} (${row.kategori === "SP" ? row.tingkat_sp : "PKWT"})`, action: "approve" })}
+                            <button onClick={() => setApprovalConfirm({ id: row.id, nama: `${row.employeeNama} (${row.kategori === "SP" ? row.tingkat_sp : row.kategori === "PERNYATAAN" ? "Pernyataan" : "PKWT"})`, action: "approve" })}
                               title="Setujui" className="p-1.5 rounded-lg hover:bg-success-light text-muted-foreground hover:text-success"><Check className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => setApprovalConfirm({ id: row.id, nama: `${row.employeeNama} (${row.kategori === "SP" ? row.tingkat_sp : "PKWT"})`, action: "reject" })}
+                            <button onClick={() => setApprovalConfirm({ id: row.id, nama: `${row.employeeNama} (${row.kategori === "SP" ? row.tingkat_sp : row.kategori === "PERNYATAAN" ? "Pernyataan" : "PKWT"})`, action: "reject" })}
                               title="Tolak" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><X className="w-3.5 h-3.5" /></button>
                           </>
                         )}
@@ -608,7 +831,7 @@ export default function LegalPage() {
                           <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
                         )}
                         {canEdit && (
-                          <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.kategori === "SP" ? row.tingkat_sp : "PKWT"})` })}
+                          <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.kategori === "SP" ? row.tingkat_sp : row.kategori === "PERNYATAAN" ? "Pernyataan" : "PKWT"})` })}
                             title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                         )}
                       </div>
@@ -637,7 +860,7 @@ export default function LegalPage() {
                   </div>
                   <div>
                     <h2 className="text-base font-bold text-foreground">{editingId ? "Edit Dokumen" : "Tambah Dokumen Legal"}</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">PKWT atau Surat Peringatan</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">PKWT, Surat Peringatan, atau Surat Pernyataan</p>
                   </div>
                 </div>
               </div>
@@ -650,6 +873,8 @@ export default function LegalPage() {
                   </div>
                 )}
 
+                {/* Pegawai - hidden in bulk mode */}
+                {!bulkMode && (
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Pegawai <span className="text-danger">*</span></label>
                   {editingId ? (
@@ -661,6 +886,7 @@ export default function LegalPage() {
                       options={employees.map((e) => ({ value: e.id, label: e.nama }))} placeholder="Pilih pegawai" searchable />
                   )}
                 </div>
+                )}
 
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Kategori <span className="text-danger">*</span></label>
@@ -669,10 +895,11 @@ export default function LegalPage() {
                       const active = form.kategori === k.value;
                       return (
                         <button key={k.value} type="button" onClick={() => {
-                          const newKategori = k.value as "PKWT" | "SP";
-                          const autoEnd = form.tanggal_terbit ? getAutoTanggalBerakhir(form.tanggal_terbit, newKategori, form.tingkat_sp) : "";
+                          const newKategori = k.value as "PKWT" | "SP" | "PERNYATAAN";
+                          const autoEnd = form.tanggal_terbit && newKategori !== "PERNYATAAN" ? getAutoTanggalBerakhir(form.tanggal_terbit, newKategori, form.tingkat_sp) : "";
                           const autoNomor = !editingId ? getAutoNomor(newKategori, form.tingkat_sp) : form.nomor_kontrak;
                           setForm({ ...form, kategori: newKategori, tanggal_berakhir: autoEnd || form.tanggal_berakhir, nomor_kontrak: autoNomor });
+                          if (newKategori !== "PERNYATAAN") setBulkMode(false);
                         }}
                           className={cn("flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border-2",
                             active ? "shadow-md" : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/50"
@@ -685,13 +912,43 @@ export default function LegalPage() {
                   </div>
                 </div>
 
-                {/* Nomor Surat (wajib untuk semua kategori) */}
+                {/* Bulk mode toggle for PERNYATAAN */}
+                {form.kategori === "PERNYATAAN" && !editingId && (
+                  <div className="rounded-xl border border-violet-200 dark:border-violet-500/20 bg-violet-50 dark:bg-violet-500/5 p-3">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <div className="relative">
+                        <input type="checkbox" checked={bulkMode} onChange={(e) => setBulkMode(e.target.checked)} className="sr-only peer" />
+                        <div className="w-9 h-5 bg-muted rounded-full peer-checked:bg-violet-500 transition-colors" />
+                        <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform peer-checked:translate-x-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                          <Users className="w-3.5 h-3.5 text-violet-500" />
+                          Buat untuk seluruh karyawan
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          {(() => {
+                            const existingCount = list.filter(r => r.kategori === "PERNYATAAN").length;
+                            const remaining = employees.length - existingCount;
+                            return remaining > 0
+                              ? `${remaining} dari ${employees.length} karyawan belum memiliki Surat Pernyataan`
+                              : "Semua karyawan sudah memiliki Surat Pernyataan";
+                          })()}
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                )}
+
+                {/* Nomor Surat - hidden in bulk mode */}
+                {!bulkMode && (
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Nomor Surat <span className="text-danger">*</span></label>
                   <input type="text" placeholder="01/V/JAMS/2026" value={form.nomor_kontrak}
                     onChange={(e) => setForm({ ...form, nomor_kontrak: e.target.value })} className={inputClass} />
                   <p className="text-[10px] text-muted-foreground mt-1">Otomatis di-generate. Bisa diubah manual.</p>
                 </div>
+                )}
 
                 {/* PKWT fields */}
                 {form.kategori === "PKWT" && (
@@ -722,15 +979,16 @@ export default function LegalPage() {
                 )}
 
                 {/* Tanggal */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className={form.kategori === "PERNYATAAN" ? "" : "grid grid-cols-2 gap-3"}>
                   <div>
                     <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Terbit <span className="text-danger">*</span></label>
                     <DatePicker value={form.tanggal_terbit} onChange={(val) => {
-                      const autoEnd = getAutoTanggalBerakhir(val, form.kategori, form.tingkat_sp);
+                      const autoEnd = form.kategori !== "PERNYATAAN" ? getAutoTanggalBerakhir(val, form.kategori, form.tingkat_sp) : "";
                       setForm({ ...form, tanggal_terbit: val, tanggal_berakhir: autoEnd || form.tanggal_berakhir });
                       setFormError("");
                     }} placeholder="Tanggal terbit" />
                   </div>
+                  {form.kategori !== "PERNYATAAN" && (
                   <div>
                     <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Berakhir <span className="text-danger">*</span></label>
                     <DatePicker value={form.tanggal_berakhir} onChange={(val) => { setForm({ ...form, tanggal_berakhir: val }); setFormError(""); }} placeholder="Tanggal berakhir" />
@@ -738,6 +996,7 @@ export default function LegalPage() {
                       <p className="text-[10px] text-muted-foreground mt-1">Otomatis dari pengaturan masa berlaku. Bisa diubah manual.</p>
                     )}
                   </div>
+                  )}
                 </div>
 
                 <div>
@@ -752,8 +1011,8 @@ export default function LegalPage() {
               {/* Footer */}
               <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
                 <Button variant="outline" size="sm" onClick={() => setShowForm(false)} disabled={formSaving}>Batal</Button>
-                <Button size="sm" icon={editingId ? Check : Plus} onClick={handleSave} disabled={formSaving}>
-                  {formSaving ? "Menyimpan..." : editingId ? "Simpan" : "Tambah"}
+                <Button size="sm" icon={bulkMode ? Users : editingId ? Check : Plus} onClick={handleSave} disabled={formSaving}>
+                  {formSaving ? "Menyimpan..." : bulkMode ? `Buat untuk ${Math.max(0, employees.length - list.filter(r => r.kategori === "PERNYATAAN").length)} Karyawan` : editingId ? "Simpan" : "Tambah"}
                 </Button>
               </div>
             </div>
@@ -870,6 +1129,33 @@ export default function LegalPage() {
           </div>
         </Portal>
       )}
+
+
+      {/* ═══ BULK DELETE CONFIRM ═══ */}
+      {showBulkDeleteConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !bulkDeleting && setShowBulkDeleteConfirm(false)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="p-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4"><Trash2 className="w-7 h-7 text-danger" /></div>
+                <h3 className="text-base font-bold text-foreground">Hapus {selectedIds.size} Dokumen?</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  <span className="font-semibold text-danger">{selectedIds.size} dokumen</span> yang dipilih akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowBulkDeleteConfirm(false)} disabled={bulkDeleting}>Batal</Button>
+                <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={handleBulkDelete} disabled={bulkDeleting}>
+                  {bulkDeleting ? "Menghapus..." : `Hapus ${selectedIds.size}`}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+
     </div>
     </RouteGuard>
   );
