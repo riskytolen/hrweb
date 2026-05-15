@@ -590,6 +590,27 @@ export default function AttendancePage() {
 
     setFormSaving(true);
 
+    // Refresh session sebelum insert. Jika JWT expired tanpa diketahui,
+    // trigger DB akan menganggap user tidak terotentikasi dan mengoverride
+    // jam_masuk ke server time. Cek session aktif dulu.
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) {
+      setFormError("Sesi login Anda berakhir. Silakan login ulang sebelum menyimpan absensi.");
+      setFormSaving(false);
+      return;
+    }
+    // Refresh token jika hampir kadaluarsa (Supabase auto-refresh, tapi belt-and-suspender)
+    const expiresAt = sessionData.session.expires_at ?? 0;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (expiresAt - nowSec < 120) {
+      const { error: refreshErr } = await supabase.auth.refreshSession();
+      if (refreshErr) {
+        setFormError("Gagal memperbarui sesi login. Silakan login ulang.");
+        setFormSaving(false);
+        return;
+      }
+    }
+
     const sched = schedules.find((s) => s.division_id === form.division_id);
     const penalty = penalties.find((p) => p.division_id === form.division_id);
     const schedJamMasuk = sched?.jam_masuk || "08:00";
@@ -630,7 +651,11 @@ export default function AttendancePage() {
         if (error) { setFormError(error.message); setFormSaving(false); return; }
         showToast("success", "Data Diperbarui", "Data absen berhasil diperbarui.");
       } else {
-        const { error } = await supabase.from("attendance_records").insert(payload);
+        const { data: inserted, error } = await supabase
+          .from("attendance_records")
+          .insert(payload)
+          .select("id, jam_masuk, status, durasi_telat")
+          .single();
         if (error) {
           if (error.message.includes("duplicate") || error.message.includes("unique")) {
             setFormError("Pegawai ini sudah memiliki data absen di tanggal tersebut.");
@@ -639,6 +664,24 @@ export default function AttendancePage() {
           }
           setFormSaving(false);
           return;
+        }
+        // Verifikasi server tidak override (artinya trigger DB merubah data form
+        // karena auth.uid() / role admin tidak terdeteksi). Ini lapisan deteksi
+        // kedua: kalau sampai sini berbeda, refresh halaman dan info ke user.
+        if (inserted && payload.jam_masuk && inserted.jam_masuk) {
+          const formJam = String(payload.jam_masuk).slice(0, 5);
+          const dbJam = String(inserted.jam_masuk).slice(0, 5);
+          if (formJam !== dbJam) {
+            // Hapus record yang sudah ter-override agar tidak menjadi data salah,
+            // lalu beri tahu admin.
+            await supabase.from("attendance_records").delete().eq("id", inserted.id);
+            setFormError(
+              `Sesi login bermasalah: server mengubah jam menjadi ${dbJam} (form: ${formJam}). ` +
+                `Data tidak disimpan. Silakan logout dan login ulang sebagai Admin, kemudian coba lagi.`
+            );
+            setFormSaving(false);
+            return;
+          }
         }
         showToast("success", "Absensi Disimpan", `Data absen ${employees.find((e) => e.id === form.employee_id)?.nama || ""} berhasil disimpan.`);
       }
