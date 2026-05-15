@@ -178,7 +178,8 @@ export default function RecruitmentPage() {
         // Sync pegawai jika status berubah
         if (existingRow && existingRow.status !== form.status) {
           const updatedRec = { ...existingRow, ...payload, ...(cvUrl ? { cv_url: cvUrl } : {}) } as DbRecruitment;
-          await syncPegawaiForStatus(updatedRec, form.status);
+          const syncResult = await syncPegawaiForStatus(updatedRec, form.status);
+          showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
         } else if (cvWarning) {
           showToast("error", "Data Tersimpan, CV Gagal", "Data pelamar berhasil diperbarui tapi CV gagal diupload.");
         } else {
@@ -270,11 +271,11 @@ export default function RecruitmentPage() {
   };
 
   // ─── Helper: insert pegawai dari data recruitment ───
-  const insertPegawaiFromRecruitment = async (rec: DbRecruitment, pegawaiStatus: string): Promise<{ id: string } | null> => {
+  const insertPegawaiFromRecruitment = async (rec: DbRecruitment, pegawaiStatus: string): Promise<{ id: string } | { error: string }> => {
     const newId = await generateEmployeeId();
     const { error } = await supabase.from("pegawai").insert({
       id: newId,
-      nama: rec.nama,
+      nama: (rec.nama || "").trim(),
       no_telp: rec.no_hp,
       alamat_domisili: rec.alamat || null,
       alamat_ktp: rec.alamat || null,
@@ -282,70 +283,90 @@ export default function RecruitmentPage() {
       tanggal_bergabung: pegawaiStatus === "Training" ? null : new Date().toISOString().slice(0, 10),
       recruitment_id: rec.id,
     });
-    if (error) return null;
+    if (error) return { error: error.message };
     return { id: newId };
   };
 
-  /** Sync pegawai berdasarkan status recruitment. Dipanggil dari handleStatusChange dan handleSave. */
-  const syncPegawaiForStatus = async (rec: DbRecruitment, newStatus: string) => {
+  /**
+   * Sync pegawai berdasarkan status recruitment.
+   * Return { ok, message } — ok=false berarti pemanggil HARUS membatalkan update status recruitment.
+   */
+  const syncPegawaiForStatus = async (
+    rec: DbRecruitment,
+    newStatus: string,
+  ): Promise<{ ok: true; toast: { type: "success"; title: string; message: string } } | { ok: false; toast: { type: "error"; title: string; message: string } }> => {
     // Cek apakah sudah ada pegawai dari recruitment ini
     const { data: existingEmp } = await supabase
       .from("pegawai")
       .select("id, status")
       .eq("recruitment_id", rec.id)
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (newStatus === "Training") {
       if (!existingEmp) {
         const result = await insertPegawaiFromRecruitment(rec, "Training");
-        if (result) {
-          showToast("success", "Training Dimulai", `${rec.nama} terdaftar sebagai pegawai training (${result.id}).`);
-        } else {
-          showToast("error", "Status Diubah, Gagal Buat Pegawai", "Status berhasil diubah tapi gagal membuat data pegawai.");
+        if ("id" in result) {
+          return { ok: true, toast: { type: "success", title: "Training Dimulai", message: `${rec.nama} terdaftar sebagai pegawai training (${result.id}).` } };
         }
-      } else {
-        await supabase.from("pegawai").update({ status: "Training" }).eq("recruitment_id", rec.id);
-        showToast("success", "Status Diperbarui", `Status diubah ke Training.`);
+        return { ok: false, toast: { type: "error", title: "Gagal Buat Pegawai", message: result.error } };
       }
-    } else if (newStatus === "Diterima") {
+      const { error } = await supabase.from("pegawai").update({ status: "Training" }).eq("recruitment_id", rec.id);
+      if (error) return { ok: false, toast: { type: "error", title: "Gagal Update Pegawai", message: error.message } };
+      return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status diubah ke Training.` } };
+    }
+
+    if (newStatus === "Diterima") {
       if (existingEmp) {
-        await supabase.from("pegawai").update({
+        const { error } = await supabase.from("pegawai").update({
           status: "Aktif",
           tanggal_bergabung: new Date().toISOString().slice(0, 10),
         }).eq("recruitment_id", rec.id);
-        showToast("success", "Diterima & Aktif", `${rec.nama} (${existingEmp.id}) sekarang pegawai aktif.`);
-      } else {
-        // Langsung Diterima tanpa Training → buat pegawai Aktif
-        const result = await insertPegawaiFromRecruitment(rec, "Aktif");
-        if (result) {
-          showToast("success", "Diterima", `${rec.nama} terdaftar sebagai pegawai aktif (${result.id}).`);
-        } else {
-          showToast("success", "Status Diperbarui", `Status diubah ke Diterima.`);
-        }
+        if (error) return { ok: false, toast: { type: "error", title: "Gagal Update Pegawai", message: error.message } };
+        return { ok: true, toast: { type: "success", title: "Diterima & Aktif", message: `${rec.nama} (${existingEmp.id}) sekarang pegawai aktif.` } };
       }
-    } else if (newStatus === "Ditolak") {
-      if (existingEmp) {
-        await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
-        showToast("success", "Ditolak", `${rec.nama} dihapus dari daftar pegawai. Data rekap titik tetap tersimpan.`);
-      } else {
-        showToast("success", "Status Diperbarui", `Status diubah ke Ditolak.`);
+      const result = await insertPegawaiFromRecruitment(rec, "Aktif");
+      if ("id" in result) {
+        return { ok: true, toast: { type: "success", title: "Diterima", message: `${rec.nama} terdaftar sebagai pegawai aktif (${result.id}).` } };
       }
-    } else {
-      // Status mundur (Terpilih, Lamaran Masuk) → hapus pegawai jika ada
-      if (existingEmp) {
-        await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
-        showToast("success", "Status Diperbarui", `${rec.nama} dihapus dari daftar pegawai karena status mundur.`);
-      } else {
-        showToast("success", "Status Diperbarui", `Status berhasil diubah ke "${newStatus}".`);
-      }
+      return { ok: false, toast: { type: "error", title: "Gagal Buat Pegawai", message: result.error } };
     }
+
+    if (newStatus === "Ditolak") {
+      if (existingEmp) {
+        const { error } = await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
+        if (error) return { ok: false, toast: { type: "error", title: "Gagal Hapus Pegawai", message: error.message } };
+        return { ok: true, toast: { type: "success", title: "Ditolak", message: `${rec.nama} dihapus dari daftar pegawai. Data rekap titik tetap tersimpan.` } };
+      }
+      return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status diubah ke Ditolak.` } };
+    }
+
+    // Status mundur (Terpilih, Lamaran Masuk) → hapus pegawai jika ada
+    if (existingEmp) {
+      const { error } = await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
+      if (error) return { ok: false, toast: { type: "error", title: "Gagal Hapus Pegawai", message: error.message } };
+      return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `${rec.nama} dihapus dari daftar pegawai karena status mundur.` } };
+    }
+    return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status berhasil diubah ke "${newStatus}".` } };
   };
 
   const handleStatusChange = async (id: number, status: string) => {
     setStatusChanging(true);
     try {
-      // Jika status Training, set tanggal training otomatis
+      const current = list.find((r) => r.id === id);
+      if (!current) {
+        showToast("error", "Data Tidak Ditemukan", "Refresh halaman dan coba lagi.");
+        return;
+      }
+
+      // 1) Sync pegawai DULU. Kalau gagal, JANGAN ubah status recruitment (anti-orphan).
+      const syncResult = await syncPegawaiForStatus(current, status);
+      if (!syncResult.ok) {
+        showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
+        return;
+      }
+
+      // 2) Pegawai berhasil di-sync → update status recruitment
       const updatePayload: Record<string, unknown> = { status };
       if (status === "Training") {
         const today = new Date().toISOString().slice(0, 10);
@@ -362,12 +383,14 @@ export default function RecruitmentPage() {
         .single();
 
       if (error || !updated) {
-        showToast("error", "Gagal Ubah Status", error?.message || "Gagal mendapat data terbaru.");
+        // Status recruitment gagal di-update padahal pegawai sudah dibuat — kasus jarang.
+        // Tampilkan error supaya user bisa klik ulang.
+        showToast("error", "Status Belum Tersimpan", error?.message || "Refresh halaman dan coba lagi.");
         return;
       }
 
       setList((prev) => prev.map((r) => (r.id === id ? updated : r)));
-      await syncPegawaiForStatus(updated, status);
+      showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
     } catch (err) {
       showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal mengubah status.");
     } finally {
