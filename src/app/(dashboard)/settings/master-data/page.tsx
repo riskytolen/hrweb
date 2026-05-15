@@ -117,7 +117,7 @@ export default function MasterDataPage() {
   const [scheduleSearch, setScheduleSearch] = useState("");
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
-  const [scheduleForm, setScheduleForm] = useState({ division_id: 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", status: "Aktif" });
+  const [scheduleForm, setScheduleForm] = useState({ division_id: 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", awal_absen_menit: "0", status: "Aktif" });
   const [scheduleErrors, setScheduleErrors] = useState<Set<string>>(new Set());
 
   // ─── Denda Telat State ───
@@ -451,13 +451,13 @@ export default function MasterDataPage() {
   const divisionsWithoutSchedule = activeDivisions.filter((d) => !scheduleList.some((s) => s.division_id === d.id));
 
   const handleOpenAddSchedule = () => {
-    setScheduleForm({ division_id: divisionsWithoutSchedule[0]?.id || 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", status: "Aktif" });
+    setScheduleForm({ division_id: divisionsWithoutSchedule[0]?.id || 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", awal_absen_menit: "0", status: "Aktif" });
     setScheduleErrors(new Set());
     setEditingScheduleId(null);
     setShowScheduleForm(true);
   };
   const handleOpenEditSchedule = (s: DivisionSchedule) => {
-    setScheduleForm({ division_id: s.division_id, jam_masuk: s.jam_masuk.slice(0, 5), jam_pulang: s.jam_pulang ? s.jam_pulang.slice(0, 5) : "", toleransi_menit: String(s.toleransi_menit), status: s.status });
+    setScheduleForm({ division_id: s.division_id, jam_masuk: s.jam_masuk.slice(0, 5), jam_pulang: s.jam_pulang ? s.jam_pulang.slice(0, 5) : "", toleransi_menit: String(s.toleransi_menit), awal_absen_menit: String(s.awal_absen_menit ?? 0), status: s.status });
     setScheduleErrors(new Set());
     setEditingScheduleId(s.id);
     setShowScheduleForm(true);
@@ -472,7 +472,9 @@ export default function MasterDataPage() {
       return;
     }
     setScheduleErrors(new Set());
-    const payload = { division_id: scheduleForm.division_id, jam_masuk: scheduleForm.jam_masuk, jam_pulang: scheduleForm.jam_pulang || null, toleransi_menit: parseInt(scheduleForm.toleransi_menit) || 0, status: scheduleForm.status };
+    const awalAbsenParsed = parseInt(scheduleForm.awal_absen_menit);
+    const awalAbsenMenit = Number.isFinite(awalAbsenParsed) && awalAbsenParsed >= 0 ? Math.min(awalAbsenParsed, 720) : 0;
+    const payload = { division_id: scheduleForm.division_id, jam_masuk: scheduleForm.jam_masuk, jam_pulang: scheduleForm.jam_pulang || null, toleransi_menit: parseInt(scheduleForm.toleransi_menit) || 0, awal_absen_menit: awalAbsenMenit, status: scheduleForm.status };
     if (editingScheduleId !== null) {
       await supabase.from("division_schedules").update(payload).eq("id", editingScheduleId);
       showSuccess("Waktu Kerja Diperbarui", "Jadwal kerja telah disimpan.");
@@ -1109,15 +1111,16 @@ export default function MasterDataPage() {
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Jam Masuk</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Jam Pulang</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Toleransi</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Awal Absen</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
                     <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
                   {loading ? (
-                    <SkeletonTable rows={5} cols={7} />
+                    <SkeletonTable rows={5} cols={8} />
                   ) : filteredSchedules.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-10 text-sm text-muted-foreground">Tidak ada jadwal kerja ditemukan</td></tr>
+                    <tr><td colSpan={8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada jadwal kerja ditemukan</td></tr>
                   ) : filteredSchedules.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((sch, idx) => (
                     <tr key={sch.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
@@ -1125,6 +1128,11 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3.5"><span className="text-xs font-mono bg-primary-light text-primary px-2 py-1 rounded-md">{sch.jam_masuk.slice(0, 5)}</span></td>
                       <td className="px-5 py-3.5">{sch.jam_pulang ? <span className="text-xs font-mono bg-muted text-muted-foreground px-2 py-1 rounded-md">{sch.jam_pulang.slice(0, 5)}</span> : <span className="text-xs text-muted-foreground italic">-</span>}</td>
                       <td className="px-5 py-3.5"><span className="text-xs text-muted-foreground">{sch.toleransi_menit} menit</span></td>
+                      <td className="px-5 py-3.5">
+                        {(sch.awal_absen_menit ?? 0) > 0
+                          ? <span className="text-xs text-muted-foreground">{sch.awal_absen_menit} menit</span>
+                          : <span className="text-xs text-muted-foreground italic">-</span>}
+                      </td>
                       <td className="px-5 py-3.5">
                         <button onClick={() => handleToggleScheduleStatus(sch.id)}
                           className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
@@ -1975,6 +1983,33 @@ export default function MasterDataPage() {
                     options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
                   />
                 </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Mulai Bisa Absen (Awal)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={720}
+                    value={scheduleForm.awal_absen_menit}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, awal_absen_menit: e.target.value })}
+                    className={inputClass}
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">menit sebelum jam masuk</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {(() => {
+                    const n = parseInt(scheduleForm.awal_absen_menit) || 0;
+                    if (n <= 0) return "Set 0 untuk menonaktifkan. Pegawai bisa absen kapan saja sebelum jam masuk.";
+                    const [hh, mm] = (scheduleForm.jam_masuk || "08:00").split(":").map((v) => parseInt(v) || 0);
+                    const total = hh * 60 + mm - n;
+                    if (total < 0) return `Window terlalu besar (>${hh * 60 + mm} menit dari tengah malam).`;
+                    const eh = Math.floor(total / 60);
+                    const em = total % 60;
+                    const earliest = `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`;
+                    return `Pegawai bisa mulai absen pukul ${earliest} (${n} menit sebelum jam masuk ${scheduleForm.jam_masuk}).`;
+                  })()}
+                </p>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">

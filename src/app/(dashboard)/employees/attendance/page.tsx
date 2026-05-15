@@ -22,7 +22,7 @@ type EmployeeLite = { id: string; nama: string; status: string };
 type OffDayEntry = { employee_id: string; day_of_week: number };
 type OverrideEntry = { id: number; employee_id: string; tanggal: string; type: "libur" | "masuk"; catatan: string | null };
 type DivisionLite = { id: number; nama: string; color: string };
-type ScheduleLite = { division_id: number; jam_masuk: string; toleransi_menit: number };
+type ScheduleLite = { division_id: number; jam_masuk: string; toleransi_menit: number; awal_absen_menit: number };
 type PenaltyLite = { division_id: number; denda_per_menit: number; batas_menit: number; denda_maksimum: number; denda_alpha: number };
 type AttendanceRow = DbAttendanceRecord & {
   employeeNama?: string;
@@ -207,7 +207,7 @@ export default function AttendancePage() {
     if (data) setDivisions(data);
   };
   const fetchSchedules = async () => {
-    const { data } = await supabase.from("division_schedules").select("division_id, jam_masuk, toleransi_menit").eq("status", "Aktif");
+    const { data } = await supabase.from("division_schedules").select("division_id, jam_masuk, toleransi_menit, awal_absen_menit").eq("status", "Aktif");
     if (data) setSchedules(data);
   };
   const fetchPenalties = async () => {

@@ -44,6 +44,7 @@ export interface DbDivisionSchedule {
   jam_masuk: string;
   jam_pulang: string | null;
   toleransi_menit: number;
+  awal_absen_menit: number;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;
   updated_at: string;
