@@ -200,17 +200,13 @@ export default function LeavePage() {
     setFormError("");
     if (!form.employee_id) { setFormError("Pilih pegawai."); return; }
 
-    // Untuk Sakit: 1 hari (tanggal_mulai = tanggal_selesai)
-    const effectiveMulai = form.jenis === "Sakit" ? form.tanggal_mulai : form.tanggal_mulai;
-    const effectiveSelesai = form.jenis === "Sakit" ? form.tanggal_mulai : (form.tanggal_selesai || form.tanggal_mulai);
+    // Sakit, Izin, Cuti: semua pakai range tanggal_mulai - tanggal_selesai
+    const effectiveMulai = form.tanggal_mulai;
+    const effectiveSelesai = form.tanggal_selesai || form.tanggal_mulai;
 
-    if (form.jenis === "Sakit") {
-      if (!form.tanggal_mulai) { setFormError("Pilih tanggal sakit."); return; }
-    } else {
-      if (!form.tanggal_mulai) { setFormError("Pilih tanggal mulai."); return; }
-      if (!form.tanggal_selesai) { setFormError("Pilih tanggal selesai."); return; }
-      if (form.tanggal_selesai < form.tanggal_mulai) { setFormError("Tanggal selesai harus >= tanggal mulai."); return; }
-    }
+    if (!form.tanggal_mulai) { setFormError("Pilih tanggal mulai."); return; }
+    if (!effectiveSelesai) { setFormError("Pilih tanggal selesai."); return; }
+    if (effectiveSelesai < effectiveMulai) { setFormError("Tanggal selesai harus >= tanggal mulai."); return; }
 
     // Validasi kuota cuti (hanya untuk jenis Cuti)
     if (form.jenis === "Cuti" && leaveSetting) {
@@ -240,9 +236,7 @@ export default function LeavePage() {
         .gte("tanggal_selesai", effectiveMulai)
         .limit(1);
       if (overlap && overlap.length > 0) {
-        setFormError(form.jenis === "Sakit"
-          ? `Sudah ada pengajuan ${overlap[0].jenis} untuk tanggal tersebut.`
-          : `Tanggal bentrok dengan pengajuan ${overlap[0].jenis} (${overlap[0].tanggal_mulai} s/d ${overlap[0].tanggal_selesai}).`);
+        setFormError(`Tanggal bentrok dengan pengajuan ${overlap[0].jenis} (${overlap[0].tanggal_mulai} s/d ${overlap[0].tanggal_selesai}).`);
         return;
       }
     }
@@ -665,41 +659,39 @@ export default function LeavePage() {
                   </div>
                 )}
 
-                {form.jenis === "Sakit" ? (
-                  /* Sakit: pilih tanggal, 1 hari per pengajuan */
-                  <div>
-                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Sakit <span className="text-danger">*</span></label>
-                    <DatePicker value={form.tanggal_mulai} onChange={(val) => { setForm({ ...form, tanggal_mulai: val }); setFormError(""); }} placeholder="Pilih tanggal" />
-                    <p className="text-[10px] text-muted-foreground mt-1">1 hari per pengajuan. Jika besok masih sakit, ajukan lagi.</p>
+                {form.jenis === "Sakit" && (
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-danger/[0.06] border border-danger/20">
+                    <AlertTriangle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-danger leading-relaxed">
+                      Pengajuan sakit boleh untuk durasi beberapa hari sekaligus. Lampiran bukti (surat dokter) wajib dilampirkan.
+                    </p>
                   </div>
-                ) : (
-                  /* Izin & Cuti: range tanggal */
-                  <>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Mulai <span className="text-danger">*</span></label>
-                        <DatePicker value={form.tanggal_mulai} onChange={(val) => {
-                          setForm({ ...form, tanggal_mulai: val, tanggal_selesai: form.tanggal_selesai && form.tanggal_selesai >= val ? form.tanggal_selesai : val });
-                          setFormError("");
-                        }} placeholder="Mulai" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Selesai <span className="text-danger">*</span></label>
-                        <DatePicker value={form.tanggal_selesai} onChange={(val) => { setForm({ ...form, tanggal_selesai: val }); setFormError(""); }} placeholder="Selesai" />
-                      </div>
-                    </div>
+                )}
 
-                    {/* Duration preview */}
-                    {formDays > 0 && (
-                      <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/[0.06] border border-primary/20">
-                        <CalendarDays className="w-4 h-4 text-primary" />
-                        <span className="text-xs font-semibold text-primary">{formDays} hari</span>
-                        <span className="text-[10px] text-muted-foreground">
-                          ({formatTanggal(form.tanggal_mulai)}{form.tanggal_mulai !== form.tanggal_selesai ? ` - ${formatTanggal(form.tanggal_selesai)}` : ""})
-                        </span>
-                      </div>
-                    )}
-                  </>
+                {/* Date pickers: range untuk Izin, Sakit, & Cuti */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Mulai <span className="text-danger">*</span></label>
+                    <DatePicker value={form.tanggal_mulai} onChange={(val) => {
+                      setForm({ ...form, tanggal_mulai: val, tanggal_selesai: form.tanggal_selesai && form.tanggal_selesai >= val ? form.tanggal_selesai : val });
+                      setFormError("");
+                    }} placeholder="Mulai" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Selesai <span className="text-danger">*</span></label>
+                    <DatePicker value={form.tanggal_selesai} onChange={(val) => { setForm({ ...form, tanggal_selesai: val }); setFormError(""); }} placeholder="Selesai" />
+                  </div>
+                </div>
+
+                {/* Duration preview */}
+                {formDays > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary/[0.06] border border-primary/20">
+                    <CalendarDays className="w-4 h-4 text-primary" />
+                    <span className="text-xs font-semibold text-primary">{formDays} hari</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      ({formatTanggal(form.tanggal_mulai)}{form.tanggal_mulai !== form.tanggal_selesai ? ` - ${formatTanggal(form.tanggal_selesai)}` : ""})
+                    </span>
+                  </div>
                 )}
 
                 <div>
