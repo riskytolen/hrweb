@@ -127,7 +127,7 @@ export default function LegalPage() {
 
   // Fetch
   const fetchEmployees = async () => {
-    const { data } = await supabase.from("pegawai").select("id, nama").in("status", ["Aktif", "Training"]).order("nama");
+    const { data } = await supabase.from("pegawai").select("id, nama").eq("status", "Aktif").order("nama");
     if (data) setEmployees(data);
   };
 

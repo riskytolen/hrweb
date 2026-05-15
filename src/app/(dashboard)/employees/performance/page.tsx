@@ -121,7 +121,7 @@ export default function PerformancePage() {
     setLoading(true);
 
     // Fetch employees
-    const { data: empData } = await supabase.from("pegawai").select("id, nama, jabatan_id, status").in("status", ["Aktif", "Training"]).order("nama");
+    const { data: empData } = await supabase.from("pegawai").select("id, nama, jabatan_id, status").eq("status", "Aktif").order("nama");
     const emps: EmployeeLite[] = empData || [];
     setEmployees(emps);
 

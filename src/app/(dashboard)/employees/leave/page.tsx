@@ -104,7 +104,7 @@ export default function LeavePage() {
 
   // Fetch
   const fetchEmployees = async () => {
-    const { data } = await supabase.from("pegawai").select("id, nama, tanggal_bergabung").in("status", ["Aktif", "Training"]).order("nama");
+    const { data } = await supabase.from("pegawai").select("id, nama, tanggal_bergabung").eq("status", "Aktif").order("nama");
     if (data) setEmployees(data);
   };
   const fetchLeaveSetting = async () => {

@@ -183,7 +183,7 @@ export default function PayrollPage() {
     const { data, error } = await supabase
       .from("pegawai")
       .select("id, nama, status, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening, gaji_pokok")
-      .in("status", ["Aktif", "Training"])
+      .eq("status", "Aktif")
       .order("nama");
     if (error) { showToast("error", "Gagal Memuat Pegawai", error.message); return; }
     if (data) setEmployees(data.map((d: Record<string, unknown>) => ({
@@ -238,7 +238,7 @@ export default function PayrollPage() {
       const { data: activeEmps, error: empErr } = await supabase
         .from("pegawai")
         .select("id, nama, gaji_pokok")
-        .in("status", ["Aktif", "Training"])
+        .eq("status", "Aktif")
         .order("nama");
       if (empErr || !activeEmps) {
         showToast("error", "Gagal Memuat Pegawai", empErr?.message);

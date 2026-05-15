@@ -199,7 +199,7 @@ export default function AttendancePage() {
 
   // ─── Fetch ───
   const fetchEmployees = async () => {
-    const { data } = await supabase.from("pegawai").select("id, nama, status").in("status", ["Aktif", "Training"]).order("nama");
+    const { data } = await supabase.from("pegawai").select("id, nama, status").eq("status", "Aktif").order("nama");
     if (data) setEmployees(data);
   };
   const fetchDivisions = async () => {
