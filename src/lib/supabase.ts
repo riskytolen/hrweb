@@ -111,6 +111,8 @@ export interface DbPegawai {
   kartu_keluarga: string | null;
   tanggal_mulai_pkwt: string | null;
   tanggal_berakhir_pkwt: string | null;
+  /** Tanggal terakhir efektif kerja saat status diubah ke "Tidak Aktif". NULL jika masih aktif. */
+  tanggal_keluar: string | null;
   gaji_pokok: number;
   recruitment_id: number | null;
   created_at: string;

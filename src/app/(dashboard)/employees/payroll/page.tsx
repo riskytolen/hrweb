@@ -234,11 +234,13 @@ export default function PayrollPage() {
     const genPeriod = getPeriodRange(generatePeriod);
 
     try {
-      // 1. Fetch active employees (termasuk tanggal_bergabung untuk prorata)
+      // 1. Fetch pegawai relevan untuk periode ini:
+      //    - Aktif (semua)
+      //    - Tidak Aktif tapi tanggal_keluar masih di dalam periode (keluar pertengahan bulan)
       const { data: activeEmps, error: empErr } = await supabase
         .from("pegawai")
-        .select("id, nama, gaji_pokok, tanggal_bergabung")
-        .eq("status", "Aktif")
+        .select("id, nama, gaji_pokok, tanggal_bergabung, tanggal_keluar")
+        .or(`status.eq.Aktif,and(status.eq.Tidak Aktif,tanggal_keluar.gte.${genPeriod.start})`)
         .order("nama");
       if (empErr || !activeEmps) {
         showToast("error", "Gagal Memuat Pegawai", empErr?.message);
@@ -254,7 +256,7 @@ export default function PayrollPage() {
       const existingSet = new Set((existing || []).map((e: { employee_id: string }) => e.employee_id));
 
       // 3. Filter employees that don't have a slip yet
-      const newEmps = (activeEmps as { id: string; nama: string; gaji_pokok?: number; tanggal_bergabung: string | null }[]).filter((e) => !existingSet.has(e.id));
+      const newEmps = (activeEmps as { id: string; nama: string; gaji_pokok?: number; tanggal_bergabung: string | null; tanggal_keluar: string | null }[]).filter((e) => !existingSet.has(e.id));
       if (newEmps.length === 0) {
         showToast("error", "Tidak Ada Slip Baru", "Semua pegawai aktif sudah memiliki slip gaji untuk periode ini.");
         setGenerating(false);
@@ -287,12 +289,14 @@ export default function PayrollPage() {
         dendaTotals.set(d.employee_id, (dendaTotals.get(d.employee_id) || 0) + d.denda);
       });
 
-      // 6. Build gaji_pokok & tanggal_bergabung lookup
+      // 6. Build gaji_pokok, tanggal_bergabung & tanggal_keluar lookup
       const gapokMap = new Map<string, number>();
       const joinDateMap = new Map<string, string | null>();
-      (activeEmps as { id: string; gaji_pokok?: number; tanggal_bergabung: string | null }[]).forEach((e) => {
+      const exitDateMap = new Map<string, string | null>();
+      (activeEmps as { id: string; gaji_pokok?: number; tanggal_bergabung: string | null; tanggal_keluar: string | null }[]).forEach((e) => {
         gapokMap.set(e.id, e.gaji_pokok || 0);
         joinDateMap.set(e.id, e.tanggal_bergabung);
+        exitDateMap.set(e.id, e.tanggal_keluar);
       });
 
       // 6b. Fetch off_days untuk pegawai-pegawai yang akan di-generate (untuk hitung prorata)
@@ -326,22 +330,43 @@ export default function PayrollPage() {
       const inserts = newEmps.map((e) => {
         const empOff = offDayMap.get(e.id) || new Set<number>();
         const tglBergabung = joinDateMap.get(e.id);
+        const tglKeluar = exitDateMap.get(e.id);
         const totalHariKerja = countWorkingDays(genPeriod.start, genPeriod.end, empOff);
         const gapokFull = gapokMap.get(e.id) || 0;
 
-        // Prorata: jika tanggal_bergabung di tengah periode, gapok dihitung proporsional
+        // Range efektif untuk prorata:
+        //   start = max(periode.start, tanggal_bergabung || periode.start)
+        //   end   = min(periode.end, tanggal_keluar || periode.end)
+        const effectiveStart = tglBergabung && tglBergabung > genPeriod.start ? tglBergabung : genPeriod.start;
+        const effectiveEnd = tglKeluar && tglKeluar < genPeriod.end ? tglKeluar : genPeriod.end;
+
         let gapokProrata = gapokFull;
         let catatanProrata: string | null = null;
-        if (tglBergabung && tglBergabung > genPeriod.start && tglBergabung <= genPeriod.end) {
-          const hariKerjaEfektif = countWorkingDays(tglBergabung, genPeriod.end, empOff);
+        const isProratedJoin = tglBergabung && tglBergabung > genPeriod.start && tglBergabung <= genPeriod.end;
+        const isProratedExit = tglKeluar && tglKeluar >= genPeriod.start && tglKeluar < genPeriod.end;
+        const isOutsidePeriod = (tglBergabung && tglBergabung > genPeriod.end) || (tglKeluar && tglKeluar < genPeriod.start);
+
+        if (isOutsidePeriod) {
+          gapokProrata = 0;
+          if (tglBergabung && tglBergabung > genPeriod.end) {
+            catatanProrata = `Belum bergabung di periode ini (bergabung ${tglBergabung})`;
+          } else if (tglKeluar && tglKeluar < genPeriod.start) {
+            catatanProrata = `Sudah tidak aktif sebelum periode ini (keluar ${tglKeluar})`;
+          }
+        } else if (isProratedJoin || isProratedExit) {
+          const hariKerjaEfektif = countWorkingDays(effectiveStart, effectiveEnd, empOff);
           const factor = totalHariKerja > 0 ? hariKerjaEfektif / totalHariKerja : 0;
           gapokProrata = Math.round(gapokFull * factor);
-          const tglLabel = new Date(tglBergabung + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-          catatanProrata = `Prorata: bergabung ${tglLabel} (${hariKerjaEfektif}/${totalHariKerja} hari kerja)`;
-        } else if (tglBergabung && tglBergabung > genPeriod.end) {
-          // Belum bergabung di periode ini → gapok 0
-          gapokProrata = 0;
-          catatanProrata = `Belum bergabung di periode ini (bergabung setelah ${genPeriod.end})`;
+          const parts: string[] = [];
+          if (isProratedJoin) {
+            const tglLabel = new Date(tglBergabung + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+            parts.push(`bergabung ${tglLabel}`);
+          }
+          if (isProratedExit) {
+            const tglLabel = new Date(tglKeluar + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+            parts.push(`keluar ${tglLabel}`);
+          }
+          catatanProrata = `Prorata: ${parts.join(", ")} (${hariKerjaEfektif}/${totalHariKerja} hari kerja)`;
         }
 
         return {

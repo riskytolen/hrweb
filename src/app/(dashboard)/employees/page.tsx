@@ -274,6 +274,10 @@ export default function EmployeesPage() {
   const [editData, setEditData] = useState<Record<string, string | null>>({});
   const [successToast, setSuccessToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
 
+  // Modal konfirmasi tanggal keluar saat ubah status pegawai ke "Tidak Aktif"
+  const [exitModal, setExitModal] = useState<{ namaForDisplay: string } | null>(null);
+  const [exitDate, setExitDate] = useState<string>("");
+
   const showSuccessToast = (title: string, message: string) => {
     setSuccessToast({ show: true, title, message });
     setTimeout(() => setSuccessToast({ show: false, title: "", message: "" }), 4000);
@@ -364,6 +368,29 @@ export default function EmployeesPage() {
 
   const handleSaveEdit = async () => {
     if (!selectedEmployee) return;
+
+    const newStatus = editData.status as string;
+    const oldStatus = selectedEmployee.status;
+    const isBecomingInactive = newStatus === "Tidak Aktif" && oldStatus !== "Tidak Aktif";
+
+    // Status berubah ke "Tidak Aktif" → minta konfirmasi tanggal keluar dulu
+    if (isBecomingInactive) {
+      setExitDate(localDateStr());
+      setExitModal({ namaForDisplay: editData.nama as string || selectedEmployee.nama });
+      return;
+    }
+
+    await executeSaveEdit({});
+  };
+
+  /**
+   * Eksekusi update pegawai. Dipanggil dari handleSaveEdit (kalau tidak butuh konfirmasi)
+   * atau dari modal konfirmasi tanggal keluar.
+   *
+   * @param overrides Field tambahan yang di-override (mis. tanggal_keluar dari modal)
+   */
+  const executeSaveEdit = async (overrides: Record<string, string | null>) => {
+    if (!selectedEmployee) return;
     setEditSaving(true);
 
     // Upload new files if any
@@ -387,6 +414,20 @@ export default function EmployeesPage() {
     if (editFiles.kartu_keluarga) {
       const url = await uploadFile(editFiles.kartu_keluarga, selectedEmployee.id, "kk");
       if (url) fileUpdates.kartu_keluarga = url;
+    }
+
+    const newStatus = editData.status as string;
+    const oldStatus = selectedEmployee.status;
+
+    // Aturan tanggal_keluar:
+    // - Status menjadi "Tidak Aktif" → set dari overrides.tanggal_keluar (modal)
+    // - Status keluar dari "Tidak Aktif" → reset ke null (rehire/koreksi)
+    // - Selain itu, biarkan apa adanya (jangan kirim ke DB)
+    const statusUpdates: Record<string, string | null> = {};
+    if (newStatus === "Tidak Aktif" && oldStatus !== "Tidak Aktif") {
+      statusUpdates.tanggal_keluar = overrides.tanggal_keluar || localDateStr();
+    } else if (oldStatus === "Tidak Aktif" && newStatus !== "Tidak Aktif") {
+      statusUpdates.tanggal_keluar = null;
     }
 
     const { error } = await supabase
@@ -414,6 +455,7 @@ export default function EmployeesPage() {
         no_bpjs_kesehatan: editData.no_bpjs_kesehatan || null,
         no_bpjs_ketenagakerjaan: editData.no_bpjs_ketenagakerjaan || null,
         jabatan_id: editData.jabatan_id ? parseInt(editData.jabatan_id) : null,
+        ...statusUpdates,
         ...fileUpdates,
       })
       .eq("id", selectedEmployee.id);
@@ -421,6 +463,14 @@ export default function EmployeesPage() {
     setEditSaving(false);
 
     if (!error) {
+      // Side-effect: kalau status jadi Tidak Aktif, auto-disable akun login (kalau ada)
+      if (newStatus === "Tidak Aktif" && oldStatus !== "Tidak Aktif") {
+        await supabase
+          .from("user_profiles")
+          .update({ status: "Tidak Aktif" })
+          .eq("employee_id", selectedEmployee.id);
+      }
+
       setIsEditing(false);
       const uploadCount = Object.keys(fileUpdates).length;
       const msg = uploadCount > 0
@@ -428,7 +478,7 @@ export default function EmployeesPage() {
         : "Perubahan data pegawai telah disimpan ke sistem.";
       showSuccessToast("Data Berhasil Diperbarui", msg);
       fetchEmployees();
-      setSelectedEmployee((prev) => prev ? { ...prev, ...editData, ...fileUpdates, jumlah_anak: parseInt(editData.jumlah_anak || "0") } as Employee : null);
+      setSelectedEmployee((prev) => prev ? { ...prev, ...editData, ...statusUpdates, ...fileUpdates, jumlah_anak: parseInt(editData.jumlah_anak || "0") } as Employee : null);
     }
   };
 
@@ -1617,6 +1667,9 @@ export default function EmployeesPage() {
                     <Field label="Jabatan" value={selectedEmployee.jabatanNama} />
                     <Field label="Tanggal Bergabung" value={selectedEmployee.tanggal_bergabung ? formatShortDate(selectedEmployee.tanggal_bergabung) : "-"} />
                     <Field label="Status" value={<Badge variant={statusVariant[selectedEmployee.status] || "muted"}>{selectedEmployee.status}</Badge>} />
+                    {selectedEmployee.status === "Tidak Aktif" && (
+                      <Field label="Tanggal Keluar" value={selectedEmployee.tanggal_keluar ? formatShortDate(selectedEmployee.tanggal_keluar) : <span className="text-warning">Belum diisi</span>} />
+                    )}
                     <Field label="Mulai PKWT" value={selectedEmployee.tanggal_mulai_pkwt ? formatShortDate(selectedEmployee.tanggal_mulai_pkwt) : "Pegawai Tetap"} />
                     <Field label="Berakhir PKWT" value={selectedEmployee.tanggal_berakhir_pkwt ? formatShortDate(selectedEmployee.tanggal_berakhir_pkwt) : "Pegawai Tetap"} />
                   </Section>
@@ -2221,6 +2274,42 @@ export default function EmployeesPage() {
                   className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-lg"
                 />
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ EXIT DATE MODAL — saat status pegawai diubah ke "Tidak Aktif" ═══ */}
+      {exitModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !editSaving && setExitModal(null)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="p-6">
+              <div className="w-14 h-14 rounded-2xl bg-warning/10 flex items-center justify-center mx-auto mb-4">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7 text-warning"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+              </div>
+              <h3 className="text-base font-bold text-foreground text-center">Nonaktifkan &ldquo;{exitModal.namaForDisplay}&rdquo;?</h3>
+              <p className="text-sm text-muted-foreground mt-2 text-center">
+                Pegawai akan ditandai sebagai Tidak Aktif sejak tanggal yang dipilih. Akun login akan otomatis di-disable. Hari setelah tanggal ini tidak akan dihitung Alpha.
+              </p>
+
+              <div className="mt-5">
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Terakhir Aktif <span className="text-danger">*</span></label>
+                <DatePicker value={exitDate} onChange={setExitDate} placeholder="Pilih tanggal" />
+                <p className="text-[10px] text-muted-foreground mt-1.5">Default: hari ini. Boleh dimundurkan jika pegawai sebenarnya sudah berhenti sebelum admin klik tombol ini.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 px-6 pb-6">
+              <Button variant="outline" size="sm" className="flex-1" onClick={() => setExitModal(null)} disabled={editSaving}>Batal</Button>
+              <Button size="sm" className="flex-1" disabled={editSaving || !exitDate}
+                onClick={async () => {
+                  if (!exitDate) return;
+                  const date = exitDate;
+                  setExitModal(null);
+                  await executeSaveEdit({ tanggal_keluar: date });
+                }}>
+                {editSaving ? "Menyimpan..." : "Nonaktifkan"}
+              </Button>
             </div>
           </div>
         </div>
