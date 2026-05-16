@@ -1172,18 +1172,18 @@ export default function AttendancePage() {
 
             {/* Kalender grid */}
             <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
                 <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="bg-muted/50">
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 sticky left-0 bg-muted/50 z-10 min-w-[140px] border-r border-border">Pegawai</th>
+                  <thead className="sticky top-0 z-20">
+                    <tr>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 sticky left-0 bg-muted z-30 min-w-[140px] border-r border-b border-border">Pegawai</th>
                       {calDates.map((d, i) => {
                         const isWeekend = d.dow === 0 || d.dow === 6;
                         const isToday = d.dateStr === todayStr;
                         const showMonth = i === 0 || d.day === 1;
                         return (
-                          <th key={d.dateStr} className={cn("text-center text-[10px] font-bold uppercase tracking-wider px-1 py-2 min-w-[32px]",
-                            isToday ? "bg-primary/10 text-primary" : isWeekend ? "text-danger/60 bg-danger/[0.03]" : "text-muted-foreground")}>
+                          <th key={d.dateStr} className={cn("text-center text-[10px] font-bold uppercase tracking-wider px-1 py-2 min-w-[32px] border-b border-border",
+                            isToday ? "bg-primary/15 text-primary" : isWeekend ? "text-danger/60 bg-danger/[0.05]" : "text-muted-foreground bg-muted")}>
                             {showMonth && <div className="text-[7px] font-semibold text-primary">{d.monthLabel}</div>}
                             <div>{d.day}</div>
                             <div className="text-[8px] font-normal">{["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][d.dow]}</div>
@@ -1200,22 +1200,24 @@ export default function AttendancePage() {
                     ) : calEmps.map(emp => {
                       const empMap = calMap.get(emp.id);
                       return (
-                        <tr key={emp.id} className="hover:bg-muted/20">
-                          <td className="px-3 py-2 text-xs font-semibold text-foreground sticky left-0 bg-card z-10 border-r border-border truncate max-w-[140px]">{emp.nama}</td>
+                        <tr key={emp.id} className="hover:bg-muted/20 group">
+                          <td className="px-3 py-2 text-xs font-semibold text-foreground sticky left-0 bg-card z-10 border-r border-border truncate max-w-[140px] group-hover:bg-muted/30">{emp.nama}</td>
                           {calDates.map(d => {
                             const entry = empMap?.get(d.dateStr);
                             const isWeekend = d.dow === 0 || d.dow === 6;
                             const isToday = d.dateStr === todayStr;
                             return (
-                              <td key={d.dateStr} className={cn("text-center px-0.5 py-1.5", isToday && "bg-primary/[0.04]", isWeekend && !entry && "bg-danger/[0.02]")}>
+                              <td key={d.dateStr} className={cn("text-center px-0.5 py-1.5",
+                                isToday && "bg-primary/[0.06]",
+                                isWeekend && !entry && "bg-danger/[0.02]")}>
                                 {entry ? (
-                                  <span className="inline-block w-6 h-6 rounded-md text-[8px] font-bold text-white leading-6"
+                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-md text-[9px] font-bold text-white"
                                     style={{ backgroundColor: entry.color }}
                                     title={`${emp.nama} - ${entry.status} (${d.dateStr})`}>
                                     {entry.status.charAt(0)}
                                   </span>
                                 ) : (
-                                  <span className="inline-block w-6 h-6 rounded-md text-[8px] text-muted-foreground/30 leading-6">-</span>
+                                  <span className="inline-block w-6 h-6 rounded-md text-[9px] text-muted-foreground/30 leading-6">-</span>
                                 )}
                               </td>
                             );
