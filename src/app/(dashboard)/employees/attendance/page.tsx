@@ -1213,7 +1213,7 @@ export default function AttendancePage() {
                             <th key={d.dateStr} className={cn(
                               "border-b-2 border-r border-border px-1 py-2 text-center min-w-[44px]",
                               isNewMonth && "border-l-2 border-l-primary/30",
-                              isToday ? "bg-primary text-white" : isWeekend ? "bg-danger/10 text-danger" : "bg-card text-muted-foreground"
+                              isToday ? "bg-primary text-white" : isWeekend ? "bg-danger-light text-danger" : "bg-card text-muted-foreground"
                             )}>
                               {isNewMonth && (
                                 <div className={cn("text-[8px] font-bold uppercase tracking-wider mb-0.5", isToday ? "text-white/70" : "text-primary/60")}>
@@ -1247,8 +1247,8 @@ export default function AttendancePage() {
                               return (
                                 <td key={d.dateStr} className={cn("border-b border-r border-border px-1 py-2 text-center align-middle",
                                   isNewMonth && "border-l-2 border-l-primary/30",
-                                  isToday ? "bg-primary/5" : isWeekend ? "bg-danger/[0.03]" : isOdd ? "bg-muted/20" : "bg-card",
-                                  "group-hover:bg-muted/40")}>
+                                  isToday ? "bg-primary-light" : isWeekend ? "bg-danger-light" : isOdd ? "bg-muted" : "bg-card",
+                                  "group-hover:brightness-95")}>
                                   {entry ? (
                                     <span className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[10px] font-bold text-white"
                                       style={{ backgroundColor: entry.color }}
