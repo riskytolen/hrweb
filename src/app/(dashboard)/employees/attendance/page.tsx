@@ -192,10 +192,10 @@ export default function AttendancePage() {
   }, []);
 
   useEffect(() => {
-    if (showForm || showOffDay) document.body.style.overflow = "hidden";
+    if (showForm || showOffDay || viewMode === "kalender") document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showForm, showOffDay]);
+  }, [showForm, showOffDay, viewMode]);
 
   // ─── Fetch ───
   const fetchEmployees = async () => {
@@ -1132,104 +1132,155 @@ export default function AttendancePage() {
 
         const todayStr = localDateStr();
 
+        // Hitung statistik untuk header
+        const totalEntries = calRecords.length;
+        const statusBreakdown = new Map<string, { count: number; color: string }>();
+        calRecords.forEach(r => {
+          const sc = STATUS_OPTIONS.find(s => s.value === r.status);
+          const existing = statusBreakdown.get(r.status);
+          if (existing) existing.count++;
+          else statusBreakdown.set(r.status, { count: 1, color: sc?.color || "#6b7280" });
+        });
+
         return (
-          <>
-            {/* Kalender toolbar */}
-            <div className="bg-card rounded-2xl border border-border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <button onClick={() => {
-                    const [py, pm] = calPeriodKey.split("-").map(Number);
-                    const prev = new Date(py, pm - 2, 1);
-                    setCalPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
-                  }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronLeft className="w-4 h-4" /></button>
-                  <div className="text-center min-w-[260px]">
-                    <p className="text-sm font-bold text-foreground">{calPeriod.label}</p>
-                    <p className="text-[10px] text-muted-foreground">Periode tgl 8 - tgl 7</p>
+          <Portal>
+            <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
+              {/* ── Header ── */}
+              <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-card via-card to-primary/[0.03]">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20 flex-shrink-0">
+                    <CalendarDays className="w-4 h-4 text-white" />
                   </div>
-                  <button onClick={() => {
-                    const [ny, nm] = calPeriodKey.split("-").map(Number);
-                    const next = new Date(ny, nm, 1);
-                    setCalPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
-                  }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronRight className="w-4 h-4" /></button>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-bold text-foreground">Kalender Absensi</h2>
+                    <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground flex-wrap">
+                      <span><strong className="text-foreground">{calEmps.length}</strong> pegawai</span>
+                      <span className="w-1 h-1 rounded-full bg-border" />
+                      <span><strong className="text-foreground">{totalEntries}</strong> entri</span>
+                      {Array.from(statusBreakdown.entries()).map(([nama, { count, color }]) => (
+                        <span key={nama} className="inline-flex items-center gap-1">
+                          <span className="w-1 h-1 rounded-full bg-border" />
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
+                          <strong style={{ color }}>{count}</strong> {nama.toLowerCase()}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-56">
-                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                  <input type="text" placeholder="Cari pegawai..." value={calSearch} onChange={(e) => setCalSearch(e.target.value)}
-                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-56">
+                    <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                    <input type="text" placeholder="Cari pegawai..." value={calSearch} onChange={(e) => setCalSearch(e.target.value)}
+                      className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+                  </div>
+                  <div className="flex items-center bg-muted rounded-xl p-1">
+                    <button onClick={() => {
+                      const [py, pm] = calPeriodKey.split("-").map(Number);
+                      const prev = new Date(py, pm - 2, 1);
+                      setCalPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
+                    }} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+                    <span className="text-xs font-bold text-foreground px-3 min-w-[220px] text-center">{calPeriod.label}</span>
+                    <button onClick={() => {
+                      const [ny, nm] = calPeriodKey.split("-").map(Number);
+                      const next = new Date(ny, nm, 1);
+                      setCalPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+                    }} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                  </div>
+                  <button onClick={() => setViewMode("tabel")} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                    <X className="w-3.5 h-3.5" />Tutup
+                  </button>
                 </div>
               </div>
-              {/* Legend */}
-              <div className="flex items-center gap-3 mt-2.5 flex-wrap">
+
+              {/* ── Matrix table ── */}
+              <div className="flex-1 overflow-auto bg-background">
+                {calLoading ? (
+                  <div className="flex items-center justify-center h-full text-sm text-muted-foreground">Memuat data...</div>
+                ) : calEmps.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-sm text-muted-foreground">Tidak ada pegawai sesuai pencarian.</div>
+                ) : (
+                  <table className="border-collapse w-max min-w-full">
+                    <thead className="sticky top-0 z-20">
+                      <tr>
+                        <th className="sticky left-0 z-30 bg-card border-b-2 border-r-2 border-border px-4 py-3 text-left min-w-[180px] shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]">
+                          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pegawai</span>
+                        </th>
+                        {calDates.map((d, i) => {
+                          const isWeekend = d.dow === 0 || d.dow === 6;
+                          const isToday = d.dateStr === todayStr;
+                          const isNewMonth = i === 0 || d.day === 1;
+                          return (
+                            <th key={d.dateStr} className={cn(
+                              "border-b-2 border-r border-border px-1 py-2 text-center min-w-[44px]",
+                              isNewMonth && "border-l-2 border-l-primary/30",
+                              isToday ? "bg-primary text-white" : isWeekend ? "bg-danger/10 text-danger" : "bg-card text-muted-foreground"
+                            )}>
+                              {isNewMonth && (
+                                <div className={cn("text-[8px] font-bold uppercase tracking-wider mb-0.5", isToday ? "text-white/70" : "text-primary/60")}>
+                                  {d.monthLabel}
+                                </div>
+                              )}
+                              <div className="text-xs font-bold">{d.day}</div>
+                              <div className={cn("text-[9px] font-normal mt-0.5", isToday ? "text-white/80" : "")}>
+                                {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][d.dow]}
+                              </div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {calEmps.map((emp, idx) => {
+                        const empMap = calMap.get(emp.id);
+                        const isOdd = idx % 2 === 1;
+                        return (
+                          <tr key={emp.id} className="group">
+                            <td className={cn("sticky left-0 z-10 px-4 py-2.5 text-xs font-semibold text-foreground border-r-2 border-b border-border truncate max-w-[180px] shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)] group-hover:bg-muted",
+                              isOdd ? "bg-muted/30" : "bg-card")}>
+                              {emp.nama}
+                            </td>
+                            {calDates.map(d => {
+                              const entry = empMap?.get(d.dateStr);
+                              const isWeekend = d.dow === 0 || d.dow === 6;
+                              const isToday = d.dateStr === todayStr;
+                              const isNewMonth = d.day === 1;
+                              return (
+                                <td key={d.dateStr} className={cn("border-b border-r border-border px-1 py-2 text-center align-middle",
+                                  isNewMonth && "border-l-2 border-l-primary/30",
+                                  isToday ? "bg-primary/5" : isWeekend ? "bg-danger/[0.03]" : isOdd ? "bg-muted/20" : "bg-card",
+                                  "group-hover:bg-muted/40")}>
+                                  {entry ? (
+                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[10px] font-bold text-white"
+                                      style={{ backgroundColor: entry.color }}
+                                      title={`${emp.nama} — ${entry.status} (${d.dateStr})`}>
+                                      {entry.status.charAt(0)}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-block w-7 h-7 rounded-md text-[10px] text-muted-foreground/30 leading-7">—</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* ── Footer legend ── */}
+              <div className="flex items-center gap-4 px-5 py-2.5 border-t border-border bg-card flex-wrap">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Legenda:</span>
                 {STATUS_OPTIONS.map(s => (
                   <div key={s.value} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                    <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: s.color }} />
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-md text-[9px] font-bold text-white" style={{ backgroundColor: s.color }}>{s.label.charAt(0)}</span>
                     <span>{s.label}</span>
                   </div>
                 ))}
               </div>
             </div>
-
-            {/* Kalender grid */}
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
-                <table className="w-full border-collapse">
-                  <thead className="sticky top-0 z-20">
-                    <tr>
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 sticky left-0 bg-muted z-30 min-w-[140px] border-r border-b border-border">Pegawai</th>
-                      {calDates.map((d, i) => {
-                        const isWeekend = d.dow === 0 || d.dow === 6;
-                        const isToday = d.dateStr === todayStr;
-                        const showMonth = i === 0 || d.day === 1;
-                        return (
-                          <th key={d.dateStr} className={cn("text-center text-[10px] font-bold uppercase tracking-wider px-1 py-2 min-w-[32px] border-b border-border",
-                            isToday ? "bg-primary/15 text-primary" : isWeekend ? "text-danger/60 bg-danger/[0.05]" : "text-muted-foreground bg-muted")}>
-                            {showMonth && <div className="text-[7px] font-semibold text-primary">{d.monthLabel}</div>}
-                            <div>{d.day}</div>
-                            <div className="text-[8px] font-normal">{["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][d.dow]}</div>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/30">
-                    {calLoading ? (
-                      <tr><td colSpan={calDates.length + 1} className="text-center py-10 text-sm text-muted-foreground">Memuat data...</td></tr>
-                    ) : calEmps.length === 0 ? (
-                      <tr><td colSpan={calDates.length + 1} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data</td></tr>
-                    ) : calEmps.map(emp => {
-                      const empMap = calMap.get(emp.id);
-                      return (
-                        <tr key={emp.id} className="hover:bg-muted/20 group">
-                          <td className="px-3 py-2 text-xs font-semibold text-foreground sticky left-0 bg-card z-10 border-r border-border truncate max-w-[140px] group-hover:bg-muted/30">{emp.nama}</td>
-                          {calDates.map(d => {
-                            const entry = empMap?.get(d.dateStr);
-                            const isWeekend = d.dow === 0 || d.dow === 6;
-                            const isToday = d.dateStr === todayStr;
-                            return (
-                              <td key={d.dateStr} className={cn("text-center px-0.5 py-1.5",
-                                isToday && "bg-primary/[0.06]",
-                                isWeekend && !entry && "bg-danger/[0.02]")}>
-                                {entry ? (
-                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-md text-[9px] font-bold text-white"
-                                    style={{ backgroundColor: entry.color }}
-                                    title={`${emp.nama} - ${entry.status} (${d.dateStr})`}>
-                                    {entry.status.charAt(0)}
-                                  </span>
-                                ) : (
-                                  <span className="inline-block w-6 h-6 rounded-md text-[9px] text-muted-foreground/30 leading-6">-</span>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
+          </Portal>
         );
       })()}
 
