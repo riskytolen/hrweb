@@ -234,10 +234,10 @@ export default function PayrollPage() {
     const genPeriod = getPeriodRange(generatePeriod);
 
     try {
-      // 1. Fetch active employees
+      // 1. Fetch active employees (termasuk tanggal_bergabung untuk prorata)
       const { data: activeEmps, error: empErr } = await supabase
         .from("pegawai")
-        .select("id, nama, gaji_pokok")
+        .select("id, nama, gaji_pokok, tanggal_bergabung")
         .eq("status", "Aktif")
         .order("nama");
       if (empErr || !activeEmps) {
@@ -254,7 +254,7 @@ export default function PayrollPage() {
       const existingSet = new Set((existing || []).map((e: { employee_id: string }) => e.employee_id));
 
       // 3. Filter employees that don't have a slip yet
-      const newEmps = activeEmps.filter((e: { id: string }) => !existingSet.has(e.id));
+      const newEmps = (activeEmps as { id: string; nama: string; gaji_pokok?: number; tanggal_bergabung: string | null }[]).filter((e) => !existingSet.has(e.id));
       if (newEmps.length === 0) {
         showToast("error", "Tidak Ada Slip Baru", "Semua pegawai aktif sudah memiliki slip gaji untuk periode ini.");
         setGenerating(false);
@@ -267,7 +267,7 @@ export default function PayrollPage() {
         .select("employee_id, total")
         .gte("tanggal", genPeriod.start)
         .lte("tanggal", genPeriod.end)
-        .in("employee_id", newEmps.map((e: { id: string }) => e.id));
+        .in("employee_id", newEmps.map((e) => e.id));
 
       const dpTotals = new Map<string, number>();
       (dpData || []).forEach((d: { employee_id: string; total: number }) => {
@@ -280,43 +280,94 @@ export default function PayrollPage() {
         .select("employee_id, denda")
         .gte("tanggal", genPeriod.start)
         .lte("tanggal", genPeriod.end)
-        .in("employee_id", newEmps.map((e: { id: string }) => e.id));
+        .in("employee_id", newEmps.map((e) => e.id));
 
       const dendaTotals = new Map<string, number>();
       (attData || []).forEach((d: { employee_id: string; denda: number }) => {
         dendaTotals.set(d.employee_id, (dendaTotals.get(d.employee_id) || 0) + d.denda);
       });
 
-      // 6. Build gaji_pokok lookup
+      // 6. Build gaji_pokok & tanggal_bergabung lookup
       const gapokMap = new Map<string, number>();
-      (activeEmps || []).forEach((e: { id: string; gaji_pokok?: number }) => {
+      const joinDateMap = new Map<string, string | null>();
+      (activeEmps as { id: string; gaji_pokok?: number; tanggal_bergabung: string | null }[]).forEach((e) => {
         gapokMap.set(e.id, e.gaji_pokok || 0);
+        joinDateMap.set(e.id, e.tanggal_bergabung);
       });
 
+      // 6b. Fetch off_days untuk pegawai-pegawai yang akan di-generate (untuk hitung prorata)
+      const { data: offDaysData } = await supabase
+        .from("employee_off_days")
+        .select("employee_id, day_of_week")
+        .in("employee_id", newEmps.map((e) => e.id));
+
+      const offDayMap = new Map<string, Set<number>>();
+      (offDaysData || []).forEach((od: { employee_id: string; day_of_week: number }) => {
+        if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
+        offDayMap.get(od.employee_id)!.add(od.day_of_week);
+      });
+
+      // Helper: hitung hari kerja (non off-day) di range tanggal inklusif
+      const countWorkingDays = (startStr: string, endStr: string, empOff: Set<number>): number => {
+        if (startStr > endStr) return 0;
+        const [sy, sm, sd] = startStr.split("-").map(Number);
+        const [ey, em, ed] = endStr.split("-").map(Number);
+        const startMs = Date.UTC(sy, sm - 1, sd);
+        const endMs = Date.UTC(ey, em - 1, ed);
+        let count = 0;
+        for (let ms = startMs; ms <= endMs; ms += 86400000) {
+          const dow = new Date(ms).getUTCDay();
+          if (!empOff.has(dow)) count++;
+        }
+        return count;
+      };
+
       // 7. Build insert rows (exclude generated columns)
-      const inserts = newEmps.map((e: { id: string }) => ({
-        employee_id: e.id,
-        periode: generatePeriod,
-        periode_mulai: genPeriod.start,
-        periode_selesai: genPeriod.end,
-        gaji_pokok: gapokMap.get(e.id) || 0,
-        pendapatan_titik: dpTotals.get(e.id) || 0,
-        extra_job: 0,
-        uang_makan: 0,
-        insentif: 0,
-        tunjangan_jabatan: 0,
-        transport: 0,
-        tunjangan_lain: 0,
-        tambahan_lain: 0,
-        koperasi: 0,
-        pinjaman_perusahaan: 0,
-        potongan_absen: dendaTotals.get(e.id) || 0,
-        potongan_lain: 0,
-        jht: 0,
-        bpjs_kesehatan: 0,
-        status: "Draft",
-        catatan: null,
-      }));
+      const inserts = newEmps.map((e) => {
+        const empOff = offDayMap.get(e.id) || new Set<number>();
+        const tglBergabung = joinDateMap.get(e.id);
+        const totalHariKerja = countWorkingDays(genPeriod.start, genPeriod.end, empOff);
+        const gapokFull = gapokMap.get(e.id) || 0;
+
+        // Prorata: jika tanggal_bergabung di tengah periode, gapok dihitung proporsional
+        let gapokProrata = gapokFull;
+        let catatanProrata: string | null = null;
+        if (tglBergabung && tglBergabung > genPeriod.start && tglBergabung <= genPeriod.end) {
+          const hariKerjaEfektif = countWorkingDays(tglBergabung, genPeriod.end, empOff);
+          const factor = totalHariKerja > 0 ? hariKerjaEfektif / totalHariKerja : 0;
+          gapokProrata = Math.round(gapokFull * factor);
+          const tglLabel = new Date(tglBergabung + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+          catatanProrata = `Prorata: bergabung ${tglLabel} (${hariKerjaEfektif}/${totalHariKerja} hari kerja)`;
+        } else if (tglBergabung && tglBergabung > genPeriod.end) {
+          // Belum bergabung di periode ini → gapok 0
+          gapokProrata = 0;
+          catatanProrata = `Belum bergabung di periode ini (bergabung setelah ${genPeriod.end})`;
+        }
+
+        return {
+          employee_id: e.id,
+          periode: generatePeriod,
+          periode_mulai: genPeriod.start,
+          periode_selesai: genPeriod.end,
+          gaji_pokok: gapokProrata,
+          pendapatan_titik: dpTotals.get(e.id) || 0,
+          extra_job: 0,
+          uang_makan: 0,
+          insentif: 0,
+          tunjangan_jabatan: 0,
+          transport: 0,
+          tunjangan_lain: 0,
+          tambahan_lain: 0,
+          koperasi: 0,
+          pinjaman_perusahaan: 0,
+          potongan_absen: dendaTotals.get(e.id) || 0,
+          potongan_lain: 0,
+          jht: 0,
+          bpjs_kesehatan: 0,
+          status: "Draft",
+          catatan: catatanProrata,
+        };
+      });
 
       // 8. Insert
       const { error: insertErr } = await supabase.from("payrolls").insert(inserts);

@@ -18,7 +18,7 @@ import { supabase, type DbAttendanceRecord } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
-type EmployeeLite = { id: string; nama: string; status: string };
+type EmployeeLite = { id: string; nama: string; status: string; tanggal_bergabung: string | null };
 type OffDayEntry = { employee_id: string; day_of_week: number };
 type OverrideEntry = { id: number; employee_id: string; tanggal: string; type: "libur" | "masuk"; catatan: string | null };
 type DivisionLite = { id: number; nama: string; color: string };
@@ -199,7 +199,7 @@ export default function AttendancePage() {
 
   // ─── Fetch ───
   const fetchEmployees = async () => {
-    const { data } = await supabase.from("pegawai").select("id, nama, status").eq("status", "Aktif").order("nama");
+    const { data } = await supabase.from("pegawai").select("id, nama, status, tanggal_bergabung").eq("status", "Aktif").order("nama");
     if (data) setEmployees(data);
   };
   const fetchDivisions = async () => {
@@ -278,6 +278,9 @@ export default function AttendancePage() {
     const staleLiburIds: number[] = [];
 
     for (const emp of employees) {
+      // Skip pegawai yang belum bergabung di tanggal ini
+      if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
+
       const override = overrideMap.get(emp.id);
       const empOffDays = offDayMap.get(emp.id);
       const isLibur = override === "libur" || (!override && empOffDays?.has(dow));
@@ -374,6 +377,9 @@ export default function AttendancePage() {
 
     for (const emp of employees) {
       if (existingSet.has(emp.id)) continue; // sudah ada record
+
+      // Skip pegawai yang belum bergabung di tanggal ini (mis. masih Training, baru Aktif kemarin)
+      if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
 
       const override = overrideMap.get(emp.id);
       const empOffDays = offDayMap.get(emp.id);
@@ -559,6 +565,16 @@ export default function AttendancePage() {
     if (!form.tanggal) { setFormError("Pilih tanggal terlebih dahulu."); return; }
     if (!isSpecial && !form.jam_masuk) { setFormError("Isi jam masuk atau pilih status Alpha."); return; }
     if (!form.alasan_manual) { setFormError("Pilih alasan input manual."); return; }
+
+    // Cek apakah tanggal absen sebelum tanggal_bergabung pegawai
+    if (!editingId && form.employee_id && form.tanggal) {
+      const emp = employees.find((e) => e.id === form.employee_id);
+      if (emp?.tanggal_bergabung && form.tanggal < emp.tanggal_bergabung) {
+        const tglBergabung = new Date(emp.tanggal_bergabung + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+        setFormError(`${emp.nama} baru bergabung tanggal ${tglBergabung}. Tanggal absen harus pada atau setelah tanggal bergabung.`);
+        return;
+      }
+    }
 
     // Cek apakah pegawai libur di tanggal ini
     if (!editingId && form.employee_id && form.tanggal) {
