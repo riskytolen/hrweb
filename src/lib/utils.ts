@@ -76,6 +76,27 @@ export function getStatusColor(status: string): string {
   return colors[status.toLowerCase()] || "bg-muted text-muted-foreground";
 }
 
+/**
+ * Get local date string YYYY-MM-DD (timezone safe).
+ *
+ * Pakai ini untuk semua persistensi tanggal ke DB.
+ * Jangan pakai `new Date().toISOString().slice(0, 10)` — itu UTC,
+ * jadi pukul 06:30 WIB akan di-render sebagai tanggal kemarin.
+ */
+export function localDateStr(d?: Date): string {
+  const dt = d || new Date();
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Tambah / kurang hari dari string YYYY-MM-DD (timezone safe).
+ */
+export function addDaysLocal(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  return localDateStr(dt);
+}
+
 // Palet warna divisi yang kontras dan mudah dibedakan
 const DIVISION_COLORS = [
   "#3b82f6", "#8b5cf6", "#f59e0b", "#10b981", "#ef4444",

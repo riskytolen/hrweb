@@ -39,7 +39,7 @@ import Select from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import Pagination from "@/components/ui/Pagination";
 import { supabase, type DbPegawai } from "@/lib/supabase";
-import { cn, formatShortDate, toTitleCase } from "@/lib/utils";
+import { cn, formatShortDate, toTitleCase, localDateStr } from "@/lib/utils";
 import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -762,7 +762,7 @@ export default function EmployeesPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `error_import_pegawai_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `error_import_pegawai_${localDateStr()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -831,7 +831,7 @@ export default function EmployeesPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `data_pegawai_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `data_pegawai_${localDateStr()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
     showSuccessToast("Export Berhasil", `${data.length} data pegawai berhasil diexport ke CSV.`);
@@ -889,7 +889,7 @@ export default function EmployeesPage() {
       doc.text("HRM System", 14, doc.internal.pageSize.getHeight() - 8);
     }
 
-    doc.save(`data_pegawai_${new Date().toISOString().slice(0, 10)}.pdf`);
+    doc.save(`data_pegawai_${localDateStr()}.pdf`);
     showSuccessToast("Export Berhasil", `${data.length} data pegawai berhasil diexport ke PDF.`);
   };
 

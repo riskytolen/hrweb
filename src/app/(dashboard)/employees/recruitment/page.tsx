@@ -11,11 +11,12 @@ import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { cn } from "@/lib/utils";
+import { cn, localDateStr, addDaysLocal } from "@/lib/utils";
 import { supabase, type DbRecruitment } from "@/lib/supabase";
 import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
+import DatePicker from "@/components/ui/DatePicker";
 
 const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -62,6 +63,10 @@ export default function RecruitmentPage() {
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Modal picker tanggal mulai aktif (saat ubah status ke "Diterima")
+  const [acceptModal, setAcceptModal] = useState<{ id: number; nama: string } | null>(null);
+  const [acceptDate, setAcceptDate] = useState<string>("");
 
   const [statusChanging, setStatusChanging] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
@@ -271,7 +276,11 @@ export default function RecruitmentPage() {
   };
 
   // ─── Helper: insert pegawai dari data recruitment ───
-  const insertPegawaiFromRecruitment = async (rec: DbRecruitment, pegawaiStatus: string): Promise<{ id: string } | { error: string }> => {
+  const insertPegawaiFromRecruitment = async (
+    rec: DbRecruitment,
+    pegawaiStatus: string,
+    joinDate?: string,
+  ): Promise<{ id: string } | { error: string }> => {
     const newId = await generateEmployeeId();
     const { error } = await supabase.from("pegawai").insert({
       id: newId,
@@ -280,7 +289,7 @@ export default function RecruitmentPage() {
       alamat_domisili: rec.alamat || null,
       alamat_ktp: rec.alamat || null,
       status: pegawaiStatus,
-      tanggal_bergabung: pegawaiStatus === "Training" ? null : new Date().toISOString().slice(0, 10),
+      tanggal_bergabung: pegawaiStatus === "Training" ? null : (joinDate || localDateStr()),
       recruitment_id: rec.id,
     });
     if (error) return { error: error.message };
@@ -290,10 +299,14 @@ export default function RecruitmentPage() {
   /**
    * Sync pegawai berdasarkan status recruitment.
    * Return { ok, message } — ok=false berarti pemanggil HARUS membatalkan update status recruitment.
+   *
+   * @param joinDate Untuk status "Diterima" — tanggal mulai aktif yang dipilih admin (YYYY-MM-DD).
+   *                 Default: hari ini (local time).
    */
   const syncPegawaiForStatus = async (
     rec: DbRecruitment,
     newStatus: string,
+    joinDate?: string,
   ): Promise<{ ok: true; toast: { type: "success"; title: string; message: string } } | { ok: false; toast: { type: "error"; title: string; message: string } }> => {
     // Cek apakah sudah ada pegawai dari recruitment ini
     const { data: existingEmp } = await supabase
@@ -311,23 +324,24 @@ export default function RecruitmentPage() {
         }
         return { ok: false, toast: { type: "error", title: "Gagal Buat Pegawai", message: result.error } };
       }
-      const { error } = await supabase.from("pegawai").update({ status: "Training" }).eq("recruitment_id", rec.id);
+      const { error } = await supabase.from("pegawai").update({ status: "Training", tanggal_bergabung: null }).eq("recruitment_id", rec.id);
       if (error) return { ok: false, toast: { type: "error", title: "Gagal Update Pegawai", message: error.message } };
       return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status diubah ke Training.` } };
     }
 
     if (newStatus === "Diterima") {
+      const effectiveJoinDate = joinDate || localDateStr();
       if (existingEmp) {
         const { error } = await supabase.from("pegawai").update({
           status: "Aktif",
-          tanggal_bergabung: new Date().toISOString().slice(0, 10),
+          tanggal_bergabung: effectiveJoinDate,
         }).eq("recruitment_id", rec.id);
         if (error) return { ok: false, toast: { type: "error", title: "Gagal Update Pegawai", message: error.message } };
-        return { ok: true, toast: { type: "success", title: "Diterima & Aktif", message: `${rec.nama} (${existingEmp.id}) sekarang pegawai aktif.` } };
+        return { ok: true, toast: { type: "success", title: "Diterima & Aktif", message: `${rec.nama} (${existingEmp.id}) sekarang pegawai aktif sejak ${effectiveJoinDate}.` } };
       }
-      const result = await insertPegawaiFromRecruitment(rec, "Aktif");
+      const result = await insertPegawaiFromRecruitment(rec, "Aktif", effectiveJoinDate);
       if ("id" in result) {
-        return { ok: true, toast: { type: "success", title: "Diterima", message: `${rec.nama} terdaftar sebagai pegawai aktif (${result.id}).` } };
+        return { ok: true, toast: { type: "success", title: "Diterima", message: `${rec.nama} terdaftar sebagai pegawai aktif (${result.id}) sejak ${effectiveJoinDate}.` } };
       }
       return { ok: false, toast: { type: "error", title: "Gagal Buat Pegawai", message: result.error } };
     }
@@ -350,7 +364,7 @@ export default function RecruitmentPage() {
     return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status berhasil diubah ke "${newStatus}".` } };
   };
 
-  const handleStatusChange = async (id: number, status: string) => {
+  const handleStatusChange = async (id: number, status: string, joinDate?: string) => {
     setStatusChanging(true);
     try {
       const current = list.find((r) => r.id === id);
@@ -360,7 +374,7 @@ export default function RecruitmentPage() {
       }
 
       // 1) Sync pegawai DULU. Kalau gagal, JANGAN ubah status recruitment (anti-orphan).
-      const syncResult = await syncPegawaiForStatus(current, status);
+      const syncResult = await syncPegawaiForStatus(current, status, joinDate);
       if (!syncResult.ok) {
         showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
         return;
@@ -369,10 +383,9 @@ export default function RecruitmentPage() {
       // 2) Pegawai berhasil di-sync → update status recruitment
       const updatePayload: Record<string, unknown> = { status };
       if (status === "Training") {
-        const today = new Date().toISOString().slice(0, 10);
-        const selesai = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+        const today = localDateStr();
         updatePayload.tanggal_training_mulai = today;
-        updatePayload.tanggal_training_selesai = selesai;
+        updatePayload.tanggal_training_selesai = addDaysLocal(today, 2);
       }
 
       const { data: updated, error } = await supabase
@@ -725,7 +738,18 @@ export default function RecruitmentPage() {
                   <div className="flex flex-wrap gap-1.5">
                     {STATUS_OPTIONS.map((s) => (
                       <button key={s.value} disabled={statusChanging}
-                        onClick={() => { if (!statusChanging) { handleStatusChange(detail.id, s.value); setDetailId(null); } }}
+                        onClick={() => {
+                          if (statusChanging) return;
+                          // Status "Diterima" butuh konfirmasi tanggal mulai aktif
+                          if (s.value === "Diterima") {
+                            setAcceptDate(localDateStr());
+                            setAcceptModal({ id: detail.id, nama: detail.nama });
+                            setDetailId(null);
+                            return;
+                          }
+                          handleStatusChange(detail.id, s.value);
+                          setDetailId(null);
+                        }}
                         className={cn("text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all",
                           statusChanging ? "opacity-30 cursor-not-allowed" : detail.status === s.value ? "ring-2 shadow-sm" : "opacity-50 hover:opacity-100"
                         )}
@@ -762,6 +786,40 @@ export default function RecruitmentPage() {
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)} disabled={deleting}>Batal</Button>
                 <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={handleDelete} disabled={deleting}>
                   {deleting ? "Menghapus..." : "Hapus"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ ACCEPT (DITERIMA) — pilih tanggal mulai aktif ═══ */}
+      {acceptModal && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !statusChanging && setAcceptModal(null)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="p-6">
+                <div className="w-14 h-14 rounded-2xl bg-success/10 flex items-center justify-center mx-auto mb-4"><Check className="w-7 h-7 text-success" /></div>
+                <h3 className="text-base font-bold text-foreground text-center">Terima &ldquo;{acceptModal.nama}&rdquo;?</h3>
+                <p className="text-sm text-muted-foreground mt-2 text-center">Pegawai akan tercatat aktif sejak tanggal yang dipilih. Hari sebelumnya tidak akan dihitung Alpha.</p>
+
+                <div className="mt-5">
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Mulai Aktif <span className="text-danger">*</span></label>
+                  <DatePicker value={acceptDate} onChange={setAcceptDate} placeholder="Pilih tanggal" />
+                  <p className="text-[10px] text-muted-foreground mt-1.5">Default: hari ini. Boleh dimundurkan jika pegawai sebenarnya sudah mulai kerja sebelum admin klik tombol ini.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setAcceptModal(null)} disabled={statusChanging}>Batal</Button>
+                <Button size="sm" icon={Check} className="flex-1" disabled={statusChanging || !acceptDate}
+                  onClick={async () => {
+                    if (!acceptDate) return;
+                    const id = acceptModal.id;
+                    setAcceptModal(null);
+                    await handleStatusChange(id, "Diterima", acceptDate);
+                  }}>
+                  {statusChanging ? "Menyimpan..." : "Terima"}
                 </Button>
               </div>
             </div>

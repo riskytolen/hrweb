@@ -1114,7 +1114,7 @@ export default function AttendancePage() {
           calMap.get(r.employee_id)!.set(r.tanggal, { status: r.status, color: sc?.color || "#6b7280" });
         });
 
-        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayStr = localDateStr();
 
         return (
           <>

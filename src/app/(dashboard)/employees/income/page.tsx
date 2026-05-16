@@ -28,7 +28,7 @@ import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { cn, formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint, type DbDeliveryStatus } from "@/lib/supabase";
 import ReportDetail from "./ReportDetail";
 import { useAuth } from "@/components/AuthProvider";
@@ -110,7 +110,7 @@ export default function IncomePage() {
 
   // ─── Batch Input State ───
   const [showBatch, setShowBatch] = useState(false);
-  const [batchDate, setBatchDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [batchDate, setBatchDate] = useState(() => localDateStr());
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [batchSearch, setBatchSearch] = useState("");
   const [batchSaving, setBatchSaving] = useState(false);
@@ -219,7 +219,7 @@ export default function IncomePage() {
   }, []);
 
   const openBatch = () => {
-    setBatchDate(new Date().toISOString().slice(0, 10));
+    setBatchDate(localDateStr());
     const ordered = getOrderedEmployees(employees);
     setBatchRows(ordered.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "", status_id: 0 })));
     setBatchSearch("");
