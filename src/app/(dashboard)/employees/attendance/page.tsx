@@ -1235,8 +1235,8 @@ export default function AttendancePage() {
                         const isOdd = idx % 2 === 1;
                         return (
                           <tr key={emp.id} className="group">
-                            <td className={cn("sticky left-0 z-10 px-4 py-2.5 text-xs font-semibold text-foreground border-r-2 border-b border-border truncate max-w-[180px] shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)] group-hover:bg-muted",
-                              isOdd ? "bg-muted/30" : "bg-card")}>
+                            <td className={cn("sticky left-0 z-10 px-4 py-2.5 text-xs font-semibold text-foreground border-r-2 border-b border-border truncate max-w-[180px] shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)] group-hover:brightness-95",
+                              isOdd ? "bg-muted" : "bg-card")}>
                               {emp.nama}
                             </td>
                             {calDates.map(d => {
