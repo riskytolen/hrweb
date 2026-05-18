@@ -13,7 +13,6 @@ import {
   Users,
   User,
   GripVertical,
-  Save,
   RotateCcw,
   AlertTriangle,
   CalendarDays,
@@ -42,7 +41,9 @@ type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: str
 // Batch form row
 type BatchRow = {
   rowKey: string;
-  employee_id: string;
+  /** null = baris kosong (admin belum pilih pegawai). */
+  employee_id: string | null;
+  /** Display nama (snapshot saat pilih). Empty string = baris kosong. */
   nama: string;
   division_id: number;
   role: "Driver" | "Helper" | "";
@@ -50,6 +51,20 @@ type BatchRow = {
   catatan: string;
   status_id: number;
 };
+
+const DEFAULT_BLANK_ROWS = 10;
+const ADD_ROWS_BATCH = 5;
+
+const blankRow = (): BatchRow => ({
+  rowKey: nextRowKey(),
+  employee_id: null,
+  nama: "",
+  division_id: 0,
+  role: "",
+  jumlah_titik: "",
+  catatan: "",
+  status_id: 0,
+});
 
 let rowKeyCounter = 0;
 const nextRowKey = () => `row-${++rowKeyCounter}`;
@@ -120,8 +135,6 @@ export default function IncomePage() {
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState<{ newRows: Record<string, unknown>[]; updateRows: { id: number; data: Record<string, unknown> }[]; dupCount: number }>({ newRows: [], updateRows: [], dupCount: 0 });
   const [dbDuplicateRowKeys, setDbDuplicateRowKeys] = useState<Set<string>>(new Set());
-
-  const TEMPLATE_KEY = "batch_employee_order";
 
   // ─── Edit single row ───
   const [showEditForm, setShowEditForm] = useState(false);
@@ -203,30 +216,26 @@ export default function IncomePage() {
   }, [showBatch, showEditForm, showCalendar, showReport]);
 
   // ─── Batch handlers ───
-  const getOrderedEmployees = useCallback((emps: EmployeeLite[]) => {
-    try {
-      const saved = localStorage.getItem(TEMPLATE_KEY);
-      if (saved) {
-        const order: string[] = JSON.parse(saved);
-        const empMap = new Map(emps.map((e) => [e.id, e]));
-        const ordered: EmployeeLite[] = [];
-        order.forEach((id) => { const e = empMap.get(id); if (e) { ordered.push(e); empMap.delete(id); } });
-        empMap.forEach((e) => ordered.push(e)); // pegawai baru yang belum ada di template
-        return ordered;
-      }
-    } catch {}
-    return emps;
-  }, []);
-
   const openBatch = () => {
     setBatchDate(localDateStr());
-    const ordered = getOrderedEmployees(employees);
-    setBatchRows(ordered.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "", status_id: 0 })));
+    // Worksheet kosong: 10 baris blank. Admin isi sendiri sesuai surat jalan.
+    setBatchRows(Array.from({ length: DEFAULT_BLANK_ROWS }, () => blankRow()));
     setBatchSearch("");
     setDragIdx(null);
     setDragOverIdx(null);
     setDbDuplicateRowKeys(new Set());
     setShowBatch(true);
+  };
+
+  /** Pilih pegawai di baris kosong / ganti pegawai di baris terisi. */
+  const handleEmployeeChange = (rowKey: string, employeeId: string) => {
+    const emp = employees.find((e) => e.id === employeeId);
+    if (!emp) return;
+    setBatchRows((prev) => prev.map((r) =>
+      r.rowKey === rowKey
+        ? { ...r, employee_id: emp.id, nama: emp.nama }
+        : r,
+    ));
   };
 
   const handleBatchRowChange = (rowKey: string, field: "division_id" | "role" | "jumlah_titik" | "catatan" | "status_id", value: string | number) => {
@@ -237,26 +246,30 @@ export default function IncomePage() {
     }
   };
 
-  const addExtraRow = (afterRowKey: string) => {
-    setBatchRows((prev) => {
-      const idx = prev.findIndex((r) => r.rowKey === afterRowKey);
-      if (idx === -1) return prev;
-      const source = prev[idx];
-      const newRow: BatchRow = { rowKey: nextRowKey(), employee_id: source.employee_id, nama: source.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "", status_id: 0 };
-      const arr = [...prev];
-      arr.splice(idx + 1, 0, newRow);
-      return arr;
-    });
+  /** Tambah n baris kosong di akhir tabel. */
+  const addBlankRows = (count: number) => {
+    setBatchRows((prev) => [...prev, ...Array.from({ length: count }, () => blankRow())]);
   };
 
-  const removeExtraRow = (rowKey: string) => {
+  /** Hapus 1 baris (kapan saja, tanpa syarat). */
+  const removeRow = (rowKey: string) => {
     setBatchRows((prev) => {
-      // Jangan hapus jika ini satu-satunya baris untuk pegawai ini
-      const row = prev.find((r) => r.rowKey === rowKey);
-      if (!row) return prev;
-      const sameEmpRows = prev.filter((r) => r.employee_id === row.employee_id);
-      if (sameEmpRows.length <= 1) return prev;
+      // Pastikan minimal selalu ada 1 baris
+      if (prev.length <= 1) {
+        return [blankRow()];
+      }
       return prev.filter((r) => r.rowKey !== rowKey);
+    });
+    if (dbDuplicateRowKeys.has(rowKey)) {
+      setDbDuplicateRowKeys((prev) => { const n = new Set(prev); n.delete(rowKey); return n; });
+    }
+  };
+
+  /** Hapus semua baris yang masih kosong (belum pilih pegawai dan belum input apapun). */
+  const removeBlankRows = () => {
+    setBatchRows((prev) => {
+      const filtered = prev.filter((r) => r.employee_id || r.division_id || r.role || r.jumlah_titik);
+      return filtered.length === 0 ? [blankRow()] : filtered;
     });
   };
 
@@ -296,19 +309,7 @@ export default function IncomePage() {
     setDragOverIdx(null);
   };
 
-  const saveTemplate = () => {
-    const order = batchRows.map((r) => r.employee_id);
-    localStorage.setItem(TEMPLATE_KEY, JSON.stringify(order));
-    showToast("success", "Template Disimpan", "Urutan pegawai akan digunakan saat input titik berikutnya.");
-  };
-
-  const resetTemplate = () => {
-    localStorage.removeItem(TEMPLATE_KEY);
-    setBatchRows(employees.map((e) => ({ rowKey: nextRowKey(), employee_id: e.id, nama: e.nama, division_id: 0, role: "" as "Driver" | "Helper", jumlah_titik: "", catatan: "", status_id: 0 })));
-    showToast("success", "Template Direset", "Urutan pegawai kembali ke default (A-Z).");
-  };
-
-  const hasBatchData = batchRows.some((r) => r.jumlah_titik || r.division_id || r.role);
+  const hasBatchData = batchRows.some((r) => r.employee_id || r.jumlah_titik || r.division_id || r.role);
 
   const tryCloseBatch = () => {
     if (hasBatchData) {
@@ -324,7 +325,12 @@ export default function IncomePage() {
   };
 
   const prepareBatchData = async () => {
-    const validRows = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id && r.role);
+    // Worksheet: skip baris kosong/incomplete
+    const validRows = batchRows.filter((r) =>
+      r.employee_id &&
+      r.jumlah_titik && parseInt(r.jumlah_titik) > 0 &&
+      r.division_id && r.role,
+    );
     if (validRows.length === 0 || !batchDate) return null;
 
     // Lookup rates
@@ -528,23 +534,26 @@ export default function IncomePage() {
   const totalPendapatan = deliveries.reduce((s, d) => s + d.total, 0);
   const totalEntri = deliveries.length;
 
-  // Batch filtered
-  const batchFiltered = batchRows.filter((r) => r.nama.toLowerCase().includes(batchSearch.toLowerCase()));
-  const batchFilled = batchRows.filter((r) => r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id && r.role).length;
+  // Batch filtered (search by nama, kosong = tampil semua termasuk baris blank)
+  const batchFiltered = batchSearch
+    ? batchRows.filter((r) => r.nama.toLowerCase().includes(batchSearch.toLowerCase()))
+    : batchRows;
+  const batchFilled = batchRows.filter((r) => r.employee_id && r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id && r.role).length;
   // Baris yang setengah terisi (ada salah satu field tapi tidak lengkap)
   const batchIncomplete = batchRows.filter((r) => {
+    const hasEmp = !!r.employee_id;
     const hasTitik = r.jumlah_titik && parseInt(r.jumlah_titik) > 0;
     const hasDiv = !!r.division_id;
     const hasRole = !!r.role;
-    const touched = hasTitik || hasDiv || hasRole;
-    const complete = hasTitik && hasDiv && hasRole;
+    const touched = hasEmp || hasTitik || hasDiv || hasRole;
+    const complete = hasEmp && hasTitik && hasDiv && hasRole;
     return touched && !complete;
   });
-  // Deteksi duplikat: pegawai + divisi + role yang sama
+  // Deteksi duplikat: pegawai + divisi + role yang sama (skip baris yang belum pilih pegawai)
   const batchDuplicateKeys = new Set<string>();
   const seenCombos = new Map<string, string>(); // combo -> rowKey pertama
   batchRows.forEach((r) => {
-    if (!r.division_id || !r.role) return;
+    if (!r.employee_id || !r.division_id || !r.role) return;
     const combo = `${r.employee_id}-${r.division_id}-${r.role}`;
     if (seenCombos.has(combo)) {
       batchDuplicateKeys.add(r.rowKey);
@@ -1361,28 +1370,31 @@ export default function IncomePage() {
                 </div>
               </div>
 
-              {/* ── Reorder toolbar ── */}
+              {/* ── Worksheet toolbar ── */}
               <div className="px-5 py-1.5 border-b border-border flex items-center justify-between bg-muted/20">
                 <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-                  <GripVertical className="w-3 h-3" />Drag untuk ubah urutan
+                  <GripVertical className="w-3 h-3" />Drag baris untuk ubah urutan
                 </p>
                 <div className="flex items-center gap-1">
-                  <button type="button" onClick={saveTemplate} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
-                    <Save className="w-3 h-3" />Simpan
+                  <button type="button" onClick={() => addBlankRows(1)} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
+                    <Plus className="w-3 h-3" />1 Baris
                   </button>
-                  <button type="button" onClick={resetTemplate} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-2 py-1 rounded-md transition-colors">
-                    <RotateCcw className="w-3 h-3" />Reset
+                  <button type="button" onClick={() => addBlankRows(ADD_ROWS_BATCH)} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
+                    <Plus className="w-3 h-3" />{ADD_ROWS_BATCH} Baris
+                  </button>
+                  <button type="button" onClick={removeBlankRows} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-2 py-1 rounded-md transition-colors">
+                    <RotateCcw className="w-3 h-3" />Hapus Kosong
                   </button>
                 </div>
               </div>
 
-              {/* ── Batch List ── */}
+              {/* ── Worksheet table ── */}
               <div className="flex-1 overflow-y-auto">
                 <table className="w-full">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-card border-b-2 border-border shadow-sm">
                       <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-14">#</th>
-                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2">Pegawai</th>
+                      <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 min-w-[200px]">Pegawai</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-40">Divisi</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Posisi</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-20">Titik</th>
@@ -1393,79 +1405,63 @@ export default function IncomePage() {
                   </thead>
                   <tbody>
                     {batchFiltered.map((row, idx) => {
+                      const hasEmp = !!row.employee_id;
                       const hasTitik = row.jumlah_titik && parseInt(row.jumlah_titik) > 0;
                       const hasDiv = !!row.division_id;
                       const hasRole = !!row.role;
-                      const touched = hasTitik || hasDiv || hasRole;
-                      const isComplete = hasTitik && hasDiv && hasRole;
+                      const touched = hasEmp || hasTitik || hasDiv || hasRole;
+                      const isComplete = hasEmp && hasTitik && hasDiv && hasRole;
                       const isIncomplete = touched && !isComplete;
                       const isDuplicate = batchDuplicateKeys.has(row.rowKey);
                       const isDbDuplicate = dbDuplicateRowKeys.has(row.rowKey);
                       const isDragging = dragIdx === idx;
                       const isDropTarget = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;
-
-                      // Cek apakah ini baris pertama untuk pegawai ini (untuk tampilkan nama + grip)
-                      const isFirstRow = idx === 0 || batchFiltered[idx - 1]?.employee_id !== row.employee_id;
-                      const isLastRow = idx === batchFiltered.length - 1 || batchFiltered[idx + 1]?.employee_id !== row.employee_id;
-                      const sameEmpCount = batchFiltered.filter((r) => r.employee_id === row.employee_id).length;
+                      const empStatus = row.employee_id ? employees.find((e) => e.id === row.employee_id)?.status : undefined;
 
                       return (
                         <tr
                           key={row.rowKey}
-                          draggable={isFirstRow}
-                          onDragStart={(e) => isFirstRow && handleDragStart(e, idx)}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, idx)}
                           onDragOver={(e) => handleDragOver(e, idx)}
                           onDrop={() => handleDrop(idx)}
                           onDragEnd={handleDragEnd}
                           className={cn(
-                            "transition-all duration-200 relative",
+                            "transition-all duration-200 relative border-b border-border/30",
                             isDragging
-                              ? "opacity-30 scale-[0.98] bg-primary/5 border-b border-primary/30"
-                              : isDropTarget
-                                ? "border-b border-border/40"
-                                : isFirstRow ? "border-b border-border/40" : "border-b border-border/20",
-                            !isDragging && !isDropTarget && (isDuplicate ? "bg-danger/[0.06]" : isDbDuplicate ? "bg-warning/[0.08]" : isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40"),
-                            !isFirstRow && "bg-muted/[0.02]"
+                              ? "opacity-30 scale-[0.98] bg-primary/5"
+                              : !isDropTarget && (isDuplicate ? "bg-danger/[0.06]" : isDbDuplicate ? "bg-warning/[0.08]" : isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40"),
                           )}
                           style={isDropTarget ? { boxShadow: "inset 0 3px 0 0 var(--color-primary, #3b82f6)" } : undefined}
                         >
                           {/* # + Grip */}
                           <td className="px-4 py-1.5">
-                            {isFirstRow ? (
-                              <div className="flex items-center gap-1">
-                                <div className={cn("p-0.5 rounded cursor-grab active:cursor-grabbing transition-colors", isDragging ? "text-primary" : "text-muted-foreground/30 hover:text-muted-foreground")}>
-                                  <GripVertical className="w-3.5 h-3.5" />
-                                </div>
-                                <span className={cn("text-[10px] font-mono", isComplete ? "text-success font-bold" : isIncomplete ? "text-danger font-bold" : "text-muted-foreground")}>{idx + 1}</span>
+                            <div className="flex items-center gap-1">
+                              <div className={cn("p-0.5 rounded cursor-grab active:cursor-grabbing transition-colors", isDragging ? "text-primary" : "text-muted-foreground/30 hover:text-muted-foreground")}>
+                                <GripVertical className="w-3.5 h-3.5" />
                               </div>
-                            ) : (
-                              <span className="text-[10px] font-mono text-muted-foreground/40 pl-5">{idx + 1}</span>
-                            )}
+                              <span className={cn("text-[10px] font-mono", isComplete ? "text-success font-bold" : isIncomplete ? "text-danger font-bold" : "text-muted-foreground")}>{idx + 1}</span>
+                            </div>
                           </td>
 
-                          {/* Nama */}
+                          {/* Nama (searchable dropdown) */}
                           <td className="px-4 py-1.5">
-                            {isFirstRow ? (
-                              <div className="flex items-center gap-2">
-                                <div className={cn("w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-bold flex-shrink-0",
-                                  isDbDuplicate ? "bg-warning/10 text-warning" : isComplete ? "bg-success/10 text-success" : isIncomplete ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground"
-                                )}>
-                                  {row.nama.charAt(0)}
-                                </div>
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className={cn("text-xs truncate", isComplete || isIncomplete ? "font-semibold text-foreground" : "text-foreground/70")}>{row.nama}</span>
-                                  {employees.find((e) => e.id === row.employee_id)?.status === "Training" && (
-                                    <span className="text-[8px] font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded flex-shrink-0">TRAINING</span>
-                                  )}
-                                  {isDbDuplicate && <span className="text-[8px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded flex-shrink-0">SUDAH ADA</span>}
-                                </div>
+                            <div className="flex items-center gap-1.5">
+                              <div className="flex-1 min-w-0">
+                                <Select
+                                  value={row.employee_id || ""}
+                                  onChange={(val) => handleEmployeeChange(row.rowKey, val)}
+                                  options={employees.map((e) => ({ value: e.id, label: e.nama }))}
+                                  placeholder="Pilih pegawai..."
+                                  searchable
+                                  hasError={isDuplicate}
+                                />
                               </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5 pl-8">
-                                <span className="text-[10px] text-muted-foreground/50">↳ divisi lain</span>
-                                {isDbDuplicate && <span className="text-[8px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded flex-shrink-0">SUDAH ADA</span>}
-                              </div>
-                            )}
+                              {empStatus === "Training" && (
+                                <span className="text-[8px] font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded flex-shrink-0">TRAINING</span>
+                              )}
+                              {isDbDuplicate && <span className="text-[8px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded flex-shrink-0">SUDAH ADA</span>}
+                            </div>
                           </td>
 
                           {/* Divisi */}
@@ -1524,22 +1520,33 @@ export default function IncomePage() {
                               className="w-full text-[11px] px-2 py-1.5 rounded-md border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-muted-foreground/30 text-foreground" />
                           </td>
 
-                          {/* Aksi: + / - */}
+                          {/* Aksi: hapus baris */}
                           <td className="px-2 py-1.5">
-                            <div className="flex items-center justify-center gap-0.5">
-                              {isLastRow && (
-                                <button type="button" onClick={() => addExtraRow(row.rowKey)} title="Tambah divisi lain"
-                                  className="w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-bold text-primary hover:bg-primary-light transition-colors">+</button>
-                              )}
-                              {sameEmpCount > 1 && (
-                                <button type="button" onClick={() => removeExtraRow(row.rowKey)} title="Hapus baris ini"
-                                  className="w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-bold text-danger hover:bg-danger-light transition-colors">&minus;</button>
-                              )}
+                            <div className="flex items-center justify-center">
+                              <button type="button" onClick={() => removeRow(row.rowKey)} title="Hapus baris ini"
+                                className="w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-bold text-muted-foreground hover:text-danger hover:bg-danger-light transition-colors">
+                                <Trash2 className="w-3 h-3" />
+                              </button>
                             </div>
                           </td>
                         </tr>
                       );
                     })}
+                    {/* Tombol tambah baris di akhir tabel */}
+                    <tr>
+                      <td colSpan={8} className="px-4 py-2">
+                        <div className="flex items-center justify-center gap-2">
+                          <button type="button" onClick={() => addBlankRows(1)}
+                            className="flex items-center gap-1 text-[10px] font-medium text-primary hover:bg-primary-light px-3 py-1.5 rounded-md transition-colors border border-dashed border-primary/40">
+                            <Plus className="w-3 h-3" />Tambah 1 Baris
+                          </button>
+                          <button type="button" onClick={() => addBlankRows(ADD_ROWS_BATCH)}
+                            className="flex items-center gap-1 text-[10px] font-medium text-primary hover:bg-primary-light px-3 py-1.5 rounded-md transition-colors border border-dashed border-primary/40">
+                            <Plus className="w-3 h-3" />Tambah {ADD_ROWS_BATCH} Baris
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
