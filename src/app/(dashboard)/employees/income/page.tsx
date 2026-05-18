@@ -1331,7 +1331,7 @@ export default function IncomePage() {
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-3">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <div className="relative w-full max-w-5xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ height: "calc(100vh - 1.5rem)", maxHeight: "calc(100vh - 1.5rem)" }}>
+            <div className="relative w-full max-w-7xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ height: "calc(100vh - 1.5rem)", maxHeight: "calc(100vh - 1.5rem)", zoom: 0.9 }}>
 
               {/* ── Header: Title + Tanggal + Search + Counter ── */}
               <div className="px-5 py-3 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
