@@ -1466,19 +1466,14 @@ export default function IncomePage() {
 
                           {/* Divisi */}
                           <td className="px-4 py-1.5">
-                            <select
-                              value={row.division_id || ""}
-                              onChange={(e) => handleBatchRowChange(row.rowKey, "division_id", parseInt(e.target.value) || 0)}
-                              className={cn(
-                                "w-full text-[11px] px-2 py-1.5 rounded-md border outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
-                                isDuplicate ? "border-danger bg-danger/[0.05] text-danger" : row.division_id ? "border-border bg-card text-foreground" : isIncomplete && !hasDiv ? "border-danger/50 bg-danger/[0.03] text-muted-foreground" : "border-dashed border-border bg-transparent text-muted-foreground"
-                              )}
-                            >
-                              <option value="">Pilih divisi</option>
-                              {divisions.map((d) => (
-                                <option key={d.id} value={d.id}>{d.nama}</option>
-                              ))}
-                            </select>
+                            <Select
+                              value={row.division_id ? String(row.division_id) : ""}
+                              onChange={(val) => handleBatchRowChange(row.rowKey, "division_id", parseInt(val) || 0)}
+                              options={divisions.map((d) => ({ value: String(d.id), label: d.nama }))}
+                              placeholder="Pilih divisi..."
+                              searchable
+                              hasError={isDuplicate}
+                            />
                           </td>
 
                           {/* Posisi */}
