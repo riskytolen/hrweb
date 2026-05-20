@@ -1112,15 +1112,16 @@ export default function MasterDataPage() {
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Jam Pulang</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Toleransi</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Awal Absen</th>
+                    <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Lembur/Jam</th>
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
                     <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
                   {loading ? (
-                    <SkeletonTable rows={5} cols={8} />
+                    <SkeletonTable rows={5} cols={9} />
                   ) : filteredSchedules.length === 0 ? (
-                    <tr><td colSpan={8} className="text-center py-10 text-sm text-muted-foreground">Tidak ada jadwal kerja ditemukan</td></tr>
+                    <tr><td colSpan={9} className="text-center py-10 text-sm text-muted-foreground">Tidak ada jadwal kerja ditemukan</td></tr>
                   ) : filteredSchedules.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((sch, idx) => (
                     <tr key={sch.id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
@@ -1131,6 +1132,11 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3.5">
                         {(sch.awal_absen_menit ?? 0) > 0
                           ? <span className="text-xs text-muted-foreground">{sch.awal_absen_menit} menit</span>
+                          : <span className="text-xs text-muted-foreground italic">-</span>}
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        {(sch.overtime_rate_per_hour ?? 0) > 0
+                          ? <span className="text-xs font-semibold text-foreground tabular-nums">{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(sch.overtime_rate_per_hour)}</span>
                           : <span className="text-xs text-muted-foreground italic">-</span>}
                       </td>
                       <td className="px-5 py-3.5">
