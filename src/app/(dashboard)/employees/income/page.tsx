@@ -29,6 +29,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint, type DbDeliveryStatus } from "@/lib/supabase";
+import { logAudit } from "@/lib/audit";
 import ReportDetail from "./ReportDetail";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -422,6 +423,28 @@ export default function IncomePage() {
           ? `${newRows.length} data baru disimpan, ${updateRows.length} data diperbarui.`
           : `${total} data pegawai berhasil disimpan.`;
         showToast("success", "Input Titik Berhasil", msg);
+        // Audit log: input titik (batch). Tidak per-row supaya ringkas dan
+        // tidak overload audit_logs untuk batch besar.
+        const tanggalSet = new Set<string>();
+        newRows.forEach((r) => { if (r.tanggal) tanggalSet.add(String(r.tanggal)); });
+        updateRows.forEach((r) => {
+          if ("tanggal" in r.data && r.data.tanggal) tanggalSet.add(String(r.data.tanggal));
+        });
+        const tanggalList = Array.from(tanggalSet).sort();
+        await logAudit({
+          supabase,
+          action: newRows.length > 0 && updateRows.length === 0 ? "manual_input" : "update",
+          entityType: "delivery_points",
+          entityLabel: tanggalList.length === 1
+            ? `Input rekap titik ${tanggalList[0]}`
+            : `Input rekap titik ${tanggalList.length} tanggal`,
+          metadata: {
+            tanggal: tanggalList.length === 1 ? tanggalList[0] : tanggalList,
+            jumlah_baru: newRows.length,
+            jumlah_diperbarui: updateRows.length,
+            total: newRows.length + updateRows.length,
+          },
+        });
       }
     } catch (err) {
       showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menyimpan data.");
@@ -494,6 +517,15 @@ export default function IncomePage() {
     };
     setDeliveries((prev) => prev.map((d) => d.id === editingId ? mappedRow : d));
 
+    await logAudit({
+      supabase,
+      action: "update",
+      entityType: "delivery_points",
+      entityId: editingId,
+      entityLabel: `Rekap titik ${row.employeeNama} (${row.tanggal})`,
+      oldData: { ...row } as unknown as Record<string, unknown>,
+      newData: { ...row, ...updatePayload } as unknown as Record<string, unknown>,
+    });
     showToast("success", "Data Diperbarui", "Input titik telah disimpan.");
     setShowEditForm(false);
   };
@@ -504,11 +536,20 @@ export default function IncomePage() {
     const targetId = deleteConfirm.id;
     setDeleting(true);
     try {
+      const oldRow = deliveries.find((d) => d.id === targetId);
       const { error } = await supabase.from("delivery_points").delete().eq("id", targetId);
       if (error) {
         showToast("error", "Gagal Menghapus", error.message);
         return;
       }
+      await logAudit({
+        supabase,
+        action: "delete",
+        entityType: "delivery_points",
+        entityId: targetId,
+        entityLabel: oldRow ? `Rekap titik ${oldRow.employeeNama} (${oldRow.tanggal})` : `Rekap titik #${targetId}`,
+        oldData: oldRow ? { ...oldRow } as unknown as Record<string, unknown> : null,
+      });
       // Hapus dari state lokal langsung (menjaga urutan)
       setDeliveries((prev) => prev.filter((d) => d.id !== targetId));
       showToast("success", "Data Dihapus", "Input titik telah dihapus.");
@@ -767,7 +808,25 @@ export default function IncomePage() {
         showToast("error", "Sebagian Gagal", "Beberapa data gagal disimpan.");
       } else {
         const total = updates.length + inserts.length + toDelete.length;
-        if (total > 0) showToast("success", "Data Disimpan", `${calEditCell.empNama} — ${calEditCell.dateStr}`);
+        if (total > 0) {
+          showToast("success", "Data Disimpan", `${calEditCell.empNama} — ${calEditCell.dateStr}`);
+          // Audit log: edit cell kalender = bisa update + insert + delete sekaligus
+          await logAudit({
+            supabase,
+            action: inserts.length > 0 && updates.length === 0 && toDelete.length === 0 ? "manual_input" : "update",
+            entityType: "delivery_points",
+            entityLabel: `Rekap titik ${calEditCell.empNama} (${calEditCell.dateStr})`,
+            metadata: {
+              tanggal: calEditCell.dateStr,
+              employee_id: calEditCell.empId,
+              employee_nama: calEditCell.empNama,
+              jumlah_baru: inserts.length,
+              jumlah_diperbarui: updates.length,
+              jumlah_dihapus: toDelete.length,
+              source: "kalender",
+            },
+          });
+        }
       }
 
       setCalEditCell(null);
