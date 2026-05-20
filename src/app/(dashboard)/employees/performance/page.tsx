@@ -133,10 +133,15 @@ export default function PerformancePage() {
   const [performanceData, setPerformanceData] = useState<PerformanceRow[]>([]);
   const [prevPerformanceData, setPrevPerformanceData] = useState<PerformanceRow[]>([]);
 
-  const period = dateMode === "periode"
-    ? getPeriodRange(periodKey)
-    : { start: customStart, end: customEnd, label: customStart && customEnd ? `${customStart} – ${customEnd}` : "Pilih tanggal", shortLabel: "Custom" };
-  const prevPeriod = dateMode === "periode" ? getPeriodRange(getPrevPeriodKey(periodKey)) : null;
+  // useMemo agar object reference stabil (mencegah infinite loop di fetchData)
+  const period = useMemo(() =>
+    dateMode === "periode"
+      ? getPeriodRange(periodKey)
+      : { start: customStart, end: customEnd, label: customStart && customEnd ? `${customStart} – ${customEnd}` : "Pilih tanggal", shortLabel: "Custom" },
+    [dateMode, periodKey, customStart, customEnd]);
+  const prevPeriod = useMemo(() =>
+    dateMode === "periode" ? getPeriodRange(getPrevPeriodKey(periodKey)) : null,
+    [dateMode, periodKey]);
 
   // Helper: hitung performance untuk satu range dataset
   const computeRows = useCallback((emps: EmployeeLite[], attendance: AttendanceRecord[], spDocs: LegalDoc[]): PerformanceRow[] => {
