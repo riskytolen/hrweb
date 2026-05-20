@@ -274,14 +274,39 @@ export default function LeavePage() {
       }
 
       if (editingId) {
+        const oldRecord = list.find((r) => r.id === editingId);
         const { error } = await supabase.from("leave_requests").update(payload).eq("id", editingId);
         if (error) { setFormError(error.message); setFormSaving(false); return; }
+        const empNama = employees.find((e) => e.id === form.employee_id)?.nama || form.employee_id;
+        await logAudit({
+          supabase,
+          action: "update",
+          entityType: "leave_requests",
+          entityId: editingId,
+          entityLabel: `${form.jenis} ${empNama} (${effectiveMulai}${effectiveMulai !== effectiveSelesai ? ` – ${effectiveSelesai}` : ""})`,
+          oldData: oldRecord ? { ...oldRecord } as unknown as Record<string, unknown> : null,
+          newData: { ...payload } as Record<string, unknown>,
+        });
         showToast("success", "Pengajuan Diperbarui");
       } else {
         // Pengajuan baru dari admin = manual input
         const insertPayload = { ...payload, created_by: "admin" };
-        const { error } = await supabase.from("leave_requests").insert(insertPayload);
+        const { data: inserted, error } = await supabase
+          .from("leave_requests")
+          .insert(insertPayload)
+          .select("id")
+          .single();
         if (error) { setFormError(error.message); setFormSaving(false); return; }
+        const empNama = employees.find((e) => e.id === form.employee_id)?.nama || form.employee_id;
+        await logAudit({
+          supabase,
+          action: "manual_input",
+          entityType: "leave_requests",
+          entityId: inserted?.id ?? undefined,
+          entityLabel: `${form.jenis} ${empNama} (${effectiveMulai}${effectiveMulai !== effectiveSelesai ? ` – ${effectiveSelesai}` : ""})`,
+          newData: { ...insertPayload, id: inserted?.id } as Record<string, unknown>,
+          metadata: { created_by: "admin", durasi_hari: countDays(effectiveMulai, effectiveSelesai) },
+        });
         showToast("success", "Pengajuan Dibuat", `${form.jenis} untuk ${countDays(effectiveMulai, effectiveSelesai)} hari.`);
       }
       setShowForm(false);
