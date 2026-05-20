@@ -297,6 +297,8 @@ export interface DbLeaveRequest {
   status: "Menunggu" | "Disetujui" | "Ditolak";
   catatan_approval: string | null;
   approved_at: string | null;
+  /** Sumber pengajuan: pegawai (mobile self-service) atau admin (manual input dari web). */
+  created_by: "pegawai" | "admin";
   created_at: string;
   updated_at: string;
   // joined

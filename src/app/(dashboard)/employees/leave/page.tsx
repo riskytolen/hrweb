@@ -59,6 +59,7 @@ export default function LeavePage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Semua");
+  const [filterSource, setFilterSource] = useState<"Semua" | "pegawai" | "admin">("Semua");
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [list, setList] = useState<LeaveRow[]>([]);
@@ -171,7 +172,8 @@ export default function LeavePage() {
     const q = search.toLowerCase();
     const matchSearch = (r.employeeNama || "").toLowerCase().includes(q) || r.jenis.toLowerCase().includes(q);
     const matchStatus = filterStatus === "Semua" || r.status === filterStatus;
-    return matchSearch && matchStatus;
+    const matchSource = filterSource === "Semua" || r.created_by === filterSource;
+    return matchSearch && matchStatus && matchSource;
   });
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -276,7 +278,9 @@ export default function LeavePage() {
         if (error) { setFormError(error.message); setFormSaving(false); return; }
         showToast("success", "Pengajuan Diperbarui");
       } else {
-        const { error } = await supabase.from("leave_requests").insert(payload);
+        // Pengajuan baru dari admin = manual input
+        const insertPayload = { ...payload, created_by: "admin" };
+        const { error } = await supabase.from("leave_requests").insert(insertPayload);
         if (error) { setFormError(error.message); setFormSaving(false); return; }
         showToast("success", "Pengajuan Dibuat", `${form.jenis} untuk ${countDays(effectiveMulai, effectiveSelesai)} hari.`);
       }
@@ -504,6 +508,24 @@ export default function LeavePage() {
               </button>
             );
           })}
+          {/* Filter source */}
+          <div className="h-4 w-px bg-border" />
+          {([
+            { value: "Semua" as const, label: "Semua Sumber" },
+            { value: "pegawai" as const, label: "Mobile" },
+            { value: "admin" as const, label: "Manual Admin" },
+          ]).map((src) => {
+            const isActive = filterSource === src.value;
+            return (
+              <button key={src.value} onClick={() => { setFilterSource(src.value); setPage(1); }}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all",
+                  isActive ? "bg-warning/10 text-warning ring-1 ring-warning/20" : "text-muted-foreground hover:bg-muted"
+                )}>
+                <span>{src.label}</span>
+              </button>
+            );
+          })}
           {totalHari > 0 && !loading && (
             <>
               <div className="h-4 w-px bg-border" />
@@ -544,7 +566,16 @@ export default function LeavePage() {
                 return (
                   <tr key={row.id} className="hover:bg-muted/30">
                     <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                    <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p></td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-semibold text-foreground">{row.employeeNama}</p>
+                        {row.created_by === "admin" && (
+                          <span className="text-[9px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded" title="Diinput manual oleh admin">
+                            MANUAL
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${jc?.color}20`, color: jc?.color }}>{row.jenis}</span>
                     </td>
