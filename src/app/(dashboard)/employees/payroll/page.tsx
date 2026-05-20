@@ -84,6 +84,7 @@ function formatInputCurrency(val: number): string {
 const PENDAPATAN_FIELDS: { key: string; label: string; readonly?: boolean }[] = [
   { key: "gaji_pokok", label: "Gaji Pokok" },
   { key: "pendapatan_titik", label: "Pendapatan Titik", readonly: true },
+  { key: "lembur", label: "Lembur", readonly: true },
   { key: "extra_job", label: "Extra Job" },
   { key: "uang_makan", label: "Uang Makan" },
   { key: "insentif", label: "Insentif" },
@@ -289,6 +290,20 @@ export default function PayrollPage() {
         dendaTotals.set(d.employee_id, (dendaTotals.get(d.employee_id) || 0) + d.denda);
       });
 
+      // 5b. Fetch lembur Disetujui per employee dalam periode
+      const { data: lemburData } = await supabase
+        .from("overtime_requests")
+        .select("employee_id, total_lembur")
+        .eq("status", "Disetujui")
+        .gte("tanggal", genPeriod.start)
+        .lte("tanggal", genPeriod.end)
+        .in("employee_id", newEmps.map((e) => e.id));
+
+      const lemburTotals = new Map<string, number>();
+      (lemburData || []).forEach((d: { employee_id: string; total_lembur: number | null }) => {
+        lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
+      });
+
       // 6. Build gaji_pokok, tanggal_bergabung & tanggal_keluar lookup
       const gapokMap = new Map<string, number>();
       const joinDateMap = new Map<string, string | null>();
@@ -383,6 +398,7 @@ export default function PayrollPage() {
           transport: 0,
           tunjangan_lain: 0,
           tambahan_lain: 0,
+          lembur: lemburTotals.get(e.id) || 0,
           koperasi: 0,
           pinjaman_perusahaan: 0,
           potongan_absen: dendaTotals.get(e.id) || 0,

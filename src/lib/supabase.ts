@@ -139,6 +139,8 @@ export interface DbPayroll {
   transport: number;
   tunjangan_lain: number;
   tambahan_lain: number;
+  /** Total biaya lembur dari overtime_requests Disetujui dalam periode. Auto-fill saat generate. */
+  lembur: number;
   total_pendapatan: number;
   // Potongan
   koperasi: number;
