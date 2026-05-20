@@ -13,6 +13,7 @@ import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, localDateStr, addDaysLocal } from "@/lib/utils";
 import { supabase, type DbRecruitment } from "@/lib/supabase";
+import { logAudit } from "@/lib/audit";
 import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -403,6 +404,21 @@ export default function RecruitmentPage() {
       }
 
       setList((prev) => prev.map((r) => (r.id === id ? updated : r)));
+      // Audit log
+      await logAudit({
+        supabase,
+        action: "status_change",
+        entityType: "recruitments",
+        entityId: id,
+        entityLabel: `${current.nama} → ${status}`,
+        oldData: { ...current } as unknown as Record<string, unknown>,
+        newData: { ...updated } as unknown as Record<string, unknown>,
+        metadata: {
+          from: current.status,
+          to: status,
+          tanggal_mulai_aktif: joinDate ?? null,
+        },
+      });
       showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
     } catch (err) {
       showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal mengubah status.");

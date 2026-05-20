@@ -14,6 +14,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase, type DbOvertimeRequest } from "@/lib/supabase";
+import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
@@ -230,13 +231,12 @@ export default function OvertimePage() {
       approved_at: new Date().toISOString(),
     };
 
+    const oldRecord = list.find((r) => r.id === approvalConfirm.id);
+
     // Jika approve, snapshot rate dari divisi pegawai
-    if (isApprove) {
-      const req = list.find((r) => r.id === approvalConfirm.id);
-      if (req) {
-        const rate = await getEmployeeRate(req.employee_id);
-        updatePayload.rate_per_jam = rate;
-      }
+    if (isApprove && oldRecord) {
+      const rate = await getEmployeeRate(oldRecord.employee_id);
+      updatePayload.rate_per_jam = rate;
     }
 
     const { error } = await supabase.from("overtime_requests").update(updatePayload).eq("id", approvalConfirm.id);
@@ -244,6 +244,17 @@ export default function OvertimePage() {
     if (error) {
       showToast("error", "Gagal", error.message);
     } else {
+      // Audit log
+      await logAudit({
+        supabase,
+        action: isApprove ? "approve" : "reject",
+        entityType: "overtime_requests",
+        entityId: approvalConfirm.id,
+        entityLabel: `Lembur ${approvalConfirm.nama} (${oldRecord?.tanggal ?? ""})`,
+        oldData: oldRecord ? { ...oldRecord } as unknown as Record<string, unknown> : null,
+        newData: { ...oldRecord, ...updatePayload } as unknown as Record<string, unknown>,
+        metadata: { catatan_approval: approvalNote || null },
+      });
       showToast("success", isApprove ? "Pengajuan Disetujui" : "Pengajuan Ditolak", isApprove ? "Lembur akan masuk ke laporan periode terkait." : "Pengajuan ditolak.");
       await fetchList();
     }
@@ -257,10 +268,19 @@ export default function OvertimePage() {
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     setDeleting(true);
+    const oldRecord = list.find((r) => r.id === deleteConfirm.id);
     const { error } = await supabase.from("overtime_requests").delete().eq("id", deleteConfirm.id);
     if (error) {
       showToast("error", "Gagal Menghapus", error.message);
     } else {
+      await logAudit({
+        supabase,
+        action: "delete",
+        entityType: "overtime_requests",
+        entityId: deleteConfirm.id,
+        entityLabel: `Lembur ${deleteConfirm.nama} (${oldRecord?.tanggal ?? ""})`,
+        oldData: oldRecord ? { ...oldRecord } as unknown as Record<string, unknown> : null,
+      });
       setList((prev) => prev.filter((r) => r.id !== deleteConfirm.id));
       showToast("success", "Pengajuan Dihapus");
     }

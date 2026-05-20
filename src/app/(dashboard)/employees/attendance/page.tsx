@@ -15,6 +15,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbAttendanceRecord } from "@/lib/supabase";
+import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
@@ -679,8 +680,20 @@ export default function AttendancePage() {
 
     try {
       if (editingId) {
+        const oldRecord = records.find((r) => r.id === editingId);
         const { error } = await supabase.from("attendance_records").update(payload).eq("id", editingId);
         if (error) { setFormError(error.message); setFormSaving(false); return; }
+        const empNama = employees.find((e) => e.id === form.employee_id)?.nama || form.employee_id;
+        await logAudit({
+          supabase,
+          action: "update",
+          entityType: "attendance_records",
+          entityId: editingId,
+          entityLabel: `Absensi ${empNama} (${form.tanggal})`,
+          oldData: oldRecord ? { ...oldRecord } as unknown as Record<string, unknown> : null,
+          newData: { ...payload } as Record<string, unknown>,
+          metadata: { alasan_manual: form.alasan_manual || null, is_manual: true },
+        });
         showToast("success", "Data Diperbarui", "Data absen berhasil diperbarui.");
       } else {
         const { data: inserted, error } = await supabase
@@ -716,6 +729,15 @@ export default function AttendancePage() {
           }
         }
         showToast("success", "Absensi Disimpan", `Data absen ${employees.find((e) => e.id === form.employee_id)?.nama || ""} berhasil disimpan.`);
+        await logAudit({
+          supabase,
+          action: "manual_input",
+          entityType: "attendance_records",
+          entityId: inserted?.id,
+          entityLabel: `Absensi ${employees.find((e) => e.id === form.employee_id)?.nama || form.employee_id} (${form.tanggal})`,
+          newData: { ...payload, id: inserted?.id } as Record<string, unknown>,
+          metadata: { alasan_manual: form.alasan_manual || null, is_manual: true },
+        });
       }
       setShowForm(false);
       setDateFilter(form.tanggal);
@@ -731,9 +753,18 @@ export default function AttendancePage() {
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     setDeleting(true);
+    const oldRecord = records.find((r) => r.id === deleteConfirm.id);
     const { error } = await supabase.from("attendance_records").delete().eq("id", deleteConfirm.id);
     if (error) showToast("error", "Gagal Menghapus", error.message);
     else {
+      await logAudit({
+        supabase,
+        action: "delete",
+        entityType: "attendance_records",
+        entityId: deleteConfirm.id,
+        entityLabel: `Absensi ${deleteConfirm.nama}`,
+        oldData: oldRecord ? { ...oldRecord } as unknown as Record<string, unknown> : null,
+      });
       showToast("success", "Data Dihapus", "Data absen berhasil dihapus.");
       setRecords((prev) => prev.filter((r) => r.id !== deleteConfirm.id));
     }

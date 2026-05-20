@@ -24,6 +24,7 @@ import {
   UserCog,
   Megaphone,
   Clock,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -79,6 +80,7 @@ const allMenuGroups: MenuGroup[] = [
     items: [
       { name: "Data Master", href: "/settings/master-data", icon: Database, permission: "settings" },
       { name: "Keamanan", href: "/settings/security", icon: Shield, permission: "settings" },
+      { name: "Riwayat Aksi", href: "/settings/audit-logs", icon: ShieldCheck },
       { name: "Manajemen Akun", href: "/settings/accounts", icon: UserCog },
     ],
   },
@@ -95,8 +97,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       const filteredItems = group.items.filter((item) => {
         // Saat masih loading, tampilkan semua
         if (isLoading || !profile) return true;
-        // Manajemen Akun hanya untuk superadmin
+        // Manajemen Akun & Riwayat Aksi hanya untuk superadmin
         if (item.href === "/settings/accounts") return isSuperAdmin;
+        if (item.href === "/settings/audit-logs") return isSuperAdmin;
         // Item tanpa permission = tampilkan untuk semua
         if (!item.permission) return true;
         // Cek permission

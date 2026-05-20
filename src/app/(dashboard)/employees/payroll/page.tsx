@@ -33,6 +33,7 @@ import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase, type DbPayroll, type DbPegawai } from "@/lib/supabase";
+import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
@@ -419,6 +420,18 @@ export default function PayrollPage() {
       }
 
       showToast("success", "Generate Berhasil", `${inserts.length} slip gaji berhasil dibuat untuk periode ${formatPeriodLabel(generatePeriod)}.`);
+      // Audit log
+      await logAudit({
+        supabase,
+        action: "generate",
+        entityType: "payrolls",
+        entityLabel: `Slip gaji periode ${formatPeriodLabel(generatePeriod)}`,
+        metadata: {
+          periode: generatePeriod,
+          jumlah_slip: inserts.length,
+          rentang: `${genPeriod.start} – ${genPeriod.end}`,
+        },
+      });
       setShowGenerate(false);
 
       // Refresh if same period
@@ -545,6 +558,7 @@ export default function PayrollPage() {
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     setDeleting(true);
+    const oldRecord = payrolls.find((p) => p.id === deleteConfirm.id);
     const { error } = await supabase.from("payrolls").delete().eq("id", deleteConfirm.id);
     if (error) {
       showToast("error", "Gagal Menghapus", error.message);
@@ -552,6 +566,14 @@ export default function PayrollPage() {
       setDeleteConfirm(null);
       return;
     }
+    await logAudit({
+      supabase,
+      action: "delete",
+      entityType: "payrolls",
+      entityId: deleteConfirm.id,
+      entityLabel: `Slip ${deleteConfirm.nama} (${oldRecord?.periode ?? ""})`,
+      oldData: oldRecord ? { ...oldRecord } as unknown as Record<string, unknown> : null,
+    });
     setPayrolls((prev) => prev.filter((p) => p.id !== deleteConfirm.id));
     showToast("success", "Slip Dihapus", `Slip gaji ${deleteConfirm.nama} berhasil dihapus.`);
     setDeleting(false);

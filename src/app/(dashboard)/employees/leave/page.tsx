@@ -15,6 +15,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase, type DbLeaveRequest } from "@/lib/supabase";
+import { logAudit } from "@/lib/audit";
 import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -294,6 +295,7 @@ export default function LeavePage() {
     setApproving(true);
     const isApprove = approvalConfirm.action === "approve";
     const newStatus = isApprove ? "Disetujui" : "Ditolak";
+    const oldRequest = list.find((r) => r.id === approvalConfirm.id);
 
     const { error } = await supabase.from("leave_requests").update({
       status: newStatus,
@@ -304,6 +306,22 @@ export default function LeavePage() {
     if (error) {
       showToast("error", "Gagal", error.message);
     } else {
+      // Audit log
+      await logAudit({
+        supabase,
+        action: isApprove ? "approve" : "reject",
+        entityType: "leave_requests",
+        entityId: approvalConfirm.id,
+        entityLabel: oldRequest
+          ? `${oldRequest.jenis} ${approvalConfirm.nama} (${oldRequest.tanggal_mulai}${oldRequest.tanggal_mulai !== oldRequest.tanggal_selesai ? ` – ${oldRequest.tanggal_selesai}` : ""})`
+          : `Pengajuan ${approvalConfirm.nama}`,
+        oldData: oldRequest ? { ...oldRequest } as unknown as Record<string, unknown> : null,
+        newData: oldRequest
+          ? { ...oldRequest, status: newStatus, catatan_approval: approvalNote || null } as unknown as Record<string, unknown>
+          : null,
+        metadata: { catatan_approval: approvalNote || null },
+      });
+
       // Jika disetujui, insert ke attendance_records (skip hari libur)
       if (isApprove) {
         const req = list.find((r) => r.id === approvalConfirm.id);
@@ -410,6 +428,16 @@ export default function LeavePage() {
     const { error } = await supabase.from("leave_requests").delete().eq("id", deleteConfirm.id);
     if (error) showToast("error", "Gagal Menghapus", error.message);
     else {
+      await logAudit({
+        supabase,
+        action: "delete",
+        entityType: "leave_requests",
+        entityId: deleteConfirm.id,
+        entityLabel: req
+          ? `${req.jenis} ${deleteConfirm.nama} (${req.tanggal_mulai}${req.tanggal_mulai !== req.tanggal_selesai ? ` – ${req.tanggal_selesai}` : ""})`
+          : `Pengajuan ${deleteConfirm.nama}`,
+        oldData: req ? { ...req } as unknown as Record<string, unknown> : null,
+      });
       showToast("success", "Pengajuan Dihapus");
       setList((prev) => prev.filter((r) => r.id !== deleteConfirm.id));
     }

@@ -39,6 +39,7 @@ import Select from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import Pagination from "@/components/ui/Pagination";
 import { supabase, type DbPegawai } from "@/lib/supabase";
+import { logAudit } from "@/lib/audit";
 import { cn, formatShortDate, toTitleCase, localDateStr } from "@/lib/utils";
 import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
@@ -470,6 +471,21 @@ export default function EmployeesPage() {
           .update({ status: "Tidak Aktif" })
           .eq("employee_id", selectedEmployee.id);
       }
+
+      // Audit log: status change atau update data
+      const isStatusChange = newStatus !== oldStatus;
+      await logAudit({
+        supabase,
+        action: isStatusChange ? "status_change" : "update",
+        entityType: "pegawai",
+        entityId: selectedEmployee.id,
+        entityLabel: `${selectedEmployee.nama} (${selectedEmployee.id})`,
+        oldData: { ...selectedEmployee } as unknown as Record<string, unknown>,
+        newData: { ...selectedEmployee, ...editData, ...statusUpdates, ...fileUpdates } as unknown as Record<string, unknown>,
+        metadata: isStatusChange
+          ? { from: oldStatus, to: newStatus, tanggal_keluar: statusUpdates.tanggal_keluar ?? null }
+          : { fields_updated: Object.keys(editData).length },
+      });
 
       setIsEditing(false);
       const uploadCount = Object.keys(fileUpdates).length;

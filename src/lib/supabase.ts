@@ -405,3 +405,25 @@ export interface DbLegalSetting {
   keterangan: string | null;
   updated_at: string;
 }
+
+export interface DbAuditLog {
+  id: number;
+  user_id: string | null;
+  user_email: string | null;
+  user_nama: string | null;
+  user_role: string | null;
+  /** create | update | delete | approve | reject | generate | manual_input | status_change */
+  action: string;
+  /** Nama tabel target: pegawai, leave_requests, overtime_requests, attendance_records, dll. */
+  entity_type: string;
+  entity_id: string | null;
+  /** Human-readable label untuk display (mis. nama pegawai, periode payroll). */
+  entity_label: string | null;
+  /** Snapshot row sebelum perubahan (NULL untuk create). */
+  old_data: Record<string, unknown> | null;
+  /** Snapshot row sesudah perubahan (NULL untuk delete). */
+  new_data: Record<string, unknown> | null;
+  /** Konteks bisnis tambahan: catatan approval, alasan, periode, dll. */
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
