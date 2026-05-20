@@ -23,6 +23,7 @@ import {
   Shield,
   UserCog,
   Megaphone,
+  Clock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -60,6 +61,7 @@ const allMenuGroups: MenuGroup[] = [
       { name: "Data Pegawai", href: "/employees", icon: Users, permission: "employees" },
       { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck, permission: "attendance" },
       { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays, permission: "leave" },
+      { name: "Lembur", href: "/employees/overtime", icon: Clock, permission: "overtime" },
       { name: "Rekap Titik", href: "/employees/income", icon: Wallet, permission: "income" },
       { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, comingSoon: true, permission: "payroll" },
       { name: "Kinerja", href: "/employees/performance", icon: Award, permission: "performance" },

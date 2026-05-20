@@ -117,7 +117,7 @@ export default function MasterDataPage() {
   const [scheduleSearch, setScheduleSearch] = useState("");
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
-  const [scheduleForm, setScheduleForm] = useState({ division_id: 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", awal_absen_menit: "0", status: "Aktif" });
+  const [scheduleForm, setScheduleForm] = useState({ division_id: 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", awal_absen_menit: "0", overtime_rate_per_hour: "0", status: "Aktif" });
   const [scheduleErrors, setScheduleErrors] = useState<Set<string>>(new Set());
 
   // ─── Denda Telat State ───
@@ -451,13 +451,13 @@ export default function MasterDataPage() {
   const divisionsWithoutSchedule = activeDivisions.filter((d) => !scheduleList.some((s) => s.division_id === d.id));
 
   const handleOpenAddSchedule = () => {
-    setScheduleForm({ division_id: divisionsWithoutSchedule[0]?.id || 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", awal_absen_menit: "0", status: "Aktif" });
+    setScheduleForm({ division_id: divisionsWithoutSchedule[0]?.id || 0, jam_masuk: "08:00", jam_pulang: "17:00", toleransi_menit: "15", awal_absen_menit: "0", overtime_rate_per_hour: "0", status: "Aktif" });
     setScheduleErrors(new Set());
     setEditingScheduleId(null);
     setShowScheduleForm(true);
   };
   const handleOpenEditSchedule = (s: DivisionSchedule) => {
-    setScheduleForm({ division_id: s.division_id, jam_masuk: s.jam_masuk.slice(0, 5), jam_pulang: s.jam_pulang ? s.jam_pulang.slice(0, 5) : "", toleransi_menit: String(s.toleransi_menit), awal_absen_menit: String(s.awal_absen_menit ?? 0), status: s.status });
+    setScheduleForm({ division_id: s.division_id, jam_masuk: s.jam_masuk.slice(0, 5), jam_pulang: s.jam_pulang ? s.jam_pulang.slice(0, 5) : "", toleransi_menit: String(s.toleransi_menit), awal_absen_menit: String(s.awal_absen_menit ?? 0), overtime_rate_per_hour: String(s.overtime_rate_per_hour ?? 0), status: s.status });
     setScheduleErrors(new Set());
     setEditingScheduleId(s.id);
     setShowScheduleForm(true);
@@ -474,7 +474,7 @@ export default function MasterDataPage() {
     setScheduleErrors(new Set());
     const awalAbsenParsed = parseInt(scheduleForm.awal_absen_menit);
     const awalAbsenMenit = Number.isFinite(awalAbsenParsed) && awalAbsenParsed >= 0 ? Math.min(awalAbsenParsed, 720) : 0;
-    const payload = { division_id: scheduleForm.division_id, jam_masuk: scheduleForm.jam_masuk, jam_pulang: scheduleForm.jam_pulang || null, toleransi_menit: parseInt(scheduleForm.toleransi_menit) || 0, awal_absen_menit: awalAbsenMenit, status: scheduleForm.status };
+    const payload = { division_id: scheduleForm.division_id, jam_masuk: scheduleForm.jam_masuk, jam_pulang: scheduleForm.jam_pulang || null, toleransi_menit: parseInt(scheduleForm.toleransi_menit) || 0, awal_absen_menit: awalAbsenMenit, overtime_rate_per_hour: parseInt(scheduleForm.overtime_rate_per_hour) || 0, status: scheduleForm.status };
     if (editingScheduleId !== null) {
       await supabase.from("division_schedules").update(payload).eq("id", editingScheduleId);
       showSuccess("Waktu Kerja Diperbarui", "Jadwal kerja telah disimpan.");
@@ -2008,6 +2008,30 @@ export default function MasterDataPage() {
                     const em = total % 60;
                     const earliest = `${String(eh).padStart(2, "0")}:${String(em).padStart(2, "0")}`;
                     return `Pegawai bisa mulai absen pukul ${earliest} (${n} menit sebelum jam masuk ${scheduleForm.jam_masuk}).`;
+                  })()}
+                </p>
+              </div>
+
+              {/* Biaya Lembur per Jam (opsional) */}
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Biaya Lembur per Jam <span className="text-muted-foreground font-normal">(opsional)</span></label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap font-mono">Rp</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1000}
+                    value={scheduleForm.overtime_rate_per_hour}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, overtime_rate_per_hour: e.target.value })}
+                    className={inputClass}
+                  />
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">/ jam</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {(() => {
+                    const n = parseInt(scheduleForm.overtime_rate_per_hour) || 0;
+                    if (n <= 0) return "Set 0 untuk menonaktifkan lembur. Pegawai divisi ini tidak bisa ajukan lembur.";
+                    return `Pegawai divisi ini boleh ajukan lembur. Rate ${new Intl.NumberFormat("id-ID").format(n)}/jam akan di-snapshot ke pengajuan saat disetujui.`;
                   })()}
                 </p>
               </div>

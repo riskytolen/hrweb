@@ -1030,7 +1030,7 @@ export default function AttendancePage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Divisi</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Jam Masuk</th>
-                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Jadwal</th>
+                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Jam Pulang</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Status</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Telat</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Denda</th>
@@ -1068,7 +1068,22 @@ export default function AttendancePage() {
                     <td className="px-5 py-3.5 text-center text-xs">
                       {NO_JAM_STATUSES.includes(row.status)
                         ? <span className="text-muted-foreground italic">-</span>
-                        : <span className="text-muted-foreground">{row.schedule_jam_masuk.slice(0, 5)}</span>}
+                        : row.jam_pulang
+                          ? (
+                            <div className="flex flex-col items-center">
+                              <span className="font-semibold text-foreground text-sm">{row.jam_pulang.slice(0, 5)}</span>
+                              {row.status_pulang === "Cepat" && (
+                                <span className="text-[9px] font-bold text-warning">Cepat</span>
+                              )}
+                            </div>
+                          )
+                          : row.schedule_jam_pulang
+                            ? (
+                              <span className="text-[10px] font-bold text-danger bg-danger-light px-1.5 py-0.5 rounded">
+                                {row.status_pulang === "Lupa Pulang" ? "Lupa Pulang" : "Belum"}
+                              </span>
+                            )
+                            : <span className="text-muted-foreground italic">-</span>}
                     </td>
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{row.status}</span>

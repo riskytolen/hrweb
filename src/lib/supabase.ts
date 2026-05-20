@@ -45,6 +45,8 @@ export interface DbDivisionSchedule {
   jam_pulang: string | null;
   toleransi_menit: number;
   awal_absen_menit: number;
+  /** Biaya lembur per jam (Rp). 0 = divisi tidak menerapkan lembur. */
+  overtime_rate_per_hour: number;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;
   updated_at: string;
@@ -244,12 +246,42 @@ export interface DbAttendanceRecord {
   denda: number;
   location_id: number | null;
   catatan: string | null;
+  /** Realisasi jam pulang. NULL jika belum check-out atau divisi tidak menerapkan jam pulang. */
+  jam_pulang: string | null;
+  /** Snapshot jadwal jam pulang divisi saat check-in. NULL jika divisi tidak punya jam pulang. */
+  schedule_jam_pulang: string | null;
+  /** Tepat: pulang >= jadwal; Cepat: pulang sebelum jadwal; Lupa Pulang: belum absen pulang sampai akhir hari. */
+  status_pulang: "Tepat" | "Cepat" | "Lupa Pulang" | null;
+  /** Total durasi lembur (menit) yang sudah disetujui untuk hari ini. */
+  durasi_lembur_menit: number;
   created_at: string;
   updated_at: string;
   // joined
   pegawai?: DbPegawai;
   divisions?: DbDivision;
   attendance_locations?: DbAttendanceLocation;
+}
+
+export interface DbOvertimeRequest {
+  id: number;
+  employee_id: string;
+  tanggal: string;
+  jam_mulai: string;
+  jam_selesai: string;
+  alasan: string | null;
+  status: "Menunggu" | "Disetujui" | "Ditolak";
+  catatan_approval: string | null;
+  approved_at: string | null;
+  /** Snapshot rate dari division_schedules saat approve. 0 sebelum approve. */
+  rate_per_jam: number;
+  /** Auto-computed dari jam_selesai - jam_mulai dalam menit. */
+  durasi_menit: number;
+  /** Auto-computed: durasi_jam * rate_per_jam. */
+  total_lembur: number;
+  created_at: string;
+  updated_at: string;
+  // joined
+  pegawai?: DbPegawai;
 }
 
 export interface DbLeaveRequest {

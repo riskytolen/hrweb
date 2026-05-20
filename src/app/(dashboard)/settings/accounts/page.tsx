@@ -69,6 +69,7 @@ const PERMISSION_OPTIONS = [
   { key: "employees", label: "Data Pegawai" },
   { key: "attendance", label: "Absensi" },
   { key: "leave", label: "Cuti & Izin" },
+  { key: "overtime", label: "Lembur" },
   { key: "income", label: "Rekap Titik" },
   { key: "payroll", label: "Penggajian" },
   { key: "recruitment", label: "Rekrutmen" },
