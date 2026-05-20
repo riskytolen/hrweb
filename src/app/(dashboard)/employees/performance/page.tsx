@@ -1,27 +1,38 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Award, Search, ChevronLeft, ChevronRight, TrendingUp, TrendingDown,
-  Users, Clock, AlertTriangle, XCircle, CalendarCheck, Minus,
+  Users, Clock, AlertTriangle, XCircle, CalendarCheck, Trophy,
+  Download, ArrowUpRight, ArrowDownRight, Minus, FileText,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
-import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
-import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
+import Button from "@/components/ui/Button";
+import { SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
 // ─── Types ───
-type EmployeeLite = { id: string; nama: string; jabatan_id: number | null; status: string };
+type EmployeeLite = {
+  id: string;
+  nama: string;
+  jabatan_id: number | null;
+  status: string;
+  tanggal_bergabung: string | null;
+  jabatan?: { nama: string } | null;
+};
 type AttendanceRecord = { employee_id: string; tanggal: string; status: string; durasi_telat: number; is_manual: boolean };
 type LegalDoc = { employee_id: string; kategori: string; tingkat_sp: string | null; status: string; tanggal_terbit: string };
 
 type PerformanceRow = {
   employee_id: string;
   nama: string;
+  jabatanNama: string;
+  status: string;
+  tanggalBergabung: string | null;
   totalHariKerja: number;
   hadir: number;
   telat: number;
@@ -35,11 +46,6 @@ type PerformanceRow = {
   sp1: number;
   sp2: number;
   sp3: number;
-  skorKehadiran: number;
-  skorKeterlambatan: number;
-  skorAlpha: number;
-  skorManual: number;
-  skorSP: number;
   skorTotal: number;
   grade: string;
 };
@@ -48,15 +54,14 @@ type PerformanceRow = {
 const PAGE_SIZE = 10;
 const CUT_OFF_DAY = 8;
 
-// Bobot pengurangan poin
 const PENALTY = {
-  ALPHA_PER_HARI: 5,       // -5 poin per alpha
-  TELAT_PER_KEJADIAN: 1,   // -1 poin per kejadian telat
-  TELAT_PER_30_MENIT: 1,   // -1 poin tambahan per 30 menit telat
-  MANUAL_PER_KEJADIAN: 2,  // -2 poin per absen manual (lupa ID card dll)
-  SP1: 10,                  // -10 poin per SP-1
-  SP2: 20,                  // -20 poin per SP-2
-  SP3: 40,                  // -40 poin per SP-3
+  ALPHA_PER_HARI: 5,
+  TELAT_PER_KEJADIAN: 1,
+  TELAT_PER_30_MENIT: 1,
+  MANUAL_PER_KEJADIAN: 2,
+  SP1: 10,
+  SP2: 20,
+  SP3: 40,
 };
 
 function getGrade(skor: number): string {
@@ -78,14 +83,15 @@ function getGradeColor(grade: string): string {
   }
 }
 
-function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
+function getPeriodRange(periodKey: string): { start: string; end: string; label: string; shortLabel: string } {
   const [year, month] = periodKey.split("-").map(Number);
   const startDate = new Date(year, month - 1, CUT_OFF_DAY);
   const endDate = new Date(year, month, CUT_OFF_DAY - 1);
   const start = startDate.toISOString().slice(0, 10);
   const end = endDate.toISOString().slice(0, 10);
   const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY - 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
-  return { start, end, label };
+  const shortLabel = startDate.toLocaleDateString("id-ID", { month: "short", year: "2-digit" });
+  return { start, end, label, shortLabel };
 }
 
 function getCurrentPeriodKey(): string {
@@ -97,56 +103,47 @@ function getCurrentPeriodKey(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function getPrevPeriodKey(periodKey: string): string {
+  const [y, m] = periodKey.split("-").map(Number);
+  const prev = new Date(y, m - 2, 1);
+  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatDate(d: string | null): string {
+  if (!d) return "-";
+  return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+}
+
 export default function PerformancePage() {
-  const { getPermissionLevel } = useAuth();
-  const permLevel = getPermissionLevel("performance");
+  // Reserved hook untuk future role-based feature
+  useAuth();
 
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [dateMode, setDateMode] = useState<"periode" | "custom">("periode");
   const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [search, setSearch] = useState("");
   const [filterGrade, setFilterGrade] = useState("Semua");
+  const [filterJabatan, setFilterJabatan] = useState("Semua");
   const [sortOrder, setSortOrder] = useState<"best" | "worst">("best");
   const [page, setPage] = useState(1);
 
-  const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [performanceData, setPerformanceData] = useState<PerformanceRow[]>([]);
+  const [prevPerformanceData, setPrevPerformanceData] = useState<PerformanceRow[]>([]);
 
-  const period = dateMode === "periode" ? getPeriodRange(periodKey) : { start: customStart, end: customEnd, label: customStart && customEnd ? `${customStart} – ${customEnd}` : "Pilih tanggal" };
+  const period = dateMode === "periode"
+    ? getPeriodRange(periodKey)
+    : { start: customStart, end: customEnd, label: customStart && customEnd ? `${customStart} – ${customEnd}` : "Pilih tanggal", shortLabel: "Custom" };
+  const prevPeriod = dateMode === "periode" ? getPeriodRange(getPrevPeriodKey(periodKey)) : null;
 
-  // Fetch
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-
-    // Fetch employees
-    const { data: empData } = await supabase.from("pegawai").select("id, nama, jabatan_id, status").eq("status", "Aktif").order("nama");
-    const emps: EmployeeLite[] = empData || [];
-    setEmployees(emps);
-
-    // Fetch attendance records for period
-    const { data: attData } = await supabase
-      .from("attendance_records")
-      .select("employee_id, tanggal, status, durasi_telat, is_manual")
-      .gte("tanggal", period.start)
-      .lte("tanggal", period.end);
-    const attendance: AttendanceRecord[] = attData || [];
-
-    // Fetch active SP documents
-    const { data: spData } = await supabase
-      .from("legal_documents")
-      .select("employee_id, kategori, tingkat_sp, status, tanggal_terbit")
-      .eq("kategori", "SP")
-      .eq("status", "Aktif");
-    const spDocs: LegalDoc[] = spData || [];
-
-    // Calculate performance per employee
-    const rows: PerformanceRow[] = emps.map((emp) => {
+  // Helper: hitung performance untuk satu range dataset
+  const computeRows = useCallback((emps: EmployeeLite[], attendance: AttendanceRecord[], spDocs: LegalDoc[]): PerformanceRow[] => {
+    return emps.map((emp) => {
       const empAtt = attendance.filter((a) => a.employee_id === emp.id);
       const empSP = spDocs.filter((s) => s.employee_id === emp.id);
 
-      // Hitung hari kerja dalam periode
       const totalHariKerja = empAtt.length || 0;
       const hadir = empAtt.filter((a) => a.status === "Hadir" || a.status === "Terlambat").length;
       const telat = empAtt.filter((a) => a.status === "Terlambat").length;
@@ -162,30 +159,20 @@ export default function PerformancePage() {
       const sp3 = empSP.filter((s) => s.tingkat_sp === "SP-3").length;
       const spCount = sp1 + sp2 + sp3;
 
-      // Hitung skor (mulai dari 100)
-      let skor = 100;
-
-      // Pengurangan kehadiran
-      const skorKehadiran = totalHariKerja > 0 ? Math.round((hadir / totalHariKerja) * 100) : 100;
-
-      // Pengurangan alpha
       const penaltyAlpha = alpha * PENALTY.ALPHA_PER_HARI;
-
-      // Pengurangan keterlambatan
       const penaltyTelat = (telat * PENALTY.TELAT_PER_KEJADIAN) + (Math.floor(totalMenitTelat / 30) * PENALTY.TELAT_PER_30_MENIT);
-
-      // Pengurangan absen manual (lupa ID card dll)
       const penaltyManual = manual * PENALTY.MANUAL_PER_KEJADIAN;
-
-      // Pengurangan SP
       const penaltySP = (sp1 * PENALTY.SP1) + (sp2 * PENALTY.SP2) + (sp3 * PENALTY.SP3);
 
-      skor = skor - penaltyAlpha - penaltyTelat - penaltyManual - penaltySP;
+      let skor = 100 - penaltyAlpha - penaltyTelat - penaltyManual - penaltySP;
       skor = Math.max(0, Math.min(100, skor));
 
       return {
         employee_id: emp.id,
         nama: emp.nama,
+        jabatanNama: emp.jabatan?.nama ?? "-",
+        status: emp.status,
+        tanggalBergabung: emp.tanggal_bergabung,
         totalHariKerja,
         hadir,
         telat,
@@ -197,56 +184,219 @@ export default function PerformancePage() {
         cuti,
         spCount,
         sp1, sp2, sp3,
-        skorKehadiran,
-        skorKeterlambatan: Math.max(0, 100 - penaltyTelat),
-        skorAlpha: Math.max(0, 100 - penaltyAlpha),
-        skorManual: Math.max(0, 100 - penaltyManual),
-        skorSP: Math.max(0, 100 - penaltySP),
         skorTotal: skor,
         grade: getGrade(skor),
       };
     });
+  }, []);
 
-    // Sort by skor descending
+  // Fetch
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+
+    // Fetch employees + jabatan
+    const { data: empData } = await supabase
+      .from("pegawai")
+      .select("id, nama, jabatan_id, status, tanggal_bergabung, jabatan:jabatan_id(nama)")
+      .eq("status", "Aktif")
+      .order("nama");
+    const emps: EmployeeLite[] = (empData ?? []) as unknown as EmployeeLite[];
+
+    // Current period attendance
+    const { data: attData } = await supabase
+      .from("attendance_records")
+      .select("employee_id, tanggal, status, durasi_telat, is_manual")
+      .gte("tanggal", period.start)
+      .lte("tanggal", period.end);
+    const attendance: AttendanceRecord[] = attData || [];
+
+    // Active SP
+    const { data: spData } = await supabase
+      .from("legal_documents")
+      .select("employee_id, kategori, tingkat_sp, status, tanggal_terbit")
+      .eq("kategori", "SP")
+      .eq("status", "Aktif");
+    const spDocs: LegalDoc[] = spData || [];
+
+    const rows = computeRows(emps, attendance, spDocs);
     rows.sort((a, b) => b.skorTotal - a.skorTotal);
     setPerformanceData(rows);
+
+    // Previous period for trend (hanya kalau mode periode)
+    if (prevPeriod) {
+      const { data: prevAttData } = await supabase
+        .from("attendance_records")
+        .select("employee_id, tanggal, status, durasi_telat, is_manual")
+        .gte("tanggal", prevPeriod.start)
+        .lte("tanggal", prevPeriod.end);
+      const prevRows = computeRows(emps, prevAttData ?? [], spDocs);
+      setPrevPerformanceData(prevRows);
+    } else {
+      setPrevPerformanceData([]);
+    }
+
     setLoading(false);
-  }, [period.start, period.end]);
+  }, [period.start, period.end, prevPeriod, computeRows]);
 
   useEffect(() => {
-    if (dateMode === "periode") { fetchData(); }
-    else if (customStart && customEnd) { fetchData(); }
-  }, [periodKey, dateMode, customStart, customEnd]);
+    if (dateMode === "periode") fetchData();
+    else if (customStart && customEnd) fetchData();
+  }, [periodKey, dateMode, customStart, customEnd, fetchData]);
 
-  // Filter & Sort
-  const filtered = performanceData.filter((r) => {
-    const matchSearch = r.nama.toLowerCase().includes(search.toLowerCase());
-    const matchGrade = filterGrade === "Semua" || r.grade === filterGrade;
-    return matchSearch && matchGrade;
-  }).sort((a, b) => sortOrder === "best" ? b.skorTotal - a.skorTotal : a.skorTotal - b.skorTotal);
+  // Filter, sort
+  const filtered = useMemo(() => {
+    return performanceData.filter((r) => {
+      const matchSearch = r.nama.toLowerCase().includes(search.toLowerCase()) || r.employee_id.toLowerCase().includes(search.toLowerCase());
+      const matchGrade = filterGrade === "Semua" || r.grade === filterGrade;
+      const matchJabatan = filterJabatan === "Semua" || r.jabatanNama === filterJabatan;
+      return matchSearch && matchGrade && matchJabatan;
+    }).sort((a, b) => sortOrder === "best" ? b.skorTotal - a.skorTotal : a.skorTotal - b.skorTotal);
+  }, [performanceData, search, filterGrade, filterJabatan, sortOrder]);
+
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Summary stats
+  // Summary
   const avgSkor = performanceData.length > 0 ? Math.round(performanceData.reduce((s, r) => s + r.skorTotal, 0) / performanceData.length) : 0;
   const totalAlpha = performanceData.reduce((s, r) => s + r.alpha, 0);
   const totalTelat = performanceData.reduce((s, r) => s + r.telat, 0);
   const totalSP = performanceData.reduce((s, r) => s + r.spCount, 0);
+  const totalIncident = totalAlpha + totalTelat + totalSP;
   const gradeDistribution = { A: 0, B: 0, C: 0, D: 0, E: 0 };
   performanceData.forEach((r) => { if (r.grade in gradeDistribution) gradeDistribution[r.grade as keyof typeof gradeDistribution]++; });
 
+  // Trend (current vs previous)
+  const prevAvgSkor = prevPerformanceData.length > 0 ? Math.round(prevPerformanceData.reduce((s, r) => s + r.skorTotal, 0) / prevPerformanceData.length) : 0;
+  const prevTotalIncident = prevPerformanceData.reduce((s, r) => s + r.alpha + r.telat + r.spCount, 0);
+  const prevTotalSP = prevPerformanceData.reduce((s, r) => s + r.spCount, 0);
+
+  const trendSkor = prevPerformanceData.length > 0 ? avgSkor - prevAvgSkor : 0;
+  const trendIncident = prevPerformanceData.length > 0 ? totalIncident - prevTotalIncident : 0;
+  const trendSP = prevPerformanceData.length > 0 ? totalSP - prevTotalSP : 0;
+
+  // Insights: top 3 best & top 3 worst
+  const topBest = useMemo(() => [...performanceData].sort((a, b) => b.skorTotal - a.skorTotal).slice(0, 3), [performanceData]);
+  const topWorst = useMemo(() => [...performanceData].sort((a, b) => a.skorTotal - b.skorTotal).slice(0, 3), [performanceData]);
+
+  // Unique jabatan untuk filter
+  const uniqueJabatan = useMemo(() => {
+    const set = new Set<string>();
+    performanceData.forEach((r) => set.add(r.jabatanNama));
+    return Array.from(set).sort();
+  }, [performanceData]);
+
+  // ─── Export PDF ───
+  const exportPDF = useCallback(async () => {
+    setExporting(true);
+    try {
+      const { default: jsPDF } = await import("jspdf");
+      const { default: autoTable } = await import("jspdf-autotable");
+
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      // Header
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("LAPORAN KINERJA PEGAWAI", pageWidth / 2, 15, { align: "center" });
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Periode: ${period.label}`, pageWidth / 2, 22, { align: "center" });
+      doc.text(`Dicetak: ${new Date().toLocaleString("id-ID")}`, pageWidth / 2, 28, { align: "center" });
+
+      // Summary section
+      let cursorY = 36;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("RINGKASAN", 14, cursorY);
+      cursorY += 5;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(`Rata-rata Skor: ${avgSkor}`, 14, cursorY); cursorY += 5;
+      doc.text(`Total Pegawai Aktif: ${performanceData.length}`, 14, cursorY); cursorY += 5;
+      doc.text(`Total Insiden (Alpha + Telat + SP): ${totalIncident}`, 14, cursorY); cursorY += 5;
+      doc.text(`Total Surat Peringatan Aktif: ${totalSP}`, 14, cursorY); cursorY += 5;
+      doc.text(`Distribusi: A=${gradeDistribution.A}, B=${gradeDistribution.B}, C=${gradeDistribution.C}, D=${gradeDistribution.D}, E=${gradeDistribution.E}`, 14, cursorY);
+      cursorY += 8;
+
+      // Table
+      autoTable(doc, {
+        startY: cursorY,
+        head: [["#", "ID", "Nama", "Jabatan", "Status", "Tgl Bergabung", "Hari Kerja", "Hadir", "Telat", "Alpha", "Manual", "Izin", "Sakit", "SP", "Skor", "Grade"]],
+        body: filtered.map((r, idx) => [
+          idx + 1,
+          r.employee_id,
+          r.nama,
+          r.jabatanNama,
+          r.status,
+          formatDate(r.tanggalBergabung),
+          r.totalHariKerja,
+          r.hadir,
+          r.telat > 0 ? `${r.telat}x (${r.totalMenitTelat}m)` : "-",
+          r.alpha > 0 ? `${r.alpha}x` : "-",
+          r.manual > 0 ? `${r.manual}x` : "-",
+          r.izin || "-",
+          r.sakit || "-",
+          r.spCount > 0 ? `${r.sp1}+${r.sp2}+${r.sp3}` : "-",
+          r.skorTotal,
+          r.grade,
+        ]),
+        theme: "striped",
+        styles: { fontSize: 7, cellPadding: 1.5 },
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 7, halign: "center" },
+        columnStyles: {
+          0: { halign: "center" },
+          6: { halign: "center" },
+          7: { halign: "center" },
+          8: { halign: "center" },
+          9: { halign: "center" },
+          10: { halign: "center" },
+          11: { halign: "center" },
+          12: { halign: "center" },
+          13: { halign: "center" },
+          14: { halign: "center" },
+          15: { halign: "center", fontStyle: "bold" },
+        },
+      });
+
+      // Footer info
+      const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY;
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "italic");
+      doc.text(`Sistem Penilaian: Skor awal 100, dikurangi -${PENALTY.ALPHA_PER_HARI}/Alpha, -${PENALTY.TELAT_PER_KEJADIAN}/Telat + -${PENALTY.TELAT_PER_30_MENIT}/30 menit, -${PENALTY.MANUAL_PER_KEJADIAN}/Manual, -${PENALTY.SP1}/SP-1, -${PENALTY.SP2}/SP-2, -${PENALTY.SP3}/SP-3. Grade: A≥90, B 80-89, C 70-79, D 60-69, E<60.`,
+        14, finalY + 8, { maxWidth: pageWidth - 28 });
+
+      const filename = `Laporan_Kinerja_${period.shortLabel.replace(/\s/g, "_")}.pdf`;
+      doc.save(filename);
+    } catch (err) {
+      console.error("[Performance] PDF export failed:", err);
+    } finally {
+      setExporting(false);
+    }
+  }, [period, avgSkor, performanceData.length, totalIncident, totalSP, gradeDistribution, filtered]);
+
   return (
     <RouteGuard permission="performance">
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-5 animate-fade-in">
       <PageHeader
         title="Kinerja Pegawai"
-        description="Penilaian performa berdasarkan kehadiran, keterlambatan, alpha, dan surat peringatan"
+        description="Penilaian performa untuk audit & evaluasi periodik"
         icon={Award}
+        actions={
+          <Button
+            size="sm"
+            icon={Download}
+            onClick={exportPDF}
+            disabled={exporting || loading || performanceData.length === 0}
+          >
+            {exporting ? "Memproses..." : "Export PDF"}
+          </Button>
+        }
       />
 
-      {/* Period Navigator */}
-      <div className="bg-card rounded-2xl border border-border p-4 space-y-3">
+      {/* ═══ Period Selector ═══ */}
+      <div className="bg-card rounded-2xl border border-border p-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
-          {/* Mode toggle */}
           <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
             <button onClick={() => { setDateMode("periode"); setPage(1); }}
               className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
@@ -260,179 +410,207 @@ export default function PerformancePage() {
             </button>
           </div>
 
-          {/* Search */}
-          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-56">
-            <Search className="w-3.5 h-3.5 text-muted-foreground" />
-            <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
-          </div>
-        </div>
-
-        {/* Periode mode */}
-        {dateMode === "periode" && (
-          <div className="flex items-center gap-2 justify-center">
-            <button onClick={() => {
-              const [y, m] = periodKey.split("-").map(Number);
-              const prev = new Date(y, m - 2, 1);
-              setPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
-              setPage(1);
-            }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronLeft className="w-4 h-4" /></button>
-            <div className="text-center min-w-[240px]">
-              <p className="text-sm font-bold text-foreground">{period.label}</p>
-              <p className="text-[10px] text-muted-foreground">Periode Penilaian (tgl 8 - tgl 7)</p>
-            </div>
-            <button onClick={() => {
-              const [y, m] = periodKey.split("-").map(Number);
-              const next = new Date(y, m, 1);
-              setPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
-              setPage(1);
-            }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronRight className="w-4 h-4" /></button>
-          </div>
-        )}
-
-        {/* Custom mode */}
-        {dateMode === "custom" && (
-          <div className="flex items-center gap-3 justify-center flex-wrap">
+          {dateMode === "periode" ? (
             <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground">Dari:</label>
+              <button onClick={() => {
+                const [y, m] = periodKey.split("-").map(Number);
+                const prev = new Date(y, m - 2, 1);
+                setPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
+                setPage(1);
+              }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronLeft className="w-4 h-4" /></button>
+              <div className="text-center min-w-[260px]">
+                <p className="text-sm font-bold text-foreground">{period.label}</p>
+                <p className="text-[10px] text-muted-foreground">Periode penilaian (tgl 8 – tgl 7)</p>
+              </div>
+              <button onClick={() => {
+                const [y, m] = periodKey.split("-").map(Number);
+                const next = new Date(y, m, 1);
+                setPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+                setPage(1);
+              }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronRight className="w-4 h-4" /></button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap">
               <input type="date" value={customStart} onChange={(e) => { setCustomStart(e.target.value); setPage(1); }}
                 className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 text-foreground" />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground">Sampai:</label>
+              <span className="text-xs text-muted-foreground">–</span>
               <input type="date" value={customEnd} onChange={(e) => { setCustomEnd(e.target.value); setPage(1); }}
                 className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 text-foreground" />
             </div>
-            {customStart && customEnd && (
-              <p className="text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-lg">
-                {Math.floor((new Date(customEnd).getTime() - new Date(customStart).getTime()) / 86400000) + 1} hari
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="bg-card rounded-2xl border border-border p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Award className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground font-medium uppercase">Rata-rata Skor</p>
-              <p className="text-lg font-bold text-foreground">{loading ? "-" : avgSkor}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
-              <Users className="w-5 h-5 text-success" />
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground font-medium uppercase">Total Pegawai</p>
-              <p className="text-lg font-bold text-foreground">{loading ? "-" : performanceData.length}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-warning" />
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground font-medium uppercase">Total Telat</p>
-              <p className="text-lg font-bold text-warning">{loading ? "-" : totalTelat}x</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-danger/10 flex items-center justify-center">
-              <XCircle className="w-5 h-5 text-danger" />
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground font-medium uppercase">Total Alpha</p>
-              <p className="text-lg font-bold text-danger">{loading ? "-" : totalAlpha}x</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-danger/10 flex items-center justify-center">
-              <AlertTriangle className="w-5 h-5 text-danger" />
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground font-medium uppercase">Total SP Aktif</p>
-              <p className="text-lg font-bold text-danger">{loading ? "-" : totalSP}</p>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Grade Distribution */}
-      {!loading && (
+      {/* ═══ Hero Metrics dengan Trend ═══ */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <_HeroCard
+          icon={Award}
+          label="Rata-rata Skor"
+          value={loading ? "–" : String(avgSkor)}
+          unit=""
+          gradient="from-primary/15 via-primary/5 to-transparent"
+          iconBg="bg-primary/15"
+          iconColor="text-primary"
+          trend={prevPerformanceData.length > 0 ? trendSkor : null}
+          trendInverted={false}
+          prevLabel={prevPeriod?.shortLabel}
+        />
+        <_HeroCard
+          icon={Users}
+          label="Total Pegawai Aktif"
+          value={loading ? "–" : String(performanceData.length)}
+          unit="orang"
+          gradient="from-success/15 via-success/5 to-transparent"
+          iconBg="bg-success/15"
+          iconColor="text-success"
+          trend={null}
+          trendInverted={false}
+        />
+        <_HeroCard
+          icon={AlertTriangle}
+          label="Total Insiden"
+          value={loading ? "–" : String(totalIncident)}
+          unit="kejadian"
+          gradient="from-warning/15 via-warning/5 to-transparent"
+          iconBg="bg-warning/15"
+          iconColor="text-warning"
+          trend={prevPerformanceData.length > 0 ? trendIncident : null}
+          trendInverted={true}
+          prevLabel={prevPeriod?.shortLabel}
+          breakdown={
+            !loading
+              ? `${totalAlpha} alpha • ${totalTelat} telat • ${totalSP} SP`
+              : undefined
+          }
+        />
+        <_HeroCard
+          icon={XCircle}
+          label="Surat Peringatan"
+          value={loading ? "–" : String(totalSP)}
+          unit="aktif"
+          gradient="from-danger/15 via-danger/5 to-transparent"
+          iconBg="bg-danger/15"
+          iconColor="text-danger"
+          trend={prevPerformanceData.length > 0 ? trendSP : null}
+          trendInverted={true}
+          prevLabel={prevPeriod?.shortLabel}
+        />
+      </div>
+
+      {/* ═══ Insight: Top Best & Top Worst ═══ */}
+      {!loading && performanceData.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <_InsightCard
+            title="Performance Teratas"
+            subtitle="Pegawai dengan skor tertinggi"
+            icon={Trophy}
+            iconColor="text-success"
+            iconBg="bg-success/10"
+            rows={topBest}
+            valueColor="text-success"
+            ranks={["🥇", "🥈", "🥉"]}
+          />
+          <_InsightCard
+            title="Perlu Perhatian"
+            subtitle="Pegawai dengan skor terendah"
+            icon={AlertTriangle}
+            iconColor="text-danger"
+            iconBg="bg-danger/10"
+            rows={topWorst}
+            valueColor="text-danger"
+          />
+        </div>
+      )}
+
+      {/* ═══ Distribusi Grade ═══ */}
+      {!loading && performanceData.length > 0 && (
         <div className="bg-card rounded-2xl border border-border p-5">
-          <h3 className="text-xs font-bold text-foreground uppercase tracking-wider mb-4">Distribusi Grade</h3>
-          <div className="flex items-end gap-3 h-24">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-foreground">Distribusi Grade</h3>
+            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+              {(["A", "B", "C", "D", "E"] as const).map((g) => (
+                <div key={g} className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: getGradeColor(g) }} />
+                  <span>{g} {g === "A" ? "≥90" : g === "B" ? "80-89" : g === "C" ? "70-79" : g === "D" ? "60-69" : "<60"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-5 gap-3">
             {(["A", "B", "C", "D", "E"] as const).map((grade) => {
               const count = gradeDistribution[grade];
-              const maxCount = Math.max(...Object.values(gradeDistribution), 1);
-              const height = (count / maxCount) * 100;
+              const pct = performanceData.length > 0 ? Math.round((count / performanceData.length) * 100) : 0;
               const color = getGradeColor(grade);
               return (
-                <div key={grade} className="flex-1 flex flex-col items-center gap-1.5">
-                  <span className="text-xs font-bold text-foreground">{count}</span>
-                  <div className="w-full rounded-t-lg transition-all duration-500" style={{ height: `${Math.max(height, 8)}%`, backgroundColor: `${color}30` }}>
-                    <div className="w-full h-full rounded-t-lg" style={{ backgroundColor: color, opacity: 0.7 }} />
+                <button key={grade} onClick={() => { setFilterGrade(filterGrade === grade ? "Semua" : grade); setPage(1); }}
+                  className={cn(
+                    "rounded-xl border p-3 text-left transition-all hover:scale-[1.02]",
+                    filterGrade === grade ? "ring-2 ring-offset-1" : "border-border hover:border-foreground/20"
+                  )}
+                  style={filterGrade === grade ? { borderColor: color, ...({ "--tw-ring-color": color } as React.CSSProperties) } : undefined}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xl font-bold" style={{ color }}>{grade}</span>
+                    <span className="text-xs font-bold text-foreground tabular-nums">{count}</span>
                   </div>
-                  <span className="text-[10px] font-bold" style={{ color }}>{grade}</span>
-                </div>
+                  <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden mb-1.5">
+                    <div className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${pct}%`, backgroundColor: color }} />
+                  </div>
+                  <p className="text-[9px] text-muted-foreground">{pct}% dari total</p>
+                </button>
               );
             })}
-          </div>
-          <div className="flex items-center justify-center gap-4 mt-4 pt-3 border-t border-border">
-            {(["A", "B", "C", "D", "E"] as const).map((grade) => (
-              <div key={grade} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: getGradeColor(grade) }} />
-                <span>{grade} ({grade === "A" ? "≥90" : grade === "B" ? "80-89" : grade === "C" ? "70-79" : grade === "D" ? "60-69" : "<60"})</span>
-              </div>
-            ))}
           </div>
         </div>
       )}
 
-      {/* Filter Grade + Sort */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          {["Semua", "A", "B", "C", "D", "E"].map((g) => {
-            const isActive = filterGrade === g;
-            return (
-              <button key={g} onClick={() => { setFilterGrade(g); setPage(1); }}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                  isActive ? "bg-primary/10 text-primary ring-1 ring-primary/20" : "text-muted-foreground hover:bg-muted")}>
-                {g === "Semua" ? "Semua" : `Grade ${g}`}
-                {g !== "Semua" && <span className="ml-1 text-[9px] opacity-70">({gradeDistribution[g as keyof typeof gradeDistribution]})</span>}
-              </button>
-            );
-          })}
+      {/* ═══ Filter & Search ═══ */}
+      <div className="bg-card rounded-2xl border border-border p-4">
+        <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5 mb-3">
+          <Search className="w-4 h-4 text-muted-foreground" />
+          <input type="text" placeholder="Cari nama atau ID pegawai..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            autoComplete="off" className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
         </div>
-        <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
-          <button onClick={() => { setSortOrder("best"); setPage(1); }}
-            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-              sortOrder === "best" ? "bg-card text-success shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-            <TrendingUp className="w-3.5 h-3.5" />Terbaik
-          </button>
-          <button onClick={() => { setSortOrder("worst"); setPage(1); }}
-            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-              sortOrder === "worst" ? "bg-card text-danger shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-            <TrendingDown className="w-3.5 h-3.5" />Terendah
-          </button>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-1 bg-muted rounded-xl p-1 flex-wrap">
+            <span className="text-[10px] text-muted-foreground px-2 font-semibold uppercase tracking-wider">Jabatan:</span>
+            <button onClick={() => { setFilterJabatan("Semua"); setPage(1); }}
+              className={cn("px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all",
+                filterJabatan === "Semua" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              Semua
+            </button>
+            {uniqueJabatan.slice(0, 5).map((j) => (
+              <button key={j} onClick={() => { setFilterJabatan(j); setPage(1); }}
+                className={cn("px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all",
+                  filterJabatan === j ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                {j}
+              </button>
+            ))}
+            {uniqueJabatan.length > 5 && (
+              <select value={uniqueJabatan.slice(0, 5).includes(filterJabatan) || filterJabatan === "Semua" ? "" : filterJabatan}
+                onChange={(e) => { if (e.target.value) { setFilterJabatan(e.target.value); setPage(1); } }}
+                className="text-[11px] px-2 py-1 rounded-md bg-transparent text-muted-foreground outline-none cursor-pointer">
+                <option value="">+ Lainnya...</option>
+                {uniqueJabatan.slice(5).map((j) => <option key={j} value={j}>{j}</option>)}
+              </select>
+            )}
+          </div>
+          <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+            <button onClick={() => { setSortOrder("best"); setPage(1); }}
+              className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all",
+                sortOrder === "best" ? "bg-card text-success shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              <TrendingUp className="w-3 h-3" />Terbaik
+            </button>
+            <button onClick={() => { setSortOrder("worst"); setPage(1); }}
+              className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all",
+                sortOrder === "worst" ? "bg-card text-danger shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              <TrendingDown className="w-3 h-3" />Terendah
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Table */}
+      {/* ═══ Tabel Pegawai dengan Kolom Audit ═══ */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -440,72 +618,77 @@ export default function PerformancePage() {
               <tr className="border-b border-border bg-muted/50">
                 <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-10">#</th>
                 <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">Pegawai</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Hadir</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Telat</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Alpha</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Manual</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Izin</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Sakit</th>
+                <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">Jabatan</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">Bergabung</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Hadir</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Telat</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Alpha</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Manual</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">SP</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-20">Skor</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Grade</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-24">Skor</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-12">Grade</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {loading ? <SkeletonTable rows={8} cols={11} /> : paged.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data kinerja</td></tr>
-              ) : paged.map((row, idx) => {
+                <tr><td colSpan={11} className="text-center py-12 text-sm text-muted-foreground">Tidak ada data kinerja yang cocok dengan filter.</td></tr>
+              ) : paged.map((row) => {
                 const rank = filtered.indexOf(row) + 1;
                 const gradeColor = getGradeColor(row.grade);
                 return (
-                  <tr key={row.employee_id} className="hover:bg-muted/30">
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{rank}</td>
+                  <tr key={row.employee_id} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{rank}</td>
                     <td className="px-4 py-3">
                       <p className="text-sm font-semibold text-foreground">{row.nama}</p>
-                      <p className="text-[10px] text-muted-foreground">{row.totalHariKerja} hari kerja</p>
+                      <p className="text-[10px] text-muted-foreground font-mono">{row.employee_id} · {row.totalHariKerja} hari kerja</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-xs text-foreground">{row.jabatanNama}</p>
+                      {row.status !== "Aktif" && (
+                        <span className="text-[9px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded mt-0.5 inline-block">
+                          {row.status}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className="text-sm font-semibold text-success">{row.hadir}</span>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">{formatDate(row.tanggalBergabung)}</p>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="text-sm font-semibold text-success tabular-nums">{row.hadir}</span>
                     </td>
                     <td className="px-4 py-3 text-center">
                       {row.telat > 0 ? (
                         <div>
-                          <span className="text-sm font-semibold text-warning">{row.telat}x</span>
-                          <p className="text-[9px] text-muted-foreground">{row.totalMenitTelat}m</p>
+                          <span className="text-sm font-semibold text-warning tabular-nums">{row.telat}x</span>
+                          <p className="text-[9px] text-muted-foreground tabular-nums">{row.totalMenitTelat}m</p>
                         </div>
-                      ) : <span className="text-sm text-muted-foreground">-</span>}
+                      ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {row.alpha > 0 ? (
-                        <span className="text-sm font-semibold text-danger">{row.alpha}x</span>
-                      ) : <span className="text-sm text-muted-foreground">-</span>}
+                        <span className="text-sm font-semibold text-danger tabular-nums">{row.alpha}x</span>
+                      ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {row.manual > 0 ? (
-                        <span className="text-sm font-semibold text-warning">{row.manual}x</span>
-                      ) : <span className="text-sm text-muted-foreground">-</span>}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {row.izin > 0 ? (
-                        <span className="text-sm font-semibold text-blue-500">{row.izin}</span>
-                      ) : <span className="text-sm text-muted-foreground">-</span>}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {row.sakit > 0 ? (
-                        <span className="text-sm font-semibold text-orange-500">{row.sakit}</span>
-                      ) : <span className="text-sm text-muted-foreground">-</span>}
+                        <span className="text-sm font-semibold text-warning tabular-nums">{row.manual}x</span>
+                      ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {row.spCount > 0 ? (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-danger/10 text-danger">{row.spCount}</span>
-                      ) : <span className="text-sm text-muted-foreground">-</span>}
+                        <div className="inline-flex items-center gap-0.5">
+                          {row.sp1 > 0 && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-warning/15 text-warning">{row.sp1}</span>}
+                          {row.sp2 > 0 && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-orange-500/15 text-orange-500">{row.sp2}</span>}
+                          {row.sp3 > 0 && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-danger/15 text-danger">{row.sp3}</span>}
+                        </div>
+                      ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-2">
                         <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
                           <div className="h-full rounded-full transition-all duration-500" style={{ width: `${row.skorTotal}%`, backgroundColor: gradeColor }} />
                         </div>
-                        <span className="text-xs font-bold text-foreground">{row.skorTotal}</span>
+                        <span className="text-xs font-bold text-foreground tabular-nums w-6 text-right">{row.skorTotal}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -522,48 +705,145 @@ export default function PerformancePage() {
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </div>
 
-      {/* Scoring Info */}
-      <div className="bg-card rounded-2xl border border-border p-5">
-        <h3 className="text-xs font-bold text-foreground uppercase tracking-wider mb-3">Sistem Penilaian</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          <div className="bg-muted/30 rounded-xl p-3 border border-border">
-            <div className="flex items-center gap-2 mb-2">
-              <XCircle className="w-4 h-4 text-danger" />
-              <p className="text-xs font-bold text-foreground">Alpha</p>
-            </div>
-            <p className="text-[10px] text-muted-foreground">-{PENALTY.ALPHA_PER_HARI} poin per hari alpha</p>
-          </div>
-          <div className="bg-muted/30 rounded-xl p-3 border border-border">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-4 h-4 text-warning" />
-              <p className="text-xs font-bold text-foreground">Keterlambatan</p>
-            </div>
-            <p className="text-[10px] text-muted-foreground">-{PENALTY.TELAT_PER_KEJADIAN} poin per kejadian, -{PENALTY.TELAT_PER_30_MENIT} poin per 30 menit</p>
-          </div>
-          <div className="bg-muted/30 rounded-xl p-3 border border-border">
-            <div className="flex items-center gap-2 mb-2">
-              <CalendarCheck className="w-4 h-4 text-warning" />
-              <p className="text-xs font-bold text-foreground">Absen Manual</p>
-            </div>
-            <p className="text-[10px] text-muted-foreground">-{PENALTY.MANUAL_PER_KEJADIAN} poin per kejadian (lupa ID card, HP rusak, dll)</p>
-          </div>
-          <div className="bg-muted/30 rounded-xl p-3 border border-border">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="w-4 h-4 text-danger" />
-              <p className="text-xs font-bold text-foreground">Surat Peringatan</p>
-            </div>
-            <p className="text-[10px] text-muted-foreground">SP-1: -{PENALTY.SP1}, SP-2: -{PENALTY.SP2}, SP-3: -{PENALTY.SP3} poin</p>
-          </div>
-          <div className="bg-muted/30 rounded-xl p-3 border border-border">
-            <div className="flex items-center gap-2 mb-2">
-              <Award className="w-4 h-4 text-primary" />
-              <p className="text-xs font-bold text-foreground">Skor Awal</p>
-            </div>
-            <p className="text-[10px] text-muted-foreground">100 poin (dikurangi pelanggaran)</p>
-          </div>
+      {/* ═══ Sistem Penilaian (collapsed footer) ═══ */}
+      <details className="bg-card rounded-2xl border border-border overflow-hidden">
+        <summary className="px-5 py-3 cursor-pointer hover:bg-muted/30 transition-colors flex items-center gap-2">
+          <FileText className="w-4 h-4 text-muted-foreground" />
+          <span className="text-xs font-bold text-foreground uppercase tracking-wider">Sistem Penilaian</span>
+          <span className="text-[10px] text-muted-foreground ml-auto">Klik untuk lihat detail</span>
+        </summary>
+        <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <_RuleCard icon={XCircle} iconColor="text-danger" title="Alpha" desc={`-${PENALTY.ALPHA_PER_HARI} poin per hari`} />
+          <_RuleCard icon={Clock} iconColor="text-warning" title="Keterlambatan" desc={`-${PENALTY.TELAT_PER_KEJADIAN} poin per kejadian, -${PENALTY.TELAT_PER_30_MENIT} per 30 menit`} />
+          <_RuleCard icon={CalendarCheck} iconColor="text-warning" title="Absen Manual" desc={`-${PENALTY.MANUAL_PER_KEJADIAN} poin per kejadian`} />
+          <_RuleCard icon={AlertTriangle} iconColor="text-danger" title="Surat Peringatan" desc={`SP-1: -${PENALTY.SP1}, SP-2: -${PENALTY.SP2}, SP-3: -${PENALTY.SP3}`} />
+          <_RuleCard icon={Award} iconColor="text-primary" title="Skor Awal" desc="100 poin (dikurangi pelanggaran)" />
         </div>
-      </div>
+      </details>
     </div>
     </RouteGuard>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+// COMPONENTS
+// ═════════════════════════════════════════════════════════
+
+function _HeroCard({
+  icon: Icon, label, value, unit, gradient, iconBg, iconColor, trend, trendInverted, prevLabel, breakdown,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  unit: string;
+  gradient: string;
+  iconBg: string;
+  iconColor: string;
+  trend: number | null;
+  trendInverted: boolean; // true: kenaikan = negatif (mis. insiden)
+  prevLabel?: string;
+  breakdown?: string;
+}) {
+  // Trend color: kalau trendInverted, kenaikan (positif) = merah, penurunan = hijau
+  const isPositive = trend !== null && trend > 0;
+  const isNegative = trend !== null && trend < 0;
+  const isFlat = trend !== null && trend === 0;
+  const isGood = trendInverted ? isNegative : isPositive;
+  const isBad = trendInverted ? isPositive : isNegative;
+
+  return (
+    <div className={cn("relative bg-card rounded-2xl border border-border p-4 overflow-hidden")}>
+      <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none", gradient)} />
+      <div className="relative">
+        <div className="flex items-center justify-between mb-2.5">
+          <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center", iconBg)}>
+            <Icon className={cn("w-4 h-4", iconColor)} />
+          </div>
+          {trend !== null && (
+            <div className={cn("inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md",
+              isFlat ? "bg-muted text-muted-foreground" : isGood ? "bg-success/10 text-success" : isBad ? "bg-danger/10 text-danger" : "bg-muted text-muted-foreground")}>
+              {isFlat ? (
+                <Minus className="w-2.5 h-2.5" />
+              ) : isPositive ? (
+                <ArrowUpRight className="w-2.5 h-2.5" />
+              ) : (
+                <ArrowDownRight className="w-2.5 h-2.5" />
+              )}
+              <span className="tabular-nums">{trend > 0 ? "+" : ""}{trend}</span>
+            </div>
+          )}
+        </div>
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</p>
+        <div className="flex items-baseline gap-1.5 mt-1">
+          <p className="text-2xl font-bold text-foreground tabular-nums">{value}</p>
+          {unit && <p className="text-xs text-muted-foreground font-medium">{unit}</p>}
+        </div>
+        {trend !== null && prevLabel && (
+          <p className="text-[10px] text-muted-foreground mt-1">vs {prevLabel}</p>
+        )}
+        {breakdown && (
+          <p className="text-[10px] text-muted-foreground mt-1.5 truncate">{breakdown}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function _InsightCard({
+  title, subtitle, icon: Icon, iconColor, iconBg, rows, valueColor, ranks,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ComponentType<{ className?: string }>;
+  iconColor: string;
+  iconBg: string;
+  rows: PerformanceRow[];
+  valueColor: string;
+  ranks?: string[];
+}) {
+  return (
+    <div className="bg-card rounded-2xl border border-border p-5">
+      <div className="flex items-center gap-3 mb-4">
+        <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center", iconBg)}>
+          <Icon className={cn("w-4 h-4", iconColor)} />
+        </div>
+        <div>
+          <h3 className="text-sm font-bold text-foreground">{title}</h3>
+          <p className="text-[10px] text-muted-foreground">{subtitle}</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">Tidak ada data.</p>
+        ) : rows.map((r, idx) => {
+          const gradeColor = getGradeColor(r.grade);
+          return (
+            <div key={r.employee_id} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors">
+              <span className="text-base w-6 text-center">{ranks?.[idx] ?? `#${idx + 1}`}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">{r.nama}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{r.jabatanNama}</p>
+              </div>
+              <div className="text-right">
+                <p className={cn("text-base font-bold tabular-nums", valueColor)}>{r.skorTotal}</p>
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${gradeColor}20`, color: gradeColor }}>{r.grade}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function _RuleCard({ icon: Icon, iconColor, title, desc }: { icon: React.ComponentType<{ className?: string }>; iconColor: string; title: string; desc: string }) {
+  return (
+    <div className="bg-muted/30 rounded-xl p-3 border border-border">
+      <div className="flex items-center gap-2 mb-1.5">
+        <Icon className={cn("w-4 h-4", iconColor)} />
+        <p className="text-xs font-bold text-foreground">{title}</p>
+      </div>
+      <p className="text-[10px] text-muted-foreground">{desc}</p>
+    </div>
   );
 }
