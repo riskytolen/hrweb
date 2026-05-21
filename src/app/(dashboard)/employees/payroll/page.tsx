@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Users,
   FileText,
+  FileSpreadsheet,
   Download,
   Trash2,
   Zap,
@@ -105,7 +106,7 @@ const POTONGAN_FIELDS: { key: string; label: string; readonly?: boolean }[] = [
 ];
 
 export default function PayrollPage() {
-  const { getPermissionLevel } = useAuth();
+  const { getPermissionLevel, isSuperAdmin } = useAuth();
   const permLevel = getPermissionLevel("payroll");
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
@@ -514,6 +515,16 @@ export default function PayrollPage() {
       } as PayrollRow;
       setPayrolls((prev) => prev.map((p) => p.id === updated.id ? updated : p));
       setSelectedPayroll(updated);
+
+      await logAudit({
+        supabase,
+        action: "update",
+        entityType: "payrolls",
+        entityId: updated.id,
+        entityLabel: `Slip ${updated.pegawaiNama} (${updated.periode})`,
+        oldData: { ...selectedPayroll } as unknown as Record<string, unknown>,
+        newData: { ...updated } as unknown as Record<string, unknown>,
+      });
     }
 
     showToast("success", "Slip Disimpan", "Perubahan berhasil disimpan.");
@@ -525,6 +536,7 @@ export default function PayrollPage() {
     if (!selectedPayroll) return;
     setSaving(true);
     const newStatus = selectedPayroll.status === "Draft" ? "Final" : "Draft";
+    const oldStatus = selectedPayroll.status;
 
     const { data, error } = await supabase
       .from("payrolls")
@@ -548,6 +560,15 @@ export default function PayrollPage() {
       } as PayrollRow;
       setPayrolls((prev) => prev.map((p) => p.id === updated.id ? updated : p));
       setSelectedPayroll(updated);
+
+      await logAudit({
+        supabase,
+        action: newStatus === "Final" ? "finalisasi" : "status_change",
+        entityType: "payrolls",
+        entityId: updated.id,
+        entityLabel: `Slip ${updated.pegawaiNama} (${updated.periode})`,
+        metadata: { from: oldStatus, to: newStatus },
+      });
     }
 
     showToast("success", "Status Diubah", `Slip gaji diubah menjadi ${newStatus}.`);
@@ -581,6 +602,107 @@ export default function PayrollPage() {
     if (selectedPayroll?.id === deleteConfirm.id) {
       setShowDetail(false);
       setSelectedPayroll(null);
+    }
+  };
+
+  // ─── Export Excel (xlsx) untuk semua slip dalam periode ───
+  const exportExcel = async () => {
+    if (payrolls.length === 0) {
+      showToast("error", "Tidak Ada Data", "Tidak ada slip untuk di-export.");
+      return;
+    }
+    try {
+      const XLSX = await import("xlsx");
+      const periodLabel = formatPeriodLabel(periodKey);
+      const filename = `Slip_Gaji_${periodLabel.replace(/\s/g, "_")}.xlsx`;
+
+      // Build rows
+      const headers = [
+        "No", "ID Pegawai", "Nama", "Periode",
+        ...PENDAPATAN_FIELDS.map((f) => f.label),
+        "Total Pendapatan",
+        ...POTONGAN_FIELDS.map((f) => f.label),
+        "Total Potongan",
+        "Netto", "Status", "Catatan",
+      ];
+
+      const rows = payrolls.map((p, idx) => [
+        idx + 1,
+        p.employee_id,
+        p.pegawaiNama || "-",
+        periodLabel,
+        ...PENDAPATAN_FIELDS.map((f) => (p as unknown as Record<string, number>)[f.key] || 0),
+        p.total_pendapatan,
+        ...POTONGAN_FIELDS.map((f) => (p as unknown as Record<string, number>)[f.key] || 0),
+        p.total_potongan,
+        p.netto,
+        p.status,
+        p.catatan || "",
+      ]);
+
+      // Total row
+      const totalRow = [
+        "", "", "TOTAL", "",
+        ...PENDAPATAN_FIELDS.map((f) =>
+          payrolls.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)
+        ),
+        payrolls.reduce((s, p) => s + p.total_pendapatan, 0),
+        ...POTONGAN_FIELDS.map((f) =>
+          payrolls.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)
+        ),
+        payrolls.reduce((s, p) => s + p.total_potongan, 0),
+        payrolls.reduce((s, p) => s + p.netto, 0),
+        "", "",
+      ];
+
+      const wsData = [headers, ...rows, [], totalRow];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+      // Auto width column heuristic
+      const colWidths = headers.map((h, i) => {
+        let max = String(h).length;
+        rows.forEach((r) => {
+          const v = String(r[i] ?? "");
+          if (v.length > max) max = v.length;
+        });
+        return { wch: Math.min(Math.max(max + 2, 8), 30) };
+      });
+      ws["!cols"] = colWidths;
+
+      // Format Rupiah: column 4 sampai sebelum status (kolom angka)
+      // Excel format: "#,##0"
+      const rupCols: number[] = [];
+      for (let i = 4; i < headers.length - 2; i++) rupCols.push(i);
+      const range = XLSX.utils.decode_range(ws["!ref"]!);
+      for (let R = 1; R <= range.e.r; ++R) {
+        for (const C of rupCols) {
+          const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+          const cell = ws[cellRef];
+          if (cell && typeof cell.v === "number") {
+            cell.z = "#,##0";
+          }
+        }
+      }
+
+      // Freeze header
+      ws["!freeze"] = { xSplit: 3, ySplit: 1 };
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Slip Gaji");
+      XLSX.writeFile(wb, filename);
+
+      showToast("success", "Export Excel", `${payrolls.length} slip diekspor ke ${filename}.`);
+
+      await logAudit({
+        supabase,
+        action: "export",
+        entityType: "payrolls",
+        entityLabel: `Export Excel ${periodLabel}`,
+        metadata: { periode: periodKey, jumlah_slip: payrolls.length, filename },
+      });
+    } catch (err) {
+      console.error("[Payroll] Export Excel failed:", err);
+      showToast("error", "Gagal Export", err instanceof Error ? err.message : "Tidak dapat membuat file Excel.");
     }
   };
 
@@ -884,6 +1006,7 @@ export default function PayrollPage() {
 
   // ─── Summary ───
   const totalNetto = payrolls.reduce((s, p) => s + p.netto, 0);
+  const totalPendapatanAll = payrolls.reduce((s, p) => s + p.total_pendapatan, 0);
   const totalPegawai = payrolls.length;
   const draftCount = payrolls.filter((p) => p.status === "Draft").length;
   const finalCount = payrolls.filter((p) => p.status === "Final").length;
@@ -911,6 +1034,9 @@ export default function PayrollPage() {
         icon={CreditCard}
         actions={
           <div className="flex items-center gap-2">
+            <Button variant="outline" icon={FileSpreadsheet} size="sm" onClick={exportExcel} disabled={payrolls.length === 0}>
+              Export Excel
+            </Button>
             <Button variant="outline" icon={Download} size="sm" onClick={() => {
               const finalSlips = payrolls.filter((p) => p.status === "Final");
               if (finalSlips.length === 0) {
@@ -920,7 +1046,7 @@ export default function PayrollPage() {
               finalSlips.forEach((p) => exportSlipPDF(p));
               showToast("success", "Export PDF", `${finalSlips.length} slip gaji sedang di-download.`);
             }}>
-              Export Semua
+              Export PDF
             </Button>
             <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowWorksheet(true)} disabled={payrolls.length === 0}>
               Worksheet
@@ -1131,31 +1257,52 @@ export default function PayrollPage() {
       {/* ═══════════════════════════════════════ */}
       {activeTab === "slip" && (<>
 
-      {/* ═══ Summary Cards ═══ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ═══ Hero Metrics ═══ */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {loading ? Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
+          <div key={i} className="bg-card rounded-2xl border border-border p-4 space-y-2">
             <Skeleton className="w-10 h-10 rounded-xl" />
-            <div className="space-y-2"><Skeleton className="h-3 w-14 rounded-md" /><Skeleton className="h-5 w-24 rounded-md" /></div>
+            <Skeleton className="h-3 w-20 rounded-md" />
+            <Skeleton className="h-7 w-32 rounded-md" />
           </div>
         )) : (
           <>
-            <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center"><DollarSign className="w-5 h-5 text-primary" /></div>
-              <div><p className="text-xs text-muted-foreground font-medium">Total Netto</p><p className="text-lg font-bold text-foreground">{formatCurrency(totalNetto)}</p></div>
-            </div>
-            <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-success-light flex items-center justify-center"><Users className="w-5 h-5 text-success" /></div>
-              <div><p className="text-xs text-muted-foreground font-medium">Jumlah Pegawai</p><p className="text-lg font-bold text-foreground">{totalPegawai}</p></div>
-            </div>
-            <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-warning-light flex items-center justify-center"><Clock className="w-5 h-5 text-warning" /></div>
-              <div><p className="text-xs text-muted-foreground font-medium">Draft</p><p className="text-lg font-bold text-warning">{draftCount}</p></div>
-            </div>
-            <div className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-success-light flex items-center justify-center"><CheckCircle2 className="w-5 h-5 text-success" /></div>
-              <div><p className="text-xs text-muted-foreground font-medium">Final</p><p className="text-lg font-bold text-success">{finalCount}</p></div>
-            </div>
+            <_HeroMetric
+              icon={DollarSign}
+              label="Total Netto"
+              value={formatCurrency(totalNetto)}
+              gradient="from-primary/15 via-primary/5 to-transparent"
+              iconBg="bg-primary/15"
+              iconColor="text-primary"
+              breakdown={`Pendapatan ${formatCurrency(totalPendapatanAll)}`}
+            />
+            <_HeroMetric
+              icon={Users}
+              label="Jumlah Pegawai"
+              value={String(totalPegawai)}
+              unit="slip"
+              gradient="from-success/15 via-success/5 to-transparent"
+              iconBg="bg-success/15"
+              iconColor="text-success"
+            />
+            <_HeroMetric
+              icon={Clock}
+              label="Draft"
+              value={String(draftCount)}
+              unit="belum final"
+              gradient="from-warning/15 via-warning/5 to-transparent"
+              iconBg="bg-warning/15"
+              iconColor="text-warning"
+            />
+            <_HeroMetric
+              icon={CheckCircle2}
+              label="Final"
+              value={String(finalCount)}
+              unit="terkunci"
+              gradient="from-success/15 via-success/5 to-transparent"
+              iconBg="bg-success/15"
+              iconColor="text-success"
+            />
           </>
         )}
       </div>
@@ -1867,19 +2014,35 @@ export default function PayrollPage() {
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleToggleStatus}
-                    disabled={saving}
-                  >
-                    {selectedPayroll.status === "Draft" ? "Finalkan" : "Kembalikan ke Draft"}
-                  </Button>
+                  {/* Tombol Kembalikan ke Draft hanya untuk super admin */}
+                  {selectedPayroll.status === "Final" ? (
+                    isSuperAdmin && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleToggleStatus}
+                        disabled={saving}
+                        title="Hanya super admin yang bisa membatalkan finalisasi"
+                      >
+                        Kembalikan ke Draft
+                      </Button>
+                    )
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleToggleStatus}
+                      disabled={saving}
+                    >
+                      Finalkan
+                    </Button>
+                  )}
                   <Button
                     icon={saving ? Loader2 : Save}
                     size="sm"
                     onClick={handleSave}
-                    disabled={saving}
+                    disabled={saving || (selectedPayroll.status === "Final" && !isSuperAdmin)}
+                    title={selectedPayroll.status === "Final" && !isSuperAdmin ? "Slip sudah Final, hanya super admin yang bisa edit" : undefined}
                   >
                     {saving ? "Menyimpan..." : "Simpan"}
                   </Button>
@@ -1921,5 +2084,40 @@ export default function PayrollPage() {
 
     </div>
     </RouteGuard>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+// HERO METRIC CARD
+// ═════════════════════════════════════════════════════════
+function _HeroMetric({
+  icon: Icon, label, value, unit, gradient, iconBg, iconColor, breakdown,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  unit?: string;
+  gradient: string;
+  iconBg: string;
+  iconColor: string;
+  breakdown?: string;
+}) {
+  return (
+    <div className="relative bg-card rounded-2xl border border-border p-4 overflow-hidden">
+      <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none", gradient)} />
+      <div className="relative">
+        <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center mb-2.5", iconBg)}>
+          <Icon className={cn("w-4 h-4", iconColor)} />
+        </div>
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</p>
+        <div className="flex items-baseline gap-1.5 mt-1">
+          <p className="text-xl font-bold text-foreground tabular-nums truncate">{value}</p>
+          {unit && <p className="text-xs text-muted-foreground font-medium">{unit}</p>}
+        </div>
+        {breakdown && (
+          <p className="text-[10px] text-muted-foreground mt-1.5 truncate">{breakdown}</p>
+        )}
+      </div>
+    </div>
   );
 }
