@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   CreditCard,
   Search,
@@ -149,12 +149,15 @@ export default function PayrollPage() {
   // ─── Worksheet state ───
   const [showWorksheet, setShowWorksheet] = useState(false);
   const [wsData, setWsData] = useState<Record<number, Record<string, number>>>({});
-  const [wsChanged, setWsChanged] = useState<Set<number>>(new Set());
+  /** Map<payrollId, Set<fieldKey>> — track cell-level changes untuk highlight */
+  const [wsChangedCells, setWsChangedCells] = useState<Map<number, Set<string>>>(new Map());
   const [wsSaving, setWsSaving] = useState(false);
   const [wsExpandedId, setWsExpandedId] = useState<number | null>(null);
   const [showBatchFill, setShowBatchFill] = useState(false);
   const [batchField, setBatchField] = useState("");
   const [batchValue, setBatchValue] = useState("");
+  /** "semua" | "kosong" — preview filter untuk batch fill */
+  const [batchFilter, setBatchFilter] = useState<"semua" | "kosong">("semua");
 
   // ─── Delete confirm ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -890,7 +893,7 @@ export default function PayrollPage() {
       data[r.id] = vals;
     });
     setWsData(data);
-    setWsChanged(new Set());
+    setWsChangedCells(new Map());
   }, []);
 
   // Init worksheet when payrolls change
@@ -898,10 +901,31 @@ export default function PayrollPage() {
     if (payrolls.length > 0) initWsData(payrolls);
   }, [payrolls, initWsData]);
 
+  /** Total cell yang berubah di seluruh worksheet (untuk header counter). */
+  const wsTotalChanged = useMemo(() => {
+    let total = 0;
+    wsChangedCells.forEach((set) => { total += set.size; });
+    return total;
+  }, [wsChangedCells]);
+
+  /** Total row yang punya minimal 1 cell berubah. */
+  const wsRowsChanged = wsChangedCells.size;
+
+  /** Cek apakah cell tertentu berubah. */
+  const isCellChanged = useCallback((id: number, field: string) => {
+    return wsChangedCells.get(id)?.has(field) ?? false;
+  }, [wsChangedCells]);
+
   const handleWsChange = (id: number, field: string, rawValue: string) => {
     const value = parseCurrencyInput(rawValue);
     setWsData((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
-    setWsChanged((prev) => new Set(prev).add(id));
+    setWsChangedCells((prev) => {
+      const next = new Map(prev);
+      const cells = new Set(next.get(id) ?? []);
+      cells.add(field);
+      next.set(id, cells);
+      return next;
+    });
   };
 
   const wsComputeTotals = (id: number) => {
@@ -913,10 +937,11 @@ export default function PayrollPage() {
   };
 
   const handleWsSaveAll = async () => {
-    if (wsChanged.size === 0) return;
+    if (wsChangedCells.size === 0) return;
     setWsSaving(true);
     let errorCount = 0;
-    for (const id of wsChanged) {
+    const changedIds = Array.from(wsChangedCells.keys());
+    for (const id of changedIds) {
       const vals = wsData[id];
       if (!vals) continue;
       // Only send editable fields, not generated columns
@@ -928,11 +953,22 @@ export default function PayrollPage() {
     }
     setWsSaving(false);
     if (errorCount > 0) {
-      showToast("error", "Sebagian Gagal", `${errorCount} dari ${wsChanged.size} slip gagal disimpan.`);
+      showToast("error", "Sebagian Gagal", `${errorCount} dari ${changedIds.length} slip gagal disimpan.`);
     } else {
-      showToast("success", "Worksheet Disimpan", `${wsChanged.size} slip gaji berhasil diperbarui.`);
+      showToast("success", "Worksheet Disimpan", `${changedIds.length} slip gaji berhasil diperbarui.`);
+      await logAudit({
+        supabase,
+        action: "update",
+        entityType: "payrolls",
+        entityLabel: `Worksheet ${formatPeriodLabel(periodKey)}`,
+        metadata: {
+          periode: periodKey,
+          jumlah_slip: changedIds.length,
+          jumlah_cell: wsTotalChanged,
+        },
+      });
     }
-    setWsChanged(new Set());
+    setWsChangedCells(new Map());
     await fetchPayrolls();
   };
 
@@ -942,23 +978,40 @@ export default function PayrollPage() {
     ...POTONGAN_FIELDS.filter((f) => !f.readonly),
   ];
 
+  /** Hitung target rows yang akan terkena batch fill (untuk preview & apply). */
+  const computeBatchFillTargets = useCallback((rows: PayrollRow[]) => {
+    if (!batchField) return [] as PayrollRow[];
+    return rows.filter((row) => {
+      if (batchFilter === "kosong") {
+        const current = (wsData[row.id] || {})[batchField] || 0;
+        return current === 0;
+      }
+      return true;
+    });
+  }, [batchField, batchFilter, wsData]);
+
   const handleBatchFill = () => {
     if (!batchField) return;
     const value = parseCurrencyInput(batchValue);
+    const targets = computeBatchFillTargets(filtered);
     const newData = { ...wsData };
-    const newChanged = new Set(wsChanged);
-    filtered.forEach((row) => {
+    const newChangedCells = new Map(wsChangedCells);
+    targets.forEach((row) => {
       if (newData[row.id]) {
         newData[row.id] = { ...newData[row.id], [batchField]: value };
-        newChanged.add(row.id);
+        const cells = new Set(newChangedCells.get(row.id) ?? []);
+        cells.add(batchField);
+        newChangedCells.set(row.id, cells);
       }
     });
     setWsData(newData);
-    setWsChanged(newChanged);
+    setWsChangedCells(newChangedCells);
     setShowBatchFill(false);
     setBatchField("");
     setBatchValue("");
-    showToast("success", "Batch Fill Berhasil", `${filtered.length} pegawai diisi ${BATCH_FILL_OPTIONS.find((f) => f.key === batchField)?.label || batchField} = ${formatCurrency(value)}`);
+    setBatchFilter("semua");
+    const fieldLabel = BATCH_FILL_OPTIONS.find((f) => f.key === batchField)?.label || batchField;
+    showToast("success", "Batch Fill Berhasil", `${targets.length} pegawai diisi ${fieldLabel} = ${formatCurrency(value)}`);
   };
 
   // ─── Gapok handlers ───
@@ -1411,12 +1464,12 @@ export default function PayrollPage() {
                     <span><strong className="text-foreground">{filtered.length}</strong> pegawai</span>
                     <span className="w-px h-3 bg-border" />
                     <span>Netto: <strong className="text-primary">{formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}</strong></span>
-                    {wsChanged.size > 0 && (
+                    {wsRowsChanged > 0 && (
                       <>
                         <span className="w-px h-3 bg-border" />
                         <span className="flex items-center gap-1 text-warning">
                           <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
-                          <strong>{wsChanged.size}</strong> diubah
+                          <strong>{wsRowsChanged}</strong> baris &middot; <strong>{wsTotalChanged}</strong> cell diubah
                         </span>
                       </>
                     )}
@@ -1438,14 +1491,14 @@ export default function PayrollPage() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">
                   <Zap className="w-3 h-3" />Batch Fill
                 </button>
-                {wsChanged.size > 0 && (
+                {wsRowsChanged > 0 && (
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => initWsData(payrolls)} disabled={wsSaving}
                       className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">
                       Reset
                     </button>
                     <Button icon={wsSaving ? Loader2 : Save} size="sm" onClick={handleWsSaveAll} disabled={wsSaving}>
-                      {wsSaving ? "Menyimpan..." : `Simpan (${wsChanged.size})`}
+                      {wsSaving ? "Menyimpan..." : `Simpan (${wsRowsChanged})`}
                     </Button>
                   </div>
                 )}
@@ -1479,8 +1532,7 @@ export default function PayrollPage() {
                   ) : filtered.map((row, idx) => {
                     const vals = wsData[row.id] || {};
                     const computed = wsComputeTotals(row.id);
-                    const isChanged = wsChanged.has(row.id);
-                    const isExpanded = wsExpandedId === row.id;
+                    const isChanged = wsChangedCells.has(row.id);
                     const isEven = idx % 2 === 0;
                     return (
                       <React.Fragment key={row.id}>
@@ -1489,9 +1541,9 @@ export default function PayrollPage() {
                           className={cn(
                             "border-b transition-colors cursor-pointer",
                             isChanged ? "bg-amber-50/60 dark:bg-amber-500/[0.04] border-amber-200/50 dark:border-amber-500/10" : isEven ? "bg-card border-border/40" : "bg-muted/20 border-border/40",
-                            isExpanded ? "border-b-0" : "hover:bg-primary/[0.03]"
+                            wsExpandedId === row.id ? "border-b-0" : "hover:bg-primary/[0.03]"
                           )}
-                          onClick={() => setWsExpandedId(isExpanded ? null : row.id)}
+                          onClick={() => setWsExpandedId(wsExpandedId === row.id ? null : row.id)}
                         >
                           <td className="px-4 py-3 text-[10px] text-muted-foreground">{idx + 1}</td>
                           <td className="px-4 py-3">
@@ -1500,7 +1552,6 @@ export default function PayrollPage() {
                                 <p className="text-xs font-semibold text-foreground truncate">{row.pegawaiNama}</p>
                                 <p className="text-[10px] text-muted-foreground truncate">{row.pegawaiJabatan}</p>
                               </div>
-                              <ChevronRight className={cn("w-3.5 h-3.5 text-muted-foreground/40 transition-transform flex-shrink-0", isExpanded && "rotate-90")} />
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right text-xs font-medium text-foreground tabular-nums">{formatCurrency(vals.gaji_pokok || 0)}</td>
@@ -1521,7 +1572,7 @@ export default function PayrollPage() {
                         </tr>
 
                         {/* Expanded detail row */}
-                        {isExpanded && (
+                        {wsExpandedId === row.id && (
                           <tr className={cn("border-b border-border", isChanged ? "bg-amber-50/30 dark:bg-amber-500/[0.02]" : "bg-muted/10")}>
                             <td />
                             <td colSpan={7} className="px-4 py-4">
