@@ -211,3 +211,37 @@ export function entityLabel(entityType: string): string {
   };
   return labels[entityType] ?? entityType;
 }
+
+/**
+ * Ambil info user yang sedang login untuk dipakai sebagai approver.
+ *
+ * Pakai untuk handler approval:
+ * ```ts
+ * const approver = await getCurrentApprover(supabase);
+ * await supabase.from("leave_requests").update({
+ *   ...,
+ *   approved_by_user_id: approver.userId,
+ *   approved_by_nama: approver.nama,
+ * });
+ * ```
+ *
+ * Returns { userId, nama }. Fallback nama "Sistem" kalau gagal.
+ */
+export async function getCurrentApprover(supabase: SupabaseClient): Promise<{ userId: string | null; nama: string }> {
+  try {
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData.user;
+    if (!user) return { userId: null, nama: "Sistem" };
+
+    const { data: profile } = await supabase
+      .from("user_profiles")
+      .select("nama")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const nama = (profile?.nama as string | null) || user.email || "Sistem";
+    return { userId: user.id, nama };
+  } catch {
+    return { userId: null, nama: "Sistem" };
+  }
+}

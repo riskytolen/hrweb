@@ -274,6 +274,10 @@ export interface DbOvertimeRequest {
   status: "Menunggu" | "Disetujui" | "Ditolak";
   catatan_approval: string | null;
   approved_at: string | null;
+  /** FK ke auth.users untuk lookup. NULL kalau user dihapus. */
+  approved_by_user_id: string | null;
+  /** Snapshot nama approver saat approve. */
+  approved_by_nama: string | null;
   /** Snapshot rate dari division_schedules saat approve. 0 sebelum approve. */
   rate_per_jam: number;
   /** Auto-computed dari jam_selesai - jam_mulai dalam menit. */
@@ -297,6 +301,10 @@ export interface DbLeaveRequest {
   status: "Menunggu" | "Disetujui" | "Ditolak";
   catatan_approval: string | null;
   approved_at: string | null;
+  /** FK ke auth.users untuk lookup. NULL kalau user dihapus. */
+  approved_by_user_id: string | null;
+  /** Snapshot nama approver saat approve. */
+  approved_by_nama: string | null;
   /** Sumber pengajuan: pegawai (mobile self-service) atau admin (manual input dari web). */
   created_by: "pegawai" | "admin";
   created_at: string;
@@ -393,8 +401,13 @@ export interface DbLegalDocument {
   status: "Aktif" | "Segera Berakhir" | "Berakhir";
   status_approval: "Menunggu" | "Disetujui" | "Ditolak";
   catatan_approval: string | null;
+  /** Legacy: nama approver dalam bentuk text bebas. Pakai approved_by_nama untuk yang baru. */
   approved_by: string | null;
   approved_at: string | null;
+  /** FK ke auth.users untuk lookup. NULL kalau user dihapus. */
+  approved_by_user_id: string | null;
+  /** Snapshot nama approver saat approve (struktur baru, lebih akurat). */
+  approved_by_nama: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -14,7 +14,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase, type DbOvertimeRequest } from "@/lib/supabase";
-import { logAudit } from "@/lib/audit";
+import { logAudit, getCurrentApprover } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
@@ -232,6 +232,9 @@ export default function OvertimePage() {
     };
 
     const oldRecord = list.find((r) => r.id === approvalConfirm.id);
+    const approver = await getCurrentApprover(supabase);
+    updatePayload.approved_by_user_id = approver.userId;
+    updatePayload.approved_by_nama = approver.nama;
 
     // Jika approve, snapshot rate dari divisi pegawai
     if (isApprove && oldRecord) {
@@ -407,6 +410,11 @@ export default function OvertimePage() {
                           style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>
                           {r.status}
                         </button>
+                        {r.status !== "Menunggu" && r.approved_by_nama && (
+                          <p className="text-[9px] text-muted-foreground mt-1 max-w-[140px] mx-auto truncate" title={r.approved_by_nama}>
+                            oleh {r.approved_by_nama}
+                          </p>
+                        )}
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">

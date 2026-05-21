@@ -15,7 +15,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase, type DbLeaveRequest } from "@/lib/supabase";
-import { logAudit } from "@/lib/audit";
+import { logAudit, getCurrentApprover } from "@/lib/audit";
 import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -325,11 +325,14 @@ export default function LeavePage() {
     const isApprove = approvalConfirm.action === "approve";
     const newStatus = isApprove ? "Disetujui" : "Ditolak";
     const oldRequest = list.find((r) => r.id === approvalConfirm.id);
+    const approver = await getCurrentApprover(supabase);
 
     const { error } = await supabase.from("leave_requests").update({
       status: newStatus,
       catatan_approval: approvalNote || null,
       approved_at: new Date().toISOString(),
+      approved_by_user_id: approver.userId,
+      approved_by_nama: approver.nama,
     }).eq("id", approvalConfirm.id);
 
     if (error) {
@@ -641,9 +644,14 @@ export default function LeavePage() {
                     </td>
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{row.status}</span>
+                      {row.status !== "Menunggu" && row.approved_by_nama && (
+                        <p className="text-[9px] text-muted-foreground mt-1 max-w-[140px] mx-auto truncate" title={row.approved_by_nama}>
+                          oleh {row.approved_by_nama}
+                        </p>
+                      )}
                       {row.catatan_approval && (
                         <button onClick={() => setCatatanDetail({ nama: row.employeeNama || "-", status: row.status, catatan: row.catatan_approval || "" })}
-                          className="block text-[10px] text-primary/80 hover:text-primary mt-1 max-w-[120px] mx-auto truncate hover:underline cursor-pointer">
+                          className="block text-[10px] text-primary/80 hover:text-primary mt-1 max-w-[140px] mx-auto truncate hover:underline cursor-pointer">
                           &ldquo;{row.catatan_approval}&rdquo;
                         </button>
                       )}

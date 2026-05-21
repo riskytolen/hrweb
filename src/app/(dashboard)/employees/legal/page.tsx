@@ -15,6 +15,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase, type DbLegalDocument, type DbLegalSetting } from "@/lib/supabase";
+import { getCurrentApprover } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import { generatePKWT, generateSP, generateSuratPernyataan, generateNomorSP } from "@/lib/legal-pdf";
@@ -412,10 +413,14 @@ export default function LegalPage() {
     if (!approvalConfirm) return;
     setApproving(true);
     const isApprove = approvalConfirm.action === "approve";
+    const approver = await getCurrentApprover(supabase);
     const { error } = await supabase.from("legal_documents").update({
       status_approval: isApprove ? "Disetujui" : "Ditolak",
       catatan_approval: approvalNote || null,
       approved_at: new Date().toISOString(),
+      approved_by_user_id: approver.userId,
+      approved_by_nama: approver.nama,
+      approved_by: approver.nama, // legacy compatibility
     }).eq("id", approvalConfirm.id);
     if (error) {
       showToast("error", "Gagal", error.message);
@@ -475,9 +480,13 @@ export default function LegalPage() {
     if (selectedIds.size === 0) return;
     setApproving(true);
     const isApprove = action === "approve";
+    const approver = await getCurrentApprover(supabase);
     const { error } = await supabase.from("legal_documents").update({
       status_approval: isApprove ? "Disetujui" : "Ditolak",
       approved_at: new Date().toISOString(),
+      approved_by_user_id: approver.userId,
+      approved_by_nama: approver.nama,
+      approved_by: approver.nama,
     }).in("id", Array.from(selectedIds));
     if (error) {
       showToast("error", "Gagal", error.message);
@@ -804,11 +813,17 @@ export default function LegalPage() {
                     <td className="px-5 py-3.5 text-center">
                       {(() => {
                         const ac = row.status_approval === "Disetujui" ? "#10b981" : row.status_approval === "Ditolak" ? "#ef4444" : "#f59e0b";
+                        const approverNama = row.approved_by_nama || row.approved_by;
                         return (
                           <div>
                             <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${ac}20`, color: ac }}>{row.status_approval}</span>
+                            {row.status_approval !== "Menunggu" && approverNama && (
+                              <p className="text-[9px] text-muted-foreground mt-1 max-w-[120px] mx-auto truncate" title={approverNama}>
+                                oleh {approverNama}
+                              </p>
+                            )}
                             {row.catatan_approval && (
-                              <p className="text-[9px] text-muted-foreground mt-1 max-w-[100px] mx-auto truncate" title={row.catatan_approval}>&ldquo;{row.catatan_approval}&rdquo;</p>
+                              <p className="text-[9px] text-muted-foreground mt-1 max-w-[120px] mx-auto truncate" title={row.catatan_approval}>&ldquo;{row.catatan_approval}&rdquo;</p>
                             )}
                           </div>
                         );
