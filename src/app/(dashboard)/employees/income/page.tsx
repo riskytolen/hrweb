@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  MoreVertical,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -918,17 +919,28 @@ export default function IncomePage() {
         icon={Wallet}
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowReport(true)}>Laporan Detail</Button>
-            <Button variant="outline" icon={CalendarDays} size="sm" onClick={openCalendar}>Mode Kalender</Button>
-            {canInput && <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
+            {/* Desktop: 3 tombol horizontal */}
+            <div className="hidden sm:flex items-center gap-2">
+              <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowReport(true)}>Laporan Detail</Button>
+              <Button variant="outline" icon={CalendarDays} size="sm" onClick={openCalendar}>Mode Kalender</Button>
+              {canInput && <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
+            </div>
+            {/* Mobile: primary action + dropdown menu */}
+            <div className="flex sm:hidden items-center gap-1.5">
+              {canInput && <Button icon={Plus} size="sm" onClick={openBatch}>Input</Button>}
+              <_HeaderMenu
+                onShowReport={() => setShowReport(true)}
+                onOpenCalendar={openCalendar}
+              />
+            </div>
           </div>
         }
       />
 
       {toast.show && (
         <Portal>
-          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
-            <div className={cn("flex items-start gap-3 px-5 py-4 bg-card rounded-2xl shadow-2xl border min-w-[360px] max-w-[480px]",
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] animate-fade-in w-[calc(100vw-1.5rem)] max-w-[480px]">
+            <div className={cn("flex items-start gap-3 px-4 py-3.5 sm:px-5 sm:py-4 bg-card rounded-2xl shadow-2xl border",
               toast.type === "error" ? "border-danger/20" : "border-success/20")}>
               <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
                 toast.type === "error" ? "bg-danger/10" : "bg-success/10")}>
@@ -974,21 +986,21 @@ export default function IncomePage() {
       {/* Filter & Search */}
       <div className="bg-card rounded-2xl border border-border p-4">
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5 flex-1">
-            <Search className="w-4 h-4 text-muted-foreground" />
+          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5 flex-1 min-w-0">
+            <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
             <input type="text" placeholder="Cari nama, divisi, atau posisi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
           </div>
-          <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+          <div className="flex items-center gap-1 bg-muted rounded-xl p-1 self-stretch sm:self-auto">
             <button onClick={() => {
               const [y, m] = periodKey.split("-").map(Number);
               const prev = new Date(y, m - 2, 1);
               setPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
               setPage(1);
-            }} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+            }} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <div className="px-3 py-1.5 text-center min-w-[240px]">
+            <div className="px-3 py-1.5 text-center flex-1 sm:min-w-[240px] sm:flex-none">
               <p className="text-xs font-bold text-foreground">{period.label}</p>
             </div>
             <button onClick={() => {
@@ -996,15 +1008,15 @@ export default function IncomePage() {
               const next = new Date(y, m, 1);
               setPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
               setPage(1);
-            }} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+            }} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-card rounded-2xl border border-border overflow-hidden">
+      {/* Table — Desktop only */}
+      <div className="bg-card rounded-2xl border border-border overflow-hidden hidden sm:block">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -1055,6 +1067,68 @@ export default function IncomePage() {
             </tbody>
           </table>
         </div>
+        <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+      </div>
+
+      {/* Card list — Mobile only */}
+      <div className="block sm:hidden space-y-3">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-card rounded-2xl border border-border p-4 space-y-2">
+              <Skeleton className="h-4 w-32 rounded-md" />
+              <Skeleton className="h-3 w-24 rounded-md" />
+              <Skeleton className="h-3 w-20 rounded-md" />
+            </div>
+          ))
+        ) : paged.length === 0 ? (
+          <div className="bg-card rounded-2xl border border-border py-10 text-center text-sm text-muted-foreground">
+            Tidak ada data ditemukan
+          </div>
+        ) : (
+          paged.map((row, idx) => (
+            <div key={row.id} className="bg-card rounded-2xl border border-border p-4 space-y-3">
+              {/* Header row: # + tanggal + aksi */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded flex-shrink-0">#{(page - 1) * PAGE_SIZE + idx + 1}</span>
+                  <span className="text-xs font-medium text-foreground tabular-nums">{row.tanggal}</span>
+                </div>
+                {canEdit && (
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button onClick={() => openEdit(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.tanggal})` })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                )}
+              </div>
+
+              {/* Pegawai + Titik */}
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-foreground truncate">{row.employeeNama}</p>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-lg font-bold text-foreground tabular-nums leading-none">{row.jumlah_titik}</p>
+                  <p className="text-[9px] text-muted-foreground">titik</p>
+                </div>
+              </div>
+
+              {/* Divisi + Posisi + Status */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${row.divisionColor}15`, color: row.divisionColor }}>
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.divisionColor }} />
+                  {row.divisionNama}
+                </span>
+                <span className={cn("text-[11px] font-semibold px-2 py-1 rounded-md", row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400")}>{row.role}</span>
+                {row.statusNama && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md" style={{ backgroundColor: `${row.statusColor}20`, color: row.statusColor }}>{row.statusNama}</span>
+                )}
+              </div>
+
+              {/* Catatan (kalau ada) */}
+              {row.catatan && (
+                <p className="text-[11px] text-muted-foreground border-t border-border/50 pt-2 line-clamp-2">{row.catatan}</p>
+              )}
+            </div>
+          ))
+        )}
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </div>
 
@@ -1388,13 +1462,13 @@ export default function IncomePage() {
       {/* ═══ BATCH INPUT MODAL ═══ */}
       {showBatch && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-3">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-3">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <div className="relative w-full max-w-7xl bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ height: "calc(100vh - 1.5rem)", maxHeight: "calc(100vh - 1.5rem)" }}>
+            <div className="relative w-full max-w-7xl bg-card sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ height: "100vh", maxHeight: "100vh" }}>
 
               {/* ── Header: Title + Tanggal + Search + Counter ── */}
-              <div className="px-5 py-3 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
-                <div className="flex items-center gap-4">
+              <div className="px-3 sm:px-5 py-3 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+                <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
                   {/* Title */}
                   <div className="flex items-center gap-2.5 flex-shrink-0">
                     <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -1777,5 +1851,55 @@ export default function IncomePage() {
       )}
     </div>
     </RouteGuard>
+  );
+}
+
+// ═════════════════════════════════════════════════════════
+// HEADER MENU — dropdown kebab untuk HP
+// ═════════════════════════════════════════════════════════
+function _HeaderMenu({ onShowReport, onOpenCalendar }: { onShowReport: () => void; onOpenCalendar: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="p-2 rounded-xl border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Menu lainnya"
+      >
+        <MoreVertical className="w-4 h-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 w-48 bg-card rounded-xl border border-border shadow-xl z-50 animate-fade-in overflow-hidden">
+          <button
+            type="button"
+            onClick={() => { onShowReport(); setOpen(false); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium text-foreground hover:bg-muted transition-colors text-left"
+          >
+            <FileText className="w-4 h-4 text-muted-foreground" />
+            <span>Laporan Detail</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { onOpenCalendar(); setOpen(false); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium text-foreground hover:bg-muted transition-colors text-left border-t border-border"
+          >
+            <CalendarDays className="w-4 h-4 text-muted-foreground" />
+            <span>Mode Kalender</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
