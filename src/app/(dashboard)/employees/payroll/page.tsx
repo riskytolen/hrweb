@@ -1600,7 +1600,12 @@ export default function PayrollPage() {
                                               onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
                                               placeholder="0"
                                               onClick={(e) => e.stopPropagation()}
-                                              className="w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-foreground placeholder:text-muted-foreground/30 transition-all"
+                                              className={cn(
+                                                "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
+                                                isCellChanged(row.id, f.key)
+                                                  ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
+                                                  : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                              )}
                                             />
                                           </div>
                                         )}
@@ -1636,7 +1641,12 @@ export default function PayrollPage() {
                                               onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
                                               placeholder="0"
                                               onClick={(e) => e.stopPropagation()}
-                                              className="w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-foreground placeholder:text-muted-foreground/30 transition-all"
+                                              className={cn(
+                                                "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
+                                                isCellChanged(row.id, f.key)
+                                                  ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
+                                                  : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                              )}
                                             />
                                           </div>
                                         )}
@@ -1716,6 +1726,25 @@ export default function PayrollPage() {
               </div>
               <div className="px-5 py-4 space-y-4">
                 <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Target</label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button type="button" onClick={() => setBatchFilter("semua")}
+                      className={cn(
+                        "px-3 py-2 rounded-xl text-xs font-semibold transition-colors border",
+                        batchFilter === "semua" ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/30 border-border/40 text-muted-foreground hover:bg-muted"
+                      )}>
+                      Semua pegawai
+                    </button>
+                    <button type="button" onClick={() => setBatchFilter("kosong")}
+                      className={cn(
+                        "px-3 py-2 rounded-xl text-xs font-semibold transition-colors border",
+                        batchFilter === "kosong" ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/30 border-border/40 text-muted-foreground hover:bg-muted"
+                      )}>
+                      Yang masih kosong
+                    </button>
+                  </div>
+                </div>
+                <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Komponen</label>
                   <select
                     value={batchField}
@@ -1751,11 +1780,15 @@ export default function PayrollPage() {
                     />
                   </div>
                 </div>
-                {batchField && batchValue && (
-                  <div className="bg-muted/50 rounded-xl px-3 py-2.5 text-xs text-muted-foreground">
-                    <strong className="text-foreground">{BATCH_FILL_OPTIONS.find((f) => f.key === batchField)?.label}</strong> akan diisi <strong className="text-primary">{formatCurrency(parseCurrencyInput(batchValue))}</strong> untuk <strong className="text-foreground">{filtered.length} pegawai</strong>
-                  </div>
-                )}
+                {batchField && batchValue && (() => {
+                  const targets = computeBatchFillTargets(filtered);
+                  return (
+                    <div className="bg-muted/50 rounded-xl px-3 py-2.5 text-xs text-muted-foreground">
+                      <strong className="text-foreground">{BATCH_FILL_OPTIONS.find((f) => f.key === batchField)?.label}</strong> akan diisi <strong className="text-primary">{formatCurrency(parseCurrencyInput(batchValue))}</strong> untuk <strong className="text-foreground">{targets.length}</strong> dari {filtered.length} pegawai
+                      {batchFilter === "kosong" && <span className="block mt-0.5 text-[10px] text-muted-foreground/70">Hanya yang nilai komponen ini masih 0.</span>}
+                    </div>
+                  );
+                })()}
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
                 <Button variant="outline" size="sm" onClick={() => setShowBatchFill(false)}>Batal</Button>
