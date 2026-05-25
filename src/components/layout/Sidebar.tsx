@@ -122,12 +122,32 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     })
     .filter((s) => s.groups.length > 0);
 
+  /**
+   * Active href = href terpanjang yang match dengan pathname (exact atau prefix).
+   * Mencegah parent route "/employees" selalu aktif saat user di "/employees/attendance".
+   */
+  const activeHref: string | null = (() => {
+    let best: string | null = null;
+    sections.forEach((s) => {
+      s.groups.forEach((g) => {
+        g.items.forEach((item) => {
+          if (item.comingSoon) return;
+          const isMatch = pathname === item.href || pathname.startsWith(item.href + "/");
+          if (isMatch && (best === null || item.href.length > best.length)) {
+            best = item.href;
+          }
+        });
+      });
+    });
+    return best;
+  })();
+
   // Auto-open group yang punya sub item aktif
   const computeOpenGroups = () => {
     const open: Record<string, boolean> = {};
     sections.forEach((s) => {
       s.groups.forEach((g) => {
-        open[g.key] = g.items.some((item) => pathname === item.href || pathname.startsWith(item.href + "/"));
+        open[g.key] = g.items.some((item) => item.href === activeHref);
       });
     });
     return open;
@@ -217,9 +237,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <div className={cn(collapsed ? "space-y-1" : "space-y-0.5")}>
                 {section.groups.map((group) => {
                   const isOpen = openGroups[group.key];
-                  const isGroupActive = group.items.some(
-                    (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
-                  );
+                  const isGroupActive = group.items.some((item) => item.href === activeHref);
                   const GroupIcon = group.icon;
 
                   return (
@@ -295,8 +313,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                         >
                           <ul className="mt-0.5 mb-1 ml-[18px] pl-[14px] border-l border-white/[0.06] space-y-px">
                             {group.items.map((item) => {
-                              const isActive =
-                                pathname === item.href || pathname.startsWith(item.href + "/");
+                              const isActive = item.href === activeHref;
                               const ItemIcon = item.icon;
 
                               if (item.comingSoon) {
