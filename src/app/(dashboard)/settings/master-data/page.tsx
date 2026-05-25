@@ -2479,110 +2479,105 @@ export default function MasterDataPage() {
         <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !syncRunning && setSyncRow(null)} />
-          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-accent-light flex items-center justify-center">
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/30 rounded-t-2xl flex-shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-accent-light flex items-center justify-center flex-shrink-0">
                   <RefreshCw className="w-4 h-4 text-accent" />
                 </div>
-                <h2 className="text-sm font-bold text-foreground">Sinkron Harga ke Rekap Titik</h2>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-bold text-foreground truncate">Sinkron Harga ke Rekap Titik</h2>
+                  <p className="text-[10px] text-muted-foreground truncate">{syncRow.zoneNama}</p>
+                </div>
               </div>
-              <button onClick={() => !syncRunning && setSyncRow(null)} disabled={syncRunning} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50"><X className="w-4 h-4" /></button>
+              <button onClick={() => !syncRunning && setSyncRow(null)} disabled={syncRunning} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50 flex-shrink-0"><X className="w-4 h-4" /></button>
             </div>
 
-            <div className="p-5 space-y-4">
-              {/* Info zona dan harga baru */}
-              <div className="p-3 rounded-xl bg-muted/40 border border-border/50">
-                <p className="text-xs text-muted-foreground mb-2">Nama Titik</p>
-                <p className="text-sm font-bold text-foreground mb-3">{syncRow.zoneNama}</p>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                      <span className="text-muted-foreground">Driver:</span>
-                    </span>
-                    <p className="font-bold text-blue-600 mt-0.5">
-                      {syncRow.driverRate !== null ? `Rp ${syncRow.driverRate.toLocaleString("id-ID")}` : <span className="text-muted-foreground italic font-normal">-</span>}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                      <span className="text-muted-foreground">Helper:</span>
-                    </span>
-                    <p className="font-bold text-orange-600 mt-0.5">
-                      {syncRow.helperRate !== null ? `Rp ${syncRow.helperRate.toLocaleString("id-ID")}` : <span className="text-muted-foreground italic font-normal">-</span>}
-                    </p>
-                  </div>
-                </div>
+            {/* Body (scrollable) */}
+            <div className="px-5 py-4 space-y-3.5 flex-1 overflow-y-auto">
+              {/* Harga baru — inline compact */}
+              <div className="flex items-center gap-2 text-xs">
+                {syncRow.driverRate !== null && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-500/10 text-blue-600 font-semibold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    Driver Rp {syncRow.driverRate.toLocaleString("id-ID")}
+                  </span>
+                )}
+                {syncRow.helperRate !== null && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-orange-500/10 text-orange-600 font-semibold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                    Helper Rp {syncRow.helperRate.toLocaleString("id-ID")}
+                  </span>
+                )}
               </div>
 
               {/* Pilih periode */}
               <div>
-                <label className="text-xs font-semibold text-foreground mb-2 block">Periode yang akan diperbarui</label>
-                <div className="space-y-2">
-                  <label className={cn("flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors", syncMode === "active" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
-                    <input type="radio" name="syncMode" checked={syncMode === "active"} onChange={() => setSyncMode("active")} className="mt-0.5 accent-primary" disabled={syncRunning} />
-                    <div className="flex-1 min-w-0">
+                <label className="text-[11px] font-semibold text-foreground mb-1.5 block">Periode yang akan diperbarui</label>
+                <div className="space-y-1.5">
+                  <label className={cn("flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors", syncMode === "active" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
+                    <input type="radio" name="syncMode" checked={syncMode === "active"} onChange={() => setSyncMode("active")} className="accent-primary" disabled={syncRunning} />
+                    <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
                       <p className="text-xs font-semibold text-foreground">Periode aktif</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{getActivePeriodRange().label}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{getActivePeriodRange().label}</p>
                     </div>
                   </label>
-                  <label className={cn("flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors", syncMode === "all" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
-                    <input type="radio" name="syncMode" checked={syncMode === "all"} onChange={() => setSyncMode("all")} className="mt-0.5 accent-primary" disabled={syncRunning} />
-                    <div className="flex-1 min-w-0">
+                  <label className={cn("flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors", syncMode === "all" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
+                    <input type="radio" name="syncMode" checked={syncMode === "all"} onChange={() => setSyncMode("all")} className="accent-primary" disabled={syncRunning} />
+                    <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
                       <p className="text-xs font-semibold text-foreground">Semua periode</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">Termasuk data lama dan yang sudah masuk payroll. Hati-hati.</p>
+                      <p className="text-[10px] text-warning truncate">Termasuk data lama</p>
                     </div>
                   </label>
-                  <label className={cn("flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors", syncMode === "custom" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
-                    <input type="radio" name="syncMode" checked={syncMode === "custom"} onChange={() => setSyncMode("custom")} className="mt-0.5 accent-primary" disabled={syncRunning} />
-                    <div className="flex-1 min-w-0">
+                  <label className={cn("flex flex-col gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors", syncMode === "custom" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
+                    <div className="flex items-center gap-2.5">
+                      <input type="radio" name="syncMode" checked={syncMode === "custom"} onChange={() => setSyncMode("custom")} className="accent-primary" disabled={syncRunning} />
                       <p className="text-xs font-semibold text-foreground">Custom tanggal</p>
-                      <div className="grid grid-cols-2 gap-2 mt-2">
+                    </div>
+                    {syncMode === "custom" && (
+                      <div className="grid grid-cols-2 gap-2 pl-6">
                         <input
                           type="date"
                           value={syncCustomStart}
-                          onChange={(e) => { setSyncCustomStart(e.target.value); setSyncMode("custom"); }}
-                          disabled={syncMode !== "custom" || syncRunning}
+                          onChange={(e) => setSyncCustomStart(e.target.value)}
+                          disabled={syncRunning}
                           className={cn(inputClass, "py-1.5 text-xs disabled:opacity-50")}
                         />
                         <input
                           type="date"
                           value={syncCustomEnd}
-                          onChange={(e) => { setSyncCustomEnd(e.target.value); setSyncMode("custom"); }}
-                          disabled={syncMode !== "custom" || syncRunning}
+                          onChange={(e) => setSyncCustomEnd(e.target.value)}
+                          disabled={syncRunning}
                           className={cn(inputClass, "py-1.5 text-xs disabled:opacity-50")}
                         />
                       </div>
-                    </div>
+                    )}
                   </label>
                 </div>
               </div>
 
-              {/* Preview jumlah baris yang akan diperbarui */}
-              <div className="p-3 rounded-xl bg-warning-light/40 border border-warning/30">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-warning" />
-                  <p className="text-xs font-semibold text-warning">Preview perubahan</p>
+              {/* Preview ringkas */}
+              <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-warning-light/40 border border-warning/30">
+                <AlertTriangle className="w-3.5 h-3.5 text-warning flex-shrink-0 mt-0.5" />
+                <div className="text-[11px] flex-1 min-w-0">
+                  {syncPreview.loading ? (
+                    <span className="text-muted-foreground">Menghitung preview...</span>
+                  ) : syncMode === "custom" && (!syncCustomStart || !syncCustomEnd) ? (
+                    <span className="text-muted-foreground">Isi tanggal mulai dan akhir untuk melihat preview.</span>
+                  ) : (
+                    <span className="text-foreground">
+                      <strong>{syncPreview.driverCount + syncPreview.helperCount} entri</strong> akan diperbarui
+                      {(syncPreview.driverCount > 0 || syncPreview.helperCount > 0) && <> · {syncPreview.driverCount} Driver, {syncPreview.helperCount} Helper</>}.
+                      <span className="block text-[10px] text-muted-foreground mt-0.5">Pendapatan pegawai pada periode ini akan ikut berubah.</span>
+                    </span>
+                  )}
                 </div>
-                {syncPreview.loading ? (
-                  <p className="text-[11px] text-muted-foreground">Menghitung...</p>
-                ) : syncMode === "custom" && (!syncCustomStart || !syncCustomEnd) ? (
-                  <p className="text-[11px] text-muted-foreground">Isi tanggal mulai dan akhir untuk melihat preview.</p>
-                ) : (
-                  <p className="text-[11px] text-foreground">
-                    <span className="font-semibold">{syncPreview.driverCount + syncPreview.helperCount} entri</span> rekap titik akan diperbarui
-                    {(syncPreview.driverCount > 0 || syncPreview.helperCount > 0) && <> ({syncPreview.driverCount} Driver, {syncPreview.helperCount} Helper)</>}.
-                  </p>
-                )}
-                <p className="text-[10px] text-muted-foreground mt-1.5">
-                  Aksi ini langsung mengubah data historis. Pendapatan pegawai pada periode tersebut akan ikut berubah.
-                </p>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/30 rounded-b-2xl flex-shrink-0">
               <Button variant="outline" size="sm" onClick={() => setSyncRow(null)} disabled={syncRunning}>Batal</Button>
               <Button
                 size="sm"
