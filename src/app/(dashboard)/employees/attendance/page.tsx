@@ -92,6 +92,21 @@ function computeDenda(durasiTelat: number, penalty: PenaltyLite | undefined): nu
   return durasiTelat * dendaPerMenit;
 }
 
+/** Format jam HH:MM dari total menit (0–1439) */
+function minutesToTime(total: number): string {
+  const safe = ((total % 1440) + 1440) % 1440;
+  const h = Math.floor(safe / 60);
+  const m = safe % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Batas telat = jam_masuk_jadwal + toleransi_menit (HH:MM). NULL kalau jadwal kosong. */
+function getDeadlineTime(scheduleJamMasuk: string | null | undefined, toleransi: number | null | undefined): string | null {
+  if (!scheduleJamMasuk) return null;
+  const base = timeToMinutes(scheduleJamMasuk.slice(0, 5));
+  return minutesToTime(base + (toleransi ?? 0));
+}
+
 /** Hitung denda alpha */
 function computeDendaAlpha(penalty: PenaltyLite | undefined): number {
   return penalty?.denda_alpha ?? 100000;
@@ -1061,6 +1076,7 @@ export default function AttendancePage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Divisi</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Jam Masuk</th>
+                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Batas Telat</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Jam Pulang</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Status</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Telat</th>
@@ -1070,8 +1086,8 @@ export default function AttendancePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={6} cols={10} /> : paged.length === 0 ? (
-                <tr><td colSpan={10} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data absen</td></tr>
+              {loading ? <SkeletonTable rows={6} cols={11} /> : paged.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data absen</td></tr>
               ) : paged.map((row, idx) => {
                 const sc = STATUS_OPTIONS.find((s) => s.value === row.status);
                 return (
@@ -1095,6 +1111,22 @@ export default function AttendancePage() {
                       {NO_JAM_STATUSES.includes(row.status)
                         ? <span className="text-muted-foreground italic">-</span>
                         : <span className="font-semibold text-foreground">{row.jam_masuk.slice(0, 5)}</span>}
+                    </td>
+                    <td className="px-5 py-3.5 text-center text-xs">
+                      {NO_JAM_STATUSES.includes(row.status) ? (
+                        <span className="text-muted-foreground italic">-</span>
+                      ) : (() => {
+                        const deadline = getDeadlineTime(row.schedule_jam_masuk, row.toleransi_menit);
+                        if (!deadline) return <span className="text-muted-foreground italic">-</span>;
+                        return (
+                          <div className="flex flex-col items-center leading-tight">
+                            <span className="font-semibold text-foreground text-sm">{deadline}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {row.schedule_jam_masuk.slice(0, 5)} +{row.toleransi_menit}m
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-5 py-3.5 text-center text-xs">
                       {NO_JAM_STATUSES.includes(row.status)
