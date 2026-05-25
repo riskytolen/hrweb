@@ -14,6 +14,13 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
+import {
+  computePerformance,
+  getGradeColor,
+  PENALTY,
+  type AttendanceLite,
+  type SpDocLite,
+} from "@/lib/performance";
 
 // ─── Types ───
 type EmployeeLite = {
@@ -24,8 +31,6 @@ type EmployeeLite = {
   tanggal_bergabung: string | null;
   jabatan?: { nama: string } | null;
 };
-type AttendanceRecord = { employee_id: string; tanggal: string; status: string; durasi_telat: number; is_manual: boolean };
-type LegalDoc = { employee_id: string; kategori: string; tingkat_sp: string | null; status: string; tanggal_terbit: string };
 
 type PerformanceRow = {
   employee_id: string;
@@ -53,35 +58,6 @@ type PerformanceRow = {
 // ─── Constants ───
 const PAGE_SIZE = 10;
 const CUT_OFF_DAY = 8;
-
-const PENALTY = {
-  ALPHA_PER_HARI: 5,
-  TELAT_PER_KEJADIAN: 1,
-  TELAT_PER_30_MENIT: 1,
-  MANUAL_PER_KEJADIAN: 2,
-  SP1: 10,
-  SP2: 20,
-  SP3: 40,
-};
-
-function getGrade(skor: number): string {
-  if (skor >= 90) return "A";
-  if (skor >= 80) return "B";
-  if (skor >= 70) return "C";
-  if (skor >= 60) return "D";
-  return "E";
-}
-
-function getGradeColor(grade: string): string {
-  switch (grade) {
-    case "A": return "#10b981";
-    case "B": return "#3b82f6";
-    case "C": return "#f59e0b";
-    case "D": return "#f97316";
-    case "E": return "#ef4444";
-    default: return "#6b7280";
-  }
-}
 
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string; shortLabel: string } {
   const [year, month] = periodKey.split("-").map(Number);
@@ -143,54 +119,18 @@ export default function PerformancePage() {
     dateMode === "periode" ? getPeriodRange(getPrevPeriodKey(periodKey)) : null,
     [dateMode, periodKey]);
 
-  // Helper: hitung performance untuk satu range dataset
-  const computeRows = useCallback((emps: EmployeeLite[], attendance: AttendanceRecord[], spDocs: LegalDoc[]): PerformanceRow[] => {
+  // Helper: hitung performance untuk satu range dataset.
+  // Memakai shared util dari @/lib/performance supaya logic sama dengan dashboard.
+  const computeRows = useCallback((emps: EmployeeLite[], attendance: AttendanceLite[], spDocs: SpDocLite[]): PerformanceRow[] => {
     return emps.map((emp) => {
-      const empAtt = attendance.filter((a) => a.employee_id === emp.id);
-      const empSP = spDocs.filter((s) => s.employee_id === emp.id);
-
-      const totalHariKerja = empAtt.length || 0;
-      const hadir = empAtt.filter((a) => a.status === "Hadir" || a.status === "Terlambat").length;
-      const telat = empAtt.filter((a) => a.status === "Terlambat").length;
-      const totalMenitTelat = empAtt.filter((a) => a.status === "Terlambat").reduce((s, a) => s + (a.durasi_telat || 0), 0);
-      const alpha = empAtt.filter((a) => a.status === "Alpha").length;
-      const manual = empAtt.filter((a) => a.is_manual && (a.status === "Hadir" || a.status === "Terlambat")).length;
-      const izin = empAtt.filter((a) => a.status === "Izin").length;
-      const sakit = empAtt.filter((a) => a.status === "Sakit").length;
-      const cuti = empAtt.filter((a) => a.status === "Cuti").length;
-
-      const sp1 = empSP.filter((s) => s.tingkat_sp === "SP-1").length;
-      const sp2 = empSP.filter((s) => s.tingkat_sp === "SP-2").length;
-      const sp3 = empSP.filter((s) => s.tingkat_sp === "SP-3").length;
-      const spCount = sp1 + sp2 + sp3;
-
-      const penaltyAlpha = alpha * PENALTY.ALPHA_PER_HARI;
-      const penaltyTelat = (telat * PENALTY.TELAT_PER_KEJADIAN) + (Math.floor(totalMenitTelat / 30) * PENALTY.TELAT_PER_30_MENIT);
-      const penaltyManual = manual * PENALTY.MANUAL_PER_KEJADIAN;
-      const penaltySP = (sp1 * PENALTY.SP1) + (sp2 * PENALTY.SP2) + (sp3 * PENALTY.SP3);
-
-      let skor = 100 - penaltyAlpha - penaltyTelat - penaltyManual - penaltySP;
-      skor = Math.max(0, Math.min(100, skor));
-
+      const breakdown = computePerformance(emp.id, attendance, spDocs);
       return {
         employee_id: emp.id,
         nama: emp.nama,
         jabatanNama: emp.jabatan?.nama ?? "-",
         status: emp.status,
         tanggalBergabung: emp.tanggal_bergabung,
-        totalHariKerja,
-        hadir,
-        telat,
-        totalMenitTelat,
-        alpha,
-        manual,
-        izin,
-        sakit,
-        cuti,
-        spCount,
-        sp1, sp2, sp3,
-        skorTotal: skor,
-        grade: getGrade(skor),
+        ...breakdown,
       };
     });
   }, []);
@@ -213,7 +153,7 @@ export default function PerformancePage() {
       .select("employee_id, tanggal, status, durasi_telat, is_manual")
       .gte("tanggal", period.start)
       .lte("tanggal", period.end);
-    const attendance: AttendanceRecord[] = attData || [];
+    const attendance: AttendanceLite[] = attData || [];
 
     // Active SP
     const { data: spData } = await supabase
@@ -221,7 +161,7 @@ export default function PerformancePage() {
       .select("employee_id, kategori, tingkat_sp, status, tanggal_terbit")
       .eq("kategori", "SP")
       .eq("status", "Aktif");
-    const spDocs: LegalDoc[] = spData || [];
+    const spDocs: SpDocLite[] = spData || [];
 
     const rows = computeRows(emps, attendance, spDocs);
     rows.sort((a, b) => b.skorTotal - a.skorTotal);

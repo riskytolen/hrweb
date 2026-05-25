@@ -17,6 +17,8 @@ import {
   Activity,
   Award,
   Sparkles,
+  Trophy,
+  Medal,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -38,6 +40,12 @@ import { useAuth } from "@/components/AuthProvider";
 import { cn, formatCurrency, formatNumber, getInitials } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { entityLabel } from "@/lib/audit";
+import {
+  computePerformance,
+  getGradeColor,
+  type AttendanceLite,
+  type SpDocLite,
+} from "@/lib/performance";
 
 // ─── Types ───
 interface KpiData {
@@ -87,6 +95,20 @@ interface AuditLite {
   entity_label: string | null;
   user_nama: string | null;
   created_at: string;
+}
+
+interface TopPerformer {
+  employee_id: string;
+  nama: string;
+  jabatanNama: string;
+  skorTotal: number;
+  grade: "A" | "B" | "C" | "D" | "E";
+  hadir: number;
+  totalHariKerja: number;
+  telat: number;
+  alpha: number;
+  manual: number;
+  spCount: number;
 }
 
 // ─── Period helpers (cut-off tgl 8) ───
@@ -162,6 +184,7 @@ export default function DashboardPage() {
   const [statusDist, setStatusDist] = useState<{ status: string; count: number; color: string }[]>([]);
   const [recruitment, setRecruitment] = useState<RecruitmentStat[]>([]);
   const [recent, setRecent] = useState<AuditLite[]>([]);
+  const [topPerformers, setTopPerformers] = useState<TopPerformer[]>([]);
 
   const period = useMemo(() => getActivePeriod(), []);
   const prev = useMemo(() => getPreviousPeriod(), []);
@@ -225,6 +248,22 @@ export default function DashboardPage() {
       .order("created_at", { ascending: false })
       .limit(8);
 
+    // 8. Top performers — pegawai aktif + attendance periode + SP aktif
+    const empPerfPromise = supabase
+      .from("pegawai")
+      .select("id, nama, jabatan_id, status, jabatan:jabatan_id(nama)")
+      .eq("status", "Aktif");
+    const attPerfPromise = supabase
+      .from("attendance_records")
+      .select("employee_id, status, durasi_telat, is_manual")
+      .gte("tanggal", period.start)
+      .lte("tanggal", period.end);
+    const spPerfPromise = supabase
+      .from("legal_documents")
+      .select("employee_id, kategori, tingkat_sp, status")
+      .eq("kategori", "SP")
+      .eq("status", "Aktif");
+
     const [
       pegRes,
       attRes,
@@ -235,6 +274,9 @@ export default function DashboardPage() {
       legalRes,
       recRes,
       auditRes,
+      empPerfRes,
+      attPerfRes,
+      spPerfRes,
     ] = await Promise.all([
       pegawaiPromise,
       attendancePromise,
@@ -245,6 +287,9 @@ export default function DashboardPage() {
       legalPending,
       recruitmentPromise,
       auditPromise,
+      empPerfPromise,
+      attPerfPromise,
+      spPerfPromise,
     ]);
 
     // ─── Process pegawai stats ───
@@ -368,6 +413,42 @@ export default function DashboardPage() {
     // ─── Audit logs ───
     const auditRows = (auditRes.data ?? []) as AuditLite[];
 
+    // ─── Top Performers (kinerja terbaik periode aktif) ───
+    type EmpPerfRow = {
+      id: string;
+      nama: string;
+      jabatan: { nama: string } | null;
+    };
+    const empsPerf = (empPerfRes.data ?? []) as unknown as EmpPerfRow[];
+    const attPerf = (attPerfRes.data ?? []) as AttendanceLite[];
+    const spPerf = (spPerfRes.data ?? []) as SpDocLite[];
+
+    const topPerformersData: TopPerformer[] = empsPerf
+      .map((e) => {
+        const b = computePerformance(e.id, attPerf, spPerf);
+        return {
+          employee_id: e.id,
+          nama: e.nama,
+          jabatanNama: e.jabatan?.nama ?? "-",
+          skorTotal: b.skorTotal,
+          grade: b.grade,
+          hadir: b.hadir,
+          totalHariKerja: b.totalHariKerja,
+          telat: b.telat,
+          alpha: b.alpha,
+          manual: b.manual,
+          spCount: b.spCount,
+        };
+      })
+      // Skip pegawai yg tidak ada attendance sama sekali (skor full 100 tanpa data — bias)
+      .filter((p) => p.totalHariKerja > 0)
+      .sort((a, b) => {
+        if (b.skorTotal !== a.skorTotal) return b.skorTotal - a.skorTotal;
+        // tie-breaker: hari kerja lebih banyak menang
+        return b.totalHariKerja - a.totalHariKerja;
+      })
+      .slice(0, 5);
+
     setKpi({
       pegawaiAktif,
       pegawaiTraining,
@@ -385,6 +466,7 @@ export default function DashboardPage() {
     setStatusDist(statusArr);
     setRecruitment(recArr);
     setRecent(auditRows);
+    setTopPerformers(topPerformersData);
     setLoading(false);
   }, [period.start, period.end, prev.start, prev.end, today]);
 
@@ -887,6 +969,108 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* ─── Row 5: Pegawai Terbaik ─── */}
+      <div className="bg-card rounded-2xl border border-border overflow-hidden">
+        {/* Header */}
+        <div className="relative px-5 py-4 border-b border-border bg-gradient-to-r from-amber-500/[0.06] via-card to-card">
+          <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-amber-400/10 blur-3xl pointer-events-none" />
+          <div className="relative flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-md shadow-amber-500/30 flex-shrink-0">
+                <Trophy className="w-[18px] h-[18px]" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-foreground">Pegawai Terbaik</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Berdasarkan skor kinerja periode aktif</p>
+              </div>
+            </div>
+            <Link
+              href="/employees/performance"
+              className="text-[11px] font-semibold text-primary hover:underline inline-flex items-center gap-1 flex-shrink-0"
+            >
+              Lihat semua <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-5">
+          {loading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="w-full h-14 rounded-xl" />)}
+            </div>
+          ) : topPerformers.length === 0 ? (
+            <EmptyState message="Belum ada data kinerja di periode ini." />
+          ) : (
+            <ul className="space-y-2">
+              {topPerformers.map((p, idx) => {
+                const gradeColor = getGradeColor(p.grade);
+                const totalIncident = p.alpha + p.telat + p.manual + p.spCount;
+                const rankIcon =
+                  idx === 0 ? <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                  : idx === 1 ? <Medal className="w-3.5 h-3.5 text-slate-400" />
+                  : idx === 2 ? <Medal className="w-3.5 h-3.5 text-amber-700" />
+                  : null;
+                const rankBg =
+                  idx === 0 ? "from-amber-400/15 to-orange-400/10 border-amber-400/30"
+                  : idx === 1 ? "from-slate-300/15 to-slate-400/10 border-slate-400/25"
+                  : idx === 2 ? "from-amber-700/15 to-amber-800/10 border-amber-700/30"
+                  : "from-transparent to-transparent border-border";
+
+                return (
+                  <li
+                    key={p.employee_id}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2.5 rounded-xl border bg-gradient-to-r transition-colors hover:bg-muted/30",
+                      rankBg,
+                    )}
+                  >
+                    {/* Rank */}
+                    <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-card border border-border flex-shrink-0">
+                      {rankIcon ?? (
+                        <span className="text-[11px] font-bold text-muted-foreground">#{idx + 1}</span>
+                      )}
+                    </div>
+
+                    {/* Avatar */}
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white font-bold text-[11px] flex-shrink-0">
+                      {getInitials(p.nama)}
+                    </div>
+
+                    {/* Identity */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{p.nama}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{p.jabatanNama}</p>
+                    </div>
+
+                    {/* Mini stats — hidden di mobile */}
+                    <div className="hidden md:flex items-center gap-3 text-[10px] text-muted-foreground">
+                      <Stat label="Hadir" value={`${p.hadir}/${p.totalHariKerja}`} />
+                      <span className="w-px h-4 bg-border" />
+                      <Stat label="Insiden" value={String(totalIncident)} accent={totalIncident > 0 ? "warning" : undefined} />
+                    </div>
+
+                    {/* Score + Grade */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="text-right">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider font-semibold">Skor</p>
+                        <p className="text-base font-bold text-foreground tabular-nums leading-none mt-0.5">{p.skorTotal}</p>
+                      </div>
+                      <div
+                        className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                        style={{ backgroundColor: gradeColor }}
+                      >
+                        {p.grade}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -976,6 +1160,20 @@ function EmptyState({ message }: { message: string }) {
         <Activity className="w-5 h-5 text-muted-foreground" />
       </div>
       <p className="text-xs text-muted-foreground">{message}</p>
+    </div>
+  );
+}
+
+function Stat({ label, value, accent }: { label: string; value: string; accent?: "warning" | "success" }) {
+  return (
+    <div className="text-center">
+      <p className="text-[9px] uppercase tracking-wider font-semibold">{label}</p>
+      <p className={cn(
+        "text-[12px] font-bold tabular-nums leading-none mt-0.5",
+        accent === "warning" ? "text-warning" : accent === "success" ? "text-success" : "text-foreground",
+      )}>
+        {value}
+      </p>
     </div>
   );
 }
