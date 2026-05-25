@@ -71,7 +71,7 @@ export default function LoginPage() {
       }
 
       // 3. Success → redirect
-      router.push("/employees");
+      router.push("/dashboard");
       router.refresh();
     } catch {
       setError("Terjadi kesalahan. Silakan coba lagi.");
