@@ -26,6 +26,7 @@ import {
   Megaphone,
   Clock,
   ShieldCheck,
+  LayoutDashboard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -42,25 +43,47 @@ interface SubItem {
   permission?: string;
 }
 
+interface MenuLink {
+  kind: "link";
+  key: string;
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  permission?: string;
+  /** Bila true, item dianggap visible untuk semua user authenticated. */
+  alwaysVisible?: boolean;
+}
+
 interface MenuGroup {
+  kind: "group";
   key: string;
   label: string;
   icon: LucideIcon;
   basePath: string;
-  permission?: string;
   items: SubItem[];
 }
 
+type MenuEntry = MenuLink | MenuGroup;
+
 interface MenuSection {
   label: string;
-  groups: MenuGroup[];
+  entries: MenuEntry[];
 }
 
 const allSections: MenuSection[] = [
   {
     label: "Menu",
-    groups: [
+    entries: [
       {
+        kind: "link",
+        key: "dashboard",
+        label: "Dashboard",
+        href: "/dashboard",
+        icon: LayoutDashboard,
+        alwaysVisible: true,
+      },
+      {
+        kind: "group",
         key: "hrm",
         label: "HRM",
         icon: UsersRound,
@@ -82,8 +105,9 @@ const allSections: MenuSection[] = [
   },
   {
     label: "Sistem",
-    groups: [
+    entries: [
       {
+        kind: "group",
         key: "settings",
         label: "Pengaturan",
         icon: Settings,
@@ -103,24 +127,34 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const { isSuperAdmin, hasPermission, isLoading, profile } = useAuth();
 
-  // Filter section/group/items berdasarkan permission user
+  // Filter section/entries berdasarkan permission user
   const sections: MenuSection[] = allSections
     .map((section) => {
-      const filteredGroups = section.groups
-        .map((group) => {
-          const filteredItems = group.items.filter((item) => {
+      const filteredEntries = section.entries
+        .map((entry): MenuEntry | null => {
+          if (entry.kind === "link") {
+            // Standalone link
+            if (isLoading || !profile || entry.alwaysVisible) return entry;
+            if (entry.href === "/settings/accounts") return isSuperAdmin ? entry : null;
+            if (entry.href === "/settings/audit-logs") return isSuperAdmin ? entry : null;
+            if (!entry.permission) return entry;
+            return hasPermission(entry.permission) || hasPermission(entry.permission + ".view") ? entry : null;
+          }
+          // Group: filter sub items
+          const filteredItems = entry.items.filter((item) => {
             if (isLoading || !profile) return true;
             if (item.href === "/settings/accounts") return isSuperAdmin;
             if (item.href === "/settings/audit-logs") return isSuperAdmin;
             if (!item.permission) return true;
             return hasPermission(item.permission) || hasPermission(item.permission + ".view");
           });
-          return { ...group, items: filteredItems };
+          if (filteredItems.length === 0) return null;
+          return { ...entry, items: filteredItems };
         })
-        .filter((g) => g.items.length > 0);
-      return { ...section, groups: filteredGroups };
+        .filter((e): e is MenuEntry => e !== null);
+      return { ...section, entries: filteredEntries };
     })
-    .filter((s) => s.groups.length > 0);
+    .filter((s) => s.entries.length > 0);
 
   /**
    * Active href = href terpanjang yang match dengan pathname (exact atau prefix).
@@ -128,15 +162,22 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
    */
   const activeHref: string | null = (() => {
     let best: string | null = null;
+    const consider = (href: string) => {
+      const isMatch = pathname === href || pathname.startsWith(href + "/");
+      if (isMatch && (best === null || href.length > best.length)) {
+        best = href;
+      }
+    };
     sections.forEach((s) => {
-      s.groups.forEach((g) => {
-        g.items.forEach((item) => {
-          if (item.comingSoon) return;
-          const isMatch = pathname === item.href || pathname.startsWith(item.href + "/");
-          if (isMatch && (best === null || item.href.length > best.length)) {
-            best = item.href;
-          }
-        });
+      s.entries.forEach((entry) => {
+        if (entry.kind === "link") {
+          consider(entry.href);
+        } else {
+          entry.items.forEach((item) => {
+            if (item.comingSoon) return;
+            consider(item.href);
+          });
+        }
       });
     });
     return best;
@@ -146,8 +187,10 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const computeOpenGroups = () => {
     const open: Record<string, boolean> = {};
     sections.forEach((s) => {
-      s.groups.forEach((g) => {
-        open[g.key] = g.items.some((item) => item.href === activeHref);
+      s.entries.forEach((entry) => {
+        if (entry.kind === "group") {
+          open[entry.key] = entry.items.some((item) => item.href === activeHref);
+        }
       });
     });
     return open;
@@ -235,7 +278,64 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               )}
 
               <div className={cn(collapsed ? "space-y-1" : "space-y-0.5")}>
-                {section.groups.map((group) => {
+                {section.entries.map((entry) => {
+                  // ─── Standalone link entry ───
+                  if (entry.kind === "link") {
+                    const isActive = entry.href === activeHref;
+                    const LinkIcon = entry.icon;
+                    return (
+                      <div key={entry.key} className="relative group/trigger">
+                        <Link
+                          href={entry.href}
+                          className={cn(
+                            "w-full flex items-center rounded-lg transition-colors",
+                            collapsed
+                              ? "justify-center h-10 w-10 mx-auto"
+                              : "gap-2.5 px-2 py-1.5",
+                            isActive
+                              ? "text-white bg-white/[0.05]"
+                              : "text-slate-400 hover:text-white hover:bg-white/[0.04]",
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "flex items-center justify-center flex-shrink-0 w-7 h-7 rounded-md transition-colors",
+                              isActive
+                                ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/20"
+                                : "bg-white/[0.04] text-slate-400",
+                            )}
+                          >
+                            <LinkIcon className="w-[15px] h-[15px]" strokeWidth={2} />
+                          </div>
+
+                          {!collapsed && (
+                            <span
+                              className={cn(
+                                "flex-1 text-left text-[12.5px] truncate",
+                                isActive ? "font-semibold text-white" : "font-medium",
+                              )}
+                            >
+                              {entry.label}
+                            </span>
+                          )}
+
+                          {/* Active indicator dot kecil saat expanded */}
+                          {!collapsed && isActive && (
+                            <span className="w-1 h-1 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex-shrink-0" />
+                          )}
+                        </Link>
+
+                        {collapsed && (
+                          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-md shadow-xl ring-1 ring-white/10 opacity-0 invisible group-hover/trigger:opacity-100 group-hover/trigger:visible whitespace-nowrap z-50 transition-opacity">
+                            {entry.label}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // ─── Group entry ───
+                  const group = entry;
                   const isOpen = openGroups[group.key];
                   const isGroupActive = group.items.some((item) => item.href === activeHref);
                   const GroupIcon = group.icon;
@@ -265,8 +365,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                           {/* Icon */}
                           <div
                             className={cn(
-                              "flex items-center justify-center flex-shrink-0 rounded-md transition-colors",
-                              collapsed ? "w-7 h-7" : "w-7 h-7",
+                              "flex items-center justify-center flex-shrink-0 w-7 h-7 rounded-md transition-colors",
                               isGroupActive
                                 ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/20"
                                 : "bg-white/[0.04] text-slate-400 group-hover/btn:bg-white/[0.07] group-hover/btn:text-slate-200",
