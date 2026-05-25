@@ -1,4 +1,4 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 
 :root {
   --background: #f8fafc;
@@ -233,16 +233,16 @@ aside ::-webkit-scrollbar-thumb:hover {
   background-clip: text;
 }
 
-/* ═══════════════════════════════════════════════════════════════ */
-/* LOGIN PAGE STYLES — Premium Dark Theme                         */
-/* ═══════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* LOGIN PAGE STYLES â€” Premium Dark Theme                         */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-/* ── Base Background ── */
+/* â”€â”€ Base Background â”€â”€ */
 .login-bg-base {
   background: #050810;
 }
 
-/* ── Animated Gradient Orbs ── */
+/* â”€â”€ Animated Gradient Orbs â”€â”€ */
 .login-orb {
   position: absolute;
   border-radius: 50%;
@@ -294,7 +294,7 @@ aside ::-webkit-scrollbar-thumb:hover {
   50% { transform: translate(50px, -30px) scale(1.1); }
 }
 
-/* ── Grid Pattern ── */
+/* â”€â”€ Grid Pattern â”€â”€ */
 .login-grid-pattern {
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
@@ -302,14 +302,14 @@ aside ::-webkit-scrollbar-thumb:hover {
   background-size: 60px 60px;
 }
 
-/* ── Noise Texture ── */
+/* â”€â”€ Noise Texture â”€â”€ */
 .login-noise {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 128px 128px;
 }
 
-/* ── Logo Box ── */
+/* â”€â”€ Logo Box â”€â”€ */
 .login-logo-box {
   width: 40px;
   height: 40px;
@@ -322,15 +322,12 @@ aside ::-webkit-scrollbar-thumb:hover {
   justify-content: center;
 }
 
-/* ── Brand Accent ── */
+/* â”€â”€ Brand Accent â”€â”€ */
 .login-brand-accent {
-  background: linear-gradient(135deg, #60a5fa, #a78bfa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #ffffff;
 }
 
-/* ── Badge ── */
+/* â”€â”€ Badge â”€â”€ */
 .login-badge {
   display: inline-flex;
   align-items: center;
@@ -345,15 +342,12 @@ aside ::-webkit-scrollbar-thumb:hover {
   letter-spacing: 0.01em;
 }
 
-/* ── Gradient Text ── */
+/* â”€â”€ Gradient Text â”€â”€ */
 .login-gradient-text {
-  background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #34d399 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #ffffff;
 }
 
-/* ── Feature Pill ── */
+/* â”€â”€ Feature Pill â”€â”€ */
 .login-feature-pill {
   padding: 6px 16px;
   border-radius: 100px;
@@ -365,7 +359,7 @@ aside ::-webkit-scrollbar-thumb:hover {
   backdrop-filter: blur(4px);
 }
 
-/* ── Status Dot ── */
+/* â”€â”€ Status Dot â”€â”€ */
 .login-status-dot {
   position: relative;
   display: flex;
@@ -400,9 +394,9 @@ aside ::-webkit-scrollbar-thumb:hover {
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 /* LOGIN CARD                                                      */
-/* ═══════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 .login-card {
   position: relative;
@@ -424,7 +418,7 @@ aside ::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.3), rgba(139, 92, 246, 0.3), transparent);
 }
 
-/* ── Label ── */
+/* â”€â”€ Label â”€â”€ */
 .login-label {
   display: block;
   font-size: 13px;
@@ -433,7 +427,7 @@ aside ::-webkit-scrollbar-thumb:hover {
   letter-spacing: 0.01em;
 }
 
-/* ── Input fields ── */
+/* â”€â”€ Input fields â”€â”€ */
 .login-input-wrap {
   position: relative;
   border-radius: 14px;
@@ -484,7 +478,7 @@ aside ::-webkit-scrollbar-thumb:hover {
   color: rgba(255, 255, 255, 0.2);
 }
 
-/* ── Checkbox ── */
+/* â”€â”€ Checkbox â”€â”€ */
 .login-checkbox {
   width: 18px;
   height: 18px;
@@ -495,7 +489,7 @@ aside ::-webkit-scrollbar-thumb:hover {
   border: 1.5px solid rgba(255, 255, 255, 0.12);
 }
 
-/* ── Submit button ── */
+/* â”€â”€ Submit button â”€â”€ */
 .login-submit-btn {
   width: 100%;
   display: flex;
@@ -550,7 +544,7 @@ aside ::-webkit-scrollbar-thumb:hover {
   transform: none;
 }
 
-/* ── Spinner ── */
+/* â”€â”€ Spinner â”€â”€ */
 .login-spinner {
   width: 18px;
   height: 18px;
@@ -564,7 +558,7 @@ aside ::-webkit-scrollbar-thumb:hover {
   to { transform: rotate(360deg); }
 }
 
-/* ── Error Alert ── */
+/* â”€â”€ Error Alert â”€â”€ */
 .login-error-alert {
   display: flex;
   align-items: flex-start;
