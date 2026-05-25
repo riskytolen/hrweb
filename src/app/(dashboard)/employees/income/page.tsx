@@ -36,9 +36,9 @@ import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
 type EmployeeLite = { id: string; nama: string; status: string };
-type DivisionLite = { id: number; nama: string; color: string };
+type ZoneLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
-type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; divisionNama?: string; divisionColor?: string; statusNama?: string; statusColor?: string };
+type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; zoneNama?: string; zoneColor?: string; statusNama?: string; statusColor?: string };
 
 // Batch form row
 type BatchRow = {
@@ -47,7 +47,7 @@ type BatchRow = {
   employee_id: string | null;
   /** Display nama (snapshot saat pilih). Empty string = baris kosong. */
   nama: string;
-  division_id: number;
+  zone_id: number;
   role: "Driver" | "Helper" | "";
   jumlah_titik: string;
   catatan: string;
@@ -61,7 +61,7 @@ const blankRow = (): BatchRow => ({
   rowKey: nextRowKey(),
   employee_id: null,
   nama: "",
-  division_id: 0,
+  zone_id: 0,
   role: "",
   jumlah_titik: "",
   catatan: "",
@@ -110,7 +110,7 @@ export default function IncomePage() {
   const period = getPeriodRange(periodKey);
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
-  const [divisions, setDivisions] = useState<DivisionLite[]>([]);
+  const [zones, setZones] = useState<ZoneLite[]>([]);
   const [dStatuses, setDStatuses] = useState<StatusLite[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
 
@@ -122,7 +122,7 @@ export default function IncomePage() {
 
   // Calendar cell edit
   const [calEditCell, setCalEditCell] = useState<{ empId: string; empNama: string; dateStr: string } | null>(null);
-  const [calEditEntries, setCalEditEntries] = useState<{ id: number | null; division_id: number; role: string; jumlah_titik: string; status_id: number; catatan: string }[]>([]);
+  const [calEditEntries, setCalEditEntries] = useState<{ id: number | null; zone_id: number; role: string; jumlah_titik: string; status_id: number; catatan: string }[]>([]);
   const [calEditSaving, setCalEditSaving] = useState(false);
 
   // ─── Batch Input State ───
@@ -141,7 +141,7 @@ export default function IncomePage() {
   // ─── Edit single row ───
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ division_id: 0, role: "Driver", jumlah_titik: "", status_id: 0 });
+  const [editForm, setEditForm] = useState({ zone_id: 0, role: "Driver", jumlah_titik: "", status_id: 0 });
   const [editError, setEditError] = useState("");
 
   const [showReport, setShowReport] = useState(false);
@@ -166,10 +166,10 @@ export default function IncomePage() {
     if (data) setEmployees(data);
   };
 
-  const fetchDivisions = async () => {
-    const { data, error } = await supabase.from("divisions").select("id, nama, color").eq("status", "Aktif").order("nama");
-    if (error) { showToast("error", "Gagal Memuat Divisi", error.message); return; }
-    if (data) setDivisions(data);
+  const fetchZones = async () => {
+    const { data, error } = await supabase.from("delivery_zones").select("id, nama, color").eq("status", "Aktif").order("nama");
+    if (error) { showToast("error", "Gagal Memuat Nama Titik", error.message); return; }
+    if (data) setZones(data);
   };
 
   const fetchDStatuses = async () => {
@@ -181,7 +181,7 @@ export default function IncomePage() {
   const fetchDeliveries = async () => {
     const { data, error } = await supabase
       .from("delivery_points")
-      .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
+      .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
       .gte("tanggal", period.start)
       .lte("tanggal", period.end)
       .order("tanggal", { ascending: false })
@@ -191,8 +191,8 @@ export default function IncomePage() {
       const mapped = data.map((d) => ({
         ...d,
         employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
-        divisionNama: d.divisions?.nama || "-",
-        divisionColor: d.divisions?.color || "#3b82f6",
+        zoneNama: d.delivery_zones?.nama || "-",
+        zoneColor: d.delivery_zones?.color || "#3b82f6",
         statusNama: d.delivery_statuses?.nama || null,
         statusColor: d.delivery_statuses?.color || null,
       })) as DeliveryRow[];
@@ -206,7 +206,7 @@ export default function IncomePage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchDivisions(), fetchDStatuses(), fetchDeliveries()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchZones(), fetchDStatuses(), fetchDeliveries()]).then(() => setLoading(false));
   }, []);
 
   useEffect(() => { fetchDeliveries(); }, [periodKey]);
@@ -240,10 +240,10 @@ export default function IncomePage() {
     ));
   };
 
-  const handleBatchRowChange = (rowKey: string, field: "division_id" | "role" | "jumlah_titik" | "catatan" | "status_id", value: string | number) => {
+  const handleBatchRowChange = (rowKey: string, field: "zone_id" | "role" | "jumlah_titik" | "catatan" | "status_id", value: string | number) => {
     setBatchRows((prev) => prev.map((r) => r.rowKey === rowKey ? { ...r, [field]: value } : r));
-    // Reset tanda duplikat DB saat user ubah divisi atau posisi
-    if ((field === "division_id" || field === "role") && dbDuplicateRowKeys.has(rowKey)) {
+    // Reset tanda duplikat DB saat user ubah nama titik atau posisi
+    if ((field === "zone_id" || field === "role") && dbDuplicateRowKeys.has(rowKey)) {
       setDbDuplicateRowKeys((prev) => { const n = new Set(prev); n.delete(rowKey); return n; });
     }
   };
@@ -270,7 +270,7 @@ export default function IncomePage() {
   /** Hapus semua baris yang masih kosong (belum pilih pegawai dan belum input apapun). */
   const removeBlankRows = () => {
     setBatchRows((prev) => {
-      const filtered = prev.filter((r) => r.employee_id || r.division_id || r.role || r.jumlah_titik);
+      const filtered = prev.filter((r) => r.employee_id || r.zone_id || r.role || r.jumlah_titik);
       return filtered.length === 0 ? [blankRow()] : filtered;
     });
   };
@@ -311,7 +311,7 @@ export default function IncomePage() {
     setDragOverIdx(null);
   };
 
-  const hasBatchData = batchRows.some((r) => r.employee_id || r.jumlah_titik || r.division_id || r.role);
+  const hasBatchData = batchRows.some((r) => r.employee_id || r.jumlah_titik || r.zone_id || r.role);
 
   const tryCloseBatch = () => {
     if (hasBatchData) {
@@ -331,31 +331,31 @@ export default function IncomePage() {
     const validRows = batchRows.filter((r) =>
       r.employee_id &&
       r.jumlah_titik && parseInt(r.jumlah_titik) > 0 &&
-      r.division_id && r.role,
+      r.zone_id && r.role,
     );
     if (validRows.length === 0 || !batchDate) return null;
 
     // Lookup rates
-    const { data: allRates } = await supabase.from("point_rates").select("division_id, role, rate_per_point").eq("status", "Aktif");
+    const { data: allRates } = await supabase.from("point_rates").select("zone_id, role, rate_per_point").eq("status", "Aktif");
     const rateMap = new Map<string, number>();
-    allRates?.forEach((r) => rateMap.set(`${r.division_id}-${r.role}`, r.rate_per_point));
+    allRates?.forEach((r) => rateMap.set(`${r.zone_id}-${r.role}`, r.rate_per_point));
 
     // Check existing data for this date
-    const { data: existing } = await supabase.from("delivery_points").select("id, employee_id, division_id, role").eq("tanggal", batchDate);
+    const { data: existing } = await supabase.from("delivery_points").select("id, employee_id, zone_id, role").eq("tanggal", batchDate);
     const existingMap = new Map<string, number>();
-    existing?.forEach((e) => existingMap.set(`${e.employee_id}-${e.division_id}-${e.role}`, e.id));
+    existing?.forEach((e) => existingMap.set(`${e.employee_id}-${e.zone_id}-${e.role}`, e.id));
 
     const newRows: Record<string, unknown>[] = [];
     const updateRows: { id: number; data: Record<string, unknown> }[] = [];
     const dupRowKeys: string[] = [];
 
     validRows.forEach((r) => {
-      const key = `${r.employee_id}-${r.division_id}-${r.role}`;
-      const rate = rateMap.get(`${r.division_id}-${r.role}`) || 0;
+      const key = `${r.employee_id}-${r.zone_id}-${r.role}`;
+      const rate = rateMap.get(`${r.zone_id}-${r.role}`) || 0;
       const payload = {
         employee_id: r.employee_id,
         employee_nama: r.nama,
-        division_id: r.division_id,
+        zone_id: r.zone_id,
         role: r.role,
         tanggal: batchDate,
         jumlah_titik: parseInt(r.jumlah_titik),
@@ -455,23 +455,23 @@ export default function IncomePage() {
 
   // ─── Edit single ───
   const openEdit = (row: DeliveryRow) => {
-    setEditForm({ division_id: row.division_id, role: row.role, jumlah_titik: String(row.jumlah_titik), status_id: row.status_id || 0 });
+    setEditForm({ zone_id: row.zone_id, role: row.role, jumlah_titik: String(row.jumlah_titik), status_id: row.status_id || 0 });
     setEditError("");
     setEditingId(row.id);
     setShowEditForm(true);
   };
 
   const handleEditSave = async () => {
-    if (!editingId || !editForm.jumlah_titik || !editForm.division_id) return;
+    if (!editingId || !editForm.jumlah_titik || !editForm.zone_id) return;
     setEditError("");
     const row = deliveries.find((d) => d.id === editingId);
     if (!row) return;
 
-    // Cek duplikat: apakah ada data lain dengan pegawai + divisi + posisi + tanggal yang sama
+    // Cek duplikat: apakah ada data lain dengan pegawai + nama titik + posisi + tanggal yang sama
     let dupQuery = supabase
       .from("delivery_points")
       .select("id")
-      .eq("division_id", editForm.division_id)
+      .eq("zone_id", editForm.zone_id)
       .eq("role", editForm.role)
       .eq("tanggal", row.tanggal)
       .neq("id", editingId)
@@ -480,15 +480,15 @@ export default function IncomePage() {
     const { data: existing } = await dupQuery;
 
     if (existing && existing.length > 0) {
-      setEditError(`Data ${row.employeeNama} dengan divisi dan posisi ini sudah ada di tanggal ${row.tanggal}.`);
+      setEditError(`Data ${row.employeeNama} dengan nama titik dan posisi ini sudah ada di tanggal ${row.tanggal}.`);
       return;
     }
 
     // Re-lookup rate
-    const { data: rateData } = await supabase.from("point_rates").select("rate_per_point").eq("division_id", editForm.division_id).eq("role", editForm.role).eq("status", "Aktif").single();
+    const { data: rateData } = await supabase.from("point_rates").select("rate_per_point").eq("zone_id", editForm.zone_id).eq("role", editForm.role).eq("status", "Aktif").single();
 
     const updatePayload = {
-      division_id: editForm.division_id,
+      zone_id: editForm.zone_id,
       role: editForm.role,
       jumlah_titik: parseInt(editForm.jumlah_titik),
       rate_per_point: rateData?.rate_per_point || row.rate_per_point,
@@ -499,7 +499,7 @@ export default function IncomePage() {
       .from("delivery_points")
       .update(updatePayload)
       .eq("id", editingId)
-      .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
+      .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
       .single();
 
     if (updateError || !updated) {
@@ -511,8 +511,8 @@ export default function IncomePage() {
     const mappedRow: DeliveryRow = {
       ...updated,
       employeeNama: updated.pegawai?.nama || updated.employee_nama || updated.employee_id || "?",
-      divisionNama: updated.divisions?.nama || "-",
-      divisionColor: updated.divisions?.color || "#3b82f6",
+      zoneNama: updated.delivery_zones?.nama || "-",
+      zoneColor: updated.delivery_zones?.color || "#3b82f6",
       statusNama: updated.delivery_statuses?.nama || null,
       statusColor: updated.delivery_statuses?.color || null,
     };
@@ -566,7 +566,7 @@ export default function IncomePage() {
   const filtered = deliveries.filter((d) =>
     (d.employeeNama || "").toLowerCase().includes(search.toLowerCase()) ||
     (d.employee_id || "").toLowerCase().includes(search.toLowerCase()) ||
-    (d.divisionNama || "").toLowerCase().includes(search.toLowerCase()) ||
+    (d.zoneNama || "").toLowerCase().includes(search.toLowerCase()) ||
     d.role.toLowerCase().includes(search.toLowerCase())
   );
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -580,23 +580,23 @@ export default function IncomePage() {
   const batchFiltered = batchSearch
     ? batchRows.filter((r) => r.nama.toLowerCase().includes(batchSearch.toLowerCase()))
     : batchRows;
-  const batchFilled = batchRows.filter((r) => r.employee_id && r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.division_id && r.role).length;
+  const batchFilled = batchRows.filter((r) => r.employee_id && r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.zone_id && r.role).length;
   // Baris yang setengah terisi (ada salah satu field tapi tidak lengkap)
   const batchIncomplete = batchRows.filter((r) => {
     const hasEmp = !!r.employee_id;
     const hasTitik = r.jumlah_titik && parseInt(r.jumlah_titik) > 0;
-    const hasDiv = !!r.division_id;
+    const hasDiv = !!r.zone_id;
     const hasRole = !!r.role;
     const touched = hasEmp || hasTitik || hasDiv || hasRole;
     const complete = hasEmp && hasTitik && hasDiv && hasRole;
     return touched && !complete;
   });
-  // Deteksi duplikat: pegawai + divisi + role yang sama (skip baris yang belum pilih pegawai)
+  // Deteksi duplikat: pegawai + nama titik + role yang sama (skip baris yang belum pilih pegawai)
   const batchDuplicateKeys = new Set<string>();
   const seenCombos = new Map<string, string>(); // combo -> rowKey pertama
   batchRows.forEach((r) => {
-    if (!r.employee_id || !r.division_id || !r.role) return;
-    const combo = `${r.employee_id}-${r.division_id}-${r.role}`;
+    if (!r.employee_id || !r.zone_id || !r.role) return;
+    const combo = `${r.employee_id}-${r.zone_id}-${r.role}`;
     if (seenCombos.has(combo)) {
       batchDuplicateKeys.add(r.rowKey);
       batchDuplicateKeys.add(seenCombos.get(combo)!);
@@ -699,7 +699,7 @@ export default function IncomePage() {
     if (entries.length > 0) {
       setCalEditEntries(entries.map((e) => ({
         id: e.id,
-        division_id: e.division_id,
+        zone_id: e.zone_id,
         role: e.role,
         jumlah_titik: String(e.jumlah_titik),
         status_id: e.status_id || 0,
@@ -707,13 +707,13 @@ export default function IncomePage() {
       })));
     } else {
       // Sel kosong — buat 1 baris kosong untuk input baru
-      setCalEditEntries([{ id: null, division_id: 0, role: "", jumlah_titik: "", status_id: 0, catatan: "" }]);
+      setCalEditEntries([{ id: null, zone_id: 0, role: "", jumlah_titik: "", status_id: 0, catatan: "" }]);
     }
     setCalEditCell({ empId, empNama, dateStr });
   };
 
   const calEditAddRow = () => {
-    setCalEditEntries((prev) => [...prev, { id: null, division_id: 0, role: "", jumlah_titik: "", status_id: 0, catatan: "" }]);
+    setCalEditEntries((prev) => [...prev, { id: null, zone_id: 0, role: "", jumlah_titik: "", status_id: 0, catatan: "" }]);
   };
 
   const calEditRemoveRow = (idx: number) => {
@@ -732,7 +732,7 @@ export default function IncomePage() {
     // Block insert untuk pegawai yang sudah dihapus
     if (isDeletedEmployee(calEditCell.empId)) {
       // Hanya allow update/delete existing entries, tidak bisa tambah baru
-      const hasNewEntries = calEditEntries.some((e) => !e.id && e.division_id && e.role && e.jumlah_titik);
+      const hasNewEntries = calEditEntries.some((e) => !e.id && e.zone_id && e.role && e.jumlah_titik);
       if (hasNewEntries) {
         showToast("error", "Tidak Bisa Tambah", "Pegawai ini sudah dihapus. Hanya bisa edit/hapus data yang sudah ada.");
         return;
@@ -743,9 +743,9 @@ export default function IncomePage() {
 
     try {
       // Lookup rates
-      const { data: allRates } = await supabase.from("point_rates").select("division_id, role, rate_per_point").eq("status", "Aktif");
+      const { data: allRates } = await supabase.from("point_rates").select("zone_id, role, rate_per_point").eq("status", "Aktif");
       const rateMap = new Map<string, number>();
-      allRates?.forEach((r) => rateMap.set(`${r.division_id}-${r.role}`, r.rate_per_point));
+      allRates?.forEach((r) => rateMap.set(`${r.zone_id}-${r.role}`, r.rate_per_point));
 
       // Existing entries in DB for this cell
       const existingEntries = calDataMap.get(`${calEditCell.empId}-${calEditCell.dateStr}`) || [];
@@ -761,11 +761,11 @@ export default function IncomePage() {
 
       for (const entry of calEditEntries) {
         // Skip empty rows
-        if (!entry.division_id || !entry.role || !entry.jumlah_titik || parseInt(entry.jumlah_titik) <= 0) continue;
+        if (!entry.zone_id || !entry.role || !entry.jumlah_titik || parseInt(entry.jumlah_titik) <= 0) continue;
 
-        const rate = rateMap.get(`${entry.division_id}-${entry.role}`) || 0;
+        const rate = rateMap.get(`${entry.zone_id}-${entry.role}`) || 0;
         const payload = {
-          division_id: entry.division_id,
+          zone_id: entry.zone_id,
           role: entry.role,
           jumlah_titik: parseInt(entry.jumlah_titik),
           rate_per_point: rate,
@@ -835,7 +835,7 @@ export default function IncomePage() {
       const cp = getPeriodRange(calMonth);
       const { data } = await supabase
         .from("delivery_points")
-        .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
+        .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
         .gte("tanggal", cp.start)
         .lte("tanggal", cp.end)
         .order("tanggal");
@@ -845,8 +845,8 @@ export default function IncomePage() {
           const calRows = data.map((d) => ({
             ...d,
             employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
-            divisionNama: d.divisions?.nama || "-",
-            divisionColor: d.divisions?.color || "#3b82f6",
+            zoneNama: d.delivery_zones?.nama || "-",
+            zoneColor: d.delivery_zones?.color || "#3b82f6",
             statusNama: d.delivery_statuses?.nama || null,
             statusColor: d.delivery_statuses?.color || null,
           })) as DeliveryRow[];
@@ -887,7 +887,7 @@ export default function IncomePage() {
       const cp = getPeriodRange(calMonth);
       const { data, error } = await supabase
         .from("delivery_points")
-        .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
+        .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
         .gte("tanggal", cp.start)
         .lte("tanggal", cp.end)
         .order("tanggal");
@@ -898,8 +898,8 @@ export default function IncomePage() {
           const calRows = data.map((d) => ({
             ...d,
             employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
-            divisionNama: d.divisions?.nama || "-",
-            divisionColor: d.divisions?.color || "#3b82f6",
+            zoneNama: d.delivery_zones?.nama || "-",
+            zoneColor: d.delivery_zones?.color || "#3b82f6",
             statusNama: d.delivery_statuses?.nama || null,
             statusColor: d.delivery_statuses?.color || null,
           })) as DeliveryRow[];
@@ -988,7 +988,7 @@ export default function IncomePage() {
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5 flex-1 min-w-0">
             <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            <input type="text" placeholder="Cari nama, divisi, atau posisi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            <input type="text" placeholder="Cari nama, nama titik, atau posisi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
           </div>
           <div className="flex items-center gap-1 bg-muted rounded-xl p-1 self-stretch sm:self-auto">
@@ -1024,7 +1024,7 @@ export default function IncomePage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Tanggal</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Divisi</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Nama Titik</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Posisi</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Titik</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
@@ -1043,9 +1043,9 @@ export default function IncomePage() {
                   <td className="px-5 py-3.5 text-sm text-foreground">{row.tanggal}</td>
                   <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{row.employeeNama}</p></td>
                   <td className="px-5 py-3.5">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${row.divisionColor}15`, color: row.divisionColor }}>
-                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: row.divisionColor }} />
-                      {row.divisionNama}
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${row.zoneColor}15`, color: row.zoneColor }}>
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: row.zoneColor }} />
+                      {row.zoneNama}
                     </span>
                   </td>
                   <td className="px-5 py-3.5"><span className={cn("text-xs font-semibold px-2.5 py-1 rounded-lg", row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400")}>{row.role}</span></td>
@@ -1110,11 +1110,11 @@ export default function IncomePage() {
                 </div>
               </div>
 
-              {/* Divisi + Posisi + Status */}
+              {/* Nama Titik + Posisi + Status */}
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${row.divisionColor}15`, color: row.divisionColor }}>
-                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.divisionColor }} />
-                  {row.divisionNama}
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${row.zoneColor}15`, color: row.zoneColor }}>
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.zoneColor }} />
+                  {row.zoneNama}
                 </span>
                 <span className={cn("text-[11px] font-semibold px-2 py-1 rounded-md", row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400")}>{row.role}</span>
                 {row.statusNama && (
@@ -1292,9 +1292,9 @@ export default function IncomePage() {
                               {entries.length > 0 ? (
                                 <div className="space-y-0.5">
                                   {entries.map((e) => (
-                                    <div key={e.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors" style={{ backgroundColor: `${e.divisionColor}20`, borderLeft: `3px solid ${e.divisionColor}` }}>
-                                      <span className="text-[9px] font-bold truncate" style={{ color: e.divisionColor }}>{e.divisionNama}</span>
-                                      <span className="text-[11px] font-extrabold ml-auto" style={{ color: e.divisionColor }}>{e.jumlah_titik}</span>
+                                    <div key={e.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors" style={{ backgroundColor: `${e.zoneColor}20`, borderLeft: `3px solid ${e.zoneColor}` }}>
+                                      <span className="text-[9px] font-bold truncate" style={{ color: e.zoneColor }}>{e.zoneNama}</span>
+                                      <span className="text-[11px] font-extrabold ml-auto" style={{ color: e.zoneColor }}>{e.jumlah_titik}</span>
                                       <span className={cn("text-[9px] font-extrabold px-1.5 py-0.5 rounded-md", e.role === "Driver" ? "bg-blue-500 text-white" : "bg-orange-500 text-white")}>{e.role === "Driver" ? "D" : "H"}</span>
                                       {e.statusNama && <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: `${e.statusColor}25`, color: e.statusColor }}>{e.statusNama}</span>}
                                     </div>
@@ -1390,13 +1390,13 @@ export default function IncomePage() {
                             <button onClick={() => calEditRemoveRow(idx)} className="text-[10px] text-danger hover:underline">Hapus</button>
                           )}
                         </div>
-                        {/* Divisi */}
+                        {/* Nama Titik */}
                         <div>
-                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Divisi</label>
-                          <select value={entry.division_id || ""} onChange={(e) => calEditUpdateRow(idx, "division_id", parseInt(e.target.value) || 0)}
+                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Nama Titik</label>
+                          <select value={entry.zone_id || ""} onChange={(e) => calEditUpdateRow(idx, "zone_id", parseInt(e.target.value) || 0)}
                             className="w-full text-xs px-2.5 py-2 rounded-lg border border-border bg-card outline-none focus:border-primary text-foreground">
-                            <option value="">Pilih divisi</option>
-                            {divisions.map((d) => <option key={d.id} value={d.id}>{d.nama}</option>)}
+                            <option value="">Pilih nama titik</option>
+                            {zones.map((d) => <option key={d.id} value={d.id}>{d.nama}</option>)}
                           </select>
                         </div>
                         {/* Posisi + Titik (inline) */}
@@ -1528,7 +1528,7 @@ export default function IncomePage() {
                     <tr className="bg-card border-b-2 border-border shadow-sm">
                       <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-14">#</th>
                       <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 min-w-[200px]">Pegawai</th>
-                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-40">Divisi</th>
+                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-40">Nama Titik</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Posisi</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-20">Titik</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Status</th>
@@ -1540,7 +1540,7 @@ export default function IncomePage() {
                     {batchFiltered.map((row, idx) => {
                       const hasEmp = !!row.employee_id;
                       const hasTitik = row.jumlah_titik && parseInt(row.jumlah_titik) > 0;
-                      const hasDiv = !!row.division_id;
+                      const hasDiv = !!row.zone_id;
                       const hasRole = !!row.role;
                       const touched = hasEmp || hasTitik || hasDiv || hasRole;
                       const isComplete = hasEmp && hasTitik && hasDiv && hasRole;
@@ -1597,13 +1597,13 @@ export default function IncomePage() {
                             </div>
                           </td>
 
-                          {/* Divisi */}
+                          {/* Nama Titik */}
                           <td className="px-4 py-1.5">
                             <Select
-                              value={row.division_id ? String(row.division_id) : ""}
-                              onChange={(val) => handleBatchRowChange(row.rowKey, "division_id", parseInt(val) || 0)}
-                              options={divisions.map((d) => ({ value: String(d.id), label: d.nama }))}
-                              placeholder="Pilih divisi..."
+                              value={row.zone_id ? String(row.zone_id) : ""}
+                              onChange={(val) => handleBatchRowChange(row.rowKey, "zone_id", parseInt(val) || 0)}
+                              options={zones.map((d) => ({ value: String(d.id), label: d.nama }))}
+                              placeholder="Pilih nama titik..."
                               searchable
                               hasError={isDuplicate}
                             />
@@ -1686,7 +1686,7 @@ export default function IncomePage() {
                     {batchDuplicateKeys.size > 0 ? (
                       <div className="flex items-center gap-2 text-sm">
                         <div className="w-2 h-2 rounded-full bg-danger animate-pulse" />
-                        <span className="text-danger text-xs font-medium">Ada divisi + posisi yang sama dalam satu pegawai</span>
+                        <span className="text-danger text-xs font-medium">Ada nama titik + posisi yang sama dalam satu pegawai</span>
                       </div>
                     ) : batchIncomplete.length > 0 ? (
                       <div className="flex items-center gap-2 text-sm">
@@ -1728,7 +1728,7 @@ export default function IncomePage() {
                 </div>
                 <h3 className="text-base font-bold text-foreground">Data Duplikat Ditemukan</h3>
                 <p className="text-sm text-muted-foreground mt-2">
-                  <span className="font-semibold text-foreground">{duplicateInfo.dupCount} data</span> sudah ada di tanggal ini dengan pegawai, divisi, dan posisi yang sama.
+                  <span className="font-semibold text-foreground">{duplicateInfo.dupCount} data</span> sudah ada di tanggal ini dengan pegawai, nama titik, dan posisi yang sama.
                 </p>
                 <p className="text-xs text-muted-foreground mt-2">Pilih untuk memperbarui jumlah titik yang sudah ada, atau batalkan untuk mengubah input.</p>
               </div>
@@ -1785,12 +1785,12 @@ export default function IncomePage() {
                   </div>
                 )}
                 <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi</label>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Titik</label>
                   <Select
-                    value={String(editForm.division_id)}
-                    onChange={(val) => { setEditForm({ ...editForm, division_id: parseInt(val) }); setEditError(""); }}
-                    options={divisions.map((d) => ({ value: String(d.id), label: d.nama }))}
-                    placeholder="Pilih divisi"
+                    value={String(editForm.zone_id)}
+                    onChange={(val) => { setEditForm({ ...editForm, zone_id: parseInt(val) }); setEditError(""); }}
+                    options={zones.map((d) => ({ value: String(d.id), label: d.nama }))}
+                    placeholder="Pilih nama titik"
                   />
                 </div>
                 <div>
@@ -1813,7 +1813,7 @@ export default function IncomePage() {
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
                 <Button variant="outline" size="sm" onClick={() => setShowEditForm(false)}>Batal</Button>
-                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!editForm.jumlah_titik || !editForm.division_id}>Simpan</Button>
+                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!editForm.jumlah_titik || !editForm.zone_id}>Simpan</Button>
               </div>
             </div>
           </div>
@@ -1824,7 +1824,7 @@ export default function IncomePage() {
       <ReportDetail
         show={showReport}
         onClose={() => setShowReport(false)}
-        divisions={divisions}
+        zones={zones}
         dStatuses={dStatuses}
       />
 

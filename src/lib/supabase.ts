@@ -170,23 +170,40 @@ export interface DbDeliveryStatus {
   updated_at: string;
 }
 
+/**
+ * Nama titik pengantaran (delivery_zones).
+ *
+ * Terpisah penuh dari `divisions`. Divisi dipakai untuk konteks absen,
+ * sedangkan delivery_zones hanya dipakai di Rekap Titik & Harga Titik
+ * (lalu mengalir ke modul Penggajian).
+ */
+export interface DbDeliveryZone {
+  id: number;
+  nama: string;
+  deskripsi: string | null;
+  color: string;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DbPointRate {
   id: number;
-  division_id: number;
+  zone_id: number;
   role: "Driver" | "Helper";
   rate_per_point: number;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;
   updated_at: string;
   // joined
-  divisions?: DbDivision;
+  delivery_zones?: DbDeliveryZone;
 }
 
 export interface DbDeliveryPoint {
   id: number;
   employee_id: string | null;
   employee_nama: string | null;
-  division_id: number;
+  zone_id: number;
   role: "Driver" | "Helper";
   tanggal: string;
   jumlah_titik: number;
@@ -198,7 +215,7 @@ export interface DbDeliveryPoint {
   updated_at: string;
   // joined
   pegawai?: DbPegawai;
-  divisions?: DbDivision;
+  delivery_zones?: DbDeliveryZone;
   delivery_statuses?: DbDeliveryStatus;
 }
 

@@ -36,6 +36,7 @@ export type AuditEntityType =
   | "recruitments"
   | "payrolls"
   | "delivery_points"
+  | "delivery_zones"
   | "divisions"
   | "jabatan"
   | "division_schedules"
@@ -193,6 +194,7 @@ export function entityLabel(entityType: string): string {
     recruitments: "Rekrutmen",
     payrolls: "Penggajian",
     delivery_points: "Rekap Titik",
+    delivery_zones: "Nama Titik",
     divisions: "Divisi",
     jabatan: "Jabatan",
     division_schedules: "Waktu Kerja",

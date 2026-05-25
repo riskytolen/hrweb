@@ -23,15 +23,15 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, formatNumber } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
 
-type DivisionLite = { id: number; nama: string; color: string };
+type ZoneLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
 
 type ReportRow = {
   employee_id: string;
   employee_nama: string;
-  division_id: number;
-  division_nama: string;
-  division_color: string;
+  zone_id: number;
+  zone_nama: string;
+  zone_color: string;
   role: "Driver" | "Helper";
   total_titik: number;
   total_pendapatan: number;
@@ -39,10 +39,10 @@ type ReportRow = {
   status_summary: { nama: string; color: string; count: number }[];
 };
 
-type DivisionGroup = {
-  division_id: number;
-  division_nama: string;
-  division_color: string;
+type ZoneGroup = {
+  zone_id: number;
+  zone_nama: string;
+  zone_color: string;
   rows: ReportRow[];
   subtotal_titik: number;
   subtotal_pendapatan: number;
@@ -60,7 +60,7 @@ type EmployeeGroup = {
 interface ReportDetailProps {
   show: boolean;
   onClose: () => void;
-  divisions: DivisionLite[];
+  zones: ZoneLite[];
   dStatuses: StatusLite[];
 }
 
@@ -93,10 +93,10 @@ function formatDisplayDate(dateStr: string): string {
   return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 }
 
-export default function ReportDetail({ show, onClose, divisions, dStatuses }: ReportDetailProps) {
+export default function ReportDetail({ show, onClose, zones, dStatuses }: ReportDetailProps) {
   const [loading, setLoading] = useState(false);
   const [dateMode, setDateMode] = useState<"periode" | "custom">("periode");
-  const [reportTab, setReportTab] = useState<"divisi" | "pegawai">("divisi");
+  const [reportTab, setReportTab] = useState<"zona" | "pegawai">("zona");
 
   // Periode mode state
   const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
@@ -120,7 +120,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
 
   const [search, setSearch] = useState("");
   const [reportRows, setReportRows] = useState<ReportRow[]>([]);
-  const [divisionGroups, setDivisionGroups] = useState<DivisionGroup[]>([]);
+  const [zoneGroups, setZoneGroups] = useState<ZoneGroup[]>([]);
   const [employeeGroups, setEmployeeGroups] = useState<EmployeeGroup[]>([]);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -129,7 +129,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
   const grandTotalTitik = reportRows.reduce((s, r) => s + r.total_titik, 0);
   const grandTotalPendapatan = reportRows.reduce((s, r) => s + r.total_pendapatan, 0);
   const grandTotalPegawai = new Set(reportRows.map((r) => r.employee_id)).size;
-  const grandTotalDivisi = new Set(reportRows.map((r) => r.division_id)).size;
+  const grandTotalZona = new Set(reportRows.map((r) => r.zone_id)).size;
 
   // Close export menu on outside click
   useEffect(() => {
@@ -150,7 +150,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
 
     const { data, error } = await supabase
       .from("delivery_points")
-      .select("*, pegawai(nama), divisions(nama, color), delivery_statuses(nama, kode, color)")
+      .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
       .gte("tanggal", s)
       .lte("tanggal", e)
       .order("tanggal", { ascending: true });
@@ -173,9 +173,9 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
     const map = new Map<string, {
       employee_id: string;
       employee_nama: string;
-      division_id: number;
-      division_nama: string;
-      division_color: string;
+      zone_id: number;
+      zone_nama: string;
+      zone_color: string;
       role: "Driver" | "Helper";
       total_titik: number;
       total_pendapatan: number;
@@ -184,21 +184,21 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
     }>();
 
     data.forEach((d) => {
-      const divNama = d.divisions?.nama || "-";
-      const divColor = d.divisions?.color || "#3b82f6";
+      const zNama = d.delivery_zones?.nama || "-";
+      const zColor = d.delivery_zones?.color || "#3b82f6";
       const empNama = d.pegawai?.nama || d.employee_nama || d.employee_id || "?";
       const empId = d.employee_id || "unknown";
-      const divId = d.division_id;
+      const zId = d.zone_id;
       const role = d.role;
 
-      const key = `${divId}-${empId}-${role}`;
+      const key = `${zId}-${empId}-${role}`;
       if (!map.has(key)) {
         map.set(key, {
           employee_id: empId,
           employee_nama: empNama,
-          division_id: divId,
-          division_nama: divNama,
-          division_color: divColor,
+          zone_id: zId,
+          zone_nama: zNama,
+          zone_color: zColor,
           role,
           total_titik: 0,
           total_pendapatan: 0,
@@ -224,9 +224,9 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
     const rows: ReportRow[] = Array.from(map.values()).map((v) => ({
       employee_id: v.employee_id,
       employee_nama: v.employee_nama,
-      division_id: v.division_id,
-      division_nama: v.division_nama,
-      division_color: v.division_color,
+      zone_id: v.zone_id,
+      zone_nama: v.zone_nama,
+      zone_color: v.zone_color,
       role: v.role,
       total_titik: v.total_titik,
       total_pendapatan: v.total_pendapatan,
@@ -236,27 +236,27 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
 
     setReportRows(rows);
 
-    // ── Group by Division ──
-    const divMap = new Map<number, DivisionGroup>();
+    // ── Group by Nama Titik ──
+    const zoneMap = new Map<number, ZoneGroup>();
     rows.forEach((r) => {
-      if (!divMap.has(r.division_id)) {
-        divMap.set(r.division_id, {
-          division_id: r.division_id,
-          division_nama: r.division_nama,
-          division_color: r.division_color,
+      if (!zoneMap.has(r.zone_id)) {
+        zoneMap.set(r.zone_id, {
+          zone_id: r.zone_id,
+          zone_nama: r.zone_nama,
+          zone_color: r.zone_color,
           rows: [],
           subtotal_titik: 0,
           subtotal_pendapatan: 0,
         });
       }
-      const group = divMap.get(r.division_id)!;
+      const group = zoneMap.get(r.zone_id)!;
       group.rows.push(r);
       group.subtotal_titik += r.total_titik;
       group.subtotal_pendapatan += r.total_pendapatan;
     });
-    const dGroups = Array.from(divMap.values()).sort((a, b) => a.division_nama.localeCompare(b.division_nama));
-    dGroups.forEach((g) => g.rows.sort((a, b) => a.employee_nama.localeCompare(b.employee_nama)));
-    setDivisionGroups(dGroups);
+    const zGroups = Array.from(zoneMap.values()).sort((a, b) => a.zone_nama.localeCompare(b.zone_nama));
+    zGroups.forEach((g) => g.rows.sort((a, b) => a.employee_nama.localeCompare(b.employee_nama)));
+    setZoneGroups(zGroups);
 
     // ── Group by Employee ──
     const empMap = new Map<string, EmployeeGroup>();
@@ -278,12 +278,12 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
       group.total_hari += r.jumlah_hari;
     });
     const eGroups = Array.from(empMap.values()).sort((a, b) => a.employee_nama.localeCompare(b.employee_nama));
-    eGroups.forEach((g) => g.rows.sort((a, b) => a.division_nama.localeCompare(b.division_nama)));
+    eGroups.forEach((g) => g.rows.sort((a, b) => a.zone_nama.localeCompare(b.zone_nama)));
     setEmployeeGroups(eGroups);
   };
 
   // ─── Filtered data (search) ───
-  const filteredDivGroups = divisionGroups
+  const filteredZoneGroups = zoneGroups
     .map((g) => ({
       ...g,
       rows: g.rows.filter((r) =>
@@ -297,21 +297,21 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
     .map((g) => ({
       ...g,
       rows: g.rows.filter((r) =>
-        r.division_nama.toLowerCase().includes(search.toLowerCase()) ||
+        r.zone_nama.toLowerCase().includes(search.toLowerCase()) ||
         r.role.toLowerCase().includes(search.toLowerCase()) ||
         g.employee_nama.toLowerCase().includes(search.toLowerCase())
       ),
     }))
     .filter((g) => g.rows.length > 0);
 
-  const filteredTotalTitik = reportTab === "divisi"
-    ? filteredDivGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0)
+  const filteredTotalTitik = reportTab === "zona"
+    ? filteredZoneGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0)
     : filteredEmpGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0);
-  const filteredTotalPendapatan = reportTab === "divisi"
-    ? filteredDivGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_pendapatan, 0), 0)
+  const filteredTotalPendapatan = reportTab === "zona"
+    ? filteredZoneGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_pendapatan, 0), 0)
     : filteredEmpGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_pendapatan, 0), 0);
 
-  const hasData = reportTab === "divisi" ? filteredDivGroups.length > 0 : filteredEmpGroups.length > 0;
+  const hasData = reportTab === "zona" ? filteredZoneGroups.length > 0 : filteredEmpGroups.length > 0;
 
   // ─── Period text for export ───
   const periodeText = dateMode === "periode"
@@ -320,42 +320,42 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
 
   // ─── Export CSV ───
   const exportCSV = () => {
-    if (reportTab === "divisi") exportCSVDivisi();
+    if (reportTab === "zona") exportCSVZona();
     else exportCSVPegawai();
   };
 
-  const exportCSVDivisi = () => {
-    const headers = ["Divisi", "Pegawai", "Posisi", "Total Titik", "Total Pendapatan", "Jumlah Hari", "Status"];
+  const exportCSVZona = () => {
+    const headers = ["Nama Titik", "Pegawai", "Posisi", "Total Titik", "Total Pendapatan", "Jumlah Hari", "Status"];
     const csvRows = [headers.join(",")];
 
-    filteredDivGroups.forEach((g) => {
+    filteredZoneGroups.forEach((g) => {
       g.rows.forEach((r) => {
         const statusStr = r.status_summary.map((s) => `${s.nama}(${s.count})`).join(" ");
         csvRows.push([
-          `"${g.division_nama}"`, `"${r.employee_nama}"`, r.role,
+          `"${g.zone_nama}"`, `"${r.employee_nama}"`, r.role,
           r.total_titik, r.total_pendapatan, r.jumlah_hari, `"${statusStr}"`,
         ].join(","));
       });
       csvRows.push([
-        `"Subtotal ${g.division_nama}"`, "", "",
+        `"Subtotal ${g.zone_nama}"`, "", "",
         g.rows.reduce((s, r) => s + r.total_titik, 0),
         g.rows.reduce((s, r) => s + r.total_pendapatan, 0), "", "",
       ].join(","));
     });
     csvRows.push([`"GRAND TOTAL"`, "", "", filteredTotalTitik, filteredTotalPendapatan, "", ""].join(","));
 
-    downloadCSV(csvRows, `Rekap_Titik_PerDivisi_${startDate}_${endDate}.csv`);
+    downloadCSV(csvRows, `Rekap_Titik_PerNamaTitik_${startDate}_${endDate}.csv`);
   };
 
   const exportCSVPegawai = () => {
-    const headers = ["Pegawai", "Divisi", "Posisi", "Total Titik", "Total Pendapatan", "Jumlah Hari", "Status"];
+    const headers = ["Pegawai", "Nama Titik", "Posisi", "Total Titik", "Total Pendapatan", "Jumlah Hari", "Status"];
     const csvRows = [headers.join(",")];
 
     filteredEmpGroups.forEach((g) => {
       g.rows.forEach((r) => {
         const statusStr = r.status_summary.map((s) => `${s.nama}(${s.count})`).join(" ");
         csvRows.push([
-          `"${g.employee_nama}"`, `"${r.division_nama}"`, r.role,
+          `"${g.employee_nama}"`, `"${r.zone_nama}"`, r.role,
           r.total_titik, r.total_pendapatan, r.jumlah_hari, `"${statusStr}"`,
         ].join(","));
       });
@@ -382,11 +382,11 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
 
   // ─── Export PDF ───
   const exportPDF = async () => {
-    if (reportTab === "divisi") await exportPDFDivisi();
+    if (reportTab === "zona") await exportPDFZona();
     else await exportPDFPegawai();
   };
 
-  const exportPDFDivisi = async () => {
+  const exportPDFZona = async () => {
     const { default: jsPDF } = await import("jspdf");
     const { default: autoTable } = await import("jspdf-autotable");
 
@@ -395,17 +395,17 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
 
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text("Laporan Rekap Titik Per Divisi", pageWidth / 2, 15, { align: "center" });
+    doc.text("Laporan Rekap Titik Per Nama Titik", pageWidth / 2, 15, { align: "center" });
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.text(`Periode: ${periodeText}`, pageWidth / 2, 21, { align: "center" });
 
     let startY = 28;
 
-    filteredDivGroups.forEach((g) => {
+    filteredZoneGroups.forEach((g) => {
       doc.setFontSize(10);
       doc.setFont("helvetica", "bold");
-      doc.text(`Divisi: ${g.division_nama}`, 14, startY);
+      doc.text(`Nama Titik: ${g.zone_nama}`, 14, startY);
       startY += 2;
 
       const tableData = g.rows.map((r, idx) => [
@@ -450,7 +450,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
     doc.setFont("helvetica", "bold");
     doc.text(`Grand Total: ${formatNumber(filteredTotalTitik)} titik | ${formatCurrency(filteredTotalPendapatan)}`, 14, startY);
 
-    doc.save(`Rekap_Titik_PerDivisi_${startDate}_${endDate}.pdf`);
+    doc.save(`Rekap_Titik_PerNamaTitik_${startDate}_${endDate}.pdf`);
     setShowExportMenu(false);
   };
 
@@ -477,7 +477,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
       startY += 2;
 
       const tableData = g.rows.map((r, idx) => [
-        idx + 1, r.division_nama, r.role,
+        idx + 1, r.zone_nama, r.role,
         formatNumber(r.total_titik), formatCurrency(r.total_pendapatan),
         r.jumlah_hari, r.status_summary.map((s) => `${s.nama}(${s.count})`).join(", ") || "-",
       ]);
@@ -489,7 +489,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
 
       autoTable(doc, {
         startY,
-        head: [["#", "Divisi", "Posisi", "Total Titik", "Total Pendapatan", "Hari Kerja", "Status"]],
+        head: [["#", "Nama Titik", "Posisi", "Total Titik", "Total Pendapatan", "Hari Kerja", "Status"]],
         body: tableData,
         theme: "grid",
         headStyles: { fillColor: [99, 102, 241], fontSize: 8, fontStyle: "bold", halign: "center" },
@@ -536,7 +536,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
             <div>
               <h2 className="text-sm font-bold text-foreground">Laporan Detail Rekap Titik</h2>
               <p className="text-[10px] text-muted-foreground">
-                {reportTab === "divisi" ? "Rekap titik per divisi" : "Rekap titik per pegawai"} dalam periode tertentu
+                {reportTab === "zona" ? "Rekap titik per nama titik" : "Rekap titik per pegawai"} dalam periode tertentu
               </p>
             </div>
           </div>
@@ -587,16 +587,16 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
             {/* Report tab toggle */}
             <div className="flex items-center bg-muted rounded-xl p-0.5">
               <button
-                onClick={() => setReportTab("divisi")}
+                onClick={() => setReportTab("zona")}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-                  reportTab === "divisi"
+                  reportTab === "zona"
                     ? "bg-card text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 <Hash className="w-3 h-3" />
-                Per Divisi
+                Per Nama Titik
               </button>
               <button
                 onClick={() => setReportTab("pegawai")}
@@ -693,7 +693,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
               <Search className="w-3.5 h-3.5 text-muted-foreground" />
               <input
                 type="text"
-                placeholder={reportTab === "divisi" ? "Cari pegawai..." : "Cari pegawai atau divisi..."}
+                placeholder={reportTab === "zona" ? "Cari pegawai..." : "Cari pegawai atau nama titik..."}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground"
@@ -737,8 +737,8 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
                 <Hash className="w-3.5 h-3.5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-[10px] text-muted-foreground font-medium">Divisi</p>
-                <p className="text-sm font-bold text-foreground">{loading ? "..." : grandTotalDivisi}</p>
+                <p className="text-[10px] text-muted-foreground font-medium">Nama Titik</p>
+                <p className="text-sm font-bold text-foreground">{loading ? "..." : grandTotalZona}</p>
               </div>
             </div>
           </div>
@@ -761,15 +761,15 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
               <p className="text-sm text-muted-foreground">Tidak ada data untuk periode ini</p>
               <p className="text-xs text-muted-foreground/60 mt-1">Coba ubah rentang tanggal atau kata kunci pencarian</p>
             </div>
-          ) : reportTab === "divisi" ? (
-            /* ═══ TAB: PER DIVISI ═══ */
+          ) : reportTab === "zona" ? (
+            /* ═══ TAB: PER NAMA TITIK ═══ */
             <div className="space-y-6">
-              {filteredDivGroups.map((group) => (
-                <div key={group.division_id} className="bg-card rounded-2xl border border-border overflow-hidden">
+              {filteredZoneGroups.map((group) => (
+                <div key={group.zone_id} className="bg-card rounded-2xl border border-border overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/30">
                     <div className="flex items-center gap-2.5">
-                      <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: group.division_color }} />
-                      <h3 className="text-sm font-bold text-foreground">{group.division_nama}</h3>
+                      <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: group.zone_color }} />
+                      <h3 className="text-sm font-bold text-foreground">{group.zone_nama}</h3>
                       <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md font-medium">
                         {group.rows.length} pegawai
                       </span>
@@ -824,7 +824,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
                         ))}
                         <tr className="bg-muted/40 font-semibold">
                           <td className="px-5 py-2.5" colSpan={3}>
-                            <span className="text-xs font-bold text-muted-foreground">Subtotal {group.division_nama}</span>
+                            <span className="text-xs font-bold text-muted-foreground">Subtotal {group.zone_nama}</span>
                           </td>
                           <td className="px-5 py-2.5 text-right text-sm font-bold text-primary">{formatNumber(group.rows.reduce((s, r) => s + r.total_titik, 0))}</td>
                           <td className="px-5 py-2.5 text-right text-sm font-bold text-primary">{formatCurrency(group.rows.reduce((s, r) => s + r.total_pendapatan, 0))}</td>
@@ -855,7 +855,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
                       </div>
                       <h3 className="text-sm font-bold text-foreground">{group.employee_nama}</h3>
                       <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md font-medium">
-                        {group.rows.length} divisi
+                        {group.rows.length} nama titik
                       </span>
                     </div>
                     <div className="flex items-center gap-4 text-xs">
@@ -877,7 +877,7 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
                       <thead>
                         <tr className="border-b border-border bg-muted/20">
                           <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-10">#</th>
-                          <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Divisi</th>
+                          <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Nama Titik</th>
                           <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">Posisi</th>
                           <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-28">Total Titik</th>
                           <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36">Total Pendapatan</th>
@@ -887,12 +887,12 @@ export default function ReportDetail({ show, onClose, divisions, dStatuses }: Re
                       </thead>
                       <tbody className="divide-y divide-border/50">
                         {group.rows.map((row, idx) => (
-                          <tr key={`${row.division_id}-${row.role}`} className="hover:bg-muted/30 transition-colors">
+                          <tr key={`${row.zone_id}-${row.role}`} className="hover:bg-muted/30 transition-colors">
                             <td className="px-5 py-3 text-xs text-muted-foreground">{idx + 1}</td>
                             <td className="px-5 py-3">
                               <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.division_color }} />
-                                <p className="text-sm font-semibold text-foreground">{row.division_nama}</p>
+                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.zone_color }} />
+                                <p className="text-sm font-semibold text-foreground">{row.zone_nama}</p>
                               </div>
                             </td>
                             <td className="px-5 py-3 text-center">

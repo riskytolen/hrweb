@@ -14,6 +14,7 @@ import {
   Landmark,
   Building2,
   MapPin,
+  MapPinned,
   Clock,
   CircleDollarSign,
   Tag,
@@ -35,7 +36,7 @@ import Portal from "@/components/ui/Portal";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbAttendancePenaltyRate, type DbLegalSetting } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -44,7 +45,8 @@ type Bank = DbBank;
 type Division = DbDivision;
 type AttendanceLocation = DbAttendanceLocation & { divisionNames?: string[] };
 type DivisionSchedule = DbDivisionSchedule & { divisionNama?: string };
-type PointRate = DbPointRate & { divisionNama?: string };
+type DeliveryZone = DbDeliveryZone;
+type PointRate = DbPointRate & { zoneNama?: string };
 type DeliveryStatus = DbDeliveryStatus;
 type PenaltyRate = DbAttendancePenaltyRate & { divisionNama?: string };
 
@@ -59,6 +61,7 @@ const tabs = [
   { key: "titik-absen", label: "Titik Absen", icon: MapPin },
   { key: "waktu-kerja", label: "Waktu Kerja", icon: Clock },
   { key: "denda-telat", label: "Denda Telat", icon: AlertTriangle },
+  { key: "nama-titik", label: "Nama Titik", icon: MapPinned },
   { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
   { key: "status-titik", label: "Status Titik", icon: Tag },
   { key: "bank", label: "Bank", icon: Landmark },
@@ -127,13 +130,20 @@ export default function MasterDataPage() {
   const [editingPenaltyId, setEditingPenaltyId] = useState<number | null>(null);
   const [penaltyForm, setPenaltyForm] = useState<{ division_ids: number[]; denda_per_menit: string; batas_menit: string; denda_maksimum: string; denda_alpha: string; status: string }>({ division_ids: [], denda_per_menit: "3000", batas_menit: "20", denda_maksimum: "60000", denda_alpha: "100000", status: "Aktif" });
 
+  // ─── Nama Titik (Delivery Zone) State ───
+  const [zoneList, setZoneList] = useState<DeliveryZone[]>([]);
+  const [zoneSearch, setZoneSearch] = useState("");
+  const [showZoneForm, setShowZoneForm] = useState(false);
+  const [editingZoneId, setEditingZoneId] = useState<number | null>(null);
+  const [zoneForm, setZoneForm] = useState({ nama: "", deskripsi: "", color: "#3b82f6", status: "Aktif" });
+
   // ─── Harga Titik State ───
-  type RateRow = { division_id: number; divisionNama: string; driverRate: number | null; driverRateId: number | null; helperRate: number | null; helperRateId: number | null };
+  type RateRow = { zone_id: number; zoneNama: string; driverRate: number | null; driverRateId: number | null; helperRate: number | null; helperRateId: number | null };
   const [rateRows, setRateRows] = useState<RateRow[]>([]);
   const [rateSearch, setRateSearch] = useState("");
   const [showRateForm, setShowRateForm] = useState(false);
-  const [editingRateDivId, setEditingRateDivId] = useState<number | null>(null);
-  const [rateForm, setRateForm] = useState({ division_id: 0, driver_rate: "", helper_rate: "" });
+  const [editingRateZoneId, setEditingRateZoneId] = useState<number | null>(null);
+  const [rateForm, setRateForm] = useState({ zone_id: 0, driver_rate: "", helper_rate: "" });
 
   // ─── Status Titik State ───
   const [dStatusList, setDStatusList] = useState<DeliveryStatus[]>([]);
@@ -160,7 +170,7 @@ export default function MasterDataPage() {
   const [leaveSettingForm, setLeaveSettingForm] = useState({ kuota_cuti_tahunan: "12", maks_hari_per_pengajuan: "3", prorata: true });
 
   // ─── Delete Confirm Dialog ───
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "nama-titik" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
   const [loading, setLoading] = useState(true);
@@ -205,16 +215,21 @@ export default function MasterDataPage() {
     if (data) setScheduleList(data.map((s) => ({ ...s, divisionNama: s.divisions?.nama || "-" })));
   };
 
+  const fetchZones = async () => {
+    const { data } = await supabase.from("delivery_zones").select("*").order("nama");
+    if (data) setZoneList(data);
+  };
+
   const fetchRates = async () => {
-    const { data } = await supabase.from("point_rates").select("*, divisions(nama)").order("division_id");
+    const { data } = await supabase.from("point_rates").select("*, delivery_zones(id, nama)").order("zone_id");
     if (data) {
-      // Group by division_id into rows with driver + helper
+      // Group by zone_id into rows with driver + helper
       const map = new Map<number, RateRow>();
       data.forEach((r) => {
-        if (!map.has(r.division_id)) {
-          map.set(r.division_id, { division_id: r.division_id, divisionNama: r.divisions?.nama || "-", driverRate: null, driverRateId: null, helperRate: null, helperRateId: null });
+        if (!map.has(r.zone_id)) {
+          map.set(r.zone_id, { zone_id: r.zone_id, zoneNama: r.delivery_zones?.nama || "-", driverRate: null, driverRateId: null, helperRate: null, helperRateId: null });
         }
-        const row = map.get(r.division_id)!;
+        const row = map.get(r.zone_id)!;
         if (r.role === "Driver") { row.driverRate = r.rate_per_point; row.driverRateId = r.id; }
         else { row.helperRate = r.rate_per_point; row.helperRateId = r.id; }
       });
@@ -233,12 +248,12 @@ export default function MasterDataPage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm) {
+    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -246,7 +261,7 @@ export default function MasterDataPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showRateForm, showDStatusForm]);
+  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm]);
 
   const showSuccess = (title: string, message?: string) => {
     setToast({ show: true, title, message: message || "" });
@@ -560,57 +575,117 @@ export default function MasterDataPage() {
     fetchPenalties();
   };
 
+  // ─── Nama Titik (Delivery Zone) Handlers ───
+  const filteredZones = zoneList.filter((z) =>
+    z.nama.toLowerCase().includes(zoneSearch.toLowerCase()) || (z.deskripsi || "").toLowerCase().includes(zoneSearch.toLowerCase())
+  );
+  const activeZones = zoneList.filter((z) => z.status === "Aktif");
+
+  const handleOpenAddZone = () => {
+    const autoColor = generateDivisionColor(zoneList.map((z) => z.color));
+    setZoneForm({ nama: "", deskripsi: "", color: autoColor, status: "Aktif" });
+    setEditingZoneId(null);
+    setShowZoneForm(true);
+  };
+  const handleOpenEditZone = (z: DeliveryZone) => {
+    setZoneForm({ nama: z.nama, deskripsi: z.deskripsi || "", color: z.color || "#3b82f6", status: z.status });
+    setEditingZoneId(z.id);
+    setShowZoneForm(true);
+  };
+  const handleSaveZone = async () => {
+    if (!zoneForm.nama.trim()) return;
+    const cleanNama = toTitleCase(zoneForm.nama.trim());
+    if (editingZoneId !== null) {
+      const { error } = await supabase.from("delivery_zones").update({ nama: cleanNama, deskripsi: zoneForm.deskripsi || null, color: zoneForm.color, status: zoneForm.status }).eq("id", editingZoneId);
+      if (error) {
+        showSuccess("Gagal", error.message);
+        return;
+      }
+      showSuccess("Nama Titik Diperbarui", `Data nama titik "${cleanNama}" telah disimpan.`);
+    } else {
+      const { error } = await supabase.from("delivery_zones").insert({ nama: cleanNama, deskripsi: zoneForm.deskripsi || null, color: zoneForm.color, status: zoneForm.status });
+      if (error) {
+        showSuccess("Gagal", error.message.includes("duplicate") ? "Nama titik sudah ada." : error.message);
+        return;
+      }
+      showSuccess("Nama Titik Ditambahkan", `Nama titik "${cleanNama}" berhasil ditambahkan.`);
+    }
+    setShowZoneForm(false);
+    fetchZones();
+    fetchRates();
+  };
+  const handleDeleteZone = async (id: number) => {
+    const { error } = await supabase.from("delivery_zones").delete().eq("id", id);
+    setDeleteConfirm(null);
+    if (error) {
+      showSuccess("Gagal Hapus", error.message.includes("foreign key") || error.message.includes("violates")
+        ? "Nama titik dipakai pada Harga Titik atau Rekap Titik. Hapus dulu data tersebut."
+        : error.message);
+      return;
+    }
+    showSuccess("Nama Titik Dihapus", "Data nama titik telah dihapus dari sistem.");
+    fetchZones();
+    fetchRates();
+  };
+  const handleToggleZoneStatus = async (id: number) => {
+    const z = zoneList.find((x) => x.id === id);
+    if (!z) return;
+    const newStatus = z.status === "Aktif" ? "Tidak Aktif" : "Aktif";
+    await supabase.from("delivery_zones").update({ status: newStatus }).eq("id", id);
+    fetchZones();
+  };
+
   // ─── Harga Titik Handlers ───
   const filteredRateRows = rateRows.filter((r) =>
-    r.divisionNama.toLowerCase().includes(rateSearch.toLowerCase())
+    r.zoneNama.toLowerCase().includes(rateSearch.toLowerCase())
   );
-  const divisionsWithoutRate = activeDivisions.filter((d) => !rateRows.some((r) => r.division_id === d.id));
+  const zonesWithoutRate = activeZones.filter((z) => !rateRows.some((r) => r.zone_id === z.id));
 
   const handleOpenAddRate = () => {
-    setRateForm({ division_id: divisionsWithoutRate[0]?.id || 0, driver_rate: "", helper_rate: "" });
-    setEditingRateDivId(null);
+    setRateForm({ zone_id: zonesWithoutRate[0]?.id || 0, driver_rate: "", helper_rate: "" });
+    setEditingRateZoneId(null);
     setShowRateForm(true);
   };
   const handleOpenEditRate = (row: RateRow) => {
-    setRateForm({ division_id: row.division_id, driver_rate: row.driverRate !== null ? String(row.driverRate) : "", helper_rate: row.helperRate !== null ? String(row.helperRate) : "" });
-    setEditingRateDivId(row.division_id);
+    setRateForm({ zone_id: row.zone_id, driver_rate: row.driverRate !== null ? String(row.driverRate) : "", helper_rate: row.helperRate !== null ? String(row.helperRate) : "" });
+    setEditingRateZoneId(row.zone_id);
     setShowRateForm(true);
   };
   const handleSaveRate = async () => {
-    if (!rateForm.division_id) return;
+    if (!rateForm.zone_id) return;
     if (!rateForm.driver_rate && !rateForm.helper_rate) return;
-    const divNama = divisionList.find((d) => d.id === rateForm.division_id)?.nama || "";
+    const zoneNama = zoneList.find((z) => z.id === rateForm.zone_id)?.nama || "";
 
     // Upsert Driver rate
     if (rateForm.driver_rate) {
-      const existing = rateRows.find((r) => r.division_id === rateForm.division_id);
+      const existing = rateRows.find((r) => r.zone_id === rateForm.zone_id);
       if (existing?.driverRateId) {
         await supabase.from("point_rates").update({ rate_per_point: parseInt(rateForm.driver_rate) || 0 }).eq("id", existing.driverRateId);
       } else {
-        await supabase.from("point_rates").insert({ division_id: rateForm.division_id, role: "Driver", rate_per_point: parseInt(rateForm.driver_rate) || 0 });
+        await supabase.from("point_rates").insert({ zone_id: rateForm.zone_id, role: "Driver", rate_per_point: parseInt(rateForm.driver_rate) || 0 });
       }
     }
     // Upsert Helper rate
     if (rateForm.helper_rate) {
-      const existing = rateRows.find((r) => r.division_id === rateForm.division_id);
+      const existing = rateRows.find((r) => r.zone_id === rateForm.zone_id);
       if (existing?.helperRateId) {
         await supabase.from("point_rates").update({ rate_per_point: parseInt(rateForm.helper_rate) || 0 }).eq("id", existing.helperRateId);
       } else {
-        await supabase.from("point_rates").insert({ division_id: rateForm.division_id, role: "Helper", rate_per_point: parseInt(rateForm.helper_rate) || 0 });
+        await supabase.from("point_rates").insert({ zone_id: rateForm.zone_id, role: "Helper", rate_per_point: parseInt(rateForm.helper_rate) || 0 });
       }
     }
 
-    showSuccess(editingRateDivId ? "Harga Titik Diperbarui" : "Harga Titik Ditambahkan", `Tarif divisi "${divNama}" telah disimpan.`);
+    showSuccess(editingRateZoneId ? "Harga Titik Diperbarui" : "Harga Titik Ditambahkan", `Tarif titik "${zoneNama}" telah disimpan.`);
     setShowRateForm(false);
     fetchRates();
   };
-  const handleDeleteRate = async (id: number) => {
-    // Delete both driver & helper rates for this division
-    const row = rateRows.find((r) => r.division_id === id);
+  const handleDeleteRate = async (zoneId: number) => {
+    // Delete both driver & helper rates for this zone
+    const row = rateRows.find((r) => r.zone_id === zoneId);
     if (row?.driverRateId) await supabase.from("point_rates").delete().eq("id", row.driverRateId);
     if (row?.helperRateId) await supabase.from("point_rates").delete().eq("id", row.helperRateId);
     setDeleteConfirm(null);
-    showSuccess("Harga Titik Dihapus", "Data tarif divisi telah dihapus dari sistem.");
+    showSuccess("Harga Titik Dihapus", "Data tarif titik telah dihapus dari sistem.");
     fetchRates();
   };
 
@@ -814,7 +889,7 @@ export default function MasterDataPage() {
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.key;
                 const Icon = tab.icon;
-                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
+                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
                 return (
                   <button
                     key={tab.key}
@@ -1219,17 +1294,77 @@ export default function MasterDataPage() {
           </>
         )}
 
+        {/* ─── TAB: NAMA TITIK ─── */}
+        {activeTab === "nama-titik" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input type="text" placeholder="Cari nama titik..." value={zoneSearch} onChange={(e) => { setZoneSearch(e.target.value); setMasterPage(1); }}
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+              </div>
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddZone}>Tambah Nama Titik</Button>}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Titik</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Deskripsi</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <SkeletonTable rows={5} cols={5} />
+                  ) : filteredZones.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Belum ada nama titik. Tambah dulu sebelum mengatur Harga Titik.</td></tr>
+                  ) : filteredZones.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((zone, idx) => (
+                    <tr key={zone.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: zone.color || "#3b82f6" }} />
+                          <p className="text-sm font-semibold text-foreground">{zone.nama}</p>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{zone.deskripsi || <span className="italic">-</span>}</td>
+                      <td className="px-5 py-3.5">
+                        <button onClick={() => handleToggleZoneStatus(zone.id)}
+                          className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
+                            zone.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                          <div className={cn("w-1.5 h-1.5 rounded-full", zone.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
+                          {zone.status}
+                        </button>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-center gap-1">
+                          {canEdit && <button onClick={() => handleOpenEditZone(zone)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "nama-titik", id: zone.id, nama: zone.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredZones.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
+          </>
+        )}
+
         {/* ─── TAB: HARGA TITIK ─── */}
         {activeTab === "harga-titik" && (
           <>
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                <input type="text" placeholder="Cari divisi..." value={rateSearch} onChange={(e) => { setRateSearch(e.target.value); setMasterPage(1); }}
+                <input type="text" placeholder="Cari nama titik..." value={rateSearch} onChange={(e) => { setRateSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddRate} disabled={divisionsWithoutRate.length === 0}>
-                {divisionsWithoutRate.length === 0 ? "Semua Divisi Sudah Ada" : "Tambah Harga Titik"}
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddRate} disabled={zonesWithoutRate.length === 0}>
+                {activeZones.length === 0 ? "Belum Ada Nama Titik" : zonesWithoutRate.length === 0 ? "Semua Titik Sudah Ada" : "Tambah Harga Titik"}
               </Button>}
             </div>
             <div className="overflow-x-auto">
@@ -1237,7 +1372,7 @@ export default function MasterDataPage() {
                 <thead>
                   <tr className="bg-muted/30 border-b border-border">
                     <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Divisi</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Titik</th>
                     <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">
                       <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" />Driver / Titik</span>
                     </th>
@@ -1253,9 +1388,9 @@ export default function MasterDataPage() {
                   ) : filteredRateRows.length === 0 ? (
                     <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data harga titik ditemukan</td></tr>
                   ) : filteredRateRows.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((row, idx) => (
-                    <tr key={row.division_id} className="hover:bg-muted/30">
+                    <tr key={row.zone_id} className="hover:bg-muted/30">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
-                      <td className="px-5 py-3.5"><span className="text-sm font-semibold text-foreground">{row.divisionNama}</span></td>
+                      <td className="px-5 py-3.5"><span className="text-sm font-semibold text-foreground">{row.zoneNama}</span></td>
                       <td className="px-5 py-3.5 text-right">
                         {row.driverRate !== null
                           ? <span className="text-sm font-bold text-blue-600">Rp {row.driverRate.toLocaleString("id-ID")}</span>
@@ -1269,7 +1404,7 @@ export default function MasterDataPage() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
                           {canEdit && <button onClick={() => handleOpenEditRate(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
-                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "harga-titik", id: row.division_id, nama: row.divisionNama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "harga-titik", id: row.zone_id, nama: row.zoneNama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -2053,6 +2188,60 @@ export default function MasterDataPage() {
         </Portal>
       )}
 
+      {/* ═══ NAMA TITIK FORM MODAL ═══ */}
+      {showZoneForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowZoneForm(false)} />
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                  {editingZoneId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
+                </div>
+                <h2 className="text-sm font-bold text-foreground">{editingZoneId ? "Edit Nama Titik" : "Tambah Nama Titik Baru"}</h2>
+              </div>
+              <button onClick={() => setShowZoneForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Titik <span className="text-danger">*</span></label>
+                  <input type="text" placeholder="Contoh: Cp Suka, Rkf Aeon" value={zoneForm.nama} onChange={(e) => setZoneForm({ ...zoneForm, nama: e.target.value })} className={inputClass} autoFocus />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Warna</label>
+                  <input type="color" value={zoneForm.color} onChange={(e) => setZoneForm({ ...zoneForm, color: e.target.value })}
+                    className="w-10 h-10 rounded-xl border border-border cursor-pointer appearance-none bg-transparent [&::-webkit-color-swatch-wrapper]:p-0.5 [&::-webkit-color-swatch]:rounded-lg [&::-webkit-color-swatch]:border-0" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Deskripsi</label>
+                <input type="text" placeholder="Deskripsi singkat (opsional)" value={zoneForm.deskripsi} onChange={(e) => setZoneForm({ ...zoneForm, deskripsi: e.target.value })} className={inputClass} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
+                <Select
+                  value={zoneForm.status}
+                  onChange={(val) => setZoneForm({ ...zoneForm, status: val })}
+                  options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Nama Titik dipakai pada Harga Titik dan Rekap Titik. Tidak terkait dengan Divisi (yang dipakai untuk absensi).
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <Button variant="outline" size="sm" onClick={() => setShowZoneForm(false)}>Batal</Button>
+              <Button size="sm" icon={editingZoneId ? Check : Plus} onClick={handleSaveZone} disabled={!zoneForm.nama.trim()}>
+                {editingZoneId ? "Simpan" : "Tambah Nama Titik"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
       {/* ═══ HARGA TITIK FORM MODAL ═══ */}
       {showRateForm && (
         <Portal>
@@ -2062,25 +2251,25 @@ export default function MasterDataPage() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
-                  {editingRateDivId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
+                  {editingRateZoneId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
                 </div>
-                <h2 className="text-sm font-bold text-foreground">{editingRateDivId ? "Edit Harga Titik" : "Tambah Harga Titik"}</h2>
+                <h2 className="text-sm font-bold text-foreground">{editingRateZoneId ? "Edit Harga Titik" : "Tambah Harga Titik"}</h2>
               </div>
               <button onClick={() => setShowRateForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-foreground mb-1.5 block">Divisi <span className="text-danger">*</span></label>
-                {editingRateDivId !== null ? (
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Titik <span className="text-danger">*</span></label>
+                {editingRateZoneId !== null ? (
                   <div className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/50 text-sm text-muted-foreground cursor-not-allowed">
-                    {divisionList.find((d) => d.id === rateForm.division_id)?.nama || "-"}
+                    {zoneList.find((z) => z.id === rateForm.zone_id)?.nama || "-"}
                   </div>
                 ) : (
                   <Select
-                    value={String(rateForm.division_id)}
-                    onChange={(val) => setRateForm({ ...rateForm, division_id: parseInt(val) })}
-                    options={divisionsWithoutRate.map((d) => ({ value: String(d.id), label: d.nama }))}
-                    placeholder="Pilih divisi"
+                    value={String(rateForm.zone_id)}
+                    onChange={(val) => setRateForm({ ...rateForm, zone_id: parseInt(val) })}
+                    options={zonesWithoutRate.map((z) => ({ value: String(z.id), label: z.nama }))}
+                    placeholder={activeZones.length === 0 ? "Belum ada nama titik" : "Pilih nama titik"}
                   />
                 )}
               </div>
@@ -2104,12 +2293,12 @@ export default function MasterDataPage() {
                   </div>
                 </div>
               </div>
-              <p className="text-[10px] text-muted-foreground">Isi minimal salah satu harga. Kosongkan jika posisi tersebut tidak berlaku untuk divisi ini.</p>
+              <p className="text-[10px] text-muted-foreground">Isi minimal salah satu harga. Kosongkan jika role tersebut tidak berlaku untuk titik ini.</p>
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
               <Button variant="outline" size="sm" onClick={() => setShowRateForm(false)}>Batal</Button>
-              <Button size="sm" icon={editingRateDivId ? Check : Plus} onClick={handleSaveRate} disabled={!rateForm.division_id || (!rateForm.driver_rate && !rateForm.helper_rate)}>
-                {editingRateDivId ? "Simpan" : "Tambah"}
+              <Button size="sm" icon={editingRateZoneId ? Check : Plus} onClick={handleSaveRate} disabled={!rateForm.zone_id || (!rateForm.driver_rate && !rateForm.helper_rate)}>
+                {editingRateZoneId ? "Simpan" : "Tambah"}
               </Button>
             </div>
           </div>
@@ -2348,7 +2537,7 @@ export default function MasterDataPage() {
               <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
                 <Trash2 className="w-7 h-7 text-danger" />
               </div>
-              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "denda-telat": "Denda Telat", "harga-titik": "Harga Titik", "status-titik": "Status Titik", bank: "Bank" }[deleteConfirm.type]}?</h3>
+              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "denda-telat": "Denda Telat", "nama-titik": "Nama Titik", "harga-titik": "Harga Titik", "status-titik": "Status Titik", bank: "Bank" }[deleteConfirm.type]}?</h3>
               <p className="text-sm text-muted-foreground mt-2">
                 <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen dan tidak dapat dikembalikan.
               </p>
@@ -2362,6 +2551,7 @@ export default function MasterDataPage() {
                 else if (deleteConfirm.type === "titik-absen") handleDeleteLocation(deleteConfirm.id);
                 else if (deleteConfirm.type === "waktu-kerja") handleDeleteSchedule(deleteConfirm.id);
                 else if (deleteConfirm.type === "denda-telat") handleDeletePenalty(deleteConfirm.id);
+                else if (deleteConfirm.type === "nama-titik") handleDeleteZone(deleteConfirm.id);
                 else if (deleteConfirm.type === "harga-titik") handleDeleteRate(deleteConfirm.id);
                 else if (deleteConfirm.type === "status-titik") handleDeleteDStatus(deleteConfirm.id);
                 else handleDeleteBank(deleteConfirm.id);
