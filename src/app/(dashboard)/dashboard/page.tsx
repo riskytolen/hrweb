@@ -203,11 +203,11 @@ export default function DashboardPage() {
     const leavePending = supabase
       .from("leave_requests")
       .select("id", { count: "exact", head: true })
-      .eq("status_approval", "Menunggu");
+      .eq("status", "Menunggu");
     const overtimePending = supabase
       .from("overtime_requests")
       .select("id", { count: "exact", head: true })
-      .eq("status_approval", "Menunggu");
+      .eq("status", "Menunggu");
     const legalPending = supabase
       .from("legal_documents")
       .select("id", { count: "exact", head: true })
