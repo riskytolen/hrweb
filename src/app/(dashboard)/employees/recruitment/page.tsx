@@ -196,7 +196,7 @@ export default function RecruitmentPage() {
         const { data: inserted, error } = await supabase
           .from("recruitments")
           .insert(payload)
-          .select("id")
+          .select("*")
           .single();
 
         if (error || !inserted) {
@@ -204,10 +204,13 @@ export default function RecruitmentPage() {
           return;
         }
 
+        let cvWarning: string | null = null;
+        let finalRecord = inserted as DbRecruitment;
+
         if (cvFile) {
           const result = await uploadCv(cvFile, inserted.id);
           if (result.error) {
-            showToast("error", "Pelamar Ditambahkan, CV Gagal", "Data tersimpan tapi CV gagal diupload. Silakan edit untuk upload ulang.");
+            cvWarning = "Data tersimpan tapi CV gagal diupload. Silakan edit untuk upload ulang.";
           } else if (result.url) {
             const { error: updateErr } = await supabase
               .from("recruitments")
@@ -215,13 +218,41 @@ export default function RecruitmentPage() {
               .eq("id", inserted.id);
 
             if (updateErr) {
-              showToast("error", "CV Terupload, Gagal Simpan URL", "File CV berhasil diupload tapi gagal menyimpan referensinya.");
+              cvWarning = "File CV berhasil diupload tapi gagal menyimpan referensinya.";
             } else {
-              showToast("success", "Pelamar Ditambahkan", `Data "${form.nama}" berhasil disimpan.`);
+              finalRecord = { ...finalRecord, cv_url: result.url };
             }
           }
+        }
+
+        // Auto-sync pegawai bila status awal sudah "Training" atau "Diterima".
+        // Anti-orphan: kalau gagal buat pegawai, rollback recruitment.
+        const needsSync = form.status === "Training" || form.status === "Diterima";
+        if (needsSync) {
+          const syncResult = await syncPegawaiForStatus(finalRecord, form.status);
+          if (!syncResult.ok) {
+            // Rollback: hapus recruitment yang baru saja di-insert
+            await supabase.from("recruitments").delete().eq("id", inserted.id);
+            showToast(
+              "error",
+              "Gagal Membuat Pegawai",
+              `${syncResult.toast.message} Data pelamar dibatalkan, silakan coba lagi.`,
+            );
+            return;
+          }
+          // Sync sukses → tampilkan toast dari sync (sudah informatif: "Training Dimulai" / "Diterima")
+          if (cvWarning) {
+            showToast("error", "Pelamar Ditambahkan, CV Gagal", cvWarning);
+          } else {
+            showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
+          }
         } else {
-          showToast("success", "Pelamar Ditambahkan", `Data "${form.nama}" berhasil disimpan.`);
+          // Status awal "Lamaran Masuk" / "Terpilih" / "Ditolak" → tidak perlu pegawai
+          if (cvWarning) {
+            showToast("error", "Pelamar Ditambahkan, CV Gagal", cvWarning);
+          } else {
+            showToast("success", "Pelamar Ditambahkan", `Data "${form.nama}" berhasil disimpan.`);
+          }
         }
       }
 

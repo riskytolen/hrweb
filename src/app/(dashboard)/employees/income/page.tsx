@@ -1584,7 +1584,10 @@ export default function IncomePage() {
                                 <Select
                                   value={row.employee_id || ""}
                                   onChange={(val) => handleEmployeeChange(row.rowKey, val)}
-                                  options={employees.map((e) => ({ value: e.id, label: e.nama }))}
+                                  options={employees.map((e) => ({
+                                    value: e.id,
+                                    label: e.status === "Training" ? `${e.nama}  • Training` : e.nama,
+                                  }))}
                                   placeholder="Pilih pegawai..."
                                   searchable
                                   hasError={isDuplicate}
