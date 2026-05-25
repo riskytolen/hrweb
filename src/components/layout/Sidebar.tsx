@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/AuthProvider";
 import {
   Users,
-  ChevronLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   ChevronDown,
   CreditCard,
   ClipboardCheck,
@@ -38,50 +39,62 @@ interface SubItem {
   href: string;
   icon: LucideIcon;
   comingSoon?: boolean;
-  permission?: string; // permission required to see this item
+  permission?: string;
 }
 
 interface MenuGroup {
   key: string;
   label: string;
   icon: LucideIcon;
-  color: string;
   basePath: string;
-  permission?: string; // permission required to see this group
+  permission?: string;
   items: SubItem[];
 }
 
-const allMenuGroups: MenuGroup[] = [
+interface MenuSection {
+  label: string;
+  groups: MenuGroup[];
+}
+
+const allSections: MenuSection[] = [
   {
-    key: "hrm",
-    label: "HRM",
-    icon: UsersRound,
-    color: "from-blue-500 to-cyan-400",
-    basePath: "/employees",
-    items: [
-      { name: "Data Pegawai", href: "/employees", icon: Users, permission: "employees" },
-      { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck, permission: "attendance" },
-      { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays, permission: "leave" },
-      { name: "Lembur", href: "/employees/overtime", icon: Clock, permission: "overtime" },
-      { name: "Rekap Titik", href: "/employees/income", icon: Wallet, permission: "income" },
-      { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, permission: "payroll" },
-      { name: "Kinerja", href: "/employees/performance", icon: Award, permission: "performance" },
-      { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, permission: "legal" },
-      { name: "Pengumuman", href: "/employees/announcements", icon: Megaphone, permission: "employees" },
-      { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus, permission: "recruitment" },
+    label: "Menu",
+    groups: [
+      {
+        key: "hrm",
+        label: "HRM",
+        icon: UsersRound,
+        basePath: "/employees",
+        items: [
+          { name: "Data Pegawai", href: "/employees", icon: Users, permission: "employees" },
+          { name: "Absensi", href: "/employees/attendance", icon: ClipboardCheck, permission: "attendance" },
+          { name: "Cuti & Izin", href: "/employees/leave", icon: CalendarDays, permission: "leave" },
+          { name: "Lembur", href: "/employees/overtime", icon: Clock, permission: "overtime" },
+          { name: "Rekap Titik", href: "/employees/income", icon: Wallet, permission: "income" },
+          { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, permission: "payroll" },
+          { name: "Kinerja", href: "/employees/performance", icon: Award, permission: "performance" },
+          { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, permission: "legal" },
+          { name: "Pengumuman", href: "/employees/announcements", icon: Megaphone, permission: "employees" },
+          { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus, permission: "recruitment" },
+        ],
+      },
     ],
   },
   {
-    key: "settings",
-    label: "Pengaturan",
-    icon: Settings,
-    color: "from-teal-500 to-cyan-400",
-    basePath: "/settings",
-    items: [
-      { name: "Data Master", href: "/settings/master-data", icon: Database, permission: "settings" },
-      { name: "Keamanan", href: "/settings/security", icon: Shield, permission: "settings" },
-      { name: "Riwayat Aksi", href: "/settings/audit-logs", icon: ShieldCheck },
-      { name: "Manajemen Akun", href: "/settings/accounts", icon: UserCog },
+    label: "Sistem",
+    groups: [
+      {
+        key: "settings",
+        label: "Pengaturan",
+        icon: Settings,
+        basePath: "/settings",
+        items: [
+          { name: "Data Master", href: "/settings/master-data", icon: Database, permission: "settings" },
+          { name: "Keamanan", href: "/settings/security", icon: Shield, permission: "settings" },
+          { name: "Riwayat Aksi", href: "/settings/audit-logs", icon: ShieldCheck },
+          { name: "Manajemen Akun", href: "/settings/accounts", icon: UserCog },
+        ],
+      },
     ],
   },
 ];
@@ -90,39 +103,38 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
   const { isSuperAdmin, hasPermission, isLoading, profile } = useAuth();
 
-  // Filter menu berdasarkan permission user
-  // Saat loading atau belum ada profile, tampilkan semua menu (akan diproteksi middleware)
-  const menuGroups = allMenuGroups
-    .map((group) => {
-      const filteredItems = group.items.filter((item) => {
-        // Saat masih loading, tampilkan semua
-        if (isLoading || !profile) return true;
-        // Manajemen Akun & Riwayat Aksi hanya untuk superadmin
-        if (item.href === "/settings/accounts") return isSuperAdmin;
-        if (item.href === "/settings/audit-logs") return isSuperAdmin;
-        // Item tanpa permission = tampilkan untuk semua
-        if (!item.permission) return true;
-        // Cek permission
-        return hasPermission(item.permission) || hasPermission(item.permission + ".view");
-      });
-      return { ...group, items: filteredItems };
+  // Filter section/group/items berdasarkan permission user
+  const sections: MenuSection[] = allSections
+    .map((section) => {
+      const filteredGroups = section.groups
+        .map((group) => {
+          const filteredItems = group.items.filter((item) => {
+            if (isLoading || !profile) return true;
+            if (item.href === "/settings/accounts") return isSuperAdmin;
+            if (item.href === "/settings/audit-logs") return isSuperAdmin;
+            if (!item.permission) return true;
+            return hasPermission(item.permission) || hasPermission(item.permission + ".view");
+          });
+          return { ...group, items: filteredItems };
+        })
+        .filter((g) => g.items.length > 0);
+      return { ...section, groups: filteredGroups };
     })
-    .filter((group) => group.items.length > 0);
+    .filter((s) => s.groups.length > 0);
 
-  // Auto-open group yang memiliki sub item aktif
+  // Auto-open group yang punya sub item aktif
   const computeOpenGroups = () => {
     const open: Record<string, boolean> = {};
-    menuGroups.forEach((g) => {
-      open[g.key] = g.items.some((item) =>
-        pathname === item.href || pathname.startsWith(item.href + "/")
-      );
+    sections.forEach((s) => {
+      s.groups.forEach((g) => {
+        open[g.key] = g.items.some((item) => pathname === item.href || pathname.startsWith(item.href + "/"));
+      });
     });
     return open;
   };
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(computeOpenGroups);
 
-  // Re-compute open groups saat profile/permissions berubah
   useEffect(() => {
     setOpenGroups(computeOpenGroups());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,182 +144,261 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const roleLabel = profile?.roles?.nama ?? (isSuperAdmin ? "Super Admin" : "User");
+
   return (
     <aside
       className={cn(
         "fixed left-0 top-0 z-40 h-screen flex flex-col",
-        "transition-all duration-300 ease-in-out",
-        collapsed ? "w-[60px]" : "w-[230px]"
+        "transition-[width] duration-300 ease-in-out",
+        "border-r border-white/[0.05]",
+        collapsed ? "w-[64px]" : "w-[240px]",
       )}
     >
-      {/* Background */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[#0c1222] via-[#0f1729] to-[#0c1222]" />
-      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSA2MCAwIEwgMCAwIDAgNjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjAyKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-100" />
-      <div className="absolute top-0 left-0 w-32 h-32 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-20 right-0 w-24 h-24 bg-violet-600/8 rounded-full blur-3xl pointer-events-none" />
+      {/* Background: solid dark + subtle vertical gradient highlight, tanpa grid/blob */}
+      <div className="absolute inset-0 bg-[#0b1120]" />
+      <div className="absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-blue-500/[0.04] to-transparent pointer-events-none" />
 
       <div className="relative z-10 flex flex-col h-full">
-        {/* Logo */}
-        <div className={cn("flex items-center h-14 border-b border-white/[0.06]", collapsed ? "px-3 justify-center" : "px-4")}>
-          <Link href="/employees" className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center">
-              <Image
-                src="/logo.png"
-                alt="Logo"
-                width={28}
-                height={28}
-                className="object-contain"
-              />
+        {/* Header: Logo + collapse toggle */}
+        <div
+          className={cn(
+            "flex items-center h-14 border-b border-white/[0.05] flex-shrink-0",
+            collapsed ? "justify-center px-2" : "px-3 gap-2",
+          )}
+        >
+          <Link
+            href="/employees"
+            className={cn(
+              "flex items-center gap-2.5 min-w-0",
+              collapsed ? "" : "flex-1",
+            )}
+            aria-label="Beranda"
+          >
+            <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-white/[0.04] ring-1 ring-white/[0.06]">
+              <Image src="/logo.png" alt="Logo" width={22} height={22} className="object-contain" />
             </div>
             {!collapsed && (
-              <div className="animate-fade-in min-w-0">
-                <h1 className="text-[13px] font-bold bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent leading-tight truncate">
-                  Jamslogistic
-                </h1>
-                <p className="text-[9px] font-medium text-blue-400/50 uppercase tracking-[0.15em]">
-                  HRM System
-                </p>
+              <div className="min-w-0 animate-fade-in">
+                <h1 className="text-[13px] font-semibold text-white leading-tight truncate">Jamslogistic</h1>
+                <p className="text-[9px] font-medium text-blue-300/60 uppercase tracking-[0.18em]">HRM System</p>
               </div>
             )}
           </Link>
+
+          {!collapsed && (
+            <button
+              onClick={onToggle}
+              className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors flex-shrink-0"
+              aria-label="Tutup sidebar"
+              title="Tutup sidebar"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Navigation */}
-        <nav className={cn("flex-1 overflow-y-auto py-2", collapsed ? "px-1.5" : "px-2")}>
-          <div className="space-y-1">
-            {menuGroups.map((group) => {
-              const isOpen = openGroups[group.key];
-              const isGroupActive = group.items.some((item) =>
-                pathname === item.href || pathname.startsWith(item.href + "/")
-              );
-              const GroupIcon = group.icon;
+        <nav
+          className={cn(
+            "flex-1 overflow-y-auto overflow-x-hidden py-3 sidebar-scrollbar",
+            collapsed ? "px-2" : "px-3",
+          )}
+        >
+          {sections.map((section, sIdx) => (
+            <div key={section.label} className={cn(sIdx > 0 && (collapsed ? "mt-3 pt-3 border-t border-white/[0.05]" : "mt-4"))}>
+              {/* Section label */}
+              {!collapsed && (
+                <p className="px-2 mb-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-[0.12em]">
+                  {section.label}
+                </p>
+              )}
 
-              return (
-                <div key={group.key}>
-                  {/* Group Header (clickable accordion) */}
-                  <button
-                    onClick={() => {
-                      if (collapsed) {
-                        // saat collapsed, langsung navigate ke item pertama
-                        window.location.href = group.items[0].href;
-                      } else {
-                        toggleGroup(group.key);
-                      }
-                    }}
-                    className={cn(
-                      "w-full flex items-center gap-2.5 rounded-lg relative overflow-hidden",
-                      collapsed ? "px-0 py-2.5 justify-center" : "px-2.5 py-2",
-                      isGroupActive ? "text-white" : "text-slate-400 hover:text-slate-200"
-                    )}
-                  >
-                    {/* Active bg */}
-                    {isGroupActive && (
-                      <div className={cn("absolute inset-0 rounded-lg bg-gradient-to-r opacity-[0.1]", group.color)} />
-                    )}
-                    {!isGroupActive && (
-                      <div className="absolute inset-0 rounded-lg bg-white/0 hover:bg-white/[0.04]" />
-                    )}
+              <div className={cn(collapsed ? "space-y-1" : "space-y-0.5")}>
+                {section.groups.map((group) => {
+                  const isOpen = openGroups[group.key];
+                  const isGroupActive = group.items.some(
+                    (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
+                  );
+                  const GroupIcon = group.icon;
 
-                    {/* Icon */}
-                    <div className={cn(
-                      "relative flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center",
-                      isGroupActive
-                        ? cn("bg-gradient-to-br shadow-md", group.color)
-                        : "bg-white/[0.04]"
-                    )}>
-                      <GroupIcon className={cn("w-[14px] h-[14px]", isGroupActive ? "text-white" : "text-slate-400")} />
-                    </div>
+                  return (
+                    <div key={group.key}>
+                      {/* Group trigger */}
+                      <div className="relative group/trigger">
+                        <button
+                          onClick={() => {
+                            if (collapsed) {
+                              window.location.href = group.items[0].href;
+                            } else {
+                              toggleGroup(group.key);
+                            }
+                          }}
+                          className={cn(
+                            "w-full flex items-center rounded-lg transition-colors group/btn",
+                            collapsed
+                              ? "justify-center h-10 w-10 mx-auto"
+                              : "gap-2.5 px-2 py-1.5",
+                            isGroupActive
+                              ? "text-white bg-white/[0.05]"
+                              : "text-slate-400 hover:text-white hover:bg-white/[0.04]",
+                          )}
+                        >
+                          {/* Icon */}
+                          <div
+                            className={cn(
+                              "flex items-center justify-center flex-shrink-0 rounded-md transition-colors",
+                              collapsed ? "w-7 h-7" : "w-7 h-7",
+                              isGroupActive
+                                ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/20"
+                                : "bg-white/[0.04] text-slate-400 group-hover/btn:bg-white/[0.07] group-hover/btn:text-slate-200",
+                            )}
+                          >
+                            <GroupIcon className="w-[15px] h-[15px]" strokeWidth={2} />
+                          </div>
 
-                    {/* Label + Chevron */}
-                    {!collapsed && (
-                      <>
-                        <span className={cn("text-[12px] font-semibold truncate flex-1 text-left", isGroupActive ? "text-white" : "")}>
-                          {group.label}
-                        </span>
-                        <ChevronDown className={cn(
-                          "w-3.5 h-3.5 text-slate-500 transition-transform duration-200",
-                          isOpen && "rotate-180"
-                        )} />
-                      </>
-                    )}
-                  </button>
-
-                  {/* Tooltip saat collapsed */}
-                  {collapsed && (
-                    <div className="relative group/tip">
-                      <div className="absolute left-full bottom-full mb-0 ml-2.5 px-2.5 py-1 bg-slate-800 text-white text-[11px] font-medium rounded-md shadow-xl opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible whitespace-nowrap z-50 border border-white/10">
-                        {group.label}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Sub Items (accordion content) */}
-                  {!collapsed && (
-                    <div className={cn(
-                      "overflow-hidden transition-all duration-200 ease-in-out",
-                      isOpen ? "max-h-[500px] opacity-100 mt-0.5" : "max-h-0 opacity-0"
-                    )}>
-                      <ul className="ml-[18px] border-l border-white/[0.06] pl-2.5 space-y-0.5 py-0.5">
-                        {group.items.map((item) => {
-                          const isActive = !item.comingSoon && (pathname === item.href ||
-                            (item.href !== "/employees" && item.href !== "/settings" && pathname.startsWith(item.href + "/")));
-                          const ItemIcon = item.icon;
-
-                          if (item.comingSoon) {
-                            return (
-                              <li key={item.href}>
-                                <div className="flex items-center gap-2 px-2.5 py-[7px] rounded-md text-[11.5px] font-medium text-slate-600 cursor-not-allowed">
-                                  <ItemIcon className="w-[13px] h-[13px] flex-shrink-0 text-slate-700" />
-                                  <span className="truncate">{item.name}</span>
-                                  <span className="ml-auto text-[8px] font-bold text-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 rounded flex-shrink-0">SOON</span>
-                                </div>
-                              </li>
-                            );
-                          }
-
-                          return (
-                            <li key={item.href}>
-                              <Link
-                                href={item.href}
+                          {!collapsed && (
+                            <>
+                              <span
                                 className={cn(
-                                  "flex items-center gap-2 px-2.5 py-[7px] rounded-md relative text-[11.5px] font-medium",
-                                  isActive
-                                    ? "text-white bg-white/[0.08]"
-                                    : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]"
+                                  "flex-1 text-left text-[12.5px] truncate",
+                                  isGroupActive ? "font-semibold text-white" : "font-medium",
                                 )}
                               >
-                                {isActive && (
-                                  <div className="absolute -left-[13px] top-1/2 -translate-y-1/2 w-[5px] h-[5px] rounded-full bg-gradient-to-r from-blue-400 to-cyan-400 shadow-sm shadow-blue-400/50" />
+                                {group.label}
+                              </span>
+                              <ChevronDown
+                                className={cn(
+                                  "w-3.5 h-3.5 text-slate-500 transition-transform duration-200",
+                                  isOpen && "rotate-180",
                                 )}
-                                <ItemIcon className={cn("w-[13px] h-[13px] flex-shrink-0", isActive ? "text-blue-400" : "text-slate-600")} />
-                                <span className="truncate">{item.name}</span>
-                              </Link>
-                            </li>
-                          );
-                        })}
-                      </ul>
+                              />
+                            </>
+                          )}
+                        </button>
+
+                        {/* Tooltip saat collapsed */}
+                        {collapsed && (
+                          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-md shadow-xl ring-1 ring-white/10 opacity-0 invisible group-hover/trigger:opacity-100 group-hover/trigger:visible whitespace-nowrap z-50 transition-opacity">
+                            {group.label}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Sub items (accordion) */}
+                      {!collapsed && (
+                        <div
+                          className={cn(
+                            "overflow-hidden transition-[max-height,opacity] duration-300 ease-in-out",
+                            isOpen ? "max-h-[640px] opacity-100" : "max-h-0 opacity-0",
+                          )}
+                        >
+                          <ul className="mt-0.5 mb-1 ml-[18px] pl-[14px] border-l border-white/[0.06] space-y-px">
+                            {group.items.map((item) => {
+                              const isActive =
+                                pathname === item.href || pathname.startsWith(item.href + "/");
+                              const ItemIcon = item.icon;
+
+                              if (item.comingSoon) {
+                                return (
+                                  <li key={item.href}>
+                                    <div className="flex items-center gap-2 px-2 py-[7px] rounded-md text-[12px] font-medium text-slate-600 cursor-not-allowed">
+                                      <ItemIcon className="w-[13px] h-[13px] flex-shrink-0" />
+                                      <span className="truncate">{item.name}</span>
+                                      <span className="ml-auto text-[8px] font-bold text-amber-400/70 bg-amber-500/10 px-1.5 py-0.5 rounded flex-shrink-0">
+                                        SOON
+                                      </span>
+                                    </div>
+                                  </li>
+                                );
+                              }
+
+                              return (
+                                <li key={item.href} className="relative">
+                                  {isActive && (
+                                    <span className="absolute -left-[15px] top-1/2 -translate-y-1/2 h-[18px] w-[2px] rounded-r-full bg-gradient-to-b from-blue-400 to-cyan-400" />
+                                  )}
+                                  <Link
+                                    href={item.href}
+                                    className={cn(
+                                      "flex items-center gap-2 px-2 py-[7px] rounded-md text-[12px] transition-colors",
+                                      isActive
+                                        ? "text-white bg-white/[0.05] font-semibold"
+                                        : "text-slate-400 hover:text-white hover:bg-white/[0.03] font-medium",
+                                    )}
+                                  >
+                                    <ItemIcon
+                                      className={cn(
+                                        "w-[13px] h-[13px] flex-shrink-0",
+                                        isActive ? "text-blue-300" : "text-slate-500",
+                                      )}
+                                      strokeWidth={2}
+                                    />
+                                    <span className="truncate">{item.name}</span>
+                                  </Link>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
-        {/* Collapse Toggle */}
-        <div className={cn("pb-2.5", collapsed ? "px-1.5" : "px-2")}>
-          <button
-            onClick={onToggle}
-            className={cn(
-              "flex items-center justify-center w-full py-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-white/[0.04]",
-              collapsed ? "" : "gap-1.5"
-            )}
-          >
-            <ChevronLeft className={cn("w-3.5 h-3.5 transition-transform duration-300", collapsed && "rotate-180")} />
-            {!collapsed && <span className="text-[10px] font-medium">Tutup</span>}
-          </button>
+        {/* Footer */}
+        <div className="border-t border-white/[0.05] flex-shrink-0">
+          {collapsed ? (
+            <div className="px-2 py-2.5 flex flex-col items-center gap-1.5">
+              <button
+                onClick={onToggle}
+                className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+                aria-label="Buka sidebar"
+                title="Buka sidebar"
+              >
+                <PanelLeftOpen className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="px-3 py-2.5 flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-slate-500 truncate">Login sebagai</p>
+                <p className="text-[11px] font-semibold text-slate-300 truncate" title={roleLabel}>
+                  {roleLabel}
+                </p>
+              </div>
+              <span className="text-[9px] font-medium text-slate-600 bg-white/[0.04] px-1.5 py-0.5 rounded ring-1 ring-white/[0.04] flex-shrink-0">
+                v0.1
+              </span>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Custom scrollbar styling */}
+      <style jsx>{`
+        :global(.sidebar-scrollbar) {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+        }
+        :global(.sidebar-scrollbar::-webkit-scrollbar) {
+          width: 4px;
+        }
+        :global(.sidebar-scrollbar::-webkit-scrollbar-track) {
+          background: transparent;
+        }
+        :global(.sidebar-scrollbar::-webkit-scrollbar-thumb) {
+          background: rgba(255, 255, 255, 0.06);
+          border-radius: 9999px;
+        }
+        :global(.sidebar-scrollbar::-webkit-scrollbar-thumb:hover) {
+          background: rgba(255, 255, 255, 0.12);
+        }
+      `}</style>
     </aside>
   );
 }
