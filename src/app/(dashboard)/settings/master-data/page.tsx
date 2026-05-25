@@ -26,6 +26,7 @@ import {
   ChevronRight,
   Scale,
   CalendarDays,
+  RefreshCw,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -36,6 +37,7 @@ import Portal from "@/components/ui/Portal";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
+import { logAudit } from "@/lib/audit";
 import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting } from "@/lib/supabase";
 
 // ─── Types ───
@@ -52,6 +54,21 @@ type PenaltyRate = DbAttendancePenaltyRate & { divisionNama?: string };
 
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const selectClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 appearance-none text-foreground";
+
+// ─── Period helpers (cut-off tanggal 8) ───
+const CUT_OFF_DAY = 8;
+function getActivePeriodRange(): { start: string; end: string; label: string } {
+  const now = new Date();
+  // Periode aktif: jika hari ini < tgl 8 → mulai dari tgl 8 bulan lalu, akhir tgl 7 bulan ini.
+  // Jika hari ini >= tgl 8 → mulai dari tgl 8 bulan ini, akhir tgl 7 bulan depan.
+  const baseMonth = now.getDate() < CUT_OFF_DAY ? now.getMonth() - 1 : now.getMonth();
+  const startDate = new Date(now.getFullYear(), baseMonth, CUT_OFF_DAY);
+  const endDate = new Date(now.getFullYear(), baseMonth + 1, CUT_OFF_DAY - 1);
+  const start = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}-${String(startDate.getDate()).padStart(2, "0")}`;
+  const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+  const fmt = (d: Date) => d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  return { start, end, label: `${fmt(startDate)} – ${fmt(endDate)}` };
+}
 
 // ─── Tabs config ───
 const tabs = [
@@ -144,6 +161,15 @@ export default function MasterDataPage() {
   const [showRateForm, setShowRateForm] = useState(false);
   const [editingRateZoneId, setEditingRateZoneId] = useState<number | null>(null);
   const [rateForm, setRateForm] = useState({ zone_id: 0, driver_rate: "", helper_rate: "" });
+
+  // ─── Sinkron Harga ke Rekap Titik ───
+  type SyncMode = "active" | "all" | "custom";
+  const [syncRow, setSyncRow] = useState<RateRow | null>(null);
+  const [syncMode, setSyncMode] = useState<SyncMode>("active");
+  const [syncCustomStart, setSyncCustomStart] = useState("");
+  const [syncCustomEnd, setSyncCustomEnd] = useState("");
+  const [syncPreview, setSyncPreview] = useState<{ driverCount: number; helperCount: number; loading: boolean }>({ driverCount: 0, helperCount: 0, loading: false });
+  const [syncRunning, setSyncRunning] = useState(false);
 
   // ─── Status Titik State ───
   const [dStatusList, setDStatusList] = useState<DeliveryStatus[]>([]);
@@ -253,7 +279,7 @@ export default function MasterDataPage() {
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm) {
+    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm || syncRow !== null) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -261,7 +287,7 @@ export default function MasterDataPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm]);
+  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, syncRow]);
 
   const showSuccess = (title: string, message?: string) => {
     setToast({ show: true, title, message: message || "" });
@@ -687,6 +713,147 @@ export default function MasterDataPage() {
     setDeleteConfirm(null);
     showSuccess("Harga Titik Dihapus", "Data tarif titik telah dihapus dari sistem.");
     fetchRates();
+  };
+
+  // ─── Sinkron Harga ke Rekap Titik ───
+  const getSyncRange = (): { start: string | null; end: string | null; label: string } => {
+    if (syncMode === "all") return { start: null, end: null, label: "Semua periode" };
+    if (syncMode === "active") {
+      const p = getActivePeriodRange();
+      return { start: p.start, end: p.end, label: `Periode aktif (${p.label})` };
+    }
+    return {
+      start: syncCustomStart || null,
+      end: syncCustomEnd || null,
+      label: syncCustomStart && syncCustomEnd ? `${syncCustomStart} s/d ${syncCustomEnd}` : "Custom",
+    };
+  };
+
+  const handleOpenSyncDialog = (row: RateRow) => {
+    setSyncRow(row);
+    setSyncMode("active");
+    setSyncCustomStart("");
+    setSyncCustomEnd("");
+    setSyncPreview({ driverCount: 0, helperCount: 0, loading: false });
+  };
+
+  // Preview otomatis: hitung jumlah baris delivery_points yang akan ter-update
+  // saat user ganti mode atau ganti tanggal custom
+  useEffect(() => {
+    if (!syncRow) return;
+    const range = getSyncRange();
+    // Custom mode tapi tanggal belum lengkap → skip preview
+    if (syncMode === "custom" && (!range.start || !range.end)) {
+      setSyncPreview({ driverCount: 0, helperCount: 0, loading: false });
+      return;
+    }
+    let cancelled = false;
+    setSyncPreview((p) => ({ ...p, loading: true }));
+    (async () => {
+      const buildQuery = (role: "Driver" | "Helper") => {
+        let q = supabase
+          .from("delivery_points")
+          .select("id", { count: "exact", head: true })
+          .eq("zone_id", syncRow.zone_id)
+          .eq("role", role);
+        if (range.start) q = q.gte("tanggal", range.start);
+        if (range.end) q = q.lte("tanggal", range.end);
+        // Hanya hitung yang harganya belum sesuai (efisien & informatif)
+        return q;
+      };
+
+      const [driverRes, helperRes] = await Promise.all([
+        syncRow.driverRate !== null ? buildQuery("Driver") : Promise.resolve({ count: 0 }),
+        syncRow.helperRate !== null ? buildQuery("Helper") : Promise.resolve({ count: 0 }),
+      ]);
+      if (cancelled) return;
+      setSyncPreview({
+        driverCount: driverRes.count ?? 0,
+        helperCount: helperRes.count ?? 0,
+        loading: false,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [syncRow, syncMode, syncCustomStart, syncCustomEnd]);
+
+  const handleExecuteSync = async () => {
+    if (!syncRow) return;
+    const range = getSyncRange();
+    if (syncMode === "custom" && (!range.start || !range.end)) {
+      showSuccess("Tanggal Belum Lengkap", "Isi tanggal mulai dan akhir.");
+      return;
+    }
+    setSyncRunning(true);
+
+    let driverUpdated = 0;
+    let helperUpdated = 0;
+    let errMsg: string | null = null;
+
+    try {
+      const runUpdate = async (role: "Driver" | "Helper", newRate: number) => {
+        let q = supabase
+          .from("delivery_points")
+          .update({ rate_per_point: newRate }, { count: "exact" })
+          .eq("zone_id", syncRow.zone_id)
+          .eq("role", role);
+        if (range.start) q = q.gte("tanggal", range.start);
+        if (range.end) q = q.lte("tanggal", range.end);
+        const { count, error } = await q;
+        if (error) throw error;
+        return count ?? 0;
+      };
+
+      if (syncRow.driverRate !== null) {
+        driverUpdated = await runUpdate("Driver", syncRow.driverRate);
+      }
+      if (syncRow.helperRate !== null) {
+        helperUpdated = await runUpdate("Helper", syncRow.helperRate);
+      }
+
+      // Audit log: 1 entri ringkas (hindari overload audit_logs untuk batch besar)
+      const total = driverUpdated + helperUpdated;
+      if (total > 0) {
+        await logAudit({
+          supabase,
+          action: "update",
+          entityType: "point_rates",
+          entityId: syncRow.zone_id,
+          entityLabel: `Sinkron harga titik "${syncRow.zoneNama}"`,
+          metadata: {
+            zone_nama: syncRow.zoneNama,
+            mode: syncMode,
+            range_start: range.start,
+            range_end: range.end,
+            range_label: range.label,
+            driver_rate_baru: syncRow.driverRate,
+            helper_rate_baru: syncRow.helperRate,
+            jumlah_driver: driverUpdated,
+            jumlah_helper: helperUpdated,
+            total_baris: total,
+          },
+        });
+      }
+    } catch (e) {
+      errMsg = e instanceof Error ? e.message : "Gagal sinkron harga.";
+    } finally {
+      setSyncRunning(false);
+    }
+
+    if (errMsg) {
+      showSuccess("Gagal Sinkron", errMsg);
+      return;
+    }
+
+    const total = driverUpdated + helperUpdated;
+    setSyncRow(null);
+    if (total === 0) {
+      showSuccess("Tidak Ada Perubahan", `Tidak ada entri rekap titik untuk "${syncRow.zoneNama}" pada ${range.label.toLowerCase()}.`);
+    } else {
+      showSuccess(
+        "Harga Tersinkron",
+        `${total} entri rekap titik untuk "${syncRow.zoneNama}" diperbarui (Driver: ${driverUpdated}, Helper: ${helperUpdated}).`,
+      );
+    }
   };
 
   // ─── Status Titik Handlers ───
@@ -1403,8 +1570,9 @@ export default function MasterDataPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
-                          {canEdit && <button onClick={() => handleOpenEditRate(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
-                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "harga-titik", id: row.zone_id, nama: row.zoneNama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => handleOpenEditRate(row)} title="Edit harga" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => handleOpenSyncDialog(row)} title="Sinkron harga ke rekap titik" className="p-1.5 rounded-lg hover:bg-accent-light text-muted-foreground hover:text-accent"><RefreshCw className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "harga-titik", id: row.zone_id, nama: row.zoneNama })} title="Hapus harga" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -2299,6 +2467,135 @@ export default function MasterDataPage() {
               <Button variant="outline" size="sm" onClick={() => setShowRateForm(false)}>Batal</Button>
               <Button size="sm" icon={editingRateZoneId ? Check : Plus} onClick={handleSaveRate} disabled={!rateForm.zone_id || (!rateForm.driver_rate && !rateForm.helper_rate)}>
                 {editingRateZoneId ? "Simpan" : "Tambah"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {/* ═══ SINKRON HARGA TITIK MODAL ═══ */}
+      {syncRow && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !syncRunning && setSyncRow(null)} />
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-accent-light flex items-center justify-center">
+                  <RefreshCw className="w-4 h-4 text-accent" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">Sinkron Harga ke Rekap Titik</h2>
+              </div>
+              <button onClick={() => !syncRunning && setSyncRow(null)} disabled={syncRunning} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50"><X className="w-4 h-4" /></button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Info zona dan harga baru */}
+              <div className="p-3 rounded-xl bg-muted/40 border border-border/50">
+                <p className="text-xs text-muted-foreground mb-2">Nama Titik</p>
+                <p className="text-sm font-bold text-foreground mb-3">{syncRow.zoneNama}</p>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                      <span className="text-muted-foreground">Driver:</span>
+                    </span>
+                    <p className="font-bold text-blue-600 mt-0.5">
+                      {syncRow.driverRate !== null ? `Rp ${syncRow.driverRate.toLocaleString("id-ID")}` : <span className="text-muted-foreground italic font-normal">-</span>}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                      <span className="text-muted-foreground">Helper:</span>
+                    </span>
+                    <p className="font-bold text-orange-600 mt-0.5">
+                      {syncRow.helperRate !== null ? `Rp ${syncRow.helperRate.toLocaleString("id-ID")}` : <span className="text-muted-foreground italic font-normal">-</span>}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pilih periode */}
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-2 block">Periode yang akan diperbarui</label>
+                <div className="space-y-2">
+                  <label className={cn("flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors", syncMode === "active" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
+                    <input type="radio" name="syncMode" checked={syncMode === "active"} onChange={() => setSyncMode("active")} className="mt-0.5 accent-primary" disabled={syncRunning} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-foreground">Periode aktif</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{getActivePeriodRange().label}</p>
+                    </div>
+                  </label>
+                  <label className={cn("flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors", syncMode === "all" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
+                    <input type="radio" name="syncMode" checked={syncMode === "all"} onChange={() => setSyncMode("all")} className="mt-0.5 accent-primary" disabled={syncRunning} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-foreground">Semua periode</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Termasuk data lama dan yang sudah masuk payroll. Hati-hati.</p>
+                    </div>
+                  </label>
+                  <label className={cn("flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors", syncMode === "custom" ? "border-primary bg-primary-light/40" : "border-border hover:bg-muted/30")}>
+                    <input type="radio" name="syncMode" checked={syncMode === "custom"} onChange={() => setSyncMode("custom")} className="mt-0.5 accent-primary" disabled={syncRunning} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-foreground">Custom tanggal</p>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <input
+                          type="date"
+                          value={syncCustomStart}
+                          onChange={(e) => { setSyncCustomStart(e.target.value); setSyncMode("custom"); }}
+                          disabled={syncMode !== "custom" || syncRunning}
+                          className={cn(inputClass, "py-1.5 text-xs disabled:opacity-50")}
+                        />
+                        <input
+                          type="date"
+                          value={syncCustomEnd}
+                          onChange={(e) => { setSyncCustomEnd(e.target.value); setSyncMode("custom"); }}
+                          disabled={syncMode !== "custom" || syncRunning}
+                          className={cn(inputClass, "py-1.5 text-xs disabled:opacity-50")}
+                        />
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Preview jumlah baris yang akan diperbarui */}
+              <div className="p-3 rounded-xl bg-warning-light/40 border border-warning/30">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-warning" />
+                  <p className="text-xs font-semibold text-warning">Preview perubahan</p>
+                </div>
+                {syncPreview.loading ? (
+                  <p className="text-[11px] text-muted-foreground">Menghitung...</p>
+                ) : syncMode === "custom" && (!syncCustomStart || !syncCustomEnd) ? (
+                  <p className="text-[11px] text-muted-foreground">Isi tanggal mulai dan akhir untuk melihat preview.</p>
+                ) : (
+                  <p className="text-[11px] text-foreground">
+                    <span className="font-semibold">{syncPreview.driverCount + syncPreview.helperCount} entri</span> rekap titik akan diperbarui
+                    {(syncPreview.driverCount > 0 || syncPreview.helperCount > 0) && <> ({syncPreview.driverCount} Driver, {syncPreview.helperCount} Helper)</>}.
+                  </p>
+                )}
+                <p className="text-[10px] text-muted-foreground mt-1.5">
+                  Aksi ini langsung mengubah data historis. Pendapatan pegawai pada periode tersebut akan ikut berubah.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <Button variant="outline" size="sm" onClick={() => setSyncRow(null)} disabled={syncRunning}>Batal</Button>
+              <Button
+                size="sm"
+                icon={RefreshCw}
+                onClick={handleExecuteSync}
+                disabled={
+                  syncRunning ||
+                  syncPreview.loading ||
+                  (syncMode === "custom" && (!syncCustomStart || !syncCustomEnd)) ||
+                  (syncPreview.driverCount + syncPreview.helperCount === 0)
+                }
+              >
+                {syncRunning ? "Memproses..." : "Sinkron Sekarang"}
               </Button>
             </div>
           </div>
