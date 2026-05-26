@@ -16,6 +16,8 @@ import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import {
   computePerformance,
+  comparePerformanceBest,
+  comparePerformanceWorst,
   getGradeColor,
   PENALTY,
   SCORE_WEIGHT,
@@ -170,7 +172,7 @@ export default function PerformancePage() {
     const spDocs: SpDocLite[] = spData || [];
 
     const rows = computeRows(emps, attendance, spDocs);
-    rows.sort((a, b) => b.skorTotal - a.skorTotal);
+    rows.sort(comparePerformanceBest);
     setPerformanceData(rows);
 
     // Previous period for trend (hanya kalau mode periode)
@@ -201,7 +203,7 @@ export default function PerformancePage() {
       const matchGrade = filterGrade === "Semua" || r.grade === filterGrade;
       const matchJabatan = filterJabatan === "Semua" || r.jabatanNama === filterJabatan;
       return matchSearch && matchGrade && matchJabatan;
-    }).sort((a, b) => sortOrder === "best" ? b.skorTotal - a.skorTotal : a.skorTotal - b.skorTotal);
+    }).sort(sortOrder === "best" ? comparePerformanceBest : comparePerformanceWorst);
   }, [performanceData, search, filterGrade, filterJabatan, sortOrder]);
 
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -225,8 +227,8 @@ export default function PerformancePage() {
   const trendSP = prevPerformanceData.length > 0 ? totalSP - prevTotalSP : 0;
 
   // Insights: top 3 best & top 3 worst
-  const topBest = useMemo(() => [...performanceData].sort((a, b) => b.skorTotal - a.skorTotal).slice(0, 3), [performanceData]);
-  const topWorst = useMemo(() => [...performanceData].sort((a, b) => a.skorTotal - b.skorTotal).slice(0, 3), [performanceData]);
+  const topBest = useMemo(() => [...performanceData].sort(comparePerformanceBest).slice(0, 3), [performanceData]);
+  const topWorst = useMemo(() => [...performanceData].sort(comparePerformanceWorst).slice(0, 3), [performanceData]);
 
   // Unique jabatan untuk filter
   const uniqueJabatan = useMemo(() => {

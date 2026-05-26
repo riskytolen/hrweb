@@ -42,6 +42,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { entityLabel } from "@/lib/audit";
 import {
   computePerformance,
+  comparePerformanceBest,
   getGradeColor,
   type AttendanceLite,
   type SpDocLite,
@@ -442,13 +443,7 @@ export default function DashboardPage() {
       })
       // Skip pegawai tanpa data attendance di periode (mencegah skor 0 muncul sebagai top)
       .filter((p) => p.totalHariKerja > 0 && p.skorTotal > 0)
-      .sort((a, b) => {
-        if (b.skorTotal !== a.skorTotal) return b.skorTotal - a.skorTotal;
-        // Tie-breakers: hadir terbanyak → telat tersedikit → nama (deterministik)
-        if (b.hadir !== a.hadir) return b.hadir - a.hadir;
-        if (a.telat !== b.telat) return a.telat - b.telat;
-        return a.nama.localeCompare(b.nama);
-      })
+      .sort(comparePerformanceBest)
       .slice(0, 5);
 
     setKpi({

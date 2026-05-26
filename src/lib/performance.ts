@@ -114,6 +114,46 @@ export function getGradeColor(grade: string): string {
   }
 }
 
+/**
+ * Comparator untuk urutan ranking pegawai.
+ * Best-first (skor tinggi di atas) dengan tie-breakers:
+ *   1. Skor total (desc)
+ *   2. Hadir terbanyak (desc)   ← penting saat banyak yang skor 100
+ *   3. Telat tersedikit (asc)
+ *   4. Total hari kerja (desc)  ← lebih banyak data = lebih kredibel
+ *   5. Nama (asc, deterministik)
+ *
+ * Pakai untuk halaman Kinerja & Dashboard supaya hasil identik.
+ */
+export function comparePerformanceBest<T extends {
+  nama: string;
+  skorTotal: number;
+  hadir: number;
+  telat: number;
+  totalHariKerja: number;
+}>(a: T, b: T): number {
+  if (b.skorTotal !== a.skorTotal) return b.skorTotal - a.skorTotal;
+  if (b.hadir !== a.hadir) return b.hadir - a.hadir;
+  if (a.telat !== b.telat) return a.telat - b.telat;
+  if (b.totalHariKerja !== a.totalHariKerja) return b.totalHariKerja - a.totalHariKerja;
+  return a.nama.localeCompare(b.nama);
+}
+
+/** Worst-first comparator: kebalikan dari best (skor terendah duluan). */
+export function comparePerformanceWorst<T extends {
+  nama: string;
+  skorTotal: number;
+  hadir: number;
+  telat: number;
+  totalHariKerja: number;
+}>(a: T, b: T): number {
+  if (a.skorTotal !== b.skorTotal) return a.skorTotal - b.skorTotal;
+  if (a.hadir !== b.hadir) return a.hadir - b.hadir;
+  if (b.telat !== a.telat) return b.telat - a.telat;
+  if (b.totalHariKerja !== a.totalHariKerja) return b.totalHariKerja - a.totalHariKerja;
+  return a.nama.localeCompare(b.nama);
+}
+
 /** Hitung breakdown performance untuk satu pegawai. */
 export function computePerformance(
   employeeId: string,
