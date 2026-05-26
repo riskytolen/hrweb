@@ -1,9 +1,10 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink, Eye, Car,
+  Calendar, Heart, Clock, MapPinned, Globe,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -240,14 +241,14 @@ export default function RecruitmentPage() {
             );
             return;
           }
-          // Sync sukses → tampilkan toast dari sync (sudah informatif: "Training Dimulai" / "Diterima")
+          // Sync sukses â†’ tampilkan toast dari sync (sudah informatif: "Training Dimulai" / "Diterima")
           if (cvWarning) {
             showToast("error", "Pelamar Ditambahkan, CV Gagal", cvWarning);
           } else {
             showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
           }
         } else {
-          // Status awal "Lamaran Masuk" / "Terpilih" / "Ditolak" → tidak perlu pegawai
+          // Status awal "Lamaran Masuk" / "Terpilih" / "Ditolak" â†’ tidak perlu pegawai
           if (cvWarning) {
             showToast("error", "Pelamar Ditambahkan, CV Gagal", cvWarning);
           } else {
@@ -295,7 +296,7 @@ export default function RecruitmentPage() {
     }
   };
 
-  // ─── Helper: generate ID pegawai ───
+  // â”€â”€â”€ Helper: generate ID pegawai â”€â”€â”€
   const generateEmployeeId = async (): Promise<string> => {
     const { data: allIds } = await supabase.from("pegawai").select("id");
     const existingSet = new Set(allIds?.map((e) => e.id) || []);
@@ -307,7 +308,7 @@ export default function RecruitmentPage() {
     return generated;
   };
 
-  // ─── Helper: insert pegawai dari data recruitment ───
+  // â”€â”€â”€ Helper: insert pegawai dari data recruitment â”€â”€â”€
   const insertPegawaiFromRecruitment = async (
     rec: DbRecruitment,
     pegawaiStatus: string,
@@ -330,9 +331,9 @@ export default function RecruitmentPage() {
 
   /**
    * Sync pegawai berdasarkan status recruitment.
-   * Return { ok, message } — ok=false berarti pemanggil HARUS membatalkan update status recruitment.
+   * Return { ok, message } â€” ok=false berarti pemanggil HARUS membatalkan update status recruitment.
    *
-   * @param joinDate Untuk status "Diterima" — tanggal mulai aktif yang dipilih admin (YYYY-MM-DD).
+   * @param joinDate Untuk status "Diterima" â€” tanggal mulai aktif yang dipilih admin (YYYY-MM-DD).
    *                 Default: hari ini (local time).
    */
   const syncPegawaiForStatus = async (
@@ -387,7 +388,7 @@ export default function RecruitmentPage() {
       return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status diubah ke Ditolak.` } };
     }
 
-    // Status mundur (Terpilih, Lamaran Masuk) → hapus pegawai jika ada
+    // Status mundur (Terpilih, Lamaran Masuk) â†’ hapus pegawai jika ada
     if (existingEmp) {
       const { error } = await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
       if (error) return { ok: false, toast: { type: "error", title: "Gagal Hapus Pegawai", message: error.message } };
@@ -412,7 +413,7 @@ export default function RecruitmentPage() {
         return;
       }
 
-      // 2) Pegawai berhasil di-sync → update status recruitment
+      // 2) Pegawai berhasil di-sync â†’ update status recruitment
       const updatePayload: Record<string, unknown> = { status };
       if (status === "Training") {
         const today = localDateStr();
@@ -428,7 +429,7 @@ export default function RecruitmentPage() {
         .single();
 
       if (error || !updated) {
-        // Status recruitment gagal di-update padahal pegawai sudah dibuat — kasus jarang.
+        // Status recruitment gagal di-update padahal pegawai sudah dibuat â€” kasus jarang.
         // Tampilkan error supaya user bisa klik ulang.
         showToast("error", "Status Belum Tersimpan", error?.message || "Refresh halaman dan coba lagi.");
         return;
@@ -441,7 +442,7 @@ export default function RecruitmentPage() {
         action: "status_change",
         entityType: "recruitments",
         entityId: id,
-        entityLabel: `${current.nama} → ${status}`,
+        entityLabel: `${current.nama} â†’ ${status}`,
         oldData: { ...current } as unknown as Record<string, unknown>,
         newData: { ...updated } as unknown as Record<string, unknown>,
         metadata: {
@@ -582,7 +583,7 @@ export default function RecruitmentPage() {
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </div>
 
-      {/* ═══ FORM MODAL ═══ */}
+      {/* â•â•â• FORM MODAL â•â•â• */}
       {showForm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -706,7 +707,7 @@ export default function RecruitmentPage() {
         </Portal>
       )}
 
-      {/* ═══ DETAIL SLIDE-OVER ═══ */}
+      {/* â•â•â• DETAIL SLIDE-OVER â•â•â• */}
       {detail && (
         <Portal>
           <div className="fixed inset-0 z-50 flex justify-end">
@@ -745,6 +746,76 @@ export default function RecruitmentPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* â”€â”€â”€ Data Tambahan dari Form Landing â”€â”€â”€ */}
+                {(detail.tanggal_lahir
+                  || detail.lama_kerja_terakhir
+                  || detail.daerah_kerja_terakhir
+                  || detail.status_pernikahan_pelamar
+                  || detail.bisa_nyupir !== null
+                  || detail.bersedia_shift !== null
+                  || detail.bersedia_jabodetabek !== null) && (
+                  <div className="rounded-xl border border-border/60 bg-muted/20 p-3.5">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-[10px] font-bold text-foreground uppercase tracking-wider">Data Tambahan</p>
+                      {detail.sumber_lamaran === "landing" && (
+                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-primary bg-primary-light px-1.5 py-0.5 rounded">
+                          <Globe className="w-2.5 h-2.5" />
+                          Form Online
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {detail.tanggal_lahir && (
+                        <DataTambahan
+                          icon={Calendar}
+                          label="Tanggal Lahir"
+                          value={`${new Date(detail.tanggal_lahir).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}${(() => {
+                            const b = new Date(detail.tanggal_lahir);
+                            const now = new Date();
+                            let age = now.getFullYear() - b.getFullYear();
+                            const m = now.getMonth() - b.getMonth();
+                            if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+                            return ` (${age} th)`;
+                          })()}`}
+                        />
+                      )}
+                      {detail.status_pernikahan_pelamar && (
+                        <DataTambahan icon={Heart} label="Status" value={detail.status_pernikahan_pelamar} />
+                      )}
+                      {detail.lama_kerja_terakhir && (
+                        <DataTambahan icon={Clock} label="Lama Kerja" value={detail.lama_kerja_terakhir} />
+                      )}
+                      {detail.daerah_kerja_terakhir && (
+                        <DataTambahan icon={MapPinned} label="Daerah Kerja" value={detail.daerah_kerja_terakhir} />
+                      )}
+                      {detail.bisa_nyupir !== null && (
+                        <DataTambahan
+                          icon={Car}
+                          label="Bisa Nyupir"
+                          value={detail.bisa_nyupir ? "Ya" : "Tidak"}
+                          valueColor={detail.bisa_nyupir ? "text-success" : "text-muted-foreground"}
+                        />
+                      )}
+                      {detail.bersedia_shift !== null && (
+                        <DataTambahan
+                          icon={Clock}
+                          label="Kerja Shift"
+                          value={detail.bersedia_shift ? "Bersedia" : "Tidak Bersedia"}
+                          valueColor={detail.bersedia_shift ? "text-success" : "text-warning"}
+                        />
+                      )}
+                      {detail.bersedia_jabodetabek !== null && (
+                        <DataTambahan
+                          icon={MapPinned}
+                          label="Area Jabodetabek"
+                          value={detail.bersedia_jabodetabek ? "Bersedia" : "Tidak Bersedia"}
+                          valueColor={detail.bersedia_jabodetabek ? "text-success" : "text-warning"}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {detail.tanggal_training_mulai && (
                   <div className="rounded-xl border border-warning/20 bg-warning/5 p-3">
@@ -818,7 +889,7 @@ export default function RecruitmentPage() {
         </Portal>
       )}
 
-      {/* ═══ DELETE CONFIRM ═══ */}
+      {/* â•â•â• DELETE CONFIRM â•â•â• */}
       {deleteConfirm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -840,7 +911,7 @@ export default function RecruitmentPage() {
         </Portal>
       )}
 
-      {/* ═══ ACCEPT (DITERIMA) — pilih tanggal mulai aktif ═══ */}
+      {/* â•â•â• ACCEPT (DITERIMA) â€” pilih tanggal mulai aktif â•â•â• */}
       {acceptModal && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -875,5 +946,32 @@ export default function RecruitmentPage() {
       )}
     </div>
     </RouteGuard>
+  );
+}
+
+
+// ─── Helper subcomponent ───
+type LucideIcon = React.ComponentType<{ className?: string }>;
+function DataTambahan({
+  icon: Icon,
+  label,
+  value,
+  valueColor = "text-foreground",
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  valueColor?: string;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <div className="w-6 h-6 rounded-md bg-card flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Icon className="w-3 h-3 text-muted-foreground" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[9px] text-muted-foreground uppercase tracking-wider font-semibold">{label}</p>
+        <p className={`text-[12px] font-semibold ${valueColor} truncate`}>{value}</p>
+      </div>
+    </div>
   );
 }

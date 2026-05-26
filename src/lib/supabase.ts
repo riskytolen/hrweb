@@ -234,6 +234,18 @@ export interface DbRecruitment {
   catatan: string | null;
   tanggal_training_mulai: string | null;
   tanggal_training_selesai: string | null;
+  /** Tanggal lahir pelamar (form landing public). NULL untuk entry manual lama. */
+  tanggal_lahir: string | null;
+  /** Lama bekerja di perusahaan sebelumnya (text bebas, mis. "2 tahun"). */
+  lama_kerja_terakhir: string | null;
+  daerah_kerja_terakhir: string | null;
+  /** "Berkeluarga" | "Belum Berkeluarga" — diisi via form landing. */
+  status_pernikahan_pelamar: string | null;
+  bisa_nyupir: boolean | null;
+  bersedia_shift: boolean | null;
+  bersedia_jabodetabek: boolean | null;
+  /** Asal entri: "manual" (admin input) atau "landing" (form publik). */
+  sumber_lamaran: "manual" | "landing";
   created_at: string;
   updated_at: string;
 }
