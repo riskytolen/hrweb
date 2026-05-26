@@ -440,12 +440,14 @@ export default function DashboardPage() {
           spCount: b.spCount,
         };
       })
-      // Skip pegawai yg tidak ada attendance sama sekali (skor full 100 tanpa data — bias)
-      .filter((p) => p.totalHariKerja > 0)
+      // Skip pegawai tanpa data attendance di periode (mencegah skor 0 muncul sebagai top)
+      .filter((p) => p.totalHariKerja > 0 && p.skorTotal > 0)
       .sort((a, b) => {
         if (b.skorTotal !== a.skorTotal) return b.skorTotal - a.skorTotal;
-        // tie-breaker: hari kerja lebih banyak menang
-        return b.totalHariKerja - a.totalHariKerja;
+        // Tie-breakers: hadir terbanyak → telat tersedikit → nama (deterministik)
+        if (b.hadir !== a.hadir) return b.hadir - a.hadir;
+        if (a.telat !== b.telat) return a.telat - b.telat;
+        return a.nama.localeCompare(b.nama);
       })
       .slice(0, 5);
 

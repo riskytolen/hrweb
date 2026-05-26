@@ -18,6 +18,7 @@ import {
   computePerformance,
   getGradeColor,
   PENALTY,
+  SCORE_WEIGHT,
   type AttendanceLite,
   type SpDocLite,
 } from "@/lib/performance";
@@ -39,11 +40,13 @@ type PerformanceRow = {
   status: string;
   tanggalBergabung: string | null;
   totalHariKerja: number;
+  totalHariEfektif: number;
   hadir: number;
   telat: number;
   totalMenitTelat: number;
   alpha: number;
   manual: number;
+  manualLeave: number;
   izin: number;
   sakit: number;
   cuti: number;
@@ -51,6 +54,9 @@ type PerformanceRow = {
   sp1: number;
   sp2: number;
   sp3: number;
+  skorKehadiran: number;
+  skorDisiplin: number;
+  penaltiTotal: number;
   skorTotal: number;
   grade: string;
 };
@@ -308,8 +314,12 @@ export default function PerformancePage() {
       const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY;
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
-      doc.text(`Sistem Penilaian: Skor awal 100, dikurangi -${PENALTY.ALPHA_PER_HARI}/Alpha, -${PENALTY.TELAT_PER_KEJADIAN}/Telat + -${PENALTY.TELAT_PER_30_MENIT}/30 menit, -${PENALTY.MANUAL_PER_KEJADIAN}/Manual, -${PENALTY.SP1}/SP-1, -${PENALTY.SP2}/SP-2, -${PENALTY.SP3}/SP-3. Grade: A≥90, B 80-89, C 70-79, D 60-69, E<60.`,
-        14, finalY + 8, { maxWidth: pageWidth - 28 });
+      doc.text(
+        `Sistem Penilaian: Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN}) = (Hadir/Hari Efektif) x ${SCORE_WEIGHT.KEHADIRAN}, ditambah Disiplin (max ${SCORE_WEIGHT.DISIPLIN}) = max(0, ${SCORE_WEIGHT.DISIPLIN} - penalti). ` +
+        `Penalti: -${PENALTY.ALPHA_PER_HARI}/Alpha, -${PENALTY.TELAT_PER_KEJADIAN}/Telat & -${PENALTY.TELAT_PER_30_MENIT}/30 menit, -${PENALTY.MANUAL_HADIR}/Manual Hadir-Telat, -${PENALTY.MANUAL_LEAVE}/Manual Izin-Sakit-Cuti, -${PENALTY.SP1}/SP-1, -${PENALTY.SP2}/SP-2, -${PENALTY.SP3}/SP-3. ` +
+        `Grade: A>=90, B 80-89, C 70-79, D 60-69, E<60.`,
+        14, finalY + 8, { maxWidth: pageWidth - 28 },
+      );
 
       const filename = `Laporan_Kinerja_${period.shortLabel.replace(/\s/g, "_")}.pdf`;
       doc.save(filename);
@@ -657,12 +667,66 @@ export default function PerformancePage() {
           <span className="text-xs font-bold text-foreground uppercase tracking-wider">Sistem Penilaian</span>
           <span className="text-[10px] text-muted-foreground ml-auto">Klik untuk lihat detail</span>
         </summary>
-        <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          <_RuleCard icon={XCircle} iconColor="text-danger" title="Alpha" desc={`-${PENALTY.ALPHA_PER_HARI} poin per hari`} />
-          <_RuleCard icon={Clock} iconColor="text-warning" title="Keterlambatan" desc={`-${PENALTY.TELAT_PER_KEJADIAN} poin per kejadian, -${PENALTY.TELAT_PER_30_MENIT} per 30 menit`} />
-          <_RuleCard icon={CalendarCheck} iconColor="text-warning" title="Absen Manual" desc={`-${PENALTY.MANUAL_PER_KEJADIAN} poin per kejadian`} />
-          <_RuleCard icon={AlertTriangle} iconColor="text-danger" title="Surat Peringatan" desc={`SP-1: -${PENALTY.SP1}, SP-2: -${PENALTY.SP2}, SP-3: -${PENALTY.SP3}`} />
-          <_RuleCard icon={Award} iconColor="text-primary" title="Skor Awal" desc="100 poin (dikurangi pelanggaran)" />
+        <div className="px-5 pb-5 space-y-4">
+          {/* Komposisi skor */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <_RuleCard
+              icon={CalendarCheck}
+              iconColor="text-success"
+              title={`Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN})`}
+              desc="Hadir / hari efektif × 70. Libur tidak dihitung."
+            />
+            <_RuleCard
+              icon={Award}
+              iconColor="text-primary"
+              title={`Disiplin (max ${SCORE_WEIGHT.DISIPLIN})`}
+              desc="Mulai 30, dipotong oleh pelanggaran di bawah."
+            />
+          </div>
+
+          {/* Penalti */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <_RuleCard
+              icon={XCircle}
+              iconColor="text-danger"
+              title="Alpha"
+              desc={`-${PENALTY.ALPHA_PER_HARI} poin per hari`}
+            />
+            <_RuleCard
+              icon={Clock}
+              iconColor="text-warning"
+              title="Keterlambatan"
+              desc={`-${PENALTY.TELAT_PER_KEJADIAN} per kejadian, -${PENALTY.TELAT_PER_30_MENIT} per 30 menit`}
+            />
+            <_RuleCard
+              icon={CalendarCheck}
+              iconColor="text-warning"
+              title="Manual: Hadir / Telat"
+              desc={`-${PENALTY.MANUAL_HADIR} poin per input manual`}
+            />
+            <_RuleCard
+              icon={CalendarCheck}
+              iconColor="text-amber-600"
+              title="Manual: Izin / Sakit / Cuti"
+              desc={`-${PENALTY.MANUAL_LEAVE} poin per input manual`}
+            />
+            <_RuleCard
+              icon={AlertTriangle}
+              iconColor="text-danger"
+              title="Surat Peringatan"
+              desc={`SP-1: -${PENALTY.SP1}, SP-2: -${PENALTY.SP2}, SP-3: -${PENALTY.SP3}`}
+            />
+            <_RuleCard
+              icon={Award}
+              iconColor="text-primary"
+              title="Grade"
+              desc="A ≥90 · B 80–89 · C 70–79 · D 60–69 · E <60"
+            />
+          </div>
+
+          <p className="text-[10px] text-muted-foreground italic">
+            Skor akhir = Kehadiran + max(0, 30 − total penalti). Pegawai tanpa data kehadiran di periode → skor 0.
+          </p>
         </div>
       </details>
     </div>
