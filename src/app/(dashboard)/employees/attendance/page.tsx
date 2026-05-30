@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
@@ -92,7 +92,7 @@ function computeDenda(durasiTelat: number, penalty: PenaltyLite | undefined): nu
   return durasiTelat * dendaPerMenit;
 }
 
-/** Format jam HH:MM dari total menit (0â€“1439) */
+/** Format jam HH:MM dari total menit (0Ã¢â‚¬â€œ1439) */
 function minutesToTime(total: number): string {
   const safe = ((total % 1440) + 1440) % 1440;
   const h = Math.floor(safe / 60);
@@ -148,7 +148,7 @@ export default function AttendancePage() {
   const [offDays, setOffDays] = useState<OffDayEntry[]>([]);
   const [overrides, setOverrides] = useState<OverrideEntry[]>([]);
 
-  // â”€â”€â”€ Add/Edit Form â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Add/Edit Form Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const ALASAN_MANUAL_OPTIONS = [
@@ -215,10 +215,10 @@ export default function AttendancePage() {
     return () => { document.body.style.overflow = ""; };
   }, [showForm, showOffDay, viewMode]);
 
-  // â”€â”€â”€ Fetch â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Fetch Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const fetchEmployees = async () => {
     // Include pegawai Aktif + pegawai Tidak Aktif yang punya tanggal_keluar >= MIN_DATE.
-    // Pegawai Tidak Aktif tanpa tanggal_keluar (data lama) di-skip â€” admin perlu backfill manual
+    // Pegawai Tidak Aktif tanpa tanggal_keluar (data lama) di-skip Ã¢â‚¬â€ admin perlu backfill manual
     // kalau mereka memang relevan untuk periode aktif.
     const { data } = await supabase
       .from("pegawai")
@@ -276,7 +276,7 @@ export default function AttendancePage() {
     const end = `${endDt.getFullYear()}-${String(endDt.getMonth() + 1).padStart(2, "0")}-${String(endDt.getDate()).padStart(2, "0")}`;
     const startLabel = new Date(y, m - 1, 8).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
     const endLabel = endDt.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
-    const label = `8 ${startLabel} â€“ 7 ${endLabel}`;
+    const label = `8 ${startLabel} - 7 ${endLabel}`;
     return { start, end, label };
   }, []);
 
@@ -284,7 +284,7 @@ export default function AttendancePage() {
   const fetchCalendar = useCallback(async () => {
     setCalLoading(true);
     const { start, end } = getCalPeriod(calPeriodKey);
-    console.log("ðŸ“… Fetch Calendar:", { start, end, key: calPeriodKey });
+    console.log("Ã°Å¸â€œâ€¦ Fetch Calendar:", { start, end, key: calPeriodKey });
 
     const { data, error } = await supabase
       .from("attendance_records")
@@ -294,7 +294,7 @@ export default function AttendancePage() {
       .order("tanggal", { ascending: true })
       .limit(2000);
 
-    console.log("ðŸ“Š Calendar Data Count:", data?.length, "Error:", error);
+    console.log("Ã°Å¸â€œÅ  Calendar Data Count:", data?.length, "Error:", error);
 
     if (data) {
       setCalRecords(data.map((d) => ({
@@ -356,7 +356,7 @@ export default function AttendancePage() {
       const existing = existingMap.get(emp.id);
 
       if (shouldBeLibur && !existing) {
-        // Seharusnya libur tapi belum ada record â†’ insert
+        // Seharusnya libur tapi belum ada record Ã¢â€ â€™ insert
         liburInserts.push({
           employee_id: emp.id,
           division_id: null,
@@ -370,7 +370,7 @@ export default function AttendancePage() {
           catatan: "Hari libur",
         });
       } else if (!shouldBeLibur && existing && existing.status === "Libur" && existing.catatan === "Hari libur") {
-        // Seharusnya TIDAK libur tapi ada record auto-generated "Libur" â†’ hapus (jadwal sudah berubah)
+        // Seharusnya TIDAK libur tapi ada record auto-generated "Libur" Ã¢â€ â€™ hapus (jadwal sudah berubah)
         staleLiburIds.push(existing.id);
       }
     }
@@ -399,7 +399,7 @@ export default function AttendancePage() {
   }, [dateFilter, employees, fetchRecords, fetchCalendar, viewMode]);
 
   // Auto-generate record "Alpha" untuk pegawai yang seharusnya kerja tapi tidak ada record
-  // Hanya untuk tanggal SEBELUM hari ini (bukan hari ini â€” pegawai masih bisa datang)
+  // Hanya untuk tanggal SEBELUM hari ini (bukan hari ini Ã¢â‚¬â€ pegawai masih bisa datang)
   const autoGenerateAlpha = useCallback(async () => {
     if (!dateFilter || employees.length === 0) return;
 
@@ -472,10 +472,10 @@ export default function AttendancePage() {
           status: leave.jenis,
           durasi_telat: 0,
           denda: 0,
-          catatan: `${leave.jenis} otomatis â€” sudah disetujui`,
+          catatan: `${leave.jenis} otomatis Ã¢â‚¬â€ sudah disetujui`,
         });
       } else if (!shouldBeLibur) {
-        // Seharusnya kerja tapi tidak ada record â†’ Alpha
+        // Seharusnya kerja tapi tidak ada record Ã¢â€ â€™ Alpha
         const dendaAlpha = penalties.length > 0 ? (penalties[0]?.denda_alpha ?? 100000) : 100000;
         alphaInserts.push({
           employee_id: emp.id,
@@ -487,7 +487,7 @@ export default function AttendancePage() {
           status: "Alpha",
           durasi_telat: 0,
           denda: dendaAlpha,
-          catatan: "Alpha otomatis â€” tidak ada record kehadiran",
+          catatan: "Alpha otomatis Ã¢â‚¬â€ tidak ada record kehadiran",
         });
       }
     }
@@ -517,7 +517,7 @@ export default function AttendancePage() {
     Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchOffDays(), fetchOverrides(), fetchRecords()]).then(() => setLoading(false));
   }, []);
 
-  // Saat dateFilter berubah: fetch records â†’ auto-generate libur â†’ auto-generate alpha
+  // Saat dateFilter berubah: fetch records Ã¢â€ â€™ auto-generate libur Ã¢â€ â€™ auto-generate alpha
   useEffect(() => {
     fetchRecords().then(async () => {
       if (employees.length > 0) {
@@ -534,12 +534,12 @@ export default function AttendancePage() {
     }
   }, [loading]);
 
-  // â”€â”€â”€ Summary â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Summary Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const statusCounts: Record<string, number> = { Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpha: 0, Libur: 0, Cuti: 0 };
   records.forEach((r) => { if (r.status in statusCounts) statusCounts[r.status]++; });
   const totalDenda = records.reduce((s, r) => s + r.denda, 0);
 
-  // â”€â”€â”€ Filter â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Filter Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const filtered = records.filter((r) => {
     const q = search.toLowerCase();
     const matchSearch = (r.employeeNama || "").toLowerCase().includes(q) || (r.divisionNama || "").toLowerCase().includes(q);
@@ -548,7 +548,7 @@ export default function AttendancePage() {
   });
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // â”€â”€â”€ Form: live preview â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Form: live preview Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const isSpecial = NO_JAM_STATUSES.includes(form.specialStatus);
   const formSchedule = useMemo(() => schedules.find((s) => s.division_id === form.division_id), [schedules, form.division_id]);
   const formPenalty = useMemo(() => penalties.find((p) => p.division_id === form.division_id), [penalties, form.division_id]);
@@ -566,14 +566,14 @@ export default function AttendancePage() {
 
   const previewColor = formPreview ? (STATUS_OPTIONS.find((s) => s.value === formPreview.status)?.color || "#6b7280") : "#6b7280";
 
-  // â”€â”€â”€ Fetch existing absen for form date â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Fetch existing absen for form date Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const fetchFormExisting = useCallback(async (tanggal: string) => {
     if (!tanggal) { setFormExistingEmpIds(new Set()); return; }
     const { data } = await supabase.from("attendance_records").select("employee_id").eq("tanggal", tanggal);
     setFormExistingEmpIds(new Set(data?.map((d) => d.employee_id) || []));
   }, []);
 
-  // â”€â”€â”€ Open Add â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Open Add Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const openAdd = () => {
     setForm({ employee_id: "", division_id: 0, tanggal: dateFilter, jam_masuk: "", specialStatus: "", catatan: "", alasan_manual: "" });
     setFormError("");
@@ -582,7 +582,7 @@ export default function AttendancePage() {
     setShowForm(true);
   };
 
-  // â”€â”€â”€ Open Edit â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Open Edit Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const openEdit = (row: AttendanceRow) => {
     const isSpec = NO_JAM_STATUSES.includes(row.status);
     setForm({
@@ -599,7 +599,7 @@ export default function AttendancePage() {
     setShowForm(true);
   };
 
-  // â”€â”€â”€ Save â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Save Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const handleSave = async () => {
     setFormError("");
 
@@ -782,7 +782,7 @@ export default function AttendancePage() {
     }
   };
 
-  // â”€â”€â”€ Delete â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Delete Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     setDeleting(true);
@@ -806,7 +806,7 @@ export default function AttendancePage() {
     setDeleteConfirm(null);
   };
 
-  // â”€â”€â”€ Off Day Modal â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Off Day Modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const openOffDay = () => {
     const map = new Map<string, Set<number>>();
     employees.forEach((e) => map.set(e.id, new Set()));
@@ -872,7 +872,7 @@ export default function AttendancePage() {
     }
   };
 
-  // â”€â”€â”€ Custom Override Handlers â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Custom Override Handlers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const handleAddOverride = async () => {
     if (!overrideEmpId || !overrideTanggal) return;
     setOverrideSaving(true);
@@ -886,7 +886,7 @@ export default function AttendancePage() {
       showToast("error", "Gagal", error.message);
     } else {
       showToast("success", overrideType === "libur" ? "Libur Ditambahkan" : "Masuk Ditambahkan",
-        `${employees.find((e) => e.id === overrideEmpId)?.nama || ""} â€” ${overrideTanggal}`);
+        `${employees.find((e) => e.id === overrideEmpId)?.nama || ""} Ã¢â‚¬â€ ${overrideTanggal}`);
       setOverrideEmpId("");
       setOverrideTanggal("");
       setOverrideCatatan("");
@@ -901,7 +901,7 @@ export default function AttendancePage() {
     showToast("success", "Override Dihapus");
   };
 
-  // â”€â”€â”€ Export CSV â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Export CSV Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const exportCSV = () => {
     const headers = ["Tanggal", "Pegawai", "Divisi", "Jam Masuk", "Jadwal", "Status", "Telat (menit)", "Denda", "Catatan"];
     const csvRows = [headers.join(",")];
@@ -923,7 +923,7 @@ export default function AttendancePage() {
     setShowExportMenu(false);
   };
 
-  // â”€â”€â”€ Export PDF â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Export PDF Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const exportPDF = async () => {
     const { default: jsPDF } = await import("jspdf");
     const { default: autoTable } = await import("jspdf-autotable");
@@ -1193,7 +1193,7 @@ export default function AttendancePage() {
       </div>
       </>)}
 
-      {/* â•â•â• KALENDER VIEW â•â•â• */}
+      {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â KALENDER VIEW Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
       {viewMode === "kalender" && (() => {
         const calPeriod = getCalPeriod(calPeriodKey);
 
@@ -1242,7 +1242,7 @@ export default function AttendancePage() {
         return (
           <Portal>
             <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
-              {/* â”€â”€ Header â”€â”€ */}
+              {/* Ã¢â€â‚¬Ã¢â€â‚¬ Header Ã¢â€â‚¬Ã¢â€â‚¬ */}
               <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-card via-card to-primary/[0.03]">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20 flex-shrink-0">
@@ -1289,7 +1289,7 @@ export default function AttendancePage() {
                 </div>
               </div>
 
-              {/* â”€â”€ Matrix table â”€â”€ */}
+              {/* Ã¢â€â‚¬Ã¢â€â‚¬ Matrix table Ã¢â€â‚¬Ã¢â€â‚¬ */}
               <div className="flex-1 overflow-auto bg-background">
                 {calLoading ? (
                   <div className="flex items-center justify-center h-full text-sm text-muted-foreground">Memuat data...</div>
@@ -1349,11 +1349,11 @@ export default function AttendancePage() {
                                   {entry ? (
                                     <span className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[10px] font-bold text-white"
                                       style={{ backgroundColor: entry.color }}
-                                      title={`${emp.nama} â€” ${entry.status} (${d.dateStr})`}>
+                                      title={`${emp.nama} Ã¢â‚¬â€ ${entry.status} (${d.dateStr})`}>
                                       {entry.status.charAt(0)}
                                     </span>
                                   ) : (
-                                    <span className="inline-block w-7 h-7 rounded-md text-[10px] text-muted-foreground/30 leading-7">â€”</span>
+                                    <span className="inline-block w-7 h-7 rounded-md text-[10px] text-muted-foreground/30 leading-7">Ã¢â‚¬â€</span>
                                   )}
                                 </td>
                               );
@@ -1366,7 +1366,7 @@ export default function AttendancePage() {
                 )}
               </div>
 
-              {/* â”€â”€ Footer legend â”€â”€ */}
+              {/* Ã¢â€â‚¬Ã¢â€â‚¬ Footer legend Ã¢â€â‚¬Ã¢â€â‚¬ */}
               <div className="flex items-center gap-4 px-5 py-2.5 border-t border-border bg-card flex-wrap">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Legenda:</span>
                 {STATUS_OPTIONS.map(s => (
@@ -1381,7 +1381,7 @@ export default function AttendancePage() {
         );
       })()}
 
-      {/* â•â•â• ADD/EDIT FORM MODAL â•â•â• */}
+      {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â ADD/EDIT FORM MODAL Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
       {showForm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1654,7 +1654,7 @@ export default function AttendancePage() {
         </Portal>
       )}
 
-      {/* â•â•â• DELETE CONFIRM â•â•â• */}
+      {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â DELETE CONFIRM Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
       {deleteConfirm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1676,7 +1676,7 @@ export default function AttendancePage() {
         </Portal>
       )}
 
-      {/* â•â•â• ATUR LIBUR MODAL â•â•â• */}
+      {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â ATUR LIBUR MODAL Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
       {showOffDay && (
         <Portal>
           <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
@@ -1731,7 +1731,7 @@ export default function AttendancePage() {
             {/* Content */}
             <div className="flex-1 overflow-auto">
               {offDayTab === "mingguan" ? (
-                /* â”€â”€ Tab Mingguan â”€â”€ */
+                /* Ã¢â€â‚¬Ã¢â€â‚¬ Tab Mingguan Ã¢â€â‚¬Ã¢â€â‚¬ */
                 <table className="w-full border-collapse" style={{ tableLayout: "fixed" }}>
                   <colgroup>
                     <col style={{ width: "180px" }} />
@@ -1784,7 +1784,7 @@ export default function AttendancePage() {
                                         ? "bg-gradient-to-b from-violet-500 to-violet-600 text-white shadow-md shadow-violet-500/25 hover:shadow-lg hover:shadow-violet-500/30 scale-105"
                                         : "bg-muted/40 text-muted-foreground/15 hover:bg-violet-500/10 hover:text-violet-500 hover:scale-105"
                                     )}>
-                                    {isOff ? "OFF" : "â€¢"}
+                                    {isOff ? "OFF" : "Ã¢â‚¬Â¢"}
                                   </button>
                                 </td>
                               );
@@ -1795,7 +1795,7 @@ export default function AttendancePage() {
                   </tbody>
                 </table>
               ) : (
-                /* â”€â”€ Tab Custom Tanggal â”€â”€ */
+                /* Ã¢â€â‚¬Ã¢â€â‚¬ Tab Custom Tanggal Ã¢â€â‚¬Ã¢â€â‚¬ */
                 <div className="p-5 space-y-5">
                   {/* Form tambah */}
                   <div className="rounded-2xl border-2 border-dashed border-violet-500/20 bg-gradient-to-br from-violet-500/[0.03] to-transparent p-5 space-y-4">
