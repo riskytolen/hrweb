@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   ClipboardCheck, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   ChevronLeft, ChevronRight, ChevronUp, Download, FileText, ChevronDown, Clock, User,
-  CalendarOff, ArrowRightLeft, UserCheck, LayoutList, CalendarDays,
+  CalendarOff, ArrowRightLeft, UserCheck, LayoutList, CalendarDays, Calendar,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -52,6 +52,24 @@ const MANUAL_SPECIAL = ["Alpha"];
 const DAY_NAMES = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 const DAY_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 const MIN_DATE = "2026-05-08"; // Tanggal mulai sistem HRM
+
+type PublicHoliday = {
+  id: number;
+  nama: string;
+  tanggal: string;
+  tanggal_selesai: string | null;
+  kategori: "Nasional" | "Cuti Bersama" | "Spesial";
+  catatan: string | null;
+  berlaku_untuk: "semua" | "divisi";
+  divisi_ids: number[] | null;
+  created_at: string;
+};
+
+const HOLIDAY_COLORS: Record<string, string> = {
+  Nasional: "#3b82f6",
+  "Cuti Bersama": "#f59e0b",
+  Spesial: "#8b5cf6",
+};
 
 /** Get local date string YYYY-MM-DD (timezone safe) */
 function localDateStr(d?: Date): string {
@@ -147,6 +165,7 @@ export default function AttendancePage() {
   const [records, setRecords] = useState<AttendanceRow[]>([]);
   const [offDays, setOffDays] = useState<OffDayEntry[]>([]);
   const [overrides, setOverrides] = useState<OverrideEntry[]>([]);
+  const [publicHolidays, setPublicHolidays] = useState<PublicHoliday[]>([]);
 
   // ─── Add/Edit Form ───
   const [showForm, setShowForm] = useState(false);
@@ -175,7 +194,15 @@ export default function AttendancePage() {
   const [offDaySaving, setOffDaySaving] = useState(false);
   const [offDayLocal, setOffDayLocal] = useState<Map<string, Set<number>>>(new Map());
   const [offDayProgress, setOffDayProgress] = useState<{ step: number; total: number; label: string } | null>(null);
-  const [offDayTab, setOffDayTab] = useState<"mingguan" | "custom">("mingguan");
+  const [offDayTab, setOffDayTab] = useState<"mingguan" | "custom" | "libur">("mingguan");
+  // Holiday form state
+  const [holidayForm, setHolidayForm] = useState({
+    nama: "", tanggal: "", tanggal_selesai: "", kategori: "Nasional" as PublicHoliday["kategori"],
+    catatan: "", berlaku_untuk: "semua" as "semua" | "divisi", divisi_ids: [] as number[],
+  });
+  const [editingHolidayId, setEditingHolidayId] = useState<number | null>(null);
+  const [holidaySaving, setHolidaySaving] = useState(false);
+  const [holidayError, setHolidayError] = useState("");
   // Custom override form
   const [overrideEmpId, setOverrideEmpId] = useState("");
   const [overrideTanggal, setOverrideTanggal] = useState("");
@@ -247,6 +274,10 @@ export default function AttendancePage() {
   const fetchOverrides = async () => {
     const { data } = await supabase.from("employee_leave_overrides").select("*").order("tanggal", { ascending: false });
     if (data) setOverrides(data);
+  };
+  const fetchPublicHolidays = async () => {
+    const { data } = await supabase.from("public_holidays").select("*").order("tanggal", { ascending: true });
+    if (data) setPublicHolidays(data);
   };
 
   const fetchRecords = useCallback(async () => {
@@ -335,6 +366,11 @@ export default function AttendancePage() {
     const overrideMap = new Map<string, string>();
     dayOverrides?.forEach((ov) => overrideMap.set(ov.employee_id, ov.type));
 
+    // Cek public holidays untuk tanggal ini
+    const holidayForDate = publicHolidays.find(
+      (h) => dateFilter >= h.tanggal && (h.tanggal_selesai ? dateFilter <= h.tanggal_selesai : true)
+    );
+
     // Fetch existing records untuk tanggal ini (termasuk id, status, catatan untuk deteksi stale)
     const { data: existingRecs } = await supabase
       .from("attendance_records")
@@ -356,9 +392,15 @@ export default function AttendancePage() {
 
       const override = overrideMap.get(emp.id);
       const empOffDays = offDayMap.get(emp.id);
-      const isLibur = override === "libur" || (!override && empOffDays?.has(dow));
+
+      // Priority: override > public holiday > off day mingguan
       const isMasukOverride = override === "masuk";
-      const shouldBeLibur = isLibur && !isMasukOverride;
+      const isOverrideLibur = override === "libur";
+      const isPublicHoliday = holidayForDate && holidayForDate.berlaku_untuk === "semua";
+      const isWeeklyOff = !override && !isPublicHoliday && empOffDays?.has(dow);
+
+      const shouldBeLibur = (isOverrideLibur || isPublicHoliday || isWeeklyOff) && !isMasukOverride;
+      const holidayNama = isPublicHoliday ? holidayForDate.nama : null;
 
       const existing = existingMap.get(emp.id);
 
@@ -374,9 +416,9 @@ export default function AttendancePage() {
           status: "Libur",
           durasi_telat: 0,
           denda: 0,
-          catatan: "Hari libur",
+          catatan: holidayNama ? `Libur nasional: ${holidayNama}` : "Hari libur",
         });
-      } else if (!shouldBeLibur && existing && existing.status === "Libur" && existing.catatan === "Hari libur") {
+      } else if (!shouldBeLibur && existing && existing.status === "Libur" && (existing.catatan === "Hari libur" || existing.catatan?.startsWith("Libur nasional:"))) {
         // Seharusnya TIDAK libur tapi ada record auto-generated "Libur" → hapus (jadwal sudah berubah)
         staleLiburIds.push(existing.id);
       }
@@ -403,7 +445,7 @@ export default function AttendancePage() {
       await fetchRecords();
       if (viewMode === "kalender") fetchCalendar();
     }
-  }, [dateFilter, employees, fetchRecords, viewMode, fetchCalendar]);
+  }, [dateFilter, employees, fetchRecords, viewMode, fetchCalendar, publicHolidays]);
 
   // Auto-generate record "Alpha" untuk pegawai yang seharusnya kerja tapi tidak ada record
   // Hanya untuk tanggal SEBELUM hari ini (bukan hari ini — pegawai masih bisa datang)
@@ -522,7 +564,7 @@ export default function AttendancePage() {
   }, [calPeriodKey, viewMode, fetchCalendar]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchOffDays(), fetchOverrides(), fetchRecords()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchOffDays(), fetchOverrides(), fetchPublicHolidays(), fetchRecords()]).then(() => setLoading(false));
   }, []);
 
   // Saat dateFilter berubah: fetch records → auto-generate libur → auto-generate alpha
@@ -907,6 +949,52 @@ export default function AttendancePage() {
     await supabase.from("employee_leave_overrides").delete().eq("id", id);
     setOverrides((prev) => prev.filter((o) => o.id !== id));
     showToast("success", "Override Dihapus");
+  };
+
+  // ─── Public Holiday CRUD ───
+  const resetHolidayForm = () => {
+    setHolidayForm({ nama: "", tanggal: "", tanggal_selesai: "", kategori: "Nasional", catatan: "", berlaku_untuk: "semua", divisi_ids: [] });
+    setEditingHolidayId(null);
+    setHolidayError("");
+  };
+  const handleSaveHoliday = async () => {
+    setHolidayError("");
+    setHolidaySaving(true);
+    if (!holidayForm.nama || !holidayForm.tanggal) {
+      setHolidayError("Nama dan tanggal harus diisi.");
+      setHolidaySaving(false);
+      return;
+    }
+    const payload = {
+      nama: holidayForm.nama, tanggal: holidayForm.tanggal,
+      tanggal_selesai: holidayForm.tanggal_selesai || null,
+      kategori: holidayForm.kategori, catatan: holidayForm.catatan || null,
+      berlaku_untuk: holidayForm.berlaku_untuk, divisi_ids: null,
+    };
+    if (editingHolidayId) {
+      const { error } = await supabase.from("public_holidays").update(payload).eq("id", editingHolidayId);
+      if (error) { setHolidayError(error.message); setHolidaySaving(false); return; }
+      showToast("success", "Hari Libur Diperbarui");
+    } else {
+      const { error } = await supabase.from("public_holidays").insert(payload);
+      if (error) { setHolidayError(error.message); setHolidaySaving(false); return; }
+      showToast("success", "Hari Libur Ditambahkan");
+    }
+    resetHolidayForm();
+    await fetchPublicHolidays();
+    if (viewMode === "kalender") fetchCalendar();
+    setHolidaySaving(false);
+  };
+  const handleEditHoliday = (h: PublicHoliday) => {
+    setHolidayForm({ nama: h.nama, tanggal: h.tanggal, tanggal_selesai: h.tanggal_selesai || "", kategori: h.kategori, catatan: h.catatan || "", berlaku_untuk: h.berlaku_untuk, divisi_ids: h.divisi_ids || [] });
+    setEditingHolidayId(h.id);
+    setHolidayError("");
+  };
+  const handleDeleteHoliday = async (id: number) => {
+    const { error } = await supabase.from("public_holidays").delete().eq("id", id);
+    if (error) { showToast("error", "Gagal", error.message); return; }
+    showToast("success", "Hari Libur Dihapus");
+    await fetchPublicHolidays();
   };
 
   // ─── Export CSV ───
@@ -1713,6 +1801,12 @@ export default function AttendancePage() {
                     <ArrowRightLeft className="w-3 h-3" />Custom
                     {overrides.length > 0 && <span className="text-[9px] font-bold bg-violet-500/10 text-violet-500 px-1.5 py-0.5 rounded">{overrides.length}</span>}
                   </button>
+                  <button onClick={() => { setOffDayTab("libur"); resetHolidayForm(); }}
+                    className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                      offDayTab === "libur" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                    <Calendar className="w-3 h-3" />Hari Libur
+                    {publicHolidays.length > 0 && <span className="text-[9px] font-bold bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded">{publicHolidays.length}</span>}
+                  </button>
                 </div>
                 <button onClick={() => setShowOffDay(false)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors">
                   <X className="w-3.5 h-3.5" />Tutup
@@ -1802,7 +1896,7 @@ export default function AttendancePage() {
                       })}
                   </tbody>
                 </table>
-              ) : (
+              ) : offDayTab === "custom" ? (
                 /* ── Tab Custom Tanggal ── */
                 <div className="p-5 space-y-5">
                   {/* Form tambah */}
@@ -1903,6 +1997,118 @@ export default function AttendancePage() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* ── Tab Hari Libur ── */
+                <div className="p-5 space-y-5">
+                  {/* Form tambah/edit */}
+                  <div className="rounded-2xl border-2 border-dashed border-blue-500/20 bg-gradient-to-br from-blue-500/[0.03] to-transparent p-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                        <Plus className="w-3.5 h-3.5 text-blue-500" />
+                      </div>
+                      <p className="text-xs font-bold text-foreground">{editingHolidayId ? "Edit Hari Libur" : "Tambah Hari Libur Nasional"}</p>
+                    </div>
+                    {holidayError && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-danger/10 text-danger text-xs font-medium">
+                        <AlertTriangle className="w-3.5 h-3.5" />{holidayError}
+                      </div>
+                    )}
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Nama Hari Libur</label>
+                      <input type="text" placeholder="Misal: Idul Fitri 1448 H, Natal 2026..." value={holidayForm.nama}
+                        onChange={(e) => setHolidayForm({ ...holidayForm, nama: e.target.value })}
+                        className="w-full text-xs px-3 py-2.5 rounded-xl border border-border bg-muted/30 outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Tanggal Mulai</label>
+                        <DatePicker value={holidayForm.tanggal} onChange={(val) => setHolidayForm({ ...holidayForm, tanggal: val })} placeholder="Pilih tanggal" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Tanggal Selesai <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
+                        <DatePicker value={holidayForm.tanggal_selesai} onChange={(val) => setHolidayForm({ ...holidayForm, tanggal_selesai: val })} placeholder="Sama dengan mulai" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Kategori</label>
+                      <div className="flex items-center gap-2">
+                        {(["Nasional", "Cuti Bersama", "Spesial"] as const).map((k) => (
+                          <button key={k} type="button" onClick={() => setHolidayForm({ ...holidayForm, kategori: k })}
+                            className={cn("flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border-2",
+                              holidayForm.kategori === k ? "border-blue-500 bg-blue-500/10 text-blue-500" : "border-border bg-card text-muted-foreground hover:border-blue-500/30")}>
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: HOLIDAY_COLORS[k] }} />{k}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Catatan <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
+                      <input type="text" placeholder="Keterangan tambahan..." value={holidayForm.catatan}
+                        onChange={(e) => setHolidayForm({ ...holidayForm, catatan: e.target.value })}
+                        className="w-full text-xs px-3 py-2.5 rounded-xl border border-border bg-muted/30 outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                        Berlaku untuk <strong className="text-foreground">semua pegawai</strong>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {editingHolidayId && <Button variant="outline" size="sm" onClick={resetHolidayForm}>Batal Edit</Button>}
+                        <Button size="sm" icon={editingHolidayId ? Check : Plus} onClick={handleSaveHoliday} disabled={holidaySaving || !holidayForm.nama || !holidayForm.tanggal}>
+                          {holidaySaving ? "Menyimpan..." : editingHolidayId ? "Simpan" : "Tambah"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                  {/* List holidays */}
+                  {publicHolidays.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16">
+                      <Calendar className="w-10 h-10 text-muted-foreground/15 mb-3" />
+                      <p className="text-sm text-muted-foreground">Belum ada hari libur nasional</p>
+                      <p className="text-xs text-muted-foreground/60 mt-1">Gunakan form di atas untuk menambahkan</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {publicHolidays.map((h) => (
+                        <div key={h.id} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-blue-500/10 bg-blue-500/[0.02] transition-colors hover:bg-muted/30">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10">
+                            <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-semibold text-foreground">{h.nama}</p>
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${HOLIDAY_COLORS[h.kategori]}15`, color: HOLIDAY_COLORS[h.kategori] }}>{h.kategori}</span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-[10px] text-muted-foreground">
+                                {new Date(h.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
+                                {h.tanggal_selesai && h.tanggal_selesai !== h.tanggal && (
+                                  <>{" — "}{new Date(h.tanggal_selesai + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</>
+                                )}
+                              </p>
+                              {h.catatan && (
+                                <>
+                                  <span className="w-1 h-1 rounded-full bg-border" />
+                                  <p className="text-[10px] text-muted-foreground/70">{h.catatan}</p>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button onClick={() => handleEditHoliday(h)}
+                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/40 hover:text-foreground transition-colors">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => handleDeleteHoliday(h.id)}
+                              className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground/40 hover:text-danger transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
