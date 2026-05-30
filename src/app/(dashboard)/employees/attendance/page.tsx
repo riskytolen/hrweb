@@ -1349,11 +1349,11 @@ export default function AttendancePage() {
                                   {entry ? (
                                     <span className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[10px] font-bold text-white"
                                       style={{ backgroundColor: entry.color }}
-                                      title={`${emp.nama} Ã¢â‚¬â€ ${entry.status} (${d.dateStr})`}>
+                                      title={`${emp.nama} - ${entry.status} (${d.dateStr})`}>
                                       {entry.status.charAt(0)}
                                     </span>
                                   ) : (
-                                    <span className="inline-block w-7 h-7 rounded-md text-[10px] text-muted-foreground/30 leading-7">Ã¢â‚¬â€</span>
+                                    <span className="inline-block w-7 h-7 rounded-md text-[10px] text-muted-foreground/30 leading-7">-</span>
                                   )}
                                 </td>
                               );
