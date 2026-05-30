@@ -279,26 +279,37 @@ export default function AttendancePage() {
     return { start, end, label };
   }, []);
 
-  // Fetch kalender data (periode 8-7)
+  // Fetch kalender data (periode 8-7) — paginated agar tidak terpotong default limit 1000
   const fetchCalendar = useCallback(async () => {
     setCalLoading(true);
     const { start, end } = getCalPeriod(calPeriodKey);
 
-    const { data } = await supabase
-      .from("attendance_records")
-      .select("*, pegawai(nama), divisions(nama, color)")
-      .gte("tanggal", start)
-      .lte("tanggal", end)
-      .order("tanggal", { ascending: true });
+    const PAGE_SIZE = 1000;
+    let allData: any[] = [];
+    let from = 0;
+    let hasMore = true;
 
-    if (data) {
-      setCalRecords(data.map((d) => ({
-        ...d,
-        employeeNama: d.pegawai?.nama || d.employee_id,
-        divisionNama: d.divisions?.nama || "-",
-        divisionColor: d.divisions?.color || "#3b82f6",
-      })) as AttendanceRow[]);
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from("attendance_records")
+        .select("*, pegawai(nama), divisions(nama, color)")
+        .gte("tanggal", start)
+        .lte("tanggal", end)
+        .order("tanggal", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error || !data) break;
+      allData = allData.concat(data);
+      hasMore = data.length === PAGE_SIZE;
+      from += PAGE_SIZE;
     }
+
+    setCalRecords(allData.map((d) => ({
+      ...d,
+      employeeNama: d.pegawai?.nama || d.employee_id,
+      divisionNama: d.divisions?.nama || "-",
+      divisionColor: d.divisions?.color || "#3b82f6",
+    })) as AttendanceRow[]);
     setCalLoading(false);
   }, [calPeriodKey, getCalPeriod]);
 
