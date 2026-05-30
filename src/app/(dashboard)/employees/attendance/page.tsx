@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
@@ -92,7 +92,7 @@ function computeDenda(durasiTelat: number, penalty: PenaltyLite | undefined): nu
   return durasiTelat * dendaPerMenit;
 }
 
-/** Format jam HH:MM dari total menit (0Ã¢â‚¬â€œ1439) */
+/** Format jam HH:MM dari total menit (0–1439) */
 function minutesToTime(total: number): string {
   const safe = ((total % 1440) + 1440) % 1440;
   const h = Math.floor(safe / 60);
@@ -126,16 +126,16 @@ export default function AttendancePage() {
   const [dateFilter, setDateFilter] = useState(() => localDateStr());
 
   // Kalender state (periode 8 bulan ini - 7 bulan berikutnya)
-  const getInitialCalPeriod = useCallback(() => {
-    const [y, m, d] = dateFilter.split("-").map(Number);
+  const calcCalPeriodKey = useCallback((refDate?: string) => {
+    const ref = refDate || localDateStr();
+    const [y, m, d] = ref.split("-").map(Number);
     if (d < 8) {
       const prev = new Date(y, m - 2, 1);
       return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
     }
     return `${y}-${String(m).padStart(2, "0")}`;
-  }, [dateFilter]);
-
-  const [calPeriodKey, setCalPeriodKey] = useState(getInitialCalPeriod);
+  }, []);
+  const [calPeriodKey, setCalPeriodKey] = useState(() => calcCalPeriodKey());
   const [calRecords, setCalRecords] = useState<AttendanceRow[]>([]);
   const [calLoading, setCalLoading] = useState(false);
   const [calSearch, setCalSearch] = useState("");
@@ -148,7 +148,7 @@ export default function AttendancePage() {
   const [offDays, setOffDays] = useState<OffDayEntry[]>([]);
   const [overrides, setOverrides] = useState<OverrideEntry[]>([]);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Add/Edit Form Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Add/Edit Form ───
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const ALASAN_MANUAL_OPTIONS = [
@@ -215,10 +215,10 @@ export default function AttendancePage() {
     return () => { document.body.style.overflow = ""; };
   }, [showForm, showOffDay, viewMode]);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Fetch Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Fetch ───
   const fetchEmployees = async () => {
     // Include pegawai Aktif + pegawai Tidak Aktif yang punya tanggal_keluar >= MIN_DATE.
-    // Pegawai Tidak Aktif tanpa tanggal_keluar (data lama) di-skip Ã¢â‚¬â€ admin perlu backfill manual
+    // Pegawai Tidak Aktif tanpa tanggal_keluar (data lama) di-skip — admin perlu backfill manual
     // kalau mereka memang relevan untuk periode aktif.
     const { data } = await supabase
       .from("pegawai")
@@ -267,8 +267,7 @@ export default function AttendancePage() {
     }
   }, [dateFilter, showToast]);
 
-  // Auto-generate record "Libur" untuk pegawai yang libur di tanggal ini
-  // + Hapus record Libur auto-generated yang sudah tidak valid (jadwal berubah)
+  // Hitung range periode 8-7 (timezone safe)
   const getCalPeriod = useCallback((key: string) => {
     const [y, m] = key.split("-").map(Number);
     const start = `${y}-${String(m).padStart(2, "0")}-08`;
@@ -276,7 +275,7 @@ export default function AttendancePage() {
     const end = `${endDt.getFullYear()}-${String(endDt.getMonth() + 1).padStart(2, "0")}-${String(endDt.getDate()).padStart(2, "0")}`;
     const startLabel = new Date(y, m - 1, 8).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
     const endLabel = endDt.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
-    const label = `8 ${startLabel} - 7 ${endLabel}`;
+    const label = `8 ${startLabel} – 7 ${endLabel}`;
     return { start, end, label };
   }, []);
 
@@ -284,22 +283,17 @@ export default function AttendancePage() {
   const fetchCalendar = useCallback(async () => {
     setCalLoading(true);
     const { start, end } = getCalPeriod(calPeriodKey);
-    console.log("Ã°Å¸â€œâ€¦ Fetch Calendar:", { start, end, key: calPeriodKey });
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("attendance_records")
       .select("*, pegawai(nama), divisions(nama, color)")
       .gte("tanggal", start)
       .lte("tanggal", end)
-      .order("tanggal", { ascending: true })
-      .limit(2000);
-
-    console.log("Ã°Å¸â€œÅ  Calendar Data Count:", data?.length, "Error:", error);
+      .order("tanggal", { ascending: true });
 
     if (data) {
       setCalRecords(data.map((d) => ({
         ...d,
-        tanggal: d.tanggal.slice(0, 10), // Normalisasi format tanggal
         employeeNama: d.pegawai?.nama || d.employee_id,
         divisionNama: d.divisions?.nama || "-",
         divisionColor: d.divisions?.color || "#3b82f6",
@@ -308,6 +302,8 @@ export default function AttendancePage() {
     setCalLoading(false);
   }, [calPeriodKey, getCalPeriod]);
 
+  // Auto-generate record "Libur" untuk pegawai yang libur di tanggal ini
+  // + Hapus record Libur auto-generated yang sudah tidak valid (jadwal berubah)
   const autoGenerateLibur = useCallback(async () => {
     if (!dateFilter || employees.length === 0) return;
 
@@ -356,7 +352,7 @@ export default function AttendancePage() {
       const existing = existingMap.get(emp.id);
 
       if (shouldBeLibur && !existing) {
-        // Seharusnya libur tapi belum ada record Ã¢â€ â€™ insert
+        // Seharusnya libur tapi belum ada record → insert
         liburInserts.push({
           employee_id: emp.id,
           division_id: null,
@@ -370,7 +366,7 @@ export default function AttendancePage() {
           catatan: "Hari libur",
         });
       } else if (!shouldBeLibur && existing && existing.status === "Libur" && existing.catatan === "Hari libur") {
-        // Seharusnya TIDAK libur tapi ada record auto-generated "Libur" Ã¢â€ â€™ hapus (jadwal sudah berubah)
+        // Seharusnya TIDAK libur tapi ada record auto-generated "Libur" → hapus (jadwal sudah berubah)
         staleLiburIds.push(existing.id);
       }
     }
@@ -396,10 +392,10 @@ export default function AttendancePage() {
       await fetchRecords();
       if (viewMode === "kalender") fetchCalendar();
     }
-  }, [dateFilter, employees, fetchRecords, fetchCalendar, viewMode]);
+  }, [dateFilter, employees, fetchRecords, viewMode, fetchCalendar]);
 
   // Auto-generate record "Alpha" untuk pegawai yang seharusnya kerja tapi tidak ada record
-  // Hanya untuk tanggal SEBELUM hari ini (bukan hari ini Ã¢â‚¬â€ pegawai masih bisa datang)
+  // Hanya untuk tanggal SEBELUM hari ini (bukan hari ini — pegawai masih bisa datang)
   const autoGenerateAlpha = useCallback(async () => {
     if (!dateFilter || employees.length === 0) return;
 
@@ -472,10 +468,10 @@ export default function AttendancePage() {
           status: leave.jenis,
           durasi_telat: 0,
           denda: 0,
-          catatan: `${leave.jenis} otomatis Ã¢â‚¬â€ sudah disetujui`,
+          catatan: `${leave.jenis} otomatis — sudah disetujui`,
         });
       } else if (!shouldBeLibur) {
-        // Seharusnya kerja tapi tidak ada record Ã¢â€ â€™ Alpha
+        // Seharusnya kerja tapi tidak ada record → Alpha
         const dendaAlpha = penalties.length > 0 ? (penalties[0]?.denda_alpha ?? 100000) : 100000;
         alphaInserts.push({
           employee_id: emp.id,
@@ -487,7 +483,7 @@ export default function AttendancePage() {
           status: "Alpha",
           durasi_telat: 0,
           denda: dendaAlpha,
-          catatan: "Alpha otomatis Ã¢â‚¬â€ tidak ada record kehadiran",
+          catatan: "Alpha otomatis — tidak ada record kehadiran",
         });
       }
     }
@@ -500,15 +496,16 @@ export default function AttendancePage() {
       await fetchRecords();
       if (viewMode === "kalender") fetchCalendar();
     }
-  }, [dateFilter, employees, penalties, fetchRecords, fetchCalendar, viewMode]);
+  }, [dateFilter, employees, penalties, fetchRecords, viewMode, fetchCalendar]);
 
-  // Hitung range periode 8-7 (timezone safe)
+  // Sync calPeriodKey saat user berpindah ke mode kalender
   useEffect(() => {
     if (viewMode === "kalender") {
-      setCalPeriodKey(getInitialCalPeriod());
+      setCalPeriodKey(calcCalPeriodKey());
     }
-  }, [viewMode, getInitialCalPeriod]);
+  }, [viewMode, calcCalPeriodKey]);
 
+  // Fetch data kalender saat periode atau mode berubah
   useEffect(() => {
     if (viewMode === "kalender") fetchCalendar();
   }, [calPeriodKey, viewMode, fetchCalendar]);
@@ -517,7 +514,7 @@ export default function AttendancePage() {
     Promise.all([fetchEmployees(), fetchDivisions(), fetchSchedules(), fetchPenalties(), fetchOffDays(), fetchOverrides(), fetchRecords()]).then(() => setLoading(false));
   }, []);
 
-  // Saat dateFilter berubah: fetch records Ã¢â€ â€™ auto-generate libur Ã¢â€ â€™ auto-generate alpha
+  // Saat dateFilter berubah: fetch records → auto-generate libur → auto-generate alpha
   useEffect(() => {
     fetchRecords().then(async () => {
       if (employees.length > 0) {
@@ -534,12 +531,12 @@ export default function AttendancePage() {
     }
   }, [loading]);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Summary Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Summary ───
   const statusCounts: Record<string, number> = { Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpha: 0, Libur: 0, Cuti: 0 };
   records.forEach((r) => { if (r.status in statusCounts) statusCounts[r.status]++; });
   const totalDenda = records.reduce((s, r) => s + r.denda, 0);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Filter Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Filter ───
   const filtered = records.filter((r) => {
     const q = search.toLowerCase();
     const matchSearch = (r.employeeNama || "").toLowerCase().includes(q) || (r.divisionNama || "").toLowerCase().includes(q);
@@ -548,7 +545,7 @@ export default function AttendancePage() {
   });
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Form: live preview Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Form: live preview ───
   const isSpecial = NO_JAM_STATUSES.includes(form.specialStatus);
   const formSchedule = useMemo(() => schedules.find((s) => s.division_id === form.division_id), [schedules, form.division_id]);
   const formPenalty = useMemo(() => penalties.find((p) => p.division_id === form.division_id), [penalties, form.division_id]);
@@ -566,14 +563,14 @@ export default function AttendancePage() {
 
   const previewColor = formPreview ? (STATUS_OPTIONS.find((s) => s.value === formPreview.status)?.color || "#6b7280") : "#6b7280";
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Fetch existing absen for form date Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Fetch existing absen for form date ───
   const fetchFormExisting = useCallback(async (tanggal: string) => {
     if (!tanggal) { setFormExistingEmpIds(new Set()); return; }
     const { data } = await supabase.from("attendance_records").select("employee_id").eq("tanggal", tanggal);
     setFormExistingEmpIds(new Set(data?.map((d) => d.employee_id) || []));
   }, []);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Open Add Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Open Add ───
   const openAdd = () => {
     setForm({ employee_id: "", division_id: 0, tanggal: dateFilter, jam_masuk: "", specialStatus: "", catatan: "", alasan_manual: "" });
     setFormError("");
@@ -582,7 +579,7 @@ export default function AttendancePage() {
     setShowForm(true);
   };
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Open Edit Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Open Edit ───
   const openEdit = (row: AttendanceRow) => {
     const isSpec = NO_JAM_STATUSES.includes(row.status);
     setForm({
@@ -599,7 +596,7 @@ export default function AttendancePage() {
     setShowForm(true);
   };
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Save Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Save ───
   const handleSave = async () => {
     setFormError("");
 
@@ -782,7 +779,7 @@ export default function AttendancePage() {
     }
   };
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Delete Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Delete ───
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     setDeleting(true);
@@ -806,7 +803,7 @@ export default function AttendancePage() {
     setDeleteConfirm(null);
   };
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Off Day Modal Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Off Day Modal ───
   const openOffDay = () => {
     const map = new Map<string, Set<number>>();
     employees.forEach((e) => map.set(e.id, new Set()));
@@ -872,7 +869,7 @@ export default function AttendancePage() {
     }
   };
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Custom Override Handlers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Custom Override Handlers ───
   const handleAddOverride = async () => {
     if (!overrideEmpId || !overrideTanggal) return;
     setOverrideSaving(true);
@@ -886,7 +883,7 @@ export default function AttendancePage() {
       showToast("error", "Gagal", error.message);
     } else {
       showToast("success", overrideType === "libur" ? "Libur Ditambahkan" : "Masuk Ditambahkan",
-        `${employees.find((e) => e.id === overrideEmpId)?.nama || ""} Ã¢â‚¬â€ ${overrideTanggal}`);
+        `${employees.find((e) => e.id === overrideEmpId)?.nama || ""} — ${overrideTanggal}`);
       setOverrideEmpId("");
       setOverrideTanggal("");
       setOverrideCatatan("");
@@ -901,7 +898,7 @@ export default function AttendancePage() {
     showToast("success", "Override Dihapus");
   };
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Export CSV Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Export CSV ───
   const exportCSV = () => {
     const headers = ["Tanggal", "Pegawai", "Divisi", "Jam Masuk", "Jadwal", "Status", "Telat (menit)", "Denda", "Catatan"];
     const csvRows = [headers.join(",")];
@@ -923,7 +920,7 @@ export default function AttendancePage() {
     setShowExportMenu(false);
   };
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Export PDF Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ─── Export PDF ───
   const exportPDF = async () => {
     const { default: jsPDF } = await import("jspdf");
     const { default: autoTable } = await import("jspdf-autotable");
@@ -1193,7 +1190,7 @@ export default function AttendancePage() {
       </div>
       </>)}
 
-      {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â KALENDER VIEW Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
+      {/* ═══ KALENDER VIEW ═══ */}
       {viewMode === "kalender" && (() => {
         const calPeriod = getCalPeriod(calPeriodKey);
 
@@ -1242,7 +1239,7 @@ export default function AttendancePage() {
         return (
           <Portal>
             <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
-              {/* Ã¢â€â‚¬Ã¢â€â‚¬ Header Ã¢â€â‚¬Ã¢â€â‚¬ */}
+              {/* ── Header ── */}
               <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-card via-card to-primary/[0.03]">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20 flex-shrink-0">
@@ -1289,7 +1286,7 @@ export default function AttendancePage() {
                 </div>
               </div>
 
-              {/* Ã¢â€â‚¬Ã¢â€â‚¬ Matrix table Ã¢â€â‚¬Ã¢â€â‚¬ */}
+              {/* ── Matrix table ── */}
               <div className="flex-1 overflow-auto bg-background">
                 {calLoading ? (
                   <div className="flex items-center justify-center h-full text-sm text-muted-foreground">Memuat data...</div>
@@ -1349,11 +1346,11 @@ export default function AttendancePage() {
                                   {entry ? (
                                     <span className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[10px] font-bold text-white"
                                       style={{ backgroundColor: entry.color }}
-                                      title={`${emp.nama} - ${entry.status} (${d.dateStr})`}>
+                                      title={`${emp.nama} — ${entry.status} (${d.dateStr})`}>
                                       {entry.status.charAt(0)}
                                     </span>
                                   ) : (
-                                    <span className="inline-block w-7 h-7 rounded-md text-[10px] text-muted-foreground/30 leading-7">-</span>
+                                    <span className="inline-block w-7 h-7 rounded-md text-[10px] text-muted-foreground/30 leading-7">—</span>
                                   )}
                                 </td>
                               );
@@ -1366,7 +1363,7 @@ export default function AttendancePage() {
                 )}
               </div>
 
-              {/* Ã¢â€â‚¬Ã¢â€â‚¬ Footer legend Ã¢â€â‚¬Ã¢â€â‚¬ */}
+              {/* ── Footer legend ── */}
               <div className="flex items-center gap-4 px-5 py-2.5 border-t border-border bg-card flex-wrap">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Legenda:</span>
                 {STATUS_OPTIONS.map(s => (
@@ -1381,7 +1378,7 @@ export default function AttendancePage() {
         );
       })()}
 
-      {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â ADD/EDIT FORM MODAL Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
+      {/* ═══ ADD/EDIT FORM MODAL ═══ */}
       {showForm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1654,7 +1651,7 @@ export default function AttendancePage() {
         </Portal>
       )}
 
-      {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â DELETE CONFIRM Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
+      {/* ═══ DELETE CONFIRM ═══ */}
       {deleteConfirm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1676,7 +1673,7 @@ export default function AttendancePage() {
         </Portal>
       )}
 
-      {/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â ATUR LIBUR MODAL Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */}
+      {/* ═══ ATUR LIBUR MODAL ═══ */}
       {showOffDay && (
         <Portal>
           <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
@@ -1731,7 +1728,7 @@ export default function AttendancePage() {
             {/* Content */}
             <div className="flex-1 overflow-auto">
               {offDayTab === "mingguan" ? (
-                /* Ã¢â€â‚¬Ã¢â€â‚¬ Tab Mingguan Ã¢â€â‚¬Ã¢â€â‚¬ */
+                /* ── Tab Mingguan ── */
                 <table className="w-full border-collapse" style={{ tableLayout: "fixed" }}>
                   <colgroup>
                     <col style={{ width: "180px" }} />
@@ -1784,7 +1781,7 @@ export default function AttendancePage() {
                                         ? "bg-gradient-to-b from-violet-500 to-violet-600 text-white shadow-md shadow-violet-500/25 hover:shadow-lg hover:shadow-violet-500/30 scale-105"
                                         : "bg-muted/40 text-muted-foreground/15 hover:bg-violet-500/10 hover:text-violet-500 hover:scale-105"
                                     )}>
-                                    {isOff ? "OFF" : "Ã¢â‚¬Â¢"}
+                                    {isOff ? "OFF" : "•"}
                                   </button>
                                 </td>
                               );
@@ -1795,7 +1792,7 @@ export default function AttendancePage() {
                   </tbody>
                 </table>
               ) : (
-                /* Ã¢â€â‚¬Ã¢â€â‚¬ Tab Custom Tanggal Ã¢â€â‚¬Ã¢â€â‚¬ */
+                /* ── Tab Custom Tanggal ── */
                 <div className="p-5 space-y-5">
                   {/* Form tambah */}
                   <div className="rounded-2xl border-2 border-dashed border-violet-500/20 bg-gradient-to-br from-violet-500/[0.03] to-transparent p-5 space-y-4">
