@@ -270,7 +270,7 @@ export default function DashboardPage() {
       .eq("status", "Aktif");
     const attPerfPromise = supabase
       .from("attendance_records")
-      .select("employee_id, status, durasi_telat, is_manual, jam_masuk, schedule_jam_masuk, division_id")
+      .select("employee_id, tanggal, status, durasi_telat, is_manual, jam_masuk, schedule_jam_masuk, division_id")
       .gte("tanggal", period.start)
       .lte("tanggal", period.end);
     const spPerfPromise = supabase
