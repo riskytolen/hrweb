@@ -46,6 +46,7 @@ import {
   assignGrades,
   comparePerformanceBest,
   getGradeColor,
+  DIVISION_RANK_POINTS,
   type AttendanceLite,
   type SpDocLite,
   type PerformanceResult,
@@ -106,6 +107,7 @@ interface TopPerformer {
   nama: string;
   jabatanNama: string;
   totalPoint: number;
+  pointHarian: number;
   grade: "A" | "B" | "C" | "D" | "E" | "-";
   hadir: number;
   telat: number;
@@ -114,6 +116,9 @@ interface TopPerformer {
   spCount: number;
   totalPenalti: number;
   eligible: boolean;
+  divisionId: number | null;
+  divisionNama: string | null;
+  hasDivisionOverride: boolean;
 }
 
 // ─── Period helpers (cut-off tgl 8) ───
@@ -253,7 +258,12 @@ export default function DashboardPage() {
       .order("created_at", { ascending: false })
       .limit(8);
 
-    // 8. Top performers — pegawai aktif + attendance periode + SP aktif
+    // 8a. Daftar divisi (untuk tampilkan nama di Top Performers + lookup override)
+    const divisionsPromise = supabase
+      .from("divisions")
+      .select("id, nama");
+
+    // 8b. Top performers — pegawai aktif + attendance periode + SP aktif
     const empPerfPromise = supabase
       .from("pegawai")
       .select("id, nama, jabatan_id, status, tanggal_bergabung, jabatan:jabatan_id(nama)")
@@ -280,6 +290,7 @@ export default function DashboardPage() {
       legalRes,
       recRes,
       auditRes,
+      divisionsRes,
       empPerfRes,
       attPerfRes,
       spPerfRes,
@@ -293,6 +304,7 @@ export default function DashboardPage() {
       legalPending,
       recruitmentPromise,
       auditPromise,
+      divisionsPromise,
       empPerfPromise,
       attPerfPromise,
       spPerfPromise,
@@ -435,6 +447,28 @@ export default function DashboardPage() {
     const attPerf = (attPerfRes.data ?? []) as AttendanceLite[];
     const spPerf = (spPerfRes.data ?? []) as SpDocLite[];
 
+    // Map division_id → nama (untuk ditampilkan di top performer)
+    const divisionMap = new Map<number, string>();
+    ((divisionsRes.data ?? []) as { id: number; nama: string }[]).forEach((d) => divisionMap.set(d.id, d.nama));
+
+    // Map employee_id → division_id (ambil yang paling sering muncul di attendance periode)
+    const empDivisionCount = new Map<string, Map<number, number>>();
+    attPerf.forEach((a) => {
+      if (a.division_id == null) return;
+      if (!empDivisionCount.has(a.employee_id)) empDivisionCount.set(a.employee_id, new Map());
+      const m = empDivisionCount.get(a.employee_id)!;
+      m.set(a.division_id, (m.get(a.division_id) ?? 0) + 1);
+    });
+    const empDominantDivision = new Map<string, number>();
+    empDivisionCount.forEach((counts, empId) => {
+      let bestId = 0;
+      let bestCount = 0;
+      counts.forEach((c, id) => {
+        if (c > bestCount) { bestCount = c; bestId = id; }
+      });
+      if (bestId > 0) empDominantDivision.set(empId, bestId);
+    });
+
     const periodEnd = period.end;
 
     // Hitung ranking point harian sekali untuk semua pegawai
@@ -453,20 +487,27 @@ export default function DashboardPage() {
     assignGrades(perfRows, (r) => r.totalPoint);
 
     const topPerformersData: TopPerformer[] = perfRows
-      .map((b) => ({
-        employee_id: b.employee_id,
-        nama: b.nama,
-        jabatanNama: b.jabatanNama,
-        totalPoint: b.totalPoint,
-        grade: b.grade,
-        hadir: b.hadir,
-        telat: b.telat,
-        alpha: b.alpha,
-        manualCount: b.manualCount,
-        spCount: b.spCount,
-        totalPenalti: b.totalPenalti,
-        eligible: b.eligible,
-      }))
+      .map((b) => {
+        const divId = empDominantDivision.get(b.employee_id) ?? null;
+        return {
+          employee_id: b.employee_id,
+          nama: b.nama,
+          jabatanNama: b.jabatanNama,
+          totalPoint: b.totalPoint,
+          pointHarian: b.pointHarian,
+          grade: b.grade,
+          hadir: b.hadir,
+          telat: b.telat,
+          alpha: b.alpha,
+          manualCount: b.manualCount,
+          spCount: b.spCount,
+          totalPenalti: b.totalPenalti,
+          eligible: b.eligible,
+          divisionId: divId,
+          divisionNama: divId ? divisionMap.get(divId) ?? null : null,
+          hasDivisionOverride: divId != null && divId in DIVISION_RANK_POINTS,
+        };
+      })
       // Skip pegawai yang belum eligible atau tidak punya data sama sekali
       .filter((p) => p.eligible && p.hadir > 0)
       .sort(comparePerformanceBest)
@@ -1064,7 +1105,20 @@ export default function DashboardPage() {
                     {/* Identity */}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-foreground truncate">{p.nama}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{p.jabatanNama}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {p.jabatanNama}
+                        {p.divisionNama && (
+                          <>
+                            <span className="mx-1 opacity-50">·</span>
+                            <span className={cn(p.hasDivisionOverride && "text-primary font-semibold")}>
+                              {p.divisionNama}
+                            </span>
+                            {p.hasDivisionOverride && (
+                              <Sparkles className="w-2.5 h-2.5 inline-block ml-0.5 text-primary -mt-0.5" aria-label="Divisi dengan slot reward lebih besar" />
+                            )}
+                          </>
+                        )}
+                      </p>
                     </div>
 
                     {/* Mini stats — hidden di mobile */}
@@ -1072,13 +1126,14 @@ export default function DashboardPage() {
                       <Stat label="Hadir" value={String(p.hadir)} />
                       <span className="w-px h-4 bg-border" />
                       <Stat label="Insiden" value={String(totalIncident)} accent={totalIncident > 0 ? "warning" : undefined} />
+                      <span className="w-px h-4 bg-border" />
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-success tabular-nums">
+                        +{p.pointHarian}
+                      </span>
                       {p.totalPenalti > 0 && (
-                        <>
-                          <span className="w-px h-4 bg-border" />
-                          <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-rose-600 bg-rose-500/10 px-1.5 py-0.5 rounded-md">
-                            −{p.totalPenalti} pt
-                          </span>
-                        </>
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-rose-600 bg-rose-500/10 px-1.5 py-0.5 rounded-md tabular-nums">
+                          −{p.totalPenalti}
+                        </span>
                       )}
                     </div>
 
