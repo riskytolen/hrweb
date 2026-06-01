@@ -74,12 +74,18 @@ type PerformanceRow = {
 const PAGE_SIZE = 10;
 const CUT_OFF_DAY = 8;
 
+/** Format Date ke string YYYY-MM-DD memakai waktu lokal (timezone safe). */
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string; shortLabel: string } {
   const [year, month] = periodKey.split("-").map(Number);
   const startDate = new Date(year, month - 1, CUT_OFF_DAY);
   const endDate = new Date(year, month, CUT_OFF_DAY - 1);
-  const start = startDate.toISOString().slice(0, 10);
-  const end = endDate.toISOString().slice(0, 10);
+  // Pakai waktu lokal, bukan toISOString() (UTC) yang menggeser tanggal mundur di TZ positif.
+  const start = localDateStr(startDate);
+  const end = localDateStr(endDate);
   const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY - 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
   const shortLabel = startDate.toLocaleDateString("id-ID", { month: "short", year: "2-digit" });
   return { start, end, label, shortLabel };
@@ -366,7 +372,7 @@ export default function PerformancePage() {
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
       doc.text(
-        `Sistem Penilaian: Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN}) = (Hadir/Hari Efektif) x ${SCORE_WEIGHT.KEHADIRAN}. Hari efektif = exclude Libur & Cuti. ` +
+        `Sistem Penilaian: Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN}) = (Hadir/Hari Efektif) x ${SCORE_WEIGHT.KEHADIRAN}. Hari efektif = exclude Libur, Cuti, Izin & Sakit. ` +
         `Disiplin (max ${SCORE_WEIGHT.DISIPLIN}) = max(0, ${SCORE_WEIGHT.DISIPLIN} - penalti). ` +
         `Penalti: -${PENALTY.ALPHA_PER_HARI}/Alpha, -${PENALTY.TELAT_PER_KEJADIAN}/Telat, -${PENALTY.MANUAL_INPUT}/Manual Input, -${PENALTY.SP1}/SP-1, -${PENALTY.SP2}/SP-2, -${PENALTY.SP3}/SP-3. ` +
         `Bonus Ketepatan (max ${SCORE_WEIGHT.KETEPATAN_MAX}): absolute (0-${SCORE_WEIGHT.KETEPATAN_ABSOLUTE_MAX}) + relative vs median divisi (0-${SCORE_WEIGHT.KETEPATAN_RELATIVE_MAX}). ` +

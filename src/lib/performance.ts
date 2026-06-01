@@ -11,7 +11,7 @@
  *
  * 1. Kehadiran (max 70):
  *      hadir          = COUNT(status IN ("Hadir","Terlambat"))
- *      total_efektif  = COUNT(status NOT IN ("Libur","Cuti"))
+ *      total_efektif  = COUNT(status NOT IN ("Libur","Cuti","Izin","Sakit"))
  *      skor_kehadiran = (hadir / total_efektif) x 70
  *
  * 2. Disiplin (max 30):
@@ -259,8 +259,11 @@ export function computePerformance(
   const empSP = spDocs.filter((s) => s.employee_id === employeeId);
 
   const totalHariKerja = empAtt.length;
-  // Hari efektif = exclude Libur DAN Cuti (cuti sah tidak dihukum)
-  const totalHariEfektif = empAtt.filter((a) => a.status !== "Libur" && a.status !== "Cuti").length;
+  // Hari efektif = exclude Libur, Cuti, Izin, Sakit.
+  // Ketidakhadiran yang sah (cuti/izin/sakit) tidak menurunkan skor kehadiran —
+  // pegawai tidak dihukum untuk hari yang memang tidak wajib hadir.
+  const NON_EFEKTIF = ["Libur", "Cuti", "Izin", "Sakit"];
+  const totalHariEfektif = empAtt.filter((a) => !NON_EFEKTIF.includes(a.status)).length;
   const hadir = empAtt.filter((a) => a.status === "Hadir" || a.status === "Terlambat").length;
   const telat = empAtt.filter((a) => a.status === "Terlambat").length;
   const totalMenitTelat = empAtt
