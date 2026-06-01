@@ -42,6 +42,8 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { entityLabel } from "@/lib/audit";
 import {
   computePerformance,
+  computeAvgEarliness,
+  median,
   comparePerformanceBest,
   getGradeColor,
   type AttendanceLite,
@@ -103,13 +105,15 @@ interface TopPerformer {
   nama: string;
   jabatanNama: string;
   skorTotal: number;
-  grade: "A" | "B" | "C" | "D" | "E";
+  grade: "A" | "B" | "C" | "D" | "E" | "-";
   hadir: number;
   totalHariKerja: number;
   telat: number;
   alpha: number;
   manual: number;
   spCount: number;
+  avgEarliness: number | null;
+  eligible: boolean;
 }
 
 // ─── Period helpers (cut-off tgl 8) ───
@@ -252,18 +256,19 @@ export default function DashboardPage() {
     // 8. Top performers — pegawai aktif + attendance periode + SP aktif
     const empPerfPromise = supabase
       .from("pegawai")
-      .select("id, nama, jabatan_id, status, jabatan:jabatan_id(nama)")
+      .select("id, nama, jabatan_id, status, tanggal_bergabung, jabatan:jabatan_id(nama)")
       .eq("status", "Aktif");
     const attPerfPromise = supabase
       .from("attendance_records")
-      .select("employee_id, status, durasi_telat, is_manual")
+      .select("employee_id, status, durasi_telat, is_manual, jam_masuk, schedule_jam_masuk, division_id")
       .gte("tanggal", period.start)
       .lte("tanggal", period.end);
     const spPerfPromise = supabase
       .from("legal_documents")
       .select("employee_id, kategori, tingkat_sp, status")
       .eq("kategori", "SP")
-      .eq("status", "Aktif");
+      .eq("status", "Aktif")
+      .lte("tanggal_terbit", period.end);
 
     const [
       pegRes,
@@ -418,15 +423,44 @@ export default function DashboardPage() {
     type EmpPerfRow = {
       id: string;
       nama: string;
+      tanggal_bergabung: string | null;
       jabatan: { nama: string } | null;
     };
     const empsPerf = (empPerfRes.data ?? []) as unknown as EmpPerfRow[];
     const attPerf = (attPerfRes.data ?? []) as AttendanceLite[];
     const spPerf = (spPerfRes.data ?? []) as SpDocLite[];
 
+    // Hitung avgEarliness per pegawai
+    const empEarlinessMap = new Map<string, number | null>();
+    empsPerf.forEach((emp) => {
+      const empAtt = attPerf.filter((a) => a.employee_id === emp.id);
+      empEarlinessMap.set(emp.id, computeAvgEarliness(empAtt));
+    });
+    // Tentukan divisi per pegawai
+    const empDivisionMap = new Map<string, number>();
+    empsPerf.forEach((emp) => {
+      const empAtt = attPerf.filter((a) => a.employee_id === emp.id && a.division_id != null);
+      if (empAtt.length > 0) empDivisionMap.set(emp.id, empAtt[empAtt.length - 1].division_id!);
+    });
+    // Median per divisi
+    const divEarlinessMap = new Map<number, number[]>();
+    empDivisionMap.forEach((divId, empId) => {
+      const e = empEarlinessMap.get(empId);
+      if (e !== null && e !== undefined) {
+        if (!divEarlinessMap.has(divId)) divEarlinessMap.set(divId, []);
+        divEarlinessMap.get(divId)!.push(e);
+      }
+    });
+    const divMedianMap = new Map<number, number>();
+    divEarlinessMap.forEach((arr, divId) => divMedianMap.set(divId, arr.length >= 3 ? median(arr) : 0));
+
+    const periodEnd = period.end;
+
     const topPerformersData: TopPerformer[] = empsPerf
       .map((e) => {
-        const b = computePerformance(e.id, attPerf, spPerf);
+        const divId = empDivisionMap.get(e.id);
+        const divMed = divId ? divMedianMap.get(divId) ?? 0 : 0;
+        const b = computePerformance(e.id, attPerf, spPerf, e.tanggal_bergabung, periodEnd, divMed);
         return {
           employee_id: e.id,
           nama: e.nama,
@@ -439,10 +473,12 @@ export default function DashboardPage() {
           alpha: b.alpha,
           manual: b.manual,
           spCount: b.spCount,
+          avgEarliness: b.avgEarliness,
+          eligible: b.eligible,
         };
       })
       // Skip pegawai tanpa data attendance di periode (mencegah skor 0 muncul sebagai top)
-      .filter((p) => p.totalHariKerja > 0 && p.skorTotal > 0)
+      .filter((p) => p.totalHariKerja > 0 && p.skorTotal > 0 && p.eligible)
       .sort(comparePerformanceBest)
       .slice(0, 5);
 
@@ -1046,6 +1082,14 @@ export default function DashboardPage() {
                       <Stat label="Hadir" value={`${p.hadir}/${p.totalHariKerja}`} />
                       <span className="w-px h-4 bg-border" />
                       <Stat label="Insiden" value={String(totalIncident)} accent={totalIncident > 0 ? "warning" : undefined} />
+                      {p.avgEarliness !== null && p.avgEarliness >= 5 && (
+                        <>
+                          <span className="w-px h-4 bg-border" />
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-md">
+                            ⏰ +{Math.round(p.avgEarliness)}m awal
+                          </span>
+                        </>
+                      )}
                     </div>
 
                     {/* Score + Grade */}

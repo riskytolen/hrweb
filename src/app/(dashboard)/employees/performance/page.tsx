@@ -19,8 +19,12 @@ import {
   comparePerformanceBest,
   comparePerformanceWorst,
   getGradeColor,
+  isEligible,
+  computeAvgEarliness,
+  median,
   PENALTY,
   SCORE_WEIGHT,
+  MIN_MONTHS_ELIGIBLE,
   type AttendanceLite,
   type SpDocLite,
 } from "@/lib/performance";
@@ -59,6 +63,9 @@ type PerformanceRow = {
   skorKehadiran: number;
   skorDisiplin: number;
   penaltiTotal: number;
+  bonusKetepatan: number;
+  avgEarliness: number | null;
+  eligible: boolean;
   skorTotal: number;
   grade: string;
 };
@@ -129,9 +136,44 @@ export default function PerformancePage() {
 
   // Helper: hitung performance untuk satu range dataset.
   // Memakai shared util dari @/lib/performance supaya logic sama dengan dashboard.
-  const computeRows = useCallback((emps: EmployeeLite[], attendance: AttendanceLite[], spDocs: SpDocLite[]): PerformanceRow[] => {
+  const computeRows = useCallback((emps: EmployeeLite[], attendance: AttendanceLite[], spDocs: SpDocLite[], periodEnd: string): PerformanceRow[] => {
+    // 1. Hitung avgEarliness per pegawai
+    const empEarlinessMap = new Map<string, number | null>();
+    emps.forEach((emp) => {
+      const empAtt = attendance.filter((a) => a.employee_id === emp.id);
+      empEarlinessMap.set(emp.id, computeAvgEarliness(empAtt));
+    });
+
+    // 2. Tentukan divisi per pegawai (dari attendance terbaru yang punya division_id)
+    const empDivisionMap = new Map<string, number>();
+    emps.forEach((emp) => {
+      const empAtt = attendance
+        .filter((a) => a.employee_id === emp.id && a.division_id != null)
+        .sort((a, b) => (b as any).tanggal?.localeCompare((a as any).tanggal) || 0);
+      if (empAtt.length > 0 && empAtt[0].division_id) {
+        empDivisionMap.set(emp.id, empAtt[0].division_id);
+      }
+    });
+
+    // 3. Hitung median per divisi
+    const divisionEarlinessMap = new Map<number, number[]>();
+    empDivisionMap.forEach((divId, empId) => {
+      const e = empEarlinessMap.get(empId);
+      if (e !== null && e !== undefined) {
+        if (!divisionEarlinessMap.has(divId)) divisionEarlinessMap.set(divId, []);
+        divisionEarlinessMap.get(divId)!.push(e);
+      }
+    });
+    const divisionMedianMap = new Map<number, number>();
+    divisionEarlinessMap.forEach((earls, divId) => {
+      divisionMedianMap.set(divId, earls.length >= 3 ? median(earls) : 0);
+    });
+
+    // 4. Compute performance per pegawai
     return emps.map((emp) => {
-      const breakdown = computePerformance(emp.id, attendance, spDocs);
+      const empDivId = empDivisionMap.get(emp.id);
+      const divMedian = empDivId ? (divisionMedianMap.get(empDivId) ?? 0) : 0;
+      const breakdown = computePerformance(emp.id, attendance, spDocs, emp.tanggal_bergabung, periodEnd, divMedian);
       return {
         employee_id: emp.id,
         nama: emp.nama,
@@ -158,7 +200,7 @@ export default function PerformancePage() {
     // Current period attendance
     const { data: attData } = await supabase
       .from("attendance_records")
-      .select("employee_id, tanggal, status, durasi_telat, is_manual")
+      .select("employee_id, tanggal, status, durasi_telat, is_manual, jam_masuk, schedule_jam_masuk, division_id")
       .gte("tanggal", period.start)
       .lte("tanggal", period.end);
     const attendance: AttendanceLite[] = attData || [];
@@ -168,10 +210,11 @@ export default function PerformancePage() {
       .from("legal_documents")
       .select("employee_id, kategori, tingkat_sp, status, tanggal_terbit")
       .eq("kategori", "SP")
-      .eq("status", "Aktif");
+      .eq("status", "Aktif")
+      .lte("tanggal_terbit", period.end);
     const spDocs: SpDocLite[] = spData || [];
 
-    const rows = computeRows(emps, attendance, spDocs);
+    const rows = computeRows(emps, attendance, spDocs, period.end);
     rows.sort(comparePerformanceBest);
     setPerformanceData(rows);
 
@@ -179,10 +222,10 @@ export default function PerformancePage() {
     if (prevPeriod) {
       const { data: prevAttData } = await supabase
         .from("attendance_records")
-        .select("employee_id, tanggal, status, durasi_telat, is_manual")
+        .select("employee_id, tanggal, status, durasi_telat, is_manual, jam_masuk, schedule_jam_masuk, division_id")
         .gte("tanggal", prevPeriod.start)
         .lte("tanggal", prevPeriod.end);
-      const prevRows = computeRows(emps, prevAttData ?? [], spDocs);
+      const prevRows = computeRows(emps, prevAttData ?? [], spDocs, prevPeriod.end);
       setPrevPerformanceData(prevRows);
     } else {
       setPrevPerformanceData([]);
@@ -209,16 +252,18 @@ export default function PerformancePage() {
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Summary
-  const avgSkor = performanceData.length > 0 ? Math.round(performanceData.reduce((s, r) => s + r.skorTotal, 0) / performanceData.length) : 0;
+  const eligibleData = performanceData.filter(r => r.eligible);
+  const avgSkor = eligibleData.length > 0 ? Math.round(eligibleData.reduce((s, r) => s + r.skorTotal, 0) / eligibleData.length) : 0;
   const totalAlpha = performanceData.reduce((s, r) => s + r.alpha, 0);
   const totalTelat = performanceData.reduce((s, r) => s + r.telat, 0);
   const totalSP = performanceData.reduce((s, r) => s + r.spCount, 0);
   const totalIncident = totalAlpha + totalTelat + totalSP;
   const gradeDistribution = { A: 0, B: 0, C: 0, D: 0, E: 0 };
-  performanceData.forEach((r) => { if (r.grade in gradeDistribution) gradeDistribution[r.grade as keyof typeof gradeDistribution]++; });
+  eligibleData.forEach((r) => { if (r.grade in gradeDistribution) gradeDistribution[r.grade as keyof typeof gradeDistribution]++; });
 
   // Trend (current vs previous)
-  const prevAvgSkor = prevPerformanceData.length > 0 ? Math.round(prevPerformanceData.reduce((s, r) => s + r.skorTotal, 0) / prevPerformanceData.length) : 0;
+  const prevEligibleData = prevPerformanceData.filter(r => r.eligible);
+  const prevAvgSkor = prevEligibleData.length > 0 ? Math.round(prevEligibleData.reduce((s, r) => s + r.skorTotal, 0) / prevEligibleData.length) : 0;
   const prevTotalIncident = prevPerformanceData.reduce((s, r) => s + r.alpha + r.telat + r.spCount, 0);
   const prevTotalSP = prevPerformanceData.reduce((s, r) => s + r.spCount, 0);
 
@@ -227,8 +272,8 @@ export default function PerformancePage() {
   const trendSP = prevPerformanceData.length > 0 ? totalSP - prevTotalSP : 0;
 
   // Insights: top 3 best & top 3 worst
-  const topBest = useMemo(() => [...performanceData].sort(comparePerformanceBest).slice(0, 3), [performanceData]);
-  const topWorst = useMemo(() => [...performanceData].sort(comparePerformanceWorst).slice(0, 3), [performanceData]);
+  const topBest = useMemo(() => [...performanceData].filter(r => r.eligible).sort(comparePerformanceBest).slice(0, 3), [performanceData]);
+  const topWorst = useMemo(() => [...performanceData].filter(r => r.eligible).sort(comparePerformanceWorst).slice(0, 3), [performanceData]);
 
   // Unique jabatan untuk filter
   const uniqueJabatan = useMemo(() => {
@@ -265,7 +310,7 @@ export default function PerformancePage() {
       cursorY += 5;
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      doc.text(`Rata-rata Skor: ${avgSkor}`, 14, cursorY); cursorY += 5;
+      doc.text(`Rata-rata Skor: ${avgSkor} (${eligibleData.length} dinilai, ${performanceData.length - eligibleData.length} baru bergabung)`, 14, cursorY); cursorY += 5;
       doc.text(`Total Pegawai Aktif: ${performanceData.length}`, 14, cursorY); cursorY += 5;
       doc.text(`Total Insiden (Alpha + Telat + SP): ${totalIncident}`, 14, cursorY); cursorY += 5;
       doc.text(`Total Surat Peringatan Aktif: ${totalSP}`, 14, cursorY); cursorY += 5;
@@ -275,7 +320,7 @@ export default function PerformancePage() {
       // Table
       autoTable(doc, {
         startY: cursorY,
-        head: [["#", "ID", "Nama", "Jabatan", "Status", "Tgl Bergabung", "Hari Kerja", "Hadir", "Telat", "Alpha", "Manual", "Izin", "Sakit", "SP", "Skor", "Grade"]],
+        head: [["#", "ID", "Nama", "Jabatan", "Status", "Tgl Bergabung", "Hari Kerja", "Hadir", "Telat", "Alpha", "Manual", "Izin", "Sakit", "SP", "Avg.Datang", "Bonus", "Skor", "Grade"]],
         body: filtered.map((r, idx) => [
           idx + 1,
           r.employee_id,
@@ -291,7 +336,9 @@ export default function PerformancePage() {
           r.izin || "-",
           r.sakit || "-",
           r.spCount > 0 ? `${r.sp1}+${r.sp2}+${r.sp3}` : "-",
-          r.skorTotal,
+          r.avgEarliness !== null ? `${r.avgEarliness >= 0 ? "+" : ""}${Math.round(r.avgEarliness)}m` : "-",
+          r.bonusKetepatan > 0 ? `+${r.bonusKetepatan}` : "-",
+          r.eligible ? r.skorTotal : "-",
           r.grade,
         ]),
         theme: "striped",
@@ -308,7 +355,9 @@ export default function PerformancePage() {
           12: { halign: "center" },
           13: { halign: "center" },
           14: { halign: "center" },
-          15: { halign: "center", fontStyle: "bold" },
+          15: { halign: "center" },
+          16: { halign: "center" },
+          17: { halign: "center", fontStyle: "bold" },
         },
       });
 
@@ -317,8 +366,11 @@ export default function PerformancePage() {
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
       doc.text(
-        `Sistem Penilaian: Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN}) = (Hadir/Hari Efektif) x ${SCORE_WEIGHT.KEHADIRAN}, ditambah Disiplin (max ${SCORE_WEIGHT.DISIPLIN}) = max(0, ${SCORE_WEIGHT.DISIPLIN} - penalti). ` +
-        `Penalti: -${PENALTY.ALPHA_PER_HARI}/Alpha, -${PENALTY.TELAT_PER_KEJADIAN}/Telat & -${PENALTY.TELAT_PER_30_MENIT}/30 menit, -${PENALTY.MANUAL_HADIR}/Manual Hadir-Telat, -${PENALTY.MANUAL_LEAVE}/Manual Izin-Sakit-Cuti, -${PENALTY.SP1}/SP-1, -${PENALTY.SP2}/SP-2, -${PENALTY.SP3}/SP-3. ` +
+        `Sistem Penilaian: Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN}) = (Hadir/Hari Efektif) x ${SCORE_WEIGHT.KEHADIRAN}. Hari efektif = exclude Libur & Cuti. ` +
+        `Disiplin (max ${SCORE_WEIGHT.DISIPLIN}) = max(0, ${SCORE_WEIGHT.DISIPLIN} - penalti). ` +
+        `Penalti: -${PENALTY.ALPHA_PER_HARI}/Alpha, -${PENALTY.TELAT_PER_KEJADIAN}/Telat, -${PENALTY.MANUAL_INPUT}/Manual Input, -${PENALTY.SP1}/SP-1, -${PENALTY.SP2}/SP-2, -${PENALTY.SP3}/SP-3. ` +
+        `Bonus Ketepatan (max ${SCORE_WEIGHT.KETEPATAN_MAX}): absolute (0-${SCORE_WEIGHT.KETEPATAN_ABSOLUTE_MAX}) + relative vs median divisi (0-${SCORE_WEIGHT.KETEPATAN_RELATIVE_MAX}). ` +
+        `Pegawai bergabung < ${MIN_MONTHS_ELIGIBLE} bulan → belum dinilai. ` +
         `Grade: A>=90, B 80-89, C 70-79, D 60-69, E<60.`,
         14, finalY + 8, { maxWidth: pageWidth - 28 },
       );
@@ -330,7 +382,7 @@ export default function PerformancePage() {
     } finally {
       setExporting(false);
     }
-  }, [period, avgSkor, performanceData.length, totalIncident, totalSP, gradeDistribution, filtered]);
+  }, [period, avgSkor, performanceData.length, eligibleData.length, totalIncident, totalSP, gradeDistribution, filtered]);
 
   return (
     <RouteGuard permission="performance">
@@ -422,6 +474,11 @@ export default function PerformancePage() {
           iconColor="text-success"
           trend={null}
           trendInverted={false}
+          breakdown={
+            !loading && performanceData.length > 0
+              ? `${eligibleData.length} dinilai, ${performanceData.length - eligibleData.length} baru bergabung`
+              : undefined
+          }
         />
         <_HeroCard
           icon={AlertTriangle}
@@ -582,13 +639,15 @@ export default function PerformancePage() {
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Alpha</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Manual</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">SP</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Avg. Datang</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-12">Bonus</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-24">Skor</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-12">Grade</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={8} cols={11} /> : paged.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-12 text-sm text-muted-foreground">Tidak ada data kinerja yang cocok dengan filter.</td></tr>
+              {loading ? <SkeletonTable rows={8} cols={13} /> : paged.length === 0 ? (
+                <tr><td colSpan={13} className="text-center py-12 text-sm text-muted-foreground">Tidak ada data kinerja yang cocok dengan filter.</td></tr>
               ) : paged.map((row) => {
                 const rank = filtered.indexOf(row) + 1;
                 const gradeColor = getGradeColor(row.grade);
@@ -640,18 +699,42 @@ export default function PerformancePage() {
                         </div>
                       ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-center gap-2">
-                        <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${row.skorTotal}%`, backgroundColor: gradeColor }} />
-                        </div>
-                        <span className="text-xs font-bold text-foreground tabular-nums w-6 text-right">{row.skorTotal}</span>
-                      </div>
+                    <td className="px-4 py-3 text-center">
+                      {row.avgEarliness !== null ? (
+                        <span className={cn("text-xs font-semibold tabular-nums",
+                          row.avgEarliness >= 5 ? "text-success" : row.avgEarliness >= 0 ? "text-warning" : "text-muted-foreground"
+                        )}>
+                          {row.avgEarliness >= 0 ? "+" : ""}{Math.round(row.avgEarliness)}m
+                        </span>
+                      ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ backgroundColor: `${gradeColor}20`, color: gradeColor }}>
-                        {row.grade}
-                      </span>
+                      {row.bonusKetepatan > 0 ? (
+                        <span className="text-xs font-bold text-primary tabular-nums">+{row.bonusKetepatan}</span>
+                      ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
+                    </td>
+                    <td className="px-4 py-3">
+                      {row.eligible ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${row.skorTotal}%`, backgroundColor: gradeColor }} />
+                          </div>
+                          <span className="text-xs font-bold text-foreground tabular-nums w-6 text-right">{row.skorTotal}</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground text-center block">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {row.eligible ? (
+                        <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ backgroundColor: `${gradeColor}20`, color: gradeColor }}>
+                          {row.grade}
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-bold text-muted-foreground bg-muted px-1.5 py-1 rounded-lg">
+                          Baru
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -671,18 +754,24 @@ export default function PerformancePage() {
         </summary>
         <div className="px-5 pb-5 space-y-4">
           {/* Komposisi skor */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <_RuleCard
               icon={CalendarCheck}
               iconColor="text-success"
               title={`Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN})`}
-              desc="Hadir / hari efektif × 70. Libur tidak dihitung."
+              desc="Hadir / hari efektif × 70. Libur & Cuti tidak dihitung sebagai hari efektif."
             />
             <_RuleCard
               icon={Award}
               iconColor="text-primary"
               title={`Disiplin (max ${SCORE_WEIGHT.DISIPLIN})`}
               desc="Mulai 30, dipotong oleh pelanggaran di bawah."
+            />
+            <_RuleCard
+              icon={Clock}
+              iconColor="text-success"
+              title={`Bonus Ketepatan (max ${SCORE_WEIGHT.KETEPATAN_MAX})`}
+              desc={`Absolute (0-${SCORE_WEIGHT.KETEPATAN_ABSOLUTE_MAX}) berdasarkan rata-rata kedatangan + Relative (0-${SCORE_WEIGHT.KETEPATAN_RELATIVE_MAX}) vs median divisi.`}
             />
           </div>
 
@@ -698,25 +787,25 @@ export default function PerformancePage() {
               icon={Clock}
               iconColor="text-warning"
               title="Keterlambatan"
-              desc={`-${PENALTY.TELAT_PER_KEJADIAN} per kejadian, -${PENALTY.TELAT_PER_30_MENIT} per 30 menit`}
+              desc={`-${PENALTY.TELAT_PER_KEJADIAN} poin per kejadian`}
             />
             <_RuleCard
               icon={CalendarCheck}
               iconColor="text-warning"
-              title="Manual: Hadir / Telat"
-              desc={`-${PENALTY.MANUAL_HADIR} poin per input manual`}
-            />
-            <_RuleCard
-              icon={CalendarCheck}
-              iconColor="text-amber-600"
-              title="Manual: Izin / Sakit / Cuti"
-              desc={`-${PENALTY.MANUAL_LEAVE} poin per input manual`}
+              title="Manual Input"
+              desc={`-${PENALTY.MANUAL_INPUT} poin per input manual (hadir/telat/izin/sakit/cuti)`}
             />
             <_RuleCard
               icon={AlertTriangle}
               iconColor="text-danger"
               title="Surat Peringatan"
               desc={`SP-1: -${PENALTY.SP1}, SP-2: -${PENALTY.SP2}, SP-3: -${PENALTY.SP3}`}
+            />
+            <_RuleCard
+              icon={Users}
+              iconColor="text-muted-foreground"
+              title={`Eligibilitas (${MIN_MONTHS_ELIGIBLE} bulan)`}
+              desc={`Pegawai yang bergabung kurang dari ${MIN_MONTHS_ELIGIBLE} bulan belum dinilai (grade "—").`}
             />
             <_RuleCard
               icon={Award}
@@ -727,7 +816,7 @@ export default function PerformancePage() {
           </div>
 
           <p className="text-[10px] text-muted-foreground italic">
-            Skor akhir = Kehadiran + max(0, 30 − total penalti). Pegawai tanpa data kehadiran di periode → skor 0.
+            Skor akhir = Kehadiran + max(0, 30 − total penalti) + Bonus Ketepatan (clip 0–100). Pegawai tanpa data kehadiran di periode → skor 0.
           </p>
         </div>
       </details>
