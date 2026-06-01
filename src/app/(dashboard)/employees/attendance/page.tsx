@@ -897,41 +897,190 @@ export default function AttendancePage() {
     });
   };
 
-  const handleSaveOffDays = async () => {
-    setOffDaySaving(true);
-    const totalDays = Array.from(offDayLocal.values()).reduce((s, days) => s + days.size, 0);
-    const empIds = employees.map(e => e.id);
+  // Sinkronisasi attendance_records saat jadwal libur mingguan berubah.
+  // PENTING: cutoff today — data historis (< today) tidak disentuh.
+  const syncWeeklyOffDays = async (
+    diff: { added: { empId: string; dow: number }[]; removed: { empId: string; dow: number }[] }
+  ): Promise<{ inserted: number; updated: number; deleted: number }> => {
+    let inserted = 0, updated = 0, deleted = 0;
+    const today = localDateStr();
+    const periodEnd = getCalPeriod(calPeriodKey).end;
 
-    try {
-      // Step 1: Hapus semua jadwal libur lama secara batch (1 query)
-      setOffDayProgress({ step: 1, total: 3, label: "Menghapus jadwal lama..." });
-      const { error: delError } = await supabase
-        .from("employee_off_days")
-        .delete()
-        .in("employee_id", empIds);
-      if (delError) throw delError;
+    // Kumpulkan tanggal yang affected per pegawai (>= today, sampai periodEnd)
+    type Cell = { empId: string; tanggal: string; type: "add" | "remove" };
+    const cells: Cell[] = [];
+    const addAll = (emp: string, dow: number, type: "add" | "remove") => {
+      for (let cur = today; cur <= periodEnd; cur = addDays(cur, 1)) {
+        const [y, m, d] = cur.split("-").map(Number);
+        const cellDow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+        if (cellDow === dow) cells.push({ empId: emp, tanggal: cur, type });
+      }
+    };
+    diff.added.forEach((d) => addAll(d.empId, d.dow, "add"));
+    diff.removed.forEach((d) => addAll(d.empId, d.dow, "remove"));
 
-      // Step 2: Kumpulkan & insert semua jadwal baru secara batch (1 query)
-      setOffDayProgress({ step: 2, total: 3, label: `Menyimpan ${totalDays} jadwal libur...` });
-      const allInserts: { employee_id: string; day_of_week: number }[] = [];
-      for (const [empId, days] of offDayLocal) {
-        for (const d of days) {
-          allInserts.push({ employee_id: empId, day_of_week: d });
+    if (cells.length === 0) return { inserted, updated, deleted };
+
+    // Fetch semua existing record untuk affected (empId, tanggal)
+    const empIds = [...new Set(cells.map((c) => c.empId))];
+    const dates = [...new Set(cells.map((c) => c.tanggal))];
+    const { data: existing } = await supabase
+      .from("attendance_records")
+      .select("id, employee_id, tanggal, status, catatan, is_manual")
+      .in("employee_id", empIds)
+      .in("tanggal", dates);
+    const existingMap = new Map<string, { id: number; status: string; catatan: string | null; is_manual: boolean }>();
+    (existing || []).forEach((r) => existingMap.set(`${r.employee_id}|${r.tanggal}`, r));
+
+    // Fetch override custom & public holiday di rentang
+    const { data: ovs } = await supabase
+      .from("employee_leave_overrides")
+      .select("employee_id, tanggal, type")
+      .in("employee_id", empIds)
+      .in("tanggal", dates);
+    const ovMap = new Map<string, string>();
+    (ovs || []).forEach((o) => ovMap.set(`${o.employee_id}|${o.tanggal}`, o.type));
+
+    const isPublicHolidayDate = (empId: string, tanggal: string): boolean => {
+      return publicHolidays.some((h) => {
+        if (tanggal < h.tanggal) return false;
+        const endDate = h.tanggal_selesai || h.tanggal;
+        if (tanggal > endDate) return false;
+        if (h.berlaku_untuk === "semua") return true;
+        if (h.berlaku_untuk === "pegawai" && h.pegawai_ids?.includes(empId)) return true;
+        return false;
+      });
+    };
+
+    const inserts: { employee_id: string; division_id: null; tanggal: string; jam_masuk: string; schedule_jam_masuk: string; toleransi_menit: number; status: string; durasi_telat: number; denda: number; catatan: string; is_manual: boolean }[] = [];
+    const updateAlphaToLiburIds: number[] = [];
+    const deleteIds: number[] = [];
+
+    for (const cell of cells) {
+      const key = `${cell.empId}|${cell.tanggal}`;
+      const ex = existingMap.get(key);
+      const ov = ovMap.get(key);
+
+      if (cell.type === "add") {
+        // Hari kerja → off. Override "masuk" tetap menang (skip libur).
+        if (ov === "masuk") continue;
+        if (!ex) {
+          inserts.push({
+            employee_id: cell.empId, division_id: null, tanggal: cell.tanggal,
+            jam_masuk: "00:00", schedule_jam_masuk: "00:00", toleransi_menit: 0,
+            status: "Libur", durasi_telat: 0, denda: 0,
+            catatan: "Hari libur", is_manual: false,
+          });
+        } else {
+          if (ex.is_manual) continue;
+          if (["Hadir", "Terlambat", "Izin", "Sakit", "Cuti"].includes(ex.status)) continue;
+          if (ex.status === "Alpha" && (ex.catatan || "").startsWith("Alpha otomatis")) {
+            updateAlphaToLiburIds.push(ex.id);
+          }
+        }
+      } else {
+        // Off → kerja. Hapus Libur generic auto-generated, kecuali ada public holiday / override "libur".
+        if (ov === "libur") continue;
+        if (isPublicHolidayDate(cell.empId, cell.tanggal)) continue;
+        if (!ex) continue;
+        if (ex.is_manual) continue;
+        if (ex.status === "Libur" && ex.catatan === "Hari libur") {
+          deleteIds.push(ex.id);
         }
       }
-      if (allInserts.length > 0) {
-        const { error: insError } = await supabase
-          .from("employee_off_days")
-          .insert(allInserts);
+    }
+
+    if (inserts.length > 0) {
+      const { data: ins } = await supabase
+        .from("attendance_records")
+        .upsert(inserts, { onConflict: "employee_id,tanggal", ignoreDuplicates: true })
+        .select("id");
+      inserted = ins?.length || 0;
+    }
+    if (updateAlphaToLiburIds.length > 0) {
+      await supabase
+        .from("attendance_records")
+        .update({ status: "Libur", denda: 0, durasi_telat: 0, catatan: "Hari libur", jam_masuk: "00:00", schedule_jam_masuk: "00:00", toleransi_menit: 0 })
+        .in("id", updateAlphaToLiburIds);
+      updated = updateAlphaToLiburIds.length;
+    }
+    if (deleteIds.length > 0) {
+      await supabase.from("attendance_records").delete().in("id", deleteIds);
+      deleted = deleteIds.length;
+    }
+
+    return { inserted, updated, deleted };
+  };
+
+  const handleSaveOffDays = async () => {
+    setOffDaySaving(true);
+
+    // Hitung diff antara state DB (offDays) dan state lokal (offDayLocal)
+    const oldMap = new Map<string, Set<number>>();
+    offDays.forEach((od) => {
+      if (!oldMap.has(od.employee_id)) oldMap.set(od.employee_id, new Set());
+      oldMap.get(od.employee_id)!.add(od.day_of_week);
+    });
+
+    const added: { empId: string; dow: number }[] = [];
+    const removed: { empId: string; dow: number }[] = [];
+    for (const emp of employees) {
+      const oldSet = oldMap.get(emp.id) || new Set<number>();
+      const newSet = offDayLocal.get(emp.id) || new Set<number>();
+      for (const d of newSet) if (!oldSet.has(d)) added.push({ empId: emp.id, dow: d });
+      for (const d of oldSet) if (!newSet.has(d)) removed.push({ empId: emp.id, dow: d });
+    }
+
+    const totalDays = Array.from(offDayLocal.values()).reduce((s, days) => s + days.size, 0);
+
+    try {
+      // Step 1: Apply diff ke employee_off_days (granular, bukan delete-all)
+      setOffDayProgress({ step: 1, total: 3, label: `Memperbarui ${added.length + removed.length} perubahan jadwal...` });
+
+      // DELETE per (empId, dow) yang dihapus
+      for (const r of removed) {
+        await supabase.from("employee_off_days").delete()
+          .eq("employee_id", r.empId).eq("day_of_week", r.dow);
+      }
+      // INSERT per (empId, dow) yang ditambah
+      if (added.length > 0) {
+        const insertPayload = added.map((a) => ({ employee_id: a.empId, day_of_week: a.dow }));
+        const { error: insError } = await supabase.from("employee_off_days").insert(insertPayload);
         if (insError) throw insError;
       }
 
-      // Step 3: Refresh data lokal
+      // Step 2: Sync attendance_records (cutoff today, hanya untuk perubahan)
+      setOffDayProgress({ step: 2, total: 3, label: "Menyinkronkan absensi..." });
+      const syncResult = await syncWeeklyOffDays({ added, removed });
+
+      // Step 3: Refresh state + audit log
       setOffDayProgress({ step: 3, total: 3, label: "Memperbarui data..." });
-      await fetchOffDays();
+      await Promise.all([fetchOffDays(), fetchRecords()]);
+      if (viewMode === "kalender") fetchCalendar();
+
+      // Audit log: hanya kalau ada perubahan jadwal atau attendance
+      if (added.length > 0 || removed.length > 0) {
+        await logAudit({
+          supabase,
+          action: "update",
+          entityType: "attendance_records",
+          entityLabel: `Pergantian jadwal libur mingguan (${added.length} ditambah, ${removed.length} dihapus)`,
+          metadata: {
+            cutoff_date: localDateStr(),
+            days_added: added.length,
+            days_removed: removed.length,
+            attendance_inserted: syncResult.inserted,
+            attendance_updated: syncResult.updated,
+            attendance_deleted: syncResult.deleted,
+          },
+        });
+      }
 
       setShowOffDay(false);
-      showToast("success", "Jadwal Libur Disimpan", `${totalDays} hari libur untuk ${employees.length} pegawai.`);
+      const summary = (added.length === 0 && removed.length === 0)
+        ? `${totalDays} hari libur, tidak ada perubahan.`
+        : `${syncResult.inserted} baru, ${syncResult.updated} diubah, ${syncResult.deleted} dihapus (mulai hari ini).`;
+      showToast("success", "Jadwal Libur Disimpan", summary);
     } catch (err) {
       showToast("error", "Gagal Menyimpan", err instanceof Error ? err.message : "Terjadi kesalahan.");
       await fetchOffDays();
