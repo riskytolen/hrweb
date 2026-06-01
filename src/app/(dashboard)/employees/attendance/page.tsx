@@ -203,9 +203,16 @@ export default function AttendancePage() {
     divisi_ids: [] as number[], pegawai_ids: [] as string[],
   });
   const [holidayEmpSearch, setHolidayEmpSearch] = useState("");
+  // List filter & pagination
+  const [holidayListSearch, setHolidayListSearch] = useState("");
+  const [holidayKategoriFilter, setHolidayKategoriFilter] = useState<"Semua" | PublicHoliday["kategori"]>("Semua");
+  const [holidayListPage, setHolidayListPage] = useState(1);
+  const HOLIDAY_PAGE_SIZE = 10;
   // Detail modal
   const [detailHoliday, setDetailHoliday] = useState<PublicHoliday | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
+  const [detailPage, setDetailPage] = useState(1);
+  const DETAIL_PAGE_SIZE = 15;
   const [editingHolidayId, setEditingHolidayId] = useState<number | null>(null);
   const [holidaySaving, setHolidaySaving] = useState(false);
   const [holidayError, setHolidayError] = useState("");
@@ -2362,61 +2369,118 @@ export default function AttendancePage() {
                       <p className="text-sm text-muted-foreground">Belum ada hari libur nasional</p>
                       <p className="text-xs text-muted-foreground/60 mt-1">Gunakan form di atas untuk menambahkan</p>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {publicHolidays.map((h) => (
-                        <div key={h.id} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-blue-500/10 bg-blue-500/[0.02] transition-colors hover:bg-muted/30">
-                          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10">
-                            <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                  ) : (() => {
+                    const filtered = publicHolidays.filter((h) => {
+                      if (holidayKategoriFilter !== "Semua" && h.kategori !== holidayKategoriFilter) return false;
+                      if (holidayListSearch) {
+                        const q = holidayListSearch.toLowerCase();
+                        if (!h.nama.toLowerCase().includes(q) && !(h.catatan || "").toLowerCase().includes(q)) return false;
+                      }
+                      return true;
+                    });
+                    const total = filtered.length;
+                    const totalPages = Math.max(1, Math.ceil(total / HOLIDAY_PAGE_SIZE));
+                    const safePage = Math.min(holidayListPage, totalPages);
+                    const paged = filtered.slice((safePage - 1) * HOLIDAY_PAGE_SIZE, safePage * HOLIDAY_PAGE_SIZE);
+
+                    return (
+                      <div className="space-y-3">
+                        {/* Search + Filter */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 bg-muted/40 rounded-xl px-3 py-2 flex-1 min-w-[200px]">
+                            <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                            <input type="text" placeholder="Cari nama hari libur..." value={holidayListSearch}
+                              onChange={(e) => { setHolidayListSearch(e.target.value); setHolidayListPage(1); }}
+                              className="bg-transparent text-xs outline-none w-full text-foreground placeholder:text-muted-foreground/50" />
+                            {holidayListSearch && (
+                              <button onClick={() => setHolidayListSearch("")} className="text-muted-foreground hover:text-foreground">
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="text-xs font-semibold text-foreground">{h.nama}</p>
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${HOLIDAY_COLORS[h.kategori]}15`, color: HOLIDAY_COLORS[h.kategori] }}>{h.kategori}</span>
-                              {h.berlaku_untuk === "semua" ? (
-                                <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-success/10 text-success">
-                                  <UserCheck className="w-2.5 h-2.5" />Semua pegawai
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-orange-500/10 text-orange-500">
-                                  <User className="w-2.5 h-2.5" />{h.pegawai_ids?.length || 0} pegawai
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <p className="text-[10px] text-muted-foreground">
-                                {new Date(h.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
-                                {h.tanggal_selesai && h.tanggal_selesai !== h.tanggal && (
-                                  <>{" — "}{new Date(h.tanggal_selesai + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</>
-                                )}
-                              </p>
-                              {h.catatan && (
-                                <>
-                                  <span className="w-1 h-1 rounded-full bg-border" />
-                                  <p className="text-[10px] text-muted-foreground/70">{h.catatan}</p>
-                                </>
-                              )}
-                            </div>
+                          <div className="flex items-center bg-muted/40 rounded-xl p-1">
+                            {(["Semua", "Nasional", "Cuti Bersama", "Spesial"] as const).map((k) => (
+                              <button key={k} onClick={() => { setHolidayKategoriFilter(k); setHolidayListPage(1); }}
+                                className={cn("px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all",
+                                  holidayKategoriFilter === k ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                                {k}
+                              </button>
+                            ))}
                           </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <button onClick={() => { setDetailHoliday(h); setDetailSearch(""); }}
-                              className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted-foreground/40 hover:text-blue-500 transition-colors"
-                              title="Lihat detail pegawai libur">
-                              <Eye className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => handleEditHoliday(h)}
-                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/40 hover:text-foreground transition-colors">
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => handleDeleteHoliday(h.id)}
-                              className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground/40 hover:text-danger transition-colors">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                          <span className="text-[10px] text-muted-foreground">
+                            <strong className="text-foreground">{total}</strong> dari {publicHolidays.length}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  )}
+
+                        {/* List */}
+                        {paged.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-10">
+                            <Search className="w-8 h-8 text-muted-foreground/15 mb-2" />
+                            <p className="text-xs text-muted-foreground">Tidak ditemukan hari libur sesuai filter</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {paged.map((h) => (
+                              <div key={h.id} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-blue-500/10 bg-blue-500/[0.02] transition-colors hover:bg-muted/30">
+                                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/10">
+                                  <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="text-xs font-semibold text-foreground">{h.nama}</p>
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${HOLIDAY_COLORS[h.kategori]}15`, color: HOLIDAY_COLORS[h.kategori] }}>{h.kategori}</span>
+                                    {h.berlaku_untuk === "semua" ? (
+                                      <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-success/10 text-success">
+                                        <UserCheck className="w-2.5 h-2.5" />Semua pegawai
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-orange-500/10 text-orange-500">
+                                        <User className="w-2.5 h-2.5" />{h.pegawai_ids?.length || 0} pegawai
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <p className="text-[10px] text-muted-foreground">
+                                      {new Date(h.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
+                                      {h.tanggal_selesai && h.tanggal_selesai !== h.tanggal && (
+                                        <>{" — "}{new Date(h.tanggal_selesai + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</>
+                                      )}
+                                    </p>
+                                    {h.catatan && (
+                                      <>
+                                        <span className="w-1 h-1 rounded-full bg-border" />
+                                        <p className="text-[10px] text-muted-foreground/70">{h.catatan}</p>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  <button onClick={() => { setDetailHoliday(h); setDetailSearch(""); setDetailPage(1); }}
+                                    className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted-foreground/40 hover:text-blue-500 transition-colors"
+                                    title="Lihat detail pegawai libur">
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button onClick={() => handleEditHoliday(h)}
+                                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/40 hover:text-foreground transition-colors">
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button onClick={() => handleDeleteHoliday(h.id)}
+                                    className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground/40 hover:text-danger transition-colors">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Pagination */}
+                        {totalPages > 1 && (
+                          <Pagination currentPage={safePage} totalItems={total} pageSize={HOLIDAY_PAGE_SIZE} onPageChange={setHolidayListPage} />
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -2514,7 +2578,7 @@ export default function AttendancePage() {
                   <div className="flex items-center gap-2 bg-muted/40 rounded-xl px-3 py-2">
                     <Search className="w-3.5 h-3.5 text-muted-foreground" />
                     <input type="text" placeholder="Cari pegawai..." value={detailSearch}
-                      onChange={(e) => setDetailSearch(e.target.value)}
+                      onChange={(e) => { setDetailSearch(e.target.value); setDetailPage(1); }}
                       className="bg-transparent text-xs outline-none w-full text-foreground placeholder:text-muted-foreground/50" />
                     {detailSearch && (
                       <button onClick={() => setDetailSearch("")} className="text-muted-foreground hover:text-foreground">
@@ -2531,24 +2595,40 @@ export default function AttendancePage() {
                       <User className="w-8 h-8 text-muted-foreground/20 mb-2" />
                       <p className="text-xs text-muted-foreground">{detailSearch ? "Tidak ada pegawai cocok" : "Belum ada pegawai"}</p>
                     </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {affectedEmps.map((emp, idx) => (
-                        <div key={emp.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/20 hover:bg-muted/40 transition-colors">
-                          <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                            <span className="text-[10px] font-bold text-primary">{idx + 1}</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-foreground truncate">{emp.nama}</p>
-                            <p className="text-[10px] text-muted-foreground">{emp.id}</p>
-                          </div>
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-500 flex-shrink-0">
-                            Libur
-                          </span>
+                  ) : (() => {
+                    const totalDetail = affectedEmps.length;
+                    const totalPagesDetail = Math.max(1, Math.ceil(totalDetail / DETAIL_PAGE_SIZE));
+                    const safeDetailPage = Math.min(detailPage, totalPagesDetail);
+                    const pagedEmps = affectedEmps.slice((safeDetailPage - 1) * DETAIL_PAGE_SIZE, safeDetailPage * DETAIL_PAGE_SIZE);
+                    return (
+                      <>
+                        <div className="space-y-1.5">
+                          {pagedEmps.map((emp, idx) => {
+                            const globalIdx = (safeDetailPage - 1) * DETAIL_PAGE_SIZE + idx + 1;
+                            return (
+                              <div key={emp.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/20 hover:bg-muted/40 transition-colors">
+                                <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                  <span className="text-[10px] font-bold text-primary">{globalIdx}</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-semibold text-foreground truncate">{emp.nama}</p>
+                                  <p className="text-[10px] text-muted-foreground">{emp.id}</p>
+                                </div>
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-500 flex-shrink-0">
+                                  Libur
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        {totalPagesDetail > 1 && (
+                          <div className="mt-3">
+                            <Pagination currentPage={safeDetailPage} totalItems={totalDetail} pageSize={DETAIL_PAGE_SIZE} onPageChange={setDetailPage} />
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Footer */}
