@@ -60,8 +60,9 @@ type PublicHoliday = {
   tanggal_selesai: string | null;
   kategori: "Nasional" | "Cuti Bersama" | "Spesial";
   catatan: string | null;
-  berlaku_untuk: "semua" | "divisi";
+  berlaku_untuk: "semua" | "divisi" | "pegawai";
   divisi_ids: number[] | null;
+  pegawai_ids: string[] | null;
   created_at: string;
 };
 
@@ -198,8 +199,10 @@ export default function AttendancePage() {
   // Holiday form state
   const [holidayForm, setHolidayForm] = useState({
     nama: "", tanggal: "", tanggal_selesai: "", kategori: "Nasional" as PublicHoliday["kategori"],
-    catatan: "", berlaku_untuk: "semua" as "semua" | "divisi", divisi_ids: [] as number[],
+    catatan: "", berlaku_untuk: "semua" as "semua" | "divisi" | "pegawai",
+    divisi_ids: [] as number[], pegawai_ids: [] as string[],
   });
+  const [holidayEmpSearch, setHolidayEmpSearch] = useState("");
   const [editingHolidayId, setEditingHolidayId] = useState<number | null>(null);
   const [holidaySaving, setHolidaySaving] = useState(false);
   const [holidayError, setHolidayError] = useState("");
@@ -366,9 +369,9 @@ export default function AttendancePage() {
     const overrideMap = new Map<string, string>();
     dayOverrides?.forEach((ov) => overrideMap.set(ov.employee_id, ov.type));
 
-    // Cek public holidays untuk tanggal ini
-    const holidayForDate = publicHolidays.find(
-      (h) => dateFilter >= h.tanggal && (h.tanggal_selesai ? dateFilter <= h.tanggal_selesai : true)
+    // Cek SEMUA public holidays yang aktif di tanggal ini (bisa overlap)
+    const holidaysForDate = publicHolidays.filter(
+      (h) => dateFilter >= h.tanggal && (h.tanggal_selesai ? dateFilter <= h.tanggal_selesai : dateFilter === h.tanggal)
     );
 
     // Fetch existing records untuk tanggal ini (termasuk id, status, catatan untuk deteksi stale)
@@ -393,14 +396,20 @@ export default function AttendancePage() {
       const override = overrideMap.get(emp.id);
       const empOffDays = offDayMap.get(emp.id);
 
+      // Cari holiday yang berlaku untuk pegawai ini (berlaku_untuk='semua' ATAU pegawai ada di pegawai_ids)
+      const applicableHoliday = holidaysForDate.find((h) =>
+        h.berlaku_untuk === "semua" ||
+        (h.berlaku_untuk === "pegawai" && h.pegawai_ids?.includes(emp.id))
+      );
+
       // Priority: override > public holiday > off day mingguan
       const isMasukOverride = override === "masuk";
       const isOverrideLibur = override === "libur";
-      const isPublicHoliday = holidayForDate && holidayForDate.berlaku_untuk === "semua";
+      const isPublicHoliday = !!applicableHoliday;
       const isWeeklyOff = !override && !isPublicHoliday && empOffDays?.has(dow);
 
       const shouldBeLibur = (isOverrideLibur || isPublicHoliday || isWeeklyOff) && !isMasukOverride;
-      const holidayNama = isPublicHoliday ? holidayForDate.nama : null;
+      const holidayNama = applicableHoliday ? applicableHoliday.nama : null;
 
       const existing = existingMap.get(emp.id);
 
@@ -953,9 +962,10 @@ export default function AttendancePage() {
 
   // ─── Public Holiday CRUD ───
   const resetHolidayForm = () => {
-    setHolidayForm({ nama: "", tanggal: "", tanggal_selesai: "", kategori: "Nasional", catatan: "", berlaku_untuk: "semua", divisi_ids: [] });
+    setHolidayForm({ nama: "", tanggal: "", tanggal_selesai: "", kategori: "Nasional", catatan: "", berlaku_untuk: "semua", divisi_ids: [], pegawai_ids: [] });
     setEditingHolidayId(null);
     setHolidayError("");
+    setHolidayEmpSearch("");
   };
   const handleSaveHoliday = async () => {
     setHolidayError("");
@@ -965,11 +975,17 @@ export default function AttendancePage() {
       setHolidaySaving(false);
       return;
     }
+    if (holidayForm.berlaku_untuk === "pegawai" && holidayForm.pegawai_ids.length === 0) {
+      setHolidayError("Pilih minimal 1 pegawai.");
+      setHolidaySaving(false);
+      return;
+    }
     const payload = {
       nama: holidayForm.nama, tanggal: holidayForm.tanggal,
       tanggal_selesai: holidayForm.tanggal_selesai || null,
       kategori: holidayForm.kategori, catatan: holidayForm.catatan || null,
       berlaku_untuk: holidayForm.berlaku_untuk, divisi_ids: null,
+      pegawai_ids: holidayForm.berlaku_untuk === "pegawai" ? holidayForm.pegawai_ids : null,
     };
     if (editingHolidayId) {
       const { error } = await supabase.from("public_holidays").update(payload).eq("id", editingHolidayId);
@@ -986,9 +1002,10 @@ export default function AttendancePage() {
     setHolidaySaving(false);
   };
   const handleEditHoliday = (h: PublicHoliday) => {
-    setHolidayForm({ nama: h.nama, tanggal: h.tanggal, tanggal_selesai: h.tanggal_selesai || "", kategori: h.kategori, catatan: h.catatan || "", berlaku_untuk: h.berlaku_untuk, divisi_ids: h.divisi_ids || [] });
+    setHolidayForm({ nama: h.nama, tanggal: h.tanggal, tanggal_selesai: h.tanggal_selesai || "", kategori: h.kategori, catatan: h.catatan || "", berlaku_untuk: h.berlaku_untuk, divisi_ids: h.divisi_ids || [], pegawai_ids: h.pegawai_ids || [] });
     setEditingHolidayId(h.id);
     setHolidayError("");
+    setHolidayEmpSearch("");
   };
   const handleDeleteHoliday = async (id: number) => {
     const { error } = await supabase.from("public_holidays").delete().eq("id", id);
@@ -2050,11 +2067,78 @@ export default function AttendancePage() {
                         onChange={(e) => setHolidayForm({ ...holidayForm, catatan: e.target.value })}
                         className="w-full text-xs px-3 py-2.5 rounded-xl border border-border bg-muted/30 outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
                     </div>
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                        Berlaku untuk <strong className="text-foreground">semua pegawai</strong>
+                    {/* Berlaku Untuk */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Berlaku Untuk</label>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => setHolidayForm({ ...holidayForm, berlaku_untuk: "semua", pegawai_ids: [] })}
+                          className={cn("flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border-2",
+                            holidayForm.berlaku_untuk === "semua" ? "border-success bg-success/10 text-success" : "border-border bg-card text-muted-foreground hover:border-success/30")}>
+                          <UserCheck className="w-3.5 h-3.5" />
+                          Semua Pegawai
+                        </button>
+                        <button type="button" onClick={() => setHolidayForm({ ...holidayForm, berlaku_untuk: "pegawai" })}
+                          className={cn("flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border-2",
+                            holidayForm.berlaku_untuk === "pegawai" ? "border-orange-500 bg-orange-500/10 text-orange-500" : "border-border bg-card text-muted-foreground hover:border-orange-500/30")}>
+                          <User className="w-3.5 h-3.5" />
+                          Pilih Pegawai
+                          {holidayForm.berlaku_untuk === "pegawai" && holidayForm.pegawai_ids.length > 0 && (
+                            <span className="text-[9px] font-bold bg-orange-500/20 text-orange-600 px-1.5 py-0.5 rounded">{holidayForm.pegawai_ids.length}</span>
+                          )}
+                        </button>
                       </div>
+                    </div>
+
+                    {/* Multi-select pegawai (hanya saat berlaku_untuk = pegawai) */}
+                    {holidayForm.berlaku_untuk === "pegawai" && (
+                      <div className="rounded-xl border-2 border-orange-500/15 bg-orange-500/[0.02] p-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 bg-card rounded-lg px-3 py-1.5 flex-1 border border-border">
+                            <Search className="w-3 h-3 text-muted-foreground" />
+                            <input type="text" placeholder="Cari pegawai..." value={holidayEmpSearch}
+                              onChange={(e) => setHolidayEmpSearch(e.target.value)}
+                              className="bg-transparent text-[11px] outline-none w-full text-foreground placeholder:text-muted-foreground/50" />
+                          </div>
+                          <button type="button" onClick={() => setHolidayForm({ ...holidayForm, pegawai_ids: employees.map((e) => e.id) })}
+                            className="text-[10px] font-bold text-orange-500 hover:text-orange-600 px-2 py-1 rounded">Pilih Semua</button>
+                          <button type="button" onClick={() => setHolidayForm({ ...holidayForm, pegawai_ids: [] })}
+                            className="text-[10px] font-bold text-muted-foreground hover:text-foreground px-2 py-1 rounded">Hapus Semua</button>
+                        </div>
+                        <div className="max-h-44 overflow-y-auto space-y-1 pr-1">
+                          {employees
+                            .filter((e) => e.nama.toLowerCase().includes(holidayEmpSearch.toLowerCase()))
+                            .map((e) => {
+                              const checked = holidayForm.pegawai_ids.includes(e.id);
+                              return (
+                                <label key={e.id}
+                                  className={cn("flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors",
+                                    checked ? "bg-orange-500/10" : "hover:bg-muted/50")}>
+                                  <input type="checkbox" checked={checked}
+                                    onChange={(ev) => {
+                                      if (ev.target.checked) {
+                                        setHolidayForm({ ...holidayForm, pegawai_ids: [...holidayForm.pegawai_ids, e.id] });
+                                      } else {
+                                        setHolidayForm({ ...holidayForm, pegawai_ids: holidayForm.pegawai_ids.filter((id) => id !== e.id) });
+                                      }
+                                    }}
+                                    className="w-3.5 h-3.5 rounded accent-orange-500 cursor-pointer" />
+                                  <span className="text-[11px] font-medium text-foreground flex-1">{e.nama}</span>
+                                </label>
+                              );
+                            })}
+                          {employees.filter((e) => e.nama.toLowerCase().includes(holidayEmpSearch.toLowerCase())).length === 0 && (
+                            <p className="text-[10px] text-muted-foreground/50 text-center py-3">Tidak ditemukan</p>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between pt-1.5 border-t border-orange-500/10">
+                          <span className="text-[10px] text-muted-foreground">
+                            <strong className="text-orange-500">{holidayForm.pegawai_ids.length}</strong> dari {employees.length} pegawai dipilih
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end gap-2 pt-1">
                       <div className="flex items-center gap-2">
                         {editingHolidayId && <Button variant="outline" size="sm" onClick={resetHolidayForm}>Batal Edit</Button>}
                         <Button size="sm" icon={editingHolidayId ? Check : Plus} onClick={handleSaveHoliday} disabled={holidaySaving || !holidayForm.nama || !holidayForm.tanggal}>
@@ -2078,9 +2162,18 @@ export default function AttendancePage() {
                             <Calendar className="w-3.5 h-3.5 text-blue-500" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <p className="text-xs font-semibold text-foreground">{h.nama}</p>
                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${HOLIDAY_COLORS[h.kategori]}15`, color: HOLIDAY_COLORS[h.kategori] }}>{h.kategori}</span>
+                              {h.berlaku_untuk === "semua" ? (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-success/10 text-success">
+                                  <UserCheck className="w-2.5 h-2.5" />Semua pegawai
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-orange-500/10 text-orange-500">
+                                  <User className="w-2.5 h-2.5" />{h.pegawai_ids?.length || 0} pegawai
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <p className="text-[10px] text-muted-foreground">
