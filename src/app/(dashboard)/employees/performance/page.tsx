@@ -664,7 +664,7 @@ export default function PerformancePage() {
               icon={CalendarCheck}
               iconColor="text-success"
               title="Point Ranking Harian"
-              desc={`Per divisi per hari: Rank 1=${RANK_POINTS[0]}, 2=${RANK_POINTS[1]}, 3=${RANK_POINTS[2]}, 4=${RANK_POINTS[3]}, 5=${RANK_POINTS[4]}, 6+=${RANK_POINTS[5]}. Diurutkan dari jam absen paling awal.`}
+              desc={`Per divisi per hari: Rank 1=${RANK_POINTS[0]}, 2=${RANK_POINTS[1]}, 3=${RANK_POINTS[2]}, 4=${RANK_POINTS[3]}, 5=${RANK_POINTS[4]}, 6+=${RANK_POINTS[5]}. Diurutkan dari jam absen paling awal. Divisi Cp Suka punya slot lebih panjang (top 5 dapat reward lebih besar).`}
             />
             <_RuleCard
               icon={Users}

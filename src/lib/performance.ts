@@ -9,8 +9,10 @@
  * Total Point = SUM(point ranking harian) − SUM(penalti harian) − penalti SP
  *
  * Point harian (berdasarkan ranking waktu absen per divisi per hari):
- *   Rank 1 (paling awal) = 20, Rank 2 = 18, Rank 3 = 16,
- *   Rank 4 = 14, Rank 5 = 12, Rank 6+ = 10.
+ *   Default: Rank 1 = 20, Rank 2 = 18, Rank 3 = 16, Rank 4 = 14,
+ *            Rank 5 = 12, Rank 6+ = 10.
+ *   Override per divisi tersedia di DIVISION_RANK_POINTS (mis. Cp Suka dengan
+ *   slot lebih panjang & reward top-5 lebih besar).
  *
  * Penalti:
  *   Terlambat       = −3 per kejadian
@@ -76,6 +78,23 @@ export interface PerformanceResult {
 
 export const RANK_POINTS = [20, 18, 16, 14, 12, 10] as const;
 
+/** Alias untuk RANK_POINTS — fallback default kalau divisi tidak punya override. */
+export const DEFAULT_RANK_POINTS = RANK_POINTS;
+
+/**
+ * Override RANK_POINTS per divisi. Key = division_id, value = array point per rank
+ * (index 0 = rank 1). Panjang array menentukan jumlah slot; rank di luar panjang
+ * array mendapat nilai slot terakhir.
+ *
+ * Digunakan untuk divisi dengan kompetisi tinggi (15+ pegawai/hari) agar top
+ * performer mendapat reward yang lebih besar dan ada diferensiasi di rank 6-10.
+ */
+export const DIVISION_RANK_POINTS: Record<number, readonly number[]> = {
+  // Cp Suka: shift subuh, head-to-head 15+ orang/hari.
+  // Top 5 dapat bonus tinggi (30→18), rank 6-10 gradual (16→10), rank 11+ = 10.
+  1: [30, 27, 24, 21, 18, 16, 14, 12, 11, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+};
+
 export const PENALTY = {
   TELAT: 3,
   ALPHA: 5,
@@ -118,12 +137,12 @@ function timeToMinutes(t: string): number {
  * Return: Map<"empId|tanggal", pointHarian>
  *
  * Untuk setiap (divisi, tanggal), urutkan pegawai berdasarkan jam_masuk (ascending).
- * Rank 1 = 20 point, rank 2 = 18, ... rank 6+ = 10.
+ * Point diambil dari DIVISION_RANK_POINTS[divId] kalau ada, else RANK_POINTS default.
  * Hanya status Hadir/Terlambat yang di-ranking. Lainnya skip.
  */
 export function computeDailyRankPoints(attendance: AttendanceLite[]): Map<string, number> {
   // Kelompokkan per (divisi, tanggal)
-  const groups = new Map<string, { empId: string; tanggal: string; jamMasukMin: number }[]>();
+  const groups = new Map<string, { empId: string; tanggal: string; jamMasukMin: number; divId: number }[]>();
 
   for (const a of attendance) {
     if (a.status !== "Hadir" && a.status !== "Terlambat") continue;
@@ -135,6 +154,7 @@ export function computeDailyRankPoints(attendance: AttendanceLite[]): Map<string
       empId: a.employee_id,
       tanggal: a.tanggal,
       jamMasukMin: timeToMinutes(a.jam_masuk),
+      divId,
     });
   }
 
@@ -144,6 +164,9 @@ export function computeDailyRankPoints(attendance: AttendanceLite[]): Map<string
     // Urutkan berdasarkan jam masuk (paling awal duluan)
     members.sort((a, b) => a.jamMasukMin - b.jamMasukMin);
 
+    // Lookup table point per rank untuk divisi ini
+    const rankTable = DIVISION_RANK_POINTS[members[0].divId] ?? RANK_POINTS;
+
     let currentRank = 0;
     let prevJam = -1;
     for (let i = 0; i < members.length; i++) {
@@ -152,8 +175,8 @@ export function computeDailyRankPoints(attendance: AttendanceLite[]): Map<string
         currentRank = i;
         prevJam = members[i].jamMasukMin;
       }
-      const pointIdx = Math.min(currentRank, RANK_POINTS.length - 1);
-      const point = RANK_POINTS[pointIdx];
+      const pointIdx = Math.min(currentRank, rankTable.length - 1);
+      const point = rankTable[pointIdx];
       result.set(`${members[i].empId}|${members[i].tanggal}`, point);
     }
   }
