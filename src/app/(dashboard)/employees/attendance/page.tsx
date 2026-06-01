@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   ClipboardCheck, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   ChevronLeft, ChevronRight, ChevronUp, Download, FileText, ChevronDown, Clock, User,
-  CalendarOff, ArrowRightLeft, UserCheck, LayoutList, CalendarDays, Calendar,
+  CalendarOff, ArrowRightLeft, UserCheck, LayoutList, CalendarDays, Calendar, Eye,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -203,6 +203,9 @@ export default function AttendancePage() {
     divisi_ids: [] as number[], pegawai_ids: [] as string[],
   });
   const [holidayEmpSearch, setHolidayEmpSearch] = useState("");
+  // Detail modal
+  const [detailHoliday, setDetailHoliday] = useState<PublicHoliday | null>(null);
+  const [detailSearch, setDetailSearch] = useState("");
   const [editingHolidayId, setEditingHolidayId] = useState<number | null>(null);
   const [holidaySaving, setHolidaySaving] = useState(false);
   const [holidayError, setHolidayError] = useState("");
@@ -2396,6 +2399,11 @@ export default function AttendancePage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
+                            <button onClick={() => { setDetailHoliday(h); setDetailSearch(""); }}
+                              className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted-foreground/40 hover:text-blue-500 transition-colors"
+                              title="Lihat detail pegawai libur">
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
                             <button onClick={() => handleEditHoliday(h)}
                               className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground/40 hover:text-foreground transition-colors">
                               <Pencil className="w-3.5 h-3.5" />
@@ -2445,6 +2453,118 @@ export default function AttendancePage() {
           </div>
         </Portal>
       )}
+
+      {/* ═══ DETAIL HARI LIBUR MODAL ═══ */}
+      {detailHoliday && (() => {
+        const h = detailHoliday;
+        const dates = getDateRange(h.tanggal, h.tanggal_selesai);
+        const empIds = getAffectedEmployeeIds(h);
+        const affectedEmps = employees
+          .filter((e) => empIds.includes(e.id))
+          .filter((e) => !detailSearch || e.nama.toLowerCase().includes(detailSearch.toLowerCase()));
+        const rangeLabel = h.tanggal_selesai && h.tanggal_selesai !== h.tanggal
+          ? `${new Date(h.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })} - ${new Date(h.tanggal_selesai + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}`
+          : new Date(h.tanggal + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+        return (
+          <Portal>
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDetailHoliday(null)} />
+              <div className="relative w-full max-w-xl bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[85vh]">
+                {/* Header */}
+                <div className="flex items-start justify-between p-5 border-b border-border">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${HOLIDAY_COLORS[h.kategori]}15` }}>
+                      <Calendar className="w-5 h-5" style={{ color: HOLIDAY_COLORS[h.kategori] }} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-base font-bold text-foreground truncate">{h.nama}</h3>
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ backgroundColor: `${HOLIDAY_COLORS[h.kategori]}15`, color: HOLIDAY_COLORS[h.kategori] }}>{h.kategori}</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{rangeLabel}</p>
+                      {h.catatan && <p className="text-[10px] text-muted-foreground/70 mt-1 italic">&quot;{h.catatan}&quot;</p>}
+                    </div>
+                  </div>
+                  <button onClick={() => setDetailHoliday(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground flex-shrink-0">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Stats */}
+                <div className="grid grid-cols-3 gap-2 p-4 bg-muted/20 border-b border-border">
+                  <div className="rounded-xl bg-card border border-border p-3 text-center">
+                    <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Pegawai</p>
+                    <p className="text-lg font-bold text-foreground mt-0.5">{empIds.length}</p>
+                  </div>
+                  <div className="rounded-xl bg-card border border-border p-3 text-center">
+                    <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Hari</p>
+                    <p className="text-lg font-bold text-foreground mt-0.5">{dates.length}</p>
+                  </div>
+                  <div className="rounded-xl bg-card border border-border p-3 text-center">
+                    <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Berlaku</p>
+                    <p className="text-[11px] font-bold mt-1" style={{ color: h.berlaku_untuk === "semua" ? "#10b981" : "#f59e0b" }}>
+                      {h.berlaku_untuk === "semua" ? "Semua" : "Pilihan"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Search */}
+                <div className="px-5 pt-4 pb-3 border-b border-border">
+                  <div className="flex items-center gap-2 bg-muted/40 rounded-xl px-3 py-2">
+                    <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                    <input type="text" placeholder="Cari pegawai..." value={detailSearch}
+                      onChange={(e) => setDetailSearch(e.target.value)}
+                      className="bg-transparent text-xs outline-none w-full text-foreground placeholder:text-muted-foreground/50" />
+                    {detailSearch && (
+                      <button onClick={() => setDetailSearch("")} className="text-muted-foreground hover:text-foreground">
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* List pegawai */}
+                <div className="flex-1 overflow-y-auto px-5 py-3">
+                  {affectedEmps.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10">
+                      <User className="w-8 h-8 text-muted-foreground/20 mb-2" />
+                      <p className="text-xs text-muted-foreground">{detailSearch ? "Tidak ada pegawai cocok" : "Belum ada pegawai"}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {affectedEmps.map((emp, idx) => (
+                        <div key={emp.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/20 hover:bg-muted/40 transition-colors">
+                          <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-[10px] font-bold text-primary">{idx + 1}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-foreground truncate">{emp.nama}</p>
+                            <p className="text-[10px] text-muted-foreground">{emp.id}</p>
+                          </div>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-500 flex-shrink-0">
+                            Libur
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-muted/20">
+                  <p className="text-[10px] text-muted-foreground">
+                    {affectedEmps.length === empIds.length
+                      ? `Menampilkan ${empIds.length} pegawai`
+                      : `${affectedEmps.length} dari ${empIds.length} pegawai`}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => setDetailHoliday(null)}>Tutup</Button>
+                </div>
+              </div>
+            </div>
+          </Portal>
+        );
+      })()}
 
 
     </div>
