@@ -42,12 +42,13 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { entityLabel } from "@/lib/audit";
 import {
   computePerformance,
-  computeAvgEarliness,
-  median,
+  computeDailyRankPoints,
+  assignGrades,
   comparePerformanceBest,
   getGradeColor,
   type AttendanceLite,
   type SpDocLite,
+  type PerformanceResult,
 } from "@/lib/performance";
 
 // ─── Types ───
@@ -104,15 +105,14 @@ interface TopPerformer {
   employee_id: string;
   nama: string;
   jabatanNama: string;
-  skorTotal: number;
+  totalPoint: number;
   grade: "A" | "B" | "C" | "D" | "E" | "-";
   hadir: number;
-  totalHariKerja: number;
   telat: number;
   alpha: number;
-  manual: number;
+  manualCount: number;
   spCount: number;
-  avgEarliness: number | null;
+  totalPenalti: number;
   eligible: boolean;
 }
 
@@ -426,59 +426,49 @@ export default function DashboardPage() {
       tanggal_bergabung: string | null;
       jabatan: { nama: string } | null;
     };
+    type PerfWithIdentity = PerformanceResult & {
+      employee_id: string;
+      nama: string;
+      jabatanNama: string;
+    };
     const empsPerf = (empPerfRes.data ?? []) as unknown as EmpPerfRow[];
     const attPerf = (attPerfRes.data ?? []) as AttendanceLite[];
     const spPerf = (spPerfRes.data ?? []) as SpDocLite[];
 
-    // Hitung avgEarliness per pegawai
-    const empEarlinessMap = new Map<string, number | null>();
-    empsPerf.forEach((emp) => {
-      const empAtt = attPerf.filter((a) => a.employee_id === emp.id);
-      empEarlinessMap.set(emp.id, computeAvgEarliness(empAtt));
-    });
-    // Tentukan divisi per pegawai
-    const empDivisionMap = new Map<string, number>();
-    empsPerf.forEach((emp) => {
-      const empAtt = attPerf.filter((a) => a.employee_id === emp.id && a.division_id != null);
-      if (empAtt.length > 0) empDivisionMap.set(emp.id, empAtt[empAtt.length - 1].division_id!);
-    });
-    // Median per divisi
-    const divEarlinessMap = new Map<number, number[]>();
-    empDivisionMap.forEach((divId, empId) => {
-      const e = empEarlinessMap.get(empId);
-      if (e !== null && e !== undefined) {
-        if (!divEarlinessMap.has(divId)) divEarlinessMap.set(divId, []);
-        divEarlinessMap.get(divId)!.push(e);
-      }
-    });
-    const divMedianMap = new Map<number, number>();
-    divEarlinessMap.forEach((arr, divId) => divMedianMap.set(divId, arr.length >= 3 ? median(arr) : 0));
-
     const periodEnd = period.end;
 
-    const topPerformersData: TopPerformer[] = empsPerf
-      .map((e) => {
-        const divId = empDivisionMap.get(e.id);
-        const divMed = divId ? divMedianMap.get(divId) ?? 0 : 0;
-        const b = computePerformance(e.id, attPerf, spPerf, e.tanggal_bergabung, periodEnd, divMed);
-        return {
-          employee_id: e.id,
-          nama: e.nama,
-          jabatanNama: e.jabatan?.nama ?? "-",
-          skorTotal: b.skorTotal,
-          grade: b.grade,
-          hadir: b.hadir,
-          totalHariKerja: b.totalHariKerja,
-          telat: b.telat,
-          alpha: b.alpha,
-          manual: b.manual,
-          spCount: b.spCount,
-          avgEarliness: b.avgEarliness,
-          eligible: b.eligible,
-        };
-      })
-      // Skip pegawai tanpa data attendance di periode (mencegah skor 0 muncul sebagai top)
-      .filter((p) => p.totalHariKerja > 0 && p.skorTotal > 0 && p.eligible)
+    // Hitung ranking point harian sekali untuk semua pegawai
+    const dailyRankPoints = computeDailyRankPoints(attPerf);
+
+    // Bangun PerformanceResult[] lengkap supaya bisa assignGrades (persentil)
+    const perfRows: PerfWithIdentity[] = empsPerf.map((e) => {
+      const b = computePerformance(e.id, attPerf, spPerf, e.tanggal_bergabung, periodEnd, dailyRankPoints);
+      return {
+        ...b,
+        employee_id: e.id,
+        nama: e.nama,
+        jabatanNama: e.jabatan?.nama ?? "-",
+      };
+    });
+    assignGrades(perfRows, (r) => r.totalPoint);
+
+    const topPerformersData: TopPerformer[] = perfRows
+      .map((b) => ({
+        employee_id: b.employee_id,
+        nama: b.nama,
+        jabatanNama: b.jabatanNama,
+        totalPoint: b.totalPoint,
+        grade: b.grade,
+        hadir: b.hadir,
+        telat: b.telat,
+        alpha: b.alpha,
+        manualCount: b.manualCount,
+        spCount: b.spCount,
+        totalPenalti: b.totalPenalti,
+        eligible: b.eligible,
+      }))
+      // Skip pegawai yang belum eligible atau tidak punya data sama sekali
+      .filter((p) => p.eligible && p.hadir > 0)
       .sort(comparePerformanceBest)
       .slice(0, 5);
 
@@ -1039,7 +1029,7 @@ export default function DashboardPage() {
             <ul className="space-y-2">
               {topPerformers.map((p, idx) => {
                 const gradeColor = getGradeColor(p.grade);
-                const totalIncident = p.alpha + p.telat + p.manual + p.spCount;
+                const totalIncident = p.alpha + p.telat + p.manualCount + p.spCount;
                 const rankIcon =
                   idx === 0 ? <Trophy className="w-3.5 h-3.5 text-amber-500" />
                   : idx === 1 ? <Medal className="w-3.5 h-3.5 text-slate-400" />
@@ -1079,24 +1069,24 @@ export default function DashboardPage() {
 
                     {/* Mini stats — hidden di mobile */}
                     <div className="hidden md:flex items-center gap-3 text-[10px] text-muted-foreground">
-                      <Stat label="Hadir" value={`${p.hadir}/${p.totalHariKerja}`} />
+                      <Stat label="Hadir" value={String(p.hadir)} />
                       <span className="w-px h-4 bg-border" />
                       <Stat label="Insiden" value={String(totalIncident)} accent={totalIncident > 0 ? "warning" : undefined} />
-                      {p.avgEarliness !== null && p.avgEarliness >= 5 && (
+                      {p.totalPenalti > 0 && (
                         <>
                           <span className="w-px h-4 bg-border" />
-                          <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-md">
-                            ⏰ +{Math.round(p.avgEarliness)}m awal
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-rose-600 bg-rose-500/10 px-1.5 py-0.5 rounded-md">
+                            −{p.totalPenalti} pt
                           </span>
                         </>
                       )}
                     </div>
 
-                    {/* Score + Grade */}
+                    {/* Point + Grade */}
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <div className="text-right">
-                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider font-semibold">Skor</p>
-                        <p className="text-base font-bold text-foreground tabular-nums leading-none mt-0.5">{p.skorTotal}</p>
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider font-semibold">Point</p>
+                        <p className="text-base font-bold text-foreground tabular-nums leading-none mt-0.5">{p.totalPoint}<span className="text-[10px] text-muted-foreground font-medium ml-0.5">pt</span></p>
                       </div>
                       <div
                         className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold text-white flex-shrink-0"

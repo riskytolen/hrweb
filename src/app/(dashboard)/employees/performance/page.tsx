@@ -16,17 +16,17 @@ import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import {
   computePerformance,
+  computeDailyRankPoints,
+  assignGrades,
   comparePerformanceBest,
   comparePerformanceWorst,
   getGradeColor,
-  isEligible,
-  computeAvgEarliness,
-  median,
   PENALTY,
-  SCORE_WEIGHT,
+  RANK_POINTS,
   MIN_MONTHS_ELIGIBLE,
   type AttendanceLite,
   type SpDocLite,
+  type PerformanceResult,
 } from "@/lib/performance";
 
 // ─── Types ───
@@ -45,36 +45,12 @@ type PerformanceRow = {
   jabatanNama: string;
   status: string;
   tanggalBergabung: string | null;
-  totalHariKerja: number;
-  totalHariEfektif: number;
-  hadir: number;
-  telat: number;
-  totalMenitTelat: number;
-  alpha: number;
-  manual: number;
-  manualLeave: number;
-  izin: number;
-  sakit: number;
-  cuti: number;
-  spCount: number;
-  sp1: number;
-  sp2: number;
-  sp3: number;
-  skorKehadiran: number;
-  skorDisiplin: number;
-  penaltiTotal: number;
-  bonusKetepatan: number;
-  avgEarliness: number | null;
-  eligible: boolean;
-  skorTotal: number;
-  grade: string;
-};
+} & PerformanceResult;
 
 // ─── Constants ───
 const PAGE_SIZE = 10;
 const CUT_OFF_DAY = 8;
 
-/** Format Date ke string YYYY-MM-DD memakai waktu lokal (timezone safe). */
 function localDateStr(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -83,7 +59,6 @@ function getPeriodRange(periodKey: string): { start: string; end: string; label:
   const [year, month] = periodKey.split("-").map(Number);
   const startDate = new Date(year, month - 1, CUT_OFF_DAY);
   const endDate = new Date(year, month, CUT_OFF_DAY - 1);
-  // Pakai waktu lokal, bukan toISOString() (UTC) yang menggeser tanggal mundur di TZ positif.
   const start = localDateStr(startDate);
   const end = localDateStr(endDate);
   const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY - 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
@@ -97,13 +72,13 @@ function getCurrentPeriodKey(): string {
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
   }
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return `${now.getFullYear()}-${now.getMonth() + 1}`;
 }
 
 function getPrevPeriodKey(periodKey: string): string {
   const [y, m] = periodKey.split("-").map(Number);
   const prev = new Date(y, m - 2, 1);
-  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+  return `${prev.getFullYear()}-${prev.getMonth() + 1}`;
 }
 
 function formatDate(d: string | null): string {
@@ -112,7 +87,6 @@ function formatDate(d: string | null): string {
 }
 
 export default function PerformancePage() {
-  // Reserved hook untuk future role-based feature
   useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -130,7 +104,6 @@ export default function PerformancePage() {
   const [performanceData, setPerformanceData] = useState<PerformanceRow[]>([]);
   const [prevPerformanceData, setPrevPerformanceData] = useState<PerformanceRow[]>([]);
 
-  // useMemo agar object reference stabil (mencegah infinite loop di fetchData)
   const period = useMemo(() =>
     dateMode === "periode"
       ? getPeriodRange(periodKey)
@@ -140,62 +113,26 @@ export default function PerformancePage() {
     dateMode === "periode" ? getPeriodRange(getPrevPeriodKey(periodKey)) : null,
     [dateMode, periodKey]);
 
-  // Helper: hitung performance untuk satu range dataset.
-  // Memakai shared util dari @/lib/performance supaya logic sama dengan dashboard.
   const computeRows = useCallback((emps: EmployeeLite[], attendance: AttendanceLite[], spDocs: SpDocLite[], periodEnd: string): PerformanceRow[] => {
-    // 1. Hitung avgEarliness per pegawai
-    const empEarlinessMap = new Map<string, number | null>();
-    emps.forEach((emp) => {
-      const empAtt = attendance.filter((a) => a.employee_id === emp.id);
-      empEarlinessMap.set(emp.id, computeAvgEarliness(empAtt));
-    });
-
-    // 2. Tentukan divisi per pegawai (dari attendance terbaru yang punya division_id)
-    const empDivisionMap = new Map<string, number>();
-    emps.forEach((emp) => {
-      const empAtt = attendance
-        .filter((a) => a.employee_id === emp.id && a.division_id != null)
-        .sort((a, b) => (b as any).tanggal?.localeCompare((a as any).tanggal) || 0);
-      if (empAtt.length > 0 && empAtt[0].division_id) {
-        empDivisionMap.set(emp.id, empAtt[0].division_id);
-      }
-    });
-
-    // 3. Hitung median per divisi
-    const divisionEarlinessMap = new Map<number, number[]>();
-    empDivisionMap.forEach((divId, empId) => {
-      const e = empEarlinessMap.get(empId);
-      if (e !== null && e !== undefined) {
-        if (!divisionEarlinessMap.has(divId)) divisionEarlinessMap.set(divId, []);
-        divisionEarlinessMap.get(divId)!.push(e);
-      }
-    });
-    const divisionMedianMap = new Map<number, number>();
-    divisionEarlinessMap.forEach((earls, divId) => {
-      divisionMedianMap.set(divId, earls.length >= 3 ? median(earls) : 0);
-    });
-
-    // 4. Compute performance per pegawai
-    return emps.map((emp) => {
-      const empDivId = empDivisionMap.get(emp.id);
-      const divMedian = empDivId ? (divisionMedianMap.get(empDivId) ?? 0) : 0;
-      const breakdown = computePerformance(emp.id, attendance, spDocs, emp.tanggal_bergabung, periodEnd, divMedian);
+    const dailyRankPoints = computeDailyRankPoints(attendance);
+    const rows: PerformanceRow[] = emps.map((emp) => {
+      const result = computePerformance(emp.id, attendance, spDocs, emp.tanggal_bergabung, periodEnd, dailyRankPoints);
       return {
         employee_id: emp.id,
         nama: emp.nama,
         jabatanNama: emp.jabatan?.nama ?? "-",
         status: emp.status,
         tanggalBergabung: emp.tanggal_bergabung,
-        ...breakdown,
+        ...result,
       };
     });
+    assignGrades(rows, (r) => r.totalPoint);
+    return rows;
   }, []);
 
-  // Fetch
   const fetchData = useCallback(async () => {
     setLoading(true);
 
-    // Fetch employees + jabatan
     const { data: empData } = await supabase
       .from("pegawai")
       .select("id, nama, jabatan_id, status, tanggal_bergabung, jabatan:jabatan_id(nama)")
@@ -203,7 +140,6 @@ export default function PerformancePage() {
       .order("nama");
     const emps: EmployeeLite[] = (empData ?? []) as unknown as EmployeeLite[];
 
-    // Current period attendance
     const { data: attData } = await supabase
       .from("attendance_records")
       .select("employee_id, tanggal, status, durasi_telat, is_manual, jam_masuk, schedule_jam_masuk, division_id")
@@ -211,7 +147,6 @@ export default function PerformancePage() {
       .lte("tanggal", period.end);
     const attendance: AttendanceLite[] = attData || [];
 
-    // Active SP
     const { data: spData } = await supabase
       .from("legal_documents")
       .select("employee_id, kategori, tingkat_sp, status, tanggal_terbit")
@@ -224,7 +159,6 @@ export default function PerformancePage() {
     rows.sort(comparePerformanceBest);
     setPerformanceData(rows);
 
-    // Previous period for trend (hanya kalau mode periode)
     if (prevPeriod) {
       const { data: prevAttData } = await supabase
         .from("attendance_records")
@@ -245,7 +179,6 @@ export default function PerformancePage() {
     else if (customStart && customEnd) fetchData();
   }, [periodKey, dateMode, customStart, customEnd, fetchData]);
 
-  // Filter, sort
   const filtered = useMemo(() => {
     return performanceData.filter((r) => {
       const matchSearch = r.nama.toLowerCase().includes(search.toLowerCase()) || r.employee_id.toLowerCase().includes(search.toLowerCase());
@@ -259,29 +192,31 @@ export default function PerformancePage() {
 
   // Summary
   const eligibleData = performanceData.filter(r => r.eligible);
-  const avgSkor = eligibleData.length > 0 ? Math.round(eligibleData.reduce((s, r) => s + r.skorTotal, 0) / eligibleData.length) : 0;
+  const totalPointAll = eligibleData.reduce((s, r) => s + r.totalPoint, 0);
+  const avgPoint = eligibleData.length > 0 ? Math.round(totalPointAll / eligibleData.length) : 0;
+  const topPoint = eligibleData.length > 0 ? Math.max(...eligibleData.map(r => r.totalPoint)) : 0;
   const totalAlpha = performanceData.reduce((s, r) => s + r.alpha, 0);
   const totalTelat = performanceData.reduce((s, r) => s + r.telat, 0);
+  const totalManual = performanceData.reduce((s, r) => s + r.manualCount, 0);
   const totalSP = performanceData.reduce((s, r) => s + r.spCount, 0);
-  const totalIncident = totalAlpha + totalTelat + totalSP;
+  const totalPenaltiAll = eligibleData.reduce((s, r) => s + r.totalPenalti, 0);
+  const totalIncident = totalAlpha + totalTelat + totalManual + totalSP;
   const gradeDistribution = { A: 0, B: 0, C: 0, D: 0, E: 0 };
   eligibleData.forEach((r) => { if (r.grade in gradeDistribution) gradeDistribution[r.grade as keyof typeof gradeDistribution]++; });
 
-  // Trend (current vs previous)
+  // Trend
   const prevEligibleData = prevPerformanceData.filter(r => r.eligible);
-  const prevAvgSkor = prevEligibleData.length > 0 ? Math.round(prevEligibleData.reduce((s, r) => s + r.skorTotal, 0) / prevEligibleData.length) : 0;
-  const prevTotalIncident = prevPerformanceData.reduce((s, r) => s + r.alpha + r.telat + r.spCount, 0);
+  const prevAvgPoint = prevEligibleData.length > 0 ? Math.round(prevEligibleData.reduce((s, r) => s + r.totalPoint, 0) / prevEligibleData.length) : 0;
+  const prevTotalPenalti = prevEligibleData.reduce((s, r) => s + r.totalPenalti, 0);
   const prevTotalSP = prevPerformanceData.reduce((s, r) => s + r.spCount, 0);
 
-  const trendSkor = prevPerformanceData.length > 0 ? avgSkor - prevAvgSkor : 0;
-  const trendIncident = prevPerformanceData.length > 0 ? totalIncident - prevTotalIncident : 0;
+  const trendPoint = prevEligibleData.length > 0 ? avgPoint - prevAvgPoint : 0;
+  const trendPenalti = prevPerformanceData.length > 0 ? totalPenaltiAll - prevTotalPenalti : 0;
   const trendSP = prevPerformanceData.length > 0 ? totalSP - prevTotalSP : 0;
 
-  // Insights: top 3 best & top 3 worst
   const topBest = useMemo(() => [...performanceData].filter(r => r.eligible).sort(comparePerformanceBest).slice(0, 3), [performanceData]);
   const topWorst = useMemo(() => [...performanceData].filter(r => r.eligible).sort(comparePerformanceWorst).slice(0, 3), [performanceData]);
 
-  // Unique jabatan untuk filter
   const uniqueJabatan = useMemo(() => {
     const set = new Set<string>();
     performanceData.forEach((r) => set.add(r.jabatanNama));
@@ -298,7 +233,6 @@ export default function PerformancePage() {
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
       const pageWidth = doc.internal.pageSize.getWidth();
 
-      // Header
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
       doc.text("LAPORAN KINERJA PEGAWAI", pageWidth / 2, 15, { align: "center" });
@@ -308,7 +242,6 @@ export default function PerformancePage() {
       doc.text(`Periode: ${period.label}`, pageWidth / 2, 22, { align: "center" });
       doc.text(`Dicetak: ${new Date().toLocaleString("id-ID")}`, pageWidth / 2, 28, { align: "center" });
 
-      // Summary section
       let cursorY = 36;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
@@ -316,35 +249,29 @@ export default function PerformancePage() {
       cursorY += 5;
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
-      doc.text(`Rata-rata Skor: ${avgSkor} (${eligibleData.length} dinilai, ${performanceData.length - eligibleData.length} baru bergabung)`, 14, cursorY); cursorY += 5;
-      doc.text(`Total Pegawai Aktif: ${performanceData.length}`, 14, cursorY); cursorY += 5;
-      doc.text(`Total Insiden (Alpha + Telat + SP): ${totalIncident}`, 14, cursorY); cursorY += 5;
-      doc.text(`Total Surat Peringatan Aktif: ${totalSP}`, 14, cursorY); cursorY += 5;
+      doc.text(`Rata-rata Point: ${avgPoint} pt (${eligibleData.length} dinilai, ${performanceData.length - eligibleData.length} baru bergabung)`, 14, cursorY); cursorY += 5;
+      doc.text(`Point Tertinggi: ${topPoint} pt`, 14, cursorY); cursorY += 5;
+      doc.text(`Total Penalti: ${totalPenaltiAll} pt (${totalAlpha} alpha + ${totalTelat} telat + ${totalManual} manual + ${totalSP} SP)`, 14, cursorY); cursorY += 5;
+      doc.text(`Total Insiden: ${totalIncident}`, 14, cursorY); cursorY += 5;
       doc.text(`Distribusi: A=${gradeDistribution.A}, B=${gradeDistribution.B}, C=${gradeDistribution.C}, D=${gradeDistribution.D}, E=${gradeDistribution.E}`, 14, cursorY);
       cursorY += 8;
 
-      // Table
       autoTable(doc, {
         startY: cursorY,
-        head: [["#", "ID", "Nama", "Jabatan", "Status", "Tgl Bergabung", "Hari Kerja", "Hadir", "Telat", "Alpha", "Manual", "Izin", "Sakit", "SP", "Avg.Datang", "Bonus", "Skor", "Grade"]],
+        head: [["#", "ID", "Nama", "Jabatan", "Tgl Bergabung", "Hadir", "Telat", "Alpha", "Manual", "SP", "Point", "Penalti", "Grade"]],
         body: filtered.map((r, idx) => [
           idx + 1,
           r.employee_id,
           r.nama,
           r.jabatanNama,
-          r.status,
           formatDate(r.tanggalBergabung),
-          r.totalHariKerja,
           r.hadir,
-          r.telat > 0 ? `${r.telat}x (${r.totalMenitTelat}m)` : "-",
+          r.telat > 0 ? `${r.telat}x` : "-",
           r.alpha > 0 ? `${r.alpha}x` : "-",
-          r.manual > 0 ? `${r.manual}x` : "-",
-          r.izin || "-",
-          r.sakit || "-",
-          r.spCount > 0 ? `${r.sp1}+${r.sp2}+${r.sp3}` : "-",
-          r.avgEarliness !== null ? `${r.avgEarliness >= 0 ? "+" : ""}${Math.round(r.avgEarliness)}m` : "-",
-          r.bonusKetepatan > 0 ? `+${r.bonusKetepatan}` : "-",
-          r.eligible ? r.skorTotal : "-",
+          r.manualCount > 0 ? `${r.manualCount}x` : "-",
+          r.spCount > 0 ? `${r.sp1}/${r.sp2}/${r.sp3}` : "-",
+          r.eligible ? r.totalPoint : "-",
+          r.eligible ? `-${r.totalPenalti}` : "-",
           r.grade,
         ]),
         theme: "striped",
@@ -352,32 +279,27 @@ export default function PerformancePage() {
         headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 7, halign: "center" },
         columnStyles: {
           0: { halign: "center" },
+          5: { halign: "center" },
           6: { halign: "center" },
           7: { halign: "center" },
           8: { halign: "center" },
           9: { halign: "center" },
-          10: { halign: "center" },
+          10: { halign: "center", fontStyle: "bold" },
           11: { halign: "center" },
           12: { halign: "center" },
-          13: { halign: "center" },
-          14: { halign: "center" },
-          15: { halign: "center" },
-          16: { halign: "center" },
-          17: { halign: "center", fontStyle: "bold" },
         },
       });
 
-      // Footer info
       const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY;
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
       doc.text(
-        `Sistem Penilaian: Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN}) = (Hadir/Hari Efektif) x ${SCORE_WEIGHT.KEHADIRAN}. Hari efektif = exclude Libur, Cuti, Izin & Sakit. ` +
-        `Disiplin (max ${SCORE_WEIGHT.DISIPLIN}) = max(0, ${SCORE_WEIGHT.DISIPLIN} - penalti). ` +
-        `Penalti: -${PENALTY.ALPHA_PER_HARI}/Alpha, -${PENALTY.TELAT_PER_KEJADIAN}/Telat, -${PENALTY.MANUAL_INPUT}/Manual Input, -${PENALTY.SP1}/SP-1, -${PENALTY.SP2}/SP-2, -${PENALTY.SP3}/SP-3. ` +
-        `Bonus Ketepatan (max ${SCORE_WEIGHT.KETEPATAN_MAX}): absolute (0-${SCORE_WEIGHT.KETEPATAN_ABSOLUTE_MAX}) + relative vs median divisi (0-${SCORE_WEIGHT.KETEPATAN_RELATIVE_MAX}). ` +
-        `Pegawai bergabung < ${MIN_MONTHS_ELIGIBLE} bulan → belum dinilai. ` +
-        `Grade: A>=90, B 80-89, C 70-79, D 60-69, E<60.`,
+        `Sistem Point: Total = SUM(point ranking harian) − SUM(penalti) − penalti SP. ` +
+        `Point harian per divisi: Rank 1=${RANK_POINTS[0]}, 2=${RANK_POINTS[1]}, 3=${RANK_POINTS[2]}, 4=${RANK_POINTS[3]}, 5=${RANK_POINTS[4]}, 6+=${RANK_POINTS[5]}. ` +
+        `Penalti: Telat −${PENALTY.TELAT}, Alpha −${PENALTY.ALPHA}, Manual −${PENALTY.MANUAL}, SP-1 −${PENALTY.SP1}, SP-2 −${PENALTY.SP2}, SP-3 −${PENALTY.SP3}. ` +
+        `Izin/Sakit/Cuti/Libur tidak dihitung. ` +
+        `Pegawai bergabung < ${MIN_MONTHS_ELIGIBLE} bulan → belum dinilai (eligible=false). ` +
+        `Grade: A top 10%, B top 30%, C top 60%, D top 80%, E bottom 20% (persentil).`,
         14, finalY + 8, { maxWidth: pageWidth - 28 },
       );
 
@@ -388,14 +310,14 @@ export default function PerformancePage() {
     } finally {
       setExporting(false);
     }
-  }, [period, avgSkor, performanceData.length, eligibleData.length, totalIncident, totalSP, gradeDistribution, filtered]);
+  }, [period, avgPoint, topPoint, totalPenaltiAll, totalAlpha, totalTelat, totalManual, totalSP, totalIncident, performanceData.length, eligibleData.length, gradeDistribution, filtered]);
 
   return (
     <RouteGuard permission="performance">
     <div className="space-y-5 animate-fade-in">
       <PageHeader
         title="Kinerja Pegawai"
-        description="Penilaian performa untuk audit & evaluasi periodik"
+        description="Penilaian berbasis akumulasi point (ranking absen per divisi per hari + penalti)"
         icon={Award}
         actions={
           <Button
@@ -430,7 +352,7 @@ export default function PerformancePage() {
               <button onClick={() => {
                 const [y, m] = periodKey.split("-").map(Number);
                 const prev = new Date(y, m - 2, 1);
-                setPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
+                setPeriodKey(`${prev.getFullYear()}-${prev.getMonth() + 1}`);
                 setPage(1);
               }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronLeft className="w-4 h-4" /></button>
               <div className="text-center min-w-[260px]">
@@ -440,7 +362,7 @@ export default function PerformancePage() {
               <button onClick={() => {
                 const [y, m] = periodKey.split("-").map(Number);
                 const next = new Date(y, m, 1);
-                setPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+                setPeriodKey(`${next.getFullYear()}-${next.getMonth() + 1}`);
                 setPage(1);
               }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground"><ChevronRight className="w-4 h-4" /></button>
             </div>
@@ -459,27 +381,28 @@ export default function PerformancePage() {
       {/* ═══ Hero Metrics dengan Trend ═══ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <_HeroCard
-          icon={Award}
-          label="Rata-rata Skor"
-          value={loading ? "–" : String(avgSkor)}
-          unit=""
+          icon={Trophy}
+          label="Point Tertinggi"
+          value={loading ? "–" : String(topPoint)}
+          unit="pt"
           gradient="from-primary/15 via-primary/5 to-transparent"
           iconBg="bg-primary/15"
           iconColor="text-primary"
-          trend={prevPerformanceData.length > 0 ? trendSkor : null}
+          trend={prevPerformanceData.length > 0 ? trendPoint : null}
           trendInverted={false}
           prevLabel={prevPeriod?.shortLabel}
         />
         <_HeroCard
-          icon={Users}
-          label="Total Pegawai Aktif"
-          value={loading ? "–" : String(performanceData.length)}
-          unit="orang"
+          icon={Award}
+          label="Rata-rata Point"
+          value={loading ? "–" : String(avgPoint)}
+          unit="pt"
           gradient="from-success/15 via-success/5 to-transparent"
           iconBg="bg-success/15"
           iconColor="text-success"
-          trend={null}
+          trend={prevPerformanceData.length > 0 ? trendPoint : null}
           trendInverted={false}
+          prevLabel={prevPeriod?.shortLabel}
           breakdown={
             !loading && performanceData.length > 0
               ? `${eligibleData.length} dinilai, ${performanceData.length - eligibleData.length} baru bergabung`
@@ -488,24 +411,24 @@ export default function PerformancePage() {
         />
         <_HeroCard
           icon={AlertTriangle}
-          label="Total Insiden"
-          value={loading ? "–" : String(totalIncident)}
-          unit="kejadian"
+          label="Total Penalti"
+          value={loading ? "–" : String(totalPenaltiAll)}
+          unit="pt"
           gradient="from-warning/15 via-warning/5 to-transparent"
           iconBg="bg-warning/15"
           iconColor="text-warning"
-          trend={prevPerformanceData.length > 0 ? trendIncident : null}
+          trend={prevPerformanceData.length > 0 ? trendPenalti : null}
           trendInverted={true}
           prevLabel={prevPeriod?.shortLabel}
           breakdown={
             !loading
-              ? `${totalAlpha} alpha • ${totalTelat} telat • ${totalSP} SP`
+              ? `${totalAlpha} alpha · ${totalTelat} telat · ${totalManual} manual · ${totalSP} SP`
               : undefined
           }
         />
         <_HeroCard
           icon={XCircle}
-          label="Surat Peringatan"
+          label="SP Aktif"
           value={loading ? "–" : String(totalSP)}
           unit="aktif"
           gradient="from-danger/15 via-danger/5 to-transparent"
@@ -522,22 +445,23 @@ export default function PerformancePage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <_InsightCard
             title="Performance Teratas"
-            subtitle="Pegawai dengan skor tertinggi"
+            subtitle="Pegawai dengan point tertinggi"
             icon={Trophy}
             iconColor="text-success"
             iconBg="bg-success/10"
             rows={topBest}
             valueColor="text-success"
-            ranks={["🥇", "🥈", "🥉"]}
+            valueSuffix="pt"
           />
           <_InsightCard
             title="Perlu Perhatian"
-            subtitle="Pegawai dengan skor terendah"
+            subtitle="Pegawai dengan point terendah"
             icon={AlertTriangle}
             iconColor="text-danger"
             iconBg="bg-danger/10"
             rows={topWorst}
             valueColor="text-danger"
+            valueSuffix="pt"
           />
         </div>
       )}
@@ -551,7 +475,7 @@ export default function PerformancePage() {
               {(["A", "B", "C", "D", "E"] as const).map((g) => (
                 <div key={g} className="flex items-center gap-1">
                   <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: getGradeColor(g) }} />
-                  <span>{g} {g === "A" ? "≥90" : g === "B" ? "80-89" : g === "C" ? "70-79" : g === "D" ? "60-69" : "<60"}</span>
+                  <span>{g} {g === "A" ? "top 10%" : g === "B" ? "top 30%" : g === "C" ? "top 60%" : g === "D" ? "top 80%" : "bottom 20%"}</span>
                 </div>
               ))}
             </div>
@@ -559,7 +483,7 @@ export default function PerformancePage() {
           <div className="grid grid-cols-5 gap-3">
             {(["A", "B", "C", "D", "E"] as const).map((grade) => {
               const count = gradeDistribution[grade];
-              const pct = performanceData.length > 0 ? Math.round((count / performanceData.length) * 100) : 0;
+              const pct = eligibleData.length > 0 ? Math.round((count / eligibleData.length) * 100) : 0;
               const color = getGradeColor(grade);
               return (
                 <button key={grade} onClick={() => { setFilterGrade(filterGrade === grade ? "Semua" : grade); setPage(1); }}
@@ -630,7 +554,7 @@ export default function PerformancePage() {
         </div>
       </div>
 
-      {/* ═══ Tabel Pegawai dengan Kolom Audit ═══ */}
+      {/* ═══ Tabel Pegawai ═══ */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -639,21 +563,19 @@ export default function PerformancePage() {
                 <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-10">#</th>
                 <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">Pegawai</th>
                 <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">Jabatan</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">Bergabung</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Point</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Penalti</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Hadir</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Telat</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Alpha</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Manual</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">SP</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-16">Avg. Datang</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-12">Bonus</th>
-                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-24">Skor</th>
+                <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-24">SP</th>
                 <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-12">Grade</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={8} cols={13} /> : paged.length === 0 ? (
-                <tr><td colSpan={13} className="text-center py-12 text-sm text-muted-foreground">Tidak ada data kinerja yang cocok dengan filter.</td></tr>
+              {loading ? <SkeletonTable rows={8} cols={11} /> : paged.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-12 text-sm text-muted-foreground">Tidak ada data kinerja yang cocok dengan filter.</td></tr>
               ) : paged.map((row) => {
                 const rank = filtered.indexOf(row) + 1;
                 const gradeColor = getGradeColor(row.grade);
@@ -662,7 +584,7 @@ export default function PerformancePage() {
                     <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{rank}</td>
                     <td className="px-4 py-3">
                       <p className="text-sm font-semibold text-foreground">{row.nama}</p>
-                      <p className="text-[10px] text-muted-foreground font-mono">{row.employee_id} · {row.totalHariKerja} hari kerja</p>
+                      <p className="text-[10px] text-muted-foreground font-mono">{row.employee_id} · gabung {formatDate(row.tanggalBergabung)}</p>
                     </td>
                     <td className="px-4 py-3">
                       <p className="text-xs text-foreground">{row.jabatanNama}</p>
@@ -673,17 +595,21 @@ export default function PerformancePage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <p className="text-[10px] text-muted-foreground tabular-nums">{formatDate(row.tanggalBergabung)}</p>
+                      <span className={cn("text-sm font-bold tabular-nums", row.totalPoint > 0 ? "text-success" : "text-muted-foreground")}>
+                        {row.totalPoint}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className="text-sm font-semibold text-success tabular-nums">{row.hadir}</span>
+                      <span className={cn("text-xs font-semibold tabular-nums", row.totalPenalti > 0 ? "text-danger" : "text-muted-foreground")}>
+                        {row.totalPenalti > 0 ? `-${row.totalPenalti}` : "0"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className="text-sm font-semibold text-foreground tabular-nums">{row.hadir}</span>
                     </td>
                     <td className="px-4 py-3 text-center">
                       {row.telat > 0 ? (
-                        <div>
-                          <span className="text-sm font-semibold text-warning tabular-nums">{row.telat}x</span>
-                          <p className="text-[9px] text-muted-foreground tabular-nums">{row.totalMenitTelat}m</p>
-                        </div>
+                        <span className="text-sm font-semibold text-warning tabular-nums">{row.telat}x</span>
                       ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -692,8 +618,8 @@ export default function PerformancePage() {
                       ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {row.manual > 0 ? (
-                        <span className="text-sm font-semibold text-warning tabular-nums">{row.manual}x</span>
+                      {row.manualCount > 0 ? (
+                        <span className="text-sm font-semibold text-warning tabular-nums">{row.manualCount}x</span>
                       ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -704,32 +630,6 @@ export default function PerformancePage() {
                           {row.sp3 > 0 && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-danger/15 text-danger">{row.sp3}</span>}
                         </div>
                       ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {row.avgEarliness !== null ? (
-                        <span className={cn("text-xs font-semibold tabular-nums",
-                          row.avgEarliness >= 5 ? "text-success" : row.avgEarliness >= 0 ? "text-warning" : "text-muted-foreground"
-                        )}>
-                          {row.avgEarliness >= 0 ? "+" : ""}{Math.round(row.avgEarliness)}m
-                        </span>
-                      ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {row.bonusKetepatan > 0 ? (
-                        <span className="text-xs font-bold text-primary tabular-nums">+{row.bonusKetepatan}</span>
-                      ) : <Minus className="w-3 h-3 text-muted-foreground/40 mx-auto" />}
-                    </td>
-                    <td className="px-4 py-3">
-                      {row.eligible ? (
-                        <div className="flex items-center justify-center gap-2">
-                          <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${row.skorTotal}%`, backgroundColor: gradeColor }} />
-                          </div>
-                          <span className="text-xs font-bold text-foreground tabular-nums w-6 text-right">{row.skorTotal}</span>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground text-center block">—</span>
-                      )}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {row.eligible ? (
@@ -759,70 +659,68 @@ export default function PerformancePage() {
           <span className="text-[10px] text-muted-foreground ml-auto">Klik untuk lihat detail</span>
         </summary>
         <div className="px-5 pb-5 space-y-4">
-          {/* Komposisi skor */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <_RuleCard
               icon={CalendarCheck}
               iconColor="text-success"
-              title={`Kehadiran (max ${SCORE_WEIGHT.KEHADIRAN})`}
-              desc="Hadir / hari efektif × 70. Libur & Cuti tidak dihitung sebagai hari efektif."
+              title="Point Ranking Harian"
+              desc={`Per divisi per hari: Rank 1=${RANK_POINTS[0]}, 2=${RANK_POINTS[1]}, 3=${RANK_POINTS[2]}, 4=${RANK_POINTS[3]}, 5=${RANK_POINTS[4]}, 6+=${RANK_POINTS[5]}. Diurutkan dari jam absen paling awal.`}
+            />
+            <_RuleCard
+              icon={Users}
+              iconColor="text-primary"
+              title="Penalti"
+              desc="Telat, Alpha, Manual, SP. Dipotong dari point ranking."
             />
             <_RuleCard
               icon={Award}
-              iconColor="text-primary"
-              title={`Disiplin (max ${SCORE_WEIGHT.DISIPLIN})`}
-              desc="Mulai 30, dipotong oleh pelanggaran di bawah."
-            />
-            <_RuleCard
-              icon={Clock}
               iconColor="text-success"
-              title={`Bonus Ketepatan (max ${SCORE_WEIGHT.KETEPATAN_MAX})`}
-              desc={`Absolute (0-${SCORE_WEIGHT.KETEPATAN_ABSOLUTE_MAX}) berdasarkan rata-rata kedatangan + Relative (0-${SCORE_WEIGHT.KETEPATAN_RELATIVE_MAX}) vs median divisi.`}
+              title="Grade (Persentil)"
+              desc="A top 10%, B top 30%, C top 60%, D top 80%, E bottom 20% dari total point."
             />
           </div>
 
-          {/* Penalti */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <_RuleCard
               icon={XCircle}
               iconColor="text-danger"
               title="Alpha"
-              desc={`-${PENALTY.ALPHA_PER_HARI} poin per hari`}
+              desc={`−${PENALTY.ALPHA} poin per hari`}
             />
             <_RuleCard
               icon={Clock}
               iconColor="text-warning"
               title="Keterlambatan"
-              desc={`-${PENALTY.TELAT_PER_KEJADIAN} poin per kejadian`}
+              desc={`−${PENALTY.TELAT} poin per kejadian`}
             />
             <_RuleCard
               icon={CalendarCheck}
               iconColor="text-warning"
               title="Manual Input"
-              desc={`-${PENALTY.MANUAL_INPUT} poin per input manual (hadir/telat/izin/sakit/cuti)`}
+              desc={`−${PENALTY.MANUAL} poin per input manual (hadir/telat/izin/sakit/cuti)`}
             />
             <_RuleCard
               icon={AlertTriangle}
               iconColor="text-danger"
               title="Surat Peringatan"
-              desc={`SP-1: -${PENALTY.SP1}, SP-2: -${PENALTY.SP2}, SP-3: -${PENALTY.SP3}`}
+              desc={`SP-1: −${PENALTY.SP1}, SP-2: −${PENALTY.SP2}, SP-3: −${PENALTY.SP3} (per periode)`}
+            />
+            <_RuleCard
+              icon={CalendarCheck}
+              iconColor="text-muted-foreground"
+              title="Tidak Dihitung"
+              desc="Izin, Sakit, Cuti, Libur: 0 point, 0 penalti (kecuali manual input tetap −1)."
             />
             <_RuleCard
               icon={Users}
               iconColor="text-muted-foreground"
               title={`Eligibilitas (${MIN_MONTHS_ELIGIBLE} bulan)`}
-              desc={`Pegawai yang bergabung kurang dari ${MIN_MONTHS_ELIGIBLE} bulan belum dinilai (grade "—").`}
-            />
-            <_RuleCard
-              icon={Award}
-              iconColor="text-primary"
-              title="Grade"
-              desc="A ≥90 · B 80–89 · C 70–79 · D 60–69 · E <60"
+              desc={`Pegawai bergabung < ${MIN_MONTHS_ELIGIBLE} bulan belum dinilai (point tetap dihitung, tapi tidak masuk ranking/grade).`}
             />
           </div>
 
           <p className="text-[10px] text-muted-foreground italic">
-            Skor akhir = Kehadiran + max(0, 30 − total penalti) + Bonus Ketepatan (clip 0–100). Pegawai tanpa data kehadiran di periode → skor 0.
+            Total Point = SUM(point ranking harian) − total penalti (telat + alpha + manual + SP). Floor ke 0 (tidak boleh negatif).
           </p>
         </div>
       </details>
@@ -846,11 +744,10 @@ function _HeroCard({
   iconBg: string;
   iconColor: string;
   trend: number | null;
-  trendInverted: boolean; // true: kenaikan = negatif (mis. insiden)
+  trendInverted: boolean;
   prevLabel?: string;
   breakdown?: string;
 }) {
-  // Trend color: kalau trendInverted, kenaikan (positif) = merah, penurunan = hijau
   const isPositive = trend !== null && trend > 0;
   const isNegative = trend !== null && trend < 0;
   const isFlat = trend !== null && trend === 0;
@@ -896,7 +793,7 @@ function _HeroCard({
 }
 
 function _InsightCard({
-  title, subtitle, icon: Icon, iconColor, iconBg, rows, valueColor, ranks,
+  title, subtitle, icon: Icon, iconColor, iconBg, rows, valueColor, valueSuffix,
 }: {
   title: string;
   subtitle: string;
@@ -905,7 +802,7 @@ function _InsightCard({
   iconBg: string;
   rows: PerformanceRow[];
   valueColor: string;
-  ranks?: string[];
+  valueSuffix?: string;
 }) {
   return (
     <div className="bg-card rounded-2xl border border-border p-5">
@@ -925,13 +822,15 @@ function _InsightCard({
           const gradeColor = getGradeColor(r.grade);
           return (
             <div key={r.employee_id} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors">
-              <span className="text-base w-6 text-center">{ranks?.[idx] ?? `#${idx + 1}`}</span>
+              <span className="text-base w-6 text-center">#{idx + 1}</span>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-foreground truncate">{r.nama}</p>
                 <p className="text-[10px] text-muted-foreground truncate">{r.jabatanNama}</p>
               </div>
               <div className="text-right">
-                <p className={cn("text-base font-bold tabular-nums", valueColor)}>{r.skorTotal}</p>
+                <p className={cn("text-base font-bold tabular-nums", valueColor)}>
+                  {r.totalPoint}{valueSuffix ? <span className="text-[10px] font-medium text-muted-foreground ml-0.5">{valueSuffix}</span> : null}
+                </p>
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${gradeColor}20`, color: gradeColor }}>{r.grade}</span>
               </div>
             </div>
