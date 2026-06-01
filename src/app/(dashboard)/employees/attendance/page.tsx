@@ -5,6 +5,7 @@ import {
   ClipboardCheck, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   ChevronLeft, ChevronRight, ChevronUp, Download, FileText, ChevronDown, Clock, User,
   CalendarOff, ArrowRightLeft, UserCheck, LayoutList, CalendarDays, Calendar, Eye,
+  BarChart3, TrendingUp, TrendingDown, ArrowUp, ArrowDown, Filter, Trophy, Users,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -32,7 +33,28 @@ type AttendanceRow = DbAttendanceRecord & {
 };
 
 const PAGE_SIZE = 15;
+const SUMMARY_PAGE_SIZE = 15;
+const SUMMARY_CUT_OFF_DAY = 8;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
+
+function getSummaryPeriodRange(periodKey: string): { start: string; end: string; label: string } {
+  const [year, month] = periodKey.split("-").map(Number);
+  const startDate = new Date(year, month - 1, SUMMARY_CUT_OFF_DAY);
+  const endDate = new Date(year, month, SUMMARY_CUT_OFF_DAY - 1);
+  const start = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}-${String(startDate.getDate()).padStart(2, "0")}`;
+  const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, "0")}-${String(endDate.getDate()).padStart(2, "0")}`;
+  const label = `${SUMMARY_CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${SUMMARY_CUT_OFF_DAY - 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
+  return { start, end, label };
+}
+
+function getSummaryCurrentPeriodKey(): string {
+  const now = new Date();
+  if (now.getDate() < SUMMARY_CUT_OFF_DAY) {
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+  }
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
 
 const STATUS_OPTIONS = [
   { value: "Hadir", label: "Hadir", color: "#10b981" },
@@ -137,7 +159,7 @@ export default function AttendancePage() {
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"tabel" | "kalender">("tabel");
+  const [viewMode, setViewMode] = useState<"tabel" | "kalender" | "ringkasan">("tabel");
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Semua");
@@ -607,6 +629,219 @@ export default function AttendancePage() {
   const statusCounts: Record<string, number> = { Hadir: 0, Terlambat: 0, Izin: 0, Sakit: 0, Alpha: 0, Libur: 0, Cuti: 0 };
   records.forEach((r) => { if (r.status in statusCounts) statusCounts[r.status]++; });
   const totalDenda = records.reduce((s, r) => s + r.denda, 0);
+
+  // ─── Ringkasan (per-employee summary across date range) ───
+  type SummaryRow = {
+    employee_id: string;
+    nama: string;
+    status: string;
+    divisionId: number;
+    divisionNama: string;
+    divisionColor: string;
+    hadir: number;
+    telat: number;
+    izin: number;
+    sakit: number;
+    alpha: number;
+    libur: number;
+    cuti: number;
+    total: number;
+  };
+
+  const [summaryDateMode, setSummaryDateMode] = useState<"periode" | "custom">("periode");
+  const [summaryPeriodKey, setSummaryPeriodKey] = useState(getSummaryCurrentPeriodKey);
+  const [summaryCustomStart, setSummaryCustomStart] = useState("");
+  const [summaryCustomEnd, setSummaryCustomEnd] = useState("");
+  const [summarySearch, setSummarySearch] = useState("");
+  const [summaryPage, setSummaryPage] = useState(1);
+  const [summarySortBy, setSummarySortBy] = useState<"nama" | "hadir" | "alpha" | "telat" | "total">("nama");
+  const [summaryData, setSummaryData] = useState<SummaryRow[]>([]);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryExportMenu, setSummaryExportMenu] = useState(false);
+  const summaryExportRef = useRef<HTMLDivElement>(null);
+
+  const summaryPeriod = useMemo(() =>
+    summaryDateMode === "periode"
+      ? getSummaryPeriodRange(summaryPeriodKey)
+      : { start: summaryCustomStart, end: summaryCustomEnd, label: summaryCustomStart && summaryCustomEnd ? `${summaryCustomStart} – ${summaryCustomEnd}` : "Pilih tanggal" },
+    [summaryDateMode, summaryPeriodKey, summaryCustomStart, summaryCustomEnd]);
+
+  const summaryDateLabel = useMemo(() => {
+    if (!summaryPeriod.start || !summaryPeriod.end) return "";
+    const s = new Date(summaryPeriod.start + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    const e = new Date(summaryPeriod.end + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    return `${s} – ${e}`;
+  }, [summaryPeriod.start, summaryPeriod.end]);
+
+  const fetchSummary = useCallback(async () => {
+    if (!summaryPeriod.start || !summaryPeriod.end) {
+      setSummaryData([]);
+      return;
+    }
+    setSummaryLoading(true);
+    const PAGE = 1000;
+    let allData: any[] = [];
+    let from = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from("attendance_records")
+        .select("employee_id, status, division_id, divisions(nama, color)")
+        .gte("tanggal", summaryPeriod.start)
+        .lte("tanggal", summaryPeriod.end)
+        .range(from, from + PAGE - 1);
+      if (error || !data) break;
+      allData = allData.concat(data);
+      hasMore = data.length === PAGE;
+      from += PAGE;
+    }
+
+    const map = new Map<string, SummaryRow>();
+    allData.forEach((d) => {
+      let row = map.get(d.employee_id);
+      if (!row) {
+        const emp = employees.find((e) => e.id === d.employee_id);
+        row = {
+          employee_id: d.employee_id,
+          nama: emp?.nama || d.employee_id,
+          status: emp?.status || "Aktif",
+          divisionId: d.division_id || 0,
+          divisionNama: d.divisions?.nama || "-",
+          divisionColor: d.divisions?.color || "#6b7280",
+          hadir: 0, telat: 0, izin: 0, sakit: 0, alpha: 0, libur: 0, cuti: 0, total: 0,
+        };
+        map.set(d.employee_id, row);
+      }
+      switch (d.status) {
+        case "Hadir": row.hadir++; break;
+        case "Terlambat": row.telat++; row.hadir++; break;
+        case "Izin": row.izin++; break;
+        case "Sakit": row.sakit++; break;
+        case "Alpha": row.alpha++; break;
+        case "Libur": row.libur++; break;
+        case "Cuti": row.cuti++; break;
+      }
+    });
+
+    const rows = Array.from(map.values()).map((r) => ({ ...r, total: r.hadir + r.izin + r.sakit + r.alpha + r.libur + r.cuti }));
+    setSummaryData(rows);
+    setSummaryLoading(false);
+  }, [summaryPeriod.start, summaryPeriod.end, employees]);
+
+  useEffect(() => {
+    if (viewMode === "ringkasan") fetchSummary();
+  }, [viewMode, fetchSummary]);
+
+  useEffect(() => {
+    setSummaryPage(1);
+  }, [summarySearch, summarySortBy]);
+
+  const summaryFiltered = useMemo(() => {
+    const q = summarySearch.toLowerCase();
+    let rows = summaryData.filter((r) =>
+      r.nama.toLowerCase().includes(q) || r.divisionNama.toLowerCase().includes(q)
+    );
+    rows.sort((a, b) => {
+      switch (summarySortBy) {
+        case "hadir": return b.hadir - a.hadir || a.nama.localeCompare(b.nama);
+        case "alpha": return b.alpha - a.alpha || a.nama.localeCompare(b.nama);
+        case "telat": return b.telat - a.telat || a.nama.localeCompare(b.nama);
+        case "total": return b.total - a.total || a.nama.localeCompare(b.nama);
+        default: return a.nama.localeCompare(b.nama);
+      }
+    });
+    return rows;
+  }, [summaryData, summarySearch, summarySortBy]);
+
+  const summaryPaged = useMemo(
+    () => summaryFiltered.slice((summaryPage - 1) * SUMMARY_PAGE_SIZE, summaryPage * SUMMARY_PAGE_SIZE),
+    [summaryFiltered, summaryPage]
+  );
+
+  const summaryTotals = useMemo(() => {
+    const t = { hadir: 0, telat: 0, izin: 0, sakit: 0, alpha: 0, libur: 0, cuti: 0, total: 0 };
+    summaryFiltered.forEach((r) => { t.hadir += r.hadir; t.telat += r.telat; t.izin += r.izin; t.sakit += r.sakit; t.alpha += r.alpha; t.libur += r.libur; t.cuti += r.cuti; t.total += r.total; });
+    return t;
+  }, [summaryFiltered]);
+
+  const exportSummaryCSV = () => {
+    if (summaryFiltered.length === 0) return;
+    const headers = ["#", "Pegawai", "Status", "Divisi", "Hadir", "Telat", "Izin", "Sakit", "Alpha", "Libur", "Cuti", "Total"];
+    const rows: string[] = [headers.join(",")];
+    summaryFiltered.forEach((r, i) => {
+      rows.push([
+        i + 1, `"${r.nama}"`, r.status, `"${r.divisionNama}"`,
+        r.hadir, r.telat, r.izin, r.sakit, r.alpha, r.libur, r.cuti, r.total,
+      ].join(","));
+    });
+    rows.push(["", `"TOTAL (${summaryFiltered.length} pegawai)"`, "", "", summaryTotals.hadir, summaryTotals.telat, summaryTotals.izin, summaryTotals.sakit, summaryTotals.alpha, summaryTotals.libur, summaryTotals.cuti, summaryTotals.total].join(","));
+    const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Ringkasan_Absensi_${summaryPeriod.start}_${summaryPeriod.end}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSummaryExportMenu(false);
+  };
+
+  const exportSummaryPDF = async () => {
+    if (summaryFiltered.length === 0) return;
+    const { default: jsPDF } = await import("jspdf");
+    const { default: autoTable } = await import("jspdf-autotable");
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pw = doc.internal.pageSize.getWidth();
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text("Ringkasan Absensi Pegawai", pw / 2, 15, { align: "center" });
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Periode: ${summaryPeriod.label}`, pw / 2, 21, { align: "center" });
+    doc.text(`Dicetak: ${new Date().toLocaleString("id-ID")}`, pw / 2, 27, { align: "center" });
+    const body = summaryFiltered.map((r, i) => [
+      i + 1, r.nama, r.divisionNama, r.hadir, r.telat, r.izin, r.sakit, r.alpha, r.libur, r.cuti, r.total,
+    ]);
+    body.push(["TOTAL", "", `(${summaryFiltered.length} pegawai)`, summaryTotals.hadir, summaryTotals.telat, summaryTotals.izin, summaryTotals.sakit, summaryTotals.alpha, summaryTotals.libur, summaryTotals.cuti, summaryTotals.total]);
+    autoTable(doc, {
+      startY: 33,
+      head: [["#", "Pegawai", "Divisi", "Hadir", "Telat", "Izin", "Sakit", "Alpha", "Libur", "Cuti", "Total"]],
+      body,
+      theme: "grid",
+      headStyles: { fillColor: [59, 130, 246], fontSize: 8, fontStyle: "bold", halign: "center" },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 0: { halign: "center", cellWidth: 8 }, 3: { halign: "center" }, 4: { halign: "center" }, 5: { halign: "center" }, 6: { halign: "center" }, 7: { halign: "center" }, 8: { halign: "center" }, 9: { halign: "center" }, 10: { halign: "center" } },
+      margin: { left: 14, right: 14 },
+      didParseCell: (data) => {
+        if (data.row.index === body.length - 1) {
+          data.cell.styles.fillColor = [241, 245, 249];
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+    });
+    doc.save(`Ringkasan_Absensi_${summaryPeriod.start}_${summaryPeriod.end}.pdf`);
+    setSummaryExportMenu(false);
+  };
+
+  const navigateSummaryPeriod = (dir: -1 | 1) => {
+    if (summaryDateMode !== "periode") return;
+    const [y, m] = summaryPeriodKey.split("-").map(Number);
+    const next = new Date(y, m - 1 + dir, 1);
+    setSummaryPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+    setSummaryPage(1);
+  };
+
+  const summaryHeaderStats = useMemo(() => {
+    const empCount = summaryFiltered.length;
+    const totalRecords = summaryTotals.total;
+    const avgHadir = empCount > 0 ? Math.round(summaryTotals.hadir / empCount) : 0;
+    return { empCount, totalRecords, avgHadir };
+  }, [summaryFiltered, summaryTotals]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (summaryExportRef.current && !summaryExportRef.current.contains(e.target as Node)) setSummaryExportMenu(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   // ─── Filter ───
   const filtered = records.filter((r) => {
@@ -1494,6 +1729,11 @@ export default function AttendancePage() {
           className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
             viewMode === "kalender" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
           <CalendarDays className="w-3.5 h-3.5" />Kalender
+        </button>
+        <button onClick={() => setViewMode("ringkasan")}
+          className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+            viewMode === "ringkasan" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+          <BarChart3 className="w-3.5 h-3.5" />Ringkasan
         </button>
       </div>
 
@@ -2794,6 +3034,229 @@ export default function AttendancePage() {
           </Portal>
         );
       })()}
+
+      {/* ═══ RINGKASAN VIEW (per-employee summary) ═══ */}
+      {viewMode === "ringkasan" && (
+        <div className="space-y-4">
+          {/* Toolbar: period navigator + date range + sort + export */}
+          <div className="bg-card rounded-2xl border border-border p-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1 bg-muted rounded-xl p-0.5 flex-shrink-0">
+                <button onClick={() => setSummaryDateMode("periode")}
+                  className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all",
+                    summaryDateMode === "periode" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                  <CalendarDays className="w-3 h-3" />Periode
+                </button>
+                <button onClick={() => setSummaryDateMode("custom")}
+                  className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all",
+                    summaryDateMode === "custom" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                  <Filter className="w-3 h-3" />Custom
+                </button>
+              </div>
+
+              {summaryDateMode === "periode" ? (
+                <div className="flex items-center gap-1 bg-muted rounded-xl p-0.5 flex-shrink-0">
+                  <button onClick={() => navigateSummaryPeriod(-1)} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="px-2.5 py-1 text-center min-w-[180px]">
+                    <p className="text-[11px] font-bold text-foreground">{summaryPeriod.label}</p>
+                  </div>
+                  <button onClick={() => navigateSummaryPeriod(1)} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <DatePicker value={summaryCustomStart} onChange={(v) => { setSummaryCustomStart(v); setSummaryPage(1); }} placeholder="Dari" />
+                  <span className="text-xs text-muted-foreground">–</span>
+                  <DatePicker value={summaryCustomEnd} onChange={(v) => { setSummaryCustomEnd(v); setSummaryPage(1); }} placeholder="Sampai" />
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[200px]">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input type="text" placeholder="Cari nama atau divisi..." value={summarySearch}
+                  onChange={(e) => setSummarySearch(e.target.value)}
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+              </div>
+
+              <div ref={summaryExportRef} className="relative flex-shrink-0">
+                <Button variant="outline" size="sm" icon={Download} onClick={() => setSummaryExportMenu(!summaryExportMenu)} disabled={summaryFiltered.length === 0}>
+                  Export <ChevronDown className="w-3 h-3 ml-0.5" />
+                </Button>
+                {summaryExportMenu && (
+                  <div className="absolute right-0 top-full mt-1.5 w-44 bg-card rounded-xl border border-border shadow-xl z-10 overflow-hidden animate-scale-in">
+                    <button onClick={exportSummaryPDF} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-foreground hover:bg-muted transition-colors">
+                      <FileText className="w-3.5 h-3.5 text-danger" />Export PDF
+                    </button>
+                    <button onClick={exportSummaryCSV} className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-foreground hover:bg-muted transition-colors border-t border-border">
+                      <FileText className="w-3.5 h-3.5 text-success" />Export CSV
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Sort pills */}
+            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+              {([
+                { key: "nama", label: "Nama", icon: Users },
+                { key: "hadir", label: "Hadir Terbanyak", icon: TrendingUp },
+                { key: "alpha", label: "Alpha Terbanyak", icon: TrendingDown },
+                { key: "telat", label: "Telat Terbanyak", icon: Clock },
+                { key: "total", label: "Total Record", icon: BarChart3 },
+              ] as const).map((opt) => {
+                const Icon = opt.icon;
+                const isActive = summarySortBy === opt.key;
+                return (
+                  <button key={opt.key} onClick={() => setSummarySortBy(opt.key)}
+                    className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all",
+                      isActive ? "bg-primary/10 text-primary ring-1 ring-primary/20" : "text-muted-foreground hover:bg-muted")}>
+                    <Icon className="w-3 h-3" />
+                    <span>{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Stats header */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-card rounded-2xl border border-border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Pegawai</p>
+                  <p className="text-2xl font-bold text-foreground mt-1">{summaryLoading ? "-" : summaryHeaderStats.empCount}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Users className="w-5 h-5 text-primary" />
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-2">pegawai dengan data absensi</p>
+            </div>
+            <div className="bg-card rounded-2xl border border-border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Record</p>
+                  <p className="text-2xl font-bold text-foreground mt-1">{summaryLoading ? "-" : summaryHeaderStats.totalRecords}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                  <BarChart3 className="w-5 h-5 text-blue-500" />
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-2">{summaryDateLabel || "pilih periode"}</p>
+            </div>
+            <div className="bg-card rounded-2xl border border-border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Rata-rata Hadir</p>
+                  <p className="text-2xl font-bold text-foreground mt-1">{summaryLoading ? "-" : summaryHeaderStats.avgHadir}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
+                  <Trophy className="w-5 h-5 text-success" />
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-2">hari per pegawai</p>
+            </div>
+          </div>
+
+          {/* Tabel ringkasan */}
+          <div className="bg-card rounded-2xl border border-border overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Divisi</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Hadir</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Telat</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Izin</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Sakit</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Alpha</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Libur</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Cuti</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {summaryLoading ? (
+                    <SkeletonTable rows={8} cols={11} />
+                  ) : summaryPaged.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} className="text-center py-12 text-sm text-muted-foreground">
+                        {summaryData.length === 0
+                          ? "Tidak ada data absensi di periode ini"
+                          : "Tidak ada pegawai cocok dengan pencarian"}
+                      </td>
+                    </tr>
+                  ) : summaryPaged.map((row, idx) => {
+                    const sc = (s: string) => STATUS_OPTIONS.find((o) => o.value === s)?.color || "#6b7280";
+                    return (
+                      <tr key={row.employee_id} className="hover:bg-muted/30">
+                        <td className="px-5 py-3 text-xs text-muted-foreground">{(summaryPage - 1) * SUMMARY_PAGE_SIZE + idx + 1}</td>
+                        <td className="px-5 py-3">
+                          <p className="text-sm font-semibold text-foreground">{row.nama}</p>
+                          {row.status === "Tidak Aktif" && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded mt-0.5">
+                              Tidak Aktif
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${row.divisionColor}15`, color: row.divisionColor }}>
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: row.divisionColor }} />
+                            {row.divisionNama}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-center text-sm font-semibold" style={{ color: sc("Hadir") }}>{row.hadir}</td>
+                        <td className="px-5 py-3 text-center text-sm font-semibold" style={{ color: sc("Terlambat") }}>{row.telat}</td>
+                        <td className="px-5 py-3 text-center text-sm font-semibold" style={{ color: sc("Izin") }}>{row.izin}</td>
+                        <td className="px-5 py-3 text-center text-sm font-semibold" style={{ color: sc("Sakit") }}>{row.sakit}</td>
+                        <td className="px-5 py-3 text-center text-sm font-semibold" style={{ color: sc("Alpha") }}>{row.alpha}</td>
+                        <td className="px-5 py-3 text-center text-sm font-semibold" style={{ color: sc("Libur") }}>{row.libur}</td>
+                        <td className="px-5 py-3 text-center text-sm font-semibold" style={{ color: sc("Cuti") }}>{row.cuti}</td>
+                        <td className="px-5 py-3 text-center">
+                          <span className="text-sm font-bold text-foreground bg-muted px-2 py-1 rounded-md">{row.total}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {summaryFiltered.length > 0 && !summaryLoading && (
+                  <tfoot>
+                    <tr className="border-t-2 border-border bg-muted/30 font-semibold">
+                      <td className="px-5 py-3 text-xs" colSpan={3}>
+                        <span className="font-bold text-foreground">TOTAL</span>
+                        <span className="text-muted-foreground ml-2">({summaryFiltered.length} pegawai)</span>
+                      </td>
+                      <td className="px-5 py-3 text-center text-sm font-bold text-success">{summaryTotals.hadir}</td>
+                      <td className="px-5 py-3 text-center text-sm font-bold text-warning">{summaryTotals.telat}</td>
+                      <td className="px-5 py-3 text-center text-sm font-bold text-blue-500">{summaryTotals.izin}</td>
+                      <td className="px-5 py-3 text-center text-sm font-bold text-danger">{summaryTotals.sakit}</td>
+                      <td className="px-5 py-3 text-center text-sm font-bold text-muted-foreground">{summaryTotals.alpha}</td>
+                      <td className="px-5 py-3 text-center text-sm font-bold text-violet-500">{summaryTotals.libur}</td>
+                      <td className="px-5 py-3 text-center text-sm font-bold text-violet-500">{summaryTotals.cuti}</td>
+                      <td className="px-5 py-3 text-center">
+                        <span className="text-sm font-bold text-foreground bg-card px-2 py-1 rounded-md border border-border">{summaryTotals.total}</span>
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+            <Pagination currentPage={summaryPage} totalItems={summaryFiltered.length} pageSize={SUMMARY_PAGE_SIZE} onPageChange={setSummaryPage} />
+          </div>
+
+          {/* Info footer */}
+          <div className="bg-muted/30 rounded-xl border border-border/50 p-3">
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              <strong className="text-foreground">Catatan:</strong> Data dihitung dari seluruh record absensi (termasuk auto-generated Libur &amp; Alpha) di periode terpilih. Pegawai tanpa record absensi di periode ini tidak ditampilkan. Hadir = total hari hadir tepat waktu; Telat = hari hadir tapi terlambat. Total = jumlah seluruh record (Hadir + Izin + Sakit + Alpha + Libur + Cuti).
+            </p>
+          </div>
+        </div>
+      )}
 
 
     </div>
