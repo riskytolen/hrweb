@@ -563,9 +563,10 @@ export default function PettyCashPage() {
   };
 
   const handleAddUnit = async () => {
-    if (!newUnit.bagian_id || !newUnit.nama.trim()) return;
+    if (!newUnit.bagian_id) { showToast("error", "Gagal", "Pilih bagian dulu."); return; }
+    if (!newUnit.nopol.trim()) { showToast("error", "Gagal", "Nopol wajib diisi."); return; }
     const { error } = await supabase.from("petty_cash_units").insert({
-      bagian_id: newUnit.bagian_id, nama: newUnit.nama.trim(), nopol: newUnit.nopol.trim() || null, urutan: 0, status: "Aktif",
+      bagian_id: newUnit.bagian_id, nama: newUnit.nopol.trim(), nopol: newUnit.nopol.trim(), urutan: 0, status: "Aktif",
     });
     if (error) { showToast("error", "Gagal", error.message); return; }
     showToast("success", "Unit Ditambahkan");
@@ -609,10 +610,10 @@ export default function PettyCashPage() {
       updates = { nama: data.nama.trim() };
       entityLabel = data.nama.trim();
     } else {
-      if (!data.nama?.trim()) { showToast("error", "Gagal", "Nama unit tidak boleh kosong."); setMasterEditSaving(false); return; }
+      if (!data.nopol?.trim()) { showToast("error", "Gagal", "Nopol tidak boleh kosong."); setMasterEditSaving(false); return; }
       table = "petty_cash_units";
-      updates = { nama: data.nama.trim(), nopol: data.nopol?.trim() || null };
-      entityLabel = data.nopol?.trim() ? `${data.nama.trim()} (${data.nopol.trim()})` : data.nama.trim();
+      updates = { nama: data.nopol.trim(), nopol: data.nopol.trim(), bagian_id: data.bagian_id };
+      entityLabel = data.nopol.trim();
     }
 
     const { data: prev } = await supabase.from(table).select("*").eq("id", id).maybeSingle();
@@ -1148,54 +1149,48 @@ export default function PettyCashPage() {
                 )}
                 {masterTab === "unit" && (
                   <div className="space-y-2">
-                    {bagians.map((b) => {
-                      const us = units.filter((u) => u.bagian_id === b.id);
+                    {units.map((u) => {
+                      const bagian = bagians.find((b) => b.id === u.bagian_id);
                       return (
-                        <div key={b.id} className="px-3 py-2 rounded-lg bg-muted/30">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <p className="text-xs font-bold text-foreground">{b.nama}</p>
-                            <span className="text-[9px] text-muted-foreground">{us.length} unit</span>
-                          </div>
-                          {us.length === 0 ? <p className="text-[10px] text-muted-foreground italic">Belum ada unit</p> : (
-                            <div className="space-y-1">
-                              {us.map((u) => (
-                                <div key={u.id}>
-                                  {masterEdit?.type === "unit" && masterEdit.id === u.id ? (
-                                    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-primary/5 border border-primary/30">
-                                      <input type="text" placeholder="Nama unit" value={masterEdit.data.nama} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nama: e.target.value } })} className={cn(inputClass, "flex-1 text-xs py-1.5")} autoFocus />
-                                      <input type="text" placeholder="Nopol (opsional)" value={masterEdit.data.nopol ?? ""} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nopol: e.target.value } })} className="w-32 px-2 py-1.5 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50 uppercase" />
-                                      <button onClick={saveMasterEdit} disabled={masterEditSaving} title="Simpan" className="p-1 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50"><Check className="w-3 h-3" /></button>
-                                      <button onClick={cancelMasterEdit} title="Batal" className="p-1 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3 h-3" /></button>
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-card border border-border hover:border-primary/30">
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <span className="text-[10px] font-semibold text-foreground truncate">{u.nama}</span>
-                                        {u.nopol && <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">{u.nopol}</span>}
-                                      </div>
-                                      {canEdit && (
-                                        <div className="flex items-center gap-0.5 flex-shrink-0">
-                                          <button onClick={() => startEditUnit(u)} title="Edit" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary"><Pencil className="w-3 h-3" /></button>
-                                          <button onClick={() => setMasterDelete({ table: "units", id: u.id, label: u.nopol ? `${u.nama} (${u.nopol})` : u.nama })} title="Hapus" className="p-1 rounded hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3 h-3" /></button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
+                        <div key={u.id}>
+                          {masterEdit?.type === "unit" && masterEdit.id === u.id ? (
+                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/30">
+                              <select value={masterEdit.data.bagian_id} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, bagian_id: Number(e.target.value) } })} className="px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none text-foreground">
+                                <option value="0">Pilih bagian...</option>
+                                {bagians.map((b) => <option key={b.id} value={b.id}>{b.nama}</option>)}
+                              </select>
+                              <input type="text" placeholder="Nopol *" value={masterEdit.data.nopol ?? ""} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nopol: e.target.value.toUpperCase() } })} className={cn(inputClass, "flex-1 text-xs py-2 uppercase")} autoFocus />
+                              <input type="text" placeholder="Keterangan (opsional)" value={masterEdit.data.nama} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nama: e.target.value } })} className="w-40 px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
+                              <button onClick={saveMasterEdit} disabled={masterEditSaving} title="Simpan" className="p-1.5 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                              <button onClick={cancelMasterEdit} title="Batal" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30 hover:bg-muted/50">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-xs font-semibold text-foreground uppercase">{u.nopol || u.nama}</span>
+                                {u.nama && u.nopol && <span className="text-[10px] text-muted-foreground truncate">— {u.nama}</span>}
+                                {bagian && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{bagian.nama}</span>}
+                              </div>
+                              {canEdit && (
+                                <div className="flex items-center gap-0.5 flex-shrink-0">
+                                  <button onClick={() => startEditUnit(u)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                                  <button onClick={() => setMasterDelete({ table: "units", id: u.id, label: u.nopol || u.nama })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                                 </div>
-                              ))}
+                              )}
                             </div>
                           )}
                         </div>
                       );
                     })}
+                    {units.length === 0 && <p className="text-[10px] text-muted-foreground italic">Belum ada unit</p>}
                     {canEdit && (
                       <div className="flex items-center gap-2 pt-2 border-t border-border/50">
                         <select value={newUnit.bagian_id || ""} onChange={(e) => setNewUnit({ ...newUnit, bagian_id: Number(e.target.value) })} className="px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none text-foreground">
                           <option value="">Pilih bagian...</option>
                           {bagians.map((b) => <option key={b.id} value={b.id}>{b.nama}</option>)}
                         </select>
-                        <input type="text" placeholder="Nama unit..." value={newUnit.nama} onChange={(e) => setNewUnit({ ...newUnit, nama: e.target.value })} className={cn(inputClass, "flex-1 text-xs py-2")} />
-                        <input type="text" placeholder="Nopol" value={newUnit.nopol} onChange={(e) => setNewUnit({ ...newUnit, nopol: e.target.value.toUpperCase() })} className="w-28 px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50 uppercase" />
+                        <input type="text" placeholder="Nopol * (cth: B 1234 ABC)" value={newUnit.nopol} onChange={(e) => setNewUnit({ ...newUnit, nopol: e.target.value.toUpperCase() })} className={cn(inputClass, "flex-1 text-xs py-2 uppercase")} />
+                        <input type="text" placeholder="Keterangan (opsional)" value={newUnit.nama} onChange={(e) => setNewUnit({ ...newUnit, nama: e.target.value })} className="w-40 px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
                         <Button size="sm" icon={Plus} onClick={handleAddUnit}>Tambah</Button>
                       </div>
                     )}
@@ -1268,7 +1263,7 @@ export default function PettyCashPage() {
                           <Select
                             value={String(form.unit_id)}
                             onChange={(v) => setForm({ ...form, unit_id: Number(v) })}
-                            options={[{ value: "0", label: "—" }, ...unitsForBagian.map((u) => ({ value: String(u.id), label: u.nama }))]}
+                            options={[{ value: "0", label: "—" }, ...unitsForBagian.map((u) => ({ value: String(u.id), label: u.nopol || u.nama }))]}
                             placeholder="Pilih unit"
                           />
                         </div>
@@ -1349,7 +1344,7 @@ export default function PettyCashPage() {
                                       <Select
                                         value={String(row.unit_id)}
                                         onChange={(v) => updateBulkRow(row.key, { unit_id: Number(v) })}
-                                        options={[{ value: "0", label: "—" }, ...rowUnits.map((u) => ({ value: String(u.id), label: u.nama }))]}
+                                        options={[{ value: "0", label: "—" }, ...rowUnits.map((u) => ({ value: String(u.id), label: u.nopol || u.nama }))]}
                                         placeholder="Unit"
                                       />
                                     </td>
