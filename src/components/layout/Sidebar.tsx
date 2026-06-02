@@ -27,6 +27,7 @@ import {
   Clock,
   ShieldCheck,
   LayoutDashboard,
+  Briefcase,
   type LucideIcon,
 } from "lucide-react";
 
@@ -99,6 +100,16 @@ const allSections: MenuSection[] = [
           { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, permission: "legal" },
           { name: "Pengumuman", href: "/employees/announcements", icon: Megaphone, permission: "employees" },
           { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus, permission: "recruitment" },
+        ],
+      },
+      {
+        kind: "group",
+        key: "general-affair",
+        label: "General Affair",
+        icon: Briefcase,
+        basePath: "/general-affair",
+        items: [
+          { name: "Patty Cash", href: "/general-affair/patty-cash", icon: Wallet, comingSoon: true },
         ],
       },
     ],
