@@ -320,7 +320,7 @@ export default function PettyCashPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [filtered]);
 
-  // ─── Report: per Kategori (dinamis) â€” hitung untuk semua kategori yang ada di master, plus "Tanpa Kategori" untuk transaksi tanpa kategori ───
+  // ─── Report: per Kategori (dinamis) — hitung untuk semua kategori yang ada di master, plus "Tanpa Kategori" untuk transaksi tanpa kategori ───
   const reportPerKategori = useMemo(() => {
     const allCats = categories.map((c) => ({ id: c.id, nama: c.nama, color: c.color, type: c.type, count: 0, cashIn: 0, cashOut: 0 }));
     filtered.forEach((t) => {
@@ -341,7 +341,7 @@ export default function PettyCashPage() {
     return allCats;
   }, [filtered, categories]);
 
-  // ─── Report: per Bagian (dinamis) â€” semua bagian yang ada di master, plus "Tanpa Bagian" ───
+  // ─── Report: per Bagian (dinamis) — semua bagian yang ada di master, plus "Tanpa Bagian" ───
   const reportPerBagian = useMemo(() => {
     const allBags = bagians.map((b) => ({ id: b.id, nama: b.nama, count: 0, cashIn: 0, cashOut: 0 }));
     filtered.forEach((t) => {
@@ -806,7 +806,7 @@ export default function PettyCashPage() {
   };
 
   const isLowBalance = settings && stats.currentBalance < settings.low_balance_threshold;
-  const custName = settings?.custodian?.nama || "â€”";
+  const custName = settings?.custodian?.nama || "—";
 
   return (
     <RouteGuard permission="petty-cash">
@@ -868,7 +868,7 @@ export default function PettyCashPage() {
                 <Wallet className={cn("w-5 h-5", isLowBalance ? "text-warning" : "text-primary")} />
               </div>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-2 truncate">Imprest: {settings ? formatCurrency(settings.initial_balance) : "â€”"}</p>
+            <p className="text-[10px] text-muted-foreground mt-2 truncate">Imprest: {settings ? formatCurrency(settings.initial_balance) : "—"}</p>
           </div>
           <div className="bg-card rounded-2xl border border-border p-4">
             <div className="flex items-center justify-between">
@@ -1173,7 +1173,7 @@ export default function PettyCashPage() {
               {dateStart === "" && dateEnd === "" && filterCategory === "Semua" && filterBagian === "Semua" && !filterUnit && <span className="italic">Semua data (tanpa filter)</span>}
             </div>
 
-            {/* Per Kategori (Dinamis â€” semua kategori yang ada di master) */}
+            {/* Per Kategori (Dinamis — semua kategori yang ada di master) */}
             <div className="bg-card rounded-2xl border border-border overflow-hidden">
               <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1388,12 +1388,12 @@ export default function PettyCashPage() {
                               const val = row?.get(c.id) || 0;
                               return (
                                 <td key={c.id} className={cn("px-2 py-2.5 text-right text-[11px] tabular-nums", val > 0 ? "text-foreground font-semibold" : "text-muted-foreground/40")}>
-                                  {val > 0 ? formatCurrency(val) : "â€”"}
+                                  {val > 0 ? formatCurrency(val) : "—"}
                                 </td>
                               );
                             })}
                             <td className={cn("px-3 py-2.5 text-right text-xs font-bold sticky right-0 bg-card z-10 border-l border-border", rowTotal > 0 ? "text-foreground" : "text-muted-foreground/40")}>
-                              {rowTotal > 0 ? formatCurrency(rowTotal) : "â€”"}
+                              {rowTotal > 0 ? formatCurrency(rowTotal) : "—"}
                             </td>
                           </tr>
                         );
@@ -1406,7 +1406,7 @@ export default function PettyCashPage() {
                           const colTotal = filtered.filter((t) => t.category_id === c.id).reduce((sum, t) => sum + t.cash_out, 0);
                           return (
                             <td key={c.id} className={cn("px-2 py-2.5 text-right text-[11px] font-bold tabular-nums", colTotal > 0 ? "text-danger" : "text-muted-foreground/40")}>
-                              {colTotal > 0 ? formatCurrency(colTotal) : "â€”"}
+                              {colTotal > 0 ? formatCurrency(colTotal) : "—"}
                             </td>
                           );
                         })}
@@ -1613,7 +1613,7 @@ export default function PettyCashPage() {
                           <Select
                             value={form.unit}
                             onChange={(v) => setForm({ ...form, unit: v })}
-                            options={[{ value: "", label: "â€”" }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
+                            options={[{ value: "", label: "—" }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
                             placeholder="Pilih unit"
                             searchable
                           />
@@ -1694,7 +1694,7 @@ export default function PettyCashPage() {
                                       <Select
                                         value={row.unit}
                                         onChange={(v) => updateBulkRow(row.key, { unit: v })}
-                                        options={[{ value: "", label: "â€”" }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
+                                        options={[{ value: "", label: "—" }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
                                         placeholder="Unit"
                                       />
                                     </td>
@@ -1829,7 +1829,7 @@ export default function PettyCashPage() {
                     <Select
                       value={settingsForm.custodian_id}
                       onChange={(v) => setSettingsForm({ ...settingsForm, custodian_id: v })}
-                      options={[{ value: "", label: "â€”" }, ...employees.map((e) => ({ value: e.id, label: e.nama }))]}
+                      options={[{ value: "", label: "—" }, ...employees.map((e) => ({ value: e.id, label: e.nama }))]}
                       placeholder="Pilih penanggung jawab"
                     />
                   </div>
