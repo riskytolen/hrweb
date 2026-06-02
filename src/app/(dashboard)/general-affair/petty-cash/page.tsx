@@ -16,7 +16,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
-import { supabase, type DbPettyCashTransaction, type DbPettyCashCategory, type DbPettyCashBagian, type DbPettyCashUnit, type DbPettyCashSettings, type DbPegawai } from "@/lib/supabase";
+import { supabase, type DbPettyCashTransaction, type DbPettyCashCategory, type DbPettyCashBagian, type DbPettyCashSettings, type DbPegawai } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -24,20 +24,18 @@ import RouteGuard from "@/components/RouteGuard";
 type Transaction = DbPettyCashTransaction & {
   category?: DbPettyCashCategory;
   bagian?: DbPettyCashBagian;
-  unit?: DbPettyCashUnit;
   runningBalance?: number;
 };
 
 type CategoryLite = { id: number; nama: string; color: string; icon: string | null; type: "income" | "expense" | "both" };
 type BagianLite = { id: number; nama: string; status: string };
-type UnitLite = { id: number; bagian_id: number; nama: string; nopol: string | null; status: string };
 type SettingsLite = DbPettyCashSettings & { custodian?: DbPegawai };
 type BulkRow = {
   key: string;
   tanggal: string;
   category_id: number;
   bagian_id: number;
-  unit_id: number;
+  unit: string;
   keterangan: string;
   cash_in: number;
   cash_out: number;
@@ -63,7 +61,7 @@ export default function PettyCashPage() {
   const [settings, setSettings] = useState<SettingsLite | null>(null);
   const [categories, setCategories] = useState<CategoryLite[]>([]);
   const [bagians, setBagians] = useState<BagianLite[]>([]);
-  const [units, setUnits] = useState<UnitLite[]>([]);
+  const [unitHistory, setUnitHistory] = useState<string[]>([]);
   const [employees, setEmployees] = useState<{ id: string; nama: string }[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
 
@@ -79,7 +77,7 @@ export default function PettyCashPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formMode, setFormMode] = useState<"single" | "bulk">("single");
   const [form, setForm] = useState({
-    tanggal: localDateStr(), category_id: 0, bagian_id: 0, unit_id: 0, keterangan: "", cash_in: 0, cash_out: 0,
+    tanggal: localDateStr(), category_id: 0, bagian_id: 0, unit: "", keterangan: "", cash_in: 0, cash_out: 0,
   });
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [formSaving, setFormSaving] = useState(false);
@@ -96,17 +94,16 @@ export default function PettyCashPage() {
   const [settingsSaving, setSettingsSaving] = useState(false);
 
   // Master data inline editors
-  const [masterTab, setMasterTab] = useState<"kategori" | "bagian" | "unit">("kategori");
+  const [masterTab, setMasterTab] = useState<"kategori" | "bagian">("kategori");
   const [newCategory, setNewCategory] = useState({ nama: "", type: "expense" as "income" | "expense" | "both", color: "#6b7280" });
   const [newBagian, setNewBagian] = useState("");
-  const [newUnit, setNewUnit] = useState({ bagian_id: 0, nama: "", nopol: "" });
 
   // Master delete confirm
-  const [masterDelete, setMasterDelete] = useState<{ table: "categories" | "bagians" | "units"; id: number; label: string } | null>(null);
+  const [masterDelete, setMasterDelete] = useState<{ table: "categories" | "bagians"; id: number; label: string } | null>(null);
   const [masterDeleting, setMasterDeleting] = useState(false);
 
   // Master inline edit state
-  const [masterEdit, setMasterEdit] = useState<{ type: "kategori" | "bagian" | "unit"; id: number; data: { nama: string; type?: string; color?: string; nopol?: string; bagian_id?: number } } | null>(null);
+  const [masterEdit, setMasterEdit] = useState<{ type: "kategori" | "bagian"; id: number; data: { nama: string; type?: string; color?: string } } | null>(null);
   const [masterEditSaving, setMasterEditSaving] = useState(false);
 
   // Delete confirm (transactions)
@@ -169,9 +166,17 @@ export default function PettyCashPage() {
     if (data) setBagians(data as BagianLite[]);
   }, []);
 
-  const fetchUnits = useCallback(async () => {
-    const { data } = await supabase.from("petty_cash_units").select("id, bagian_id, nama, nopol, status").eq("status", "Aktif").order("urutan");
-    if (data) setUnits(data as UnitLite[]);
+  const fetchUnitHistory = useCallback(async () => {
+    const { data } = await supabase
+      .from("petty_cash_transactions")
+      .select("unit")
+      .not("unit", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (data) {
+      const unique = Array.from(new Set(data.map((r) => r.unit as string).filter(Boolean)));
+      setUnitHistory(unique);
+    }
   }, []);
 
   const fetchEmployees = useCallback(async () => {
@@ -187,7 +192,7 @@ export default function PettyCashPage() {
     while (hasMore) {
       let q = supabase
         .from("petty_cash_transactions")
-        .select("*, category:petty_cash_categories(id, nama, color, icon, type), bagian:petty_cash_bagians(id, nama), unit:petty_cash_units(id, nama)")
+        .select("*, category:petty_cash_categories(id, nama, color, icon, type), bagian:petty_cash_bagians(id, nama)")
         .order("tanggal", { ascending: true })
         .order("id", { ascending: true })
         .range(from, from + PAGE - 1);
@@ -200,15 +205,16 @@ export default function PettyCashPage() {
       from += PAGE;
     }
     setTransactions(all as Transaction[]);
+    const uniqueUnits = Array.from(new Set(all.map((t) => t.unit).filter(Boolean)));
+    if (uniqueUnits.length > 0) setUnitHistory(uniqueUnits as string[]);
   }, [dateStart, dateEnd]);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([fetchSettings(), fetchCategories(), fetchBagians(), fetchUnits(), fetchEmployees()]);
-      setLoading(false);
+      await Promise.all([fetchSettings(), fetchCategories(), fetchBagians(), fetchUnitHistory(), fetchEmployees()]);
     })();
-  }, [fetchSettings, fetchCategories, fetchBagians, fetchUnits, fetchEmployees]);
+  }, [fetchSettings, fetchCategories, fetchBagians, fetchUnitHistory, fetchEmployees]);
 
   useEffect(() => {
     if (!loading) fetchTransactions();
@@ -235,7 +241,7 @@ export default function PettyCashPage() {
         || t.keterangan.toLowerCase().includes(q)
         || (t.category?.nama || "").toLowerCase().includes(q)
         || (t.bagian?.nama || "").toLowerCase().includes(q)
-        || (t.unit?.nama || "").toLowerCase().includes(q);
+        || (t.unit || "").toLowerCase().includes(q);
       return matchCat && matchBag && matchSearch;
     });
   }, [transactionsWithBalance, filterCategory, filterBagian, search]);
@@ -299,26 +305,20 @@ export default function PettyCashPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [filtered]);
 
-  // Units filtered by selected bagian (in form)
-  const unitsForBagian = useMemo(() => {
-    if (!form.bagian_id) return [];
-    return units.filter((u) => u.bagian_id === form.bagian_id);
-  }, [form.bagian_id, units]);
-
   // ─── Form handlers ───
   const makeEmptyBulkRow = (): BulkRow => ({
     key: `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     tanggal: localDateStr(),
     category_id: categories[0]?.id || 0,
     bagian_id: bagians[0]?.id || 0,
-    unit_id: 0,
+    unit: "",
     keterangan: "",
     cash_in: 0,
     cash_out: 0,
   });
 
   const openAdd = () => {
-    setForm({ tanggal: localDateStr(), category_id: categories[0]?.id || 0, bagian_id: bagians[0]?.id || 0, unit_id: 0, keterangan: "", cash_in: 0, cash_out: 0 });
+    setForm({ tanggal: localDateStr(), category_id: categories[0]?.id || 0, bagian_id: bagians[0]?.id || 0, unit: "", keterangan: "", cash_in: 0, cash_out: 0 });
     setEditingId(null);
     setFormMode("single");
     setFormError("");
@@ -359,7 +359,7 @@ export default function PettyCashPage() {
       tanggal: t.tanggal,
       category_id: t.category_id,
       bagian_id: t.bagian_id,
-      unit_id: t.unit_id || 0,
+      unit: t.unit || "",
       keterangan: t.keterangan,
       cash_in: t.cash_in,
       cash_out: t.cash_out,
@@ -394,7 +394,7 @@ export default function PettyCashPage() {
         tanggal: r.tanggal,
         category_id: r.category_id,
         bagian_id: r.bagian_id,
-        unit_id: r.unit_id || null,
+        unit: r.unit.trim() || null,
         keterangan: r.keterangan.trim(),
         cash_in: r.cash_in,
         cash_out: r.cash_out,
@@ -427,7 +427,7 @@ export default function PettyCashPage() {
       tanggal: form.tanggal,
       category_id: form.category_id,
       bagian_id: form.bagian_id,
-      unit_id: form.unit_id || null,
+      unit: form.unit.trim() || null,
       keterangan: form.keterangan.trim(),
       cash_in: form.cash_in,
       cash_out: form.cash_out,
@@ -479,7 +479,7 @@ export default function PettyCashPage() {
       tanggal: topUpForm.tanggal,
       category_id: topUpCat.id,
       bagian_id: gaBagian.id,
-      unit_id: null,
+      unit: null,
       keterangan: topUpForm.keterangan.trim() || "Top-up saldo petty cash",
       cash_in: topUpForm.nominal,
       cash_out: 0,
@@ -562,39 +562,25 @@ export default function PettyCashPage() {
     await fetchBagians();
   };
 
-  const handleAddUnit = async () => {
-    if (!newUnit.bagian_id) { showToast("error", "Gagal", "Pilih bagian dulu."); return; }
-    if (!newUnit.nopol.trim()) { showToast("error", "Gagal", "Nopol wajib diisi."); return; }
-    const { error } = await supabase.from("petty_cash_units").insert({
-      bagian_id: newUnit.bagian_id, nama: newUnit.nopol.trim(), nopol: newUnit.nopol.trim(), urutan: 0, status: "Aktif",
-    });
-    if (error) { showToast("error", "Gagal", error.message); return; }
-    showToast("success", "Unit Ditambahkan");
-    setNewUnit({ bagian_id: 0, nama: "", nopol: "" });
-    await fetchUnits();
-  };
-
-  const handleToggleStatus = async (table: "petty_cash_categories" | "petty_cash_bagians" | "petty_cash_units", id: number, current: string) => {
+  const handleToggleStatus = async (table: "petty_cash_categories" | "petty_cash_bagians", id: number, current: string) => {
     const newStatus = current === "Aktif" ? "Tidak Aktif" : "Aktif";
     const { error } = await supabase.from(table).update({ status: newStatus }).eq("id", id);
     if (error) { showToast("error", "Gagal", error.message); return; }
     showToast("success", `Status Diubah ke ${newStatus}`);
     if (table === "petty_cash_categories") await fetchCategories();
-    else if (table === "petty_cash_bagians") await fetchBagians();
-    else await fetchUnits();
+    else await fetchBagians();
   };
 
   // ─── Master data: Edit ───
   const startEditCategory = (c: CategoryLite) => setMasterEdit({ type: "kategori", id: c.id, data: { nama: c.nama, type: c.type, color: c.color } });
   const startEditBagian = (b: BagianLite) => setMasterEdit({ type: "bagian", id: b.id, data: { nama: b.nama } });
-  const startEditUnit = (u: UnitLite) => setMasterEdit({ type: "unit", id: u.id, data: { nama: u.nama, nopol: u.nopol ?? "", bagian_id: u.bagian_id } });
   const cancelMasterEdit = () => setMasterEdit(null);
 
   const saveMasterEdit = async () => {
     if (!masterEdit) return;
     setMasterEditSaving(true);
     const { type, id, data } = masterEdit;
-    let table: "petty_cash_categories" | "petty_cash_bagians" | "petty_cash_units";
+    let table: "petty_cash_categories" | "petty_cash_bagians";
     let updates: Record<string, unknown> = {};
     let oldRow: Record<string, unknown> | null = null;
     let entityLabel = "";
@@ -604,16 +590,11 @@ export default function PettyCashPage() {
       table = "petty_cash_categories";
       updates = { nama: data.nama.trim(), type: data.type, color: data.color };
       entityLabel = data.nama.trim();
-    } else if (type === "bagian") {
+    } else {
       if (!data.nama?.trim()) { showToast("error", "Gagal", "Nama bagian tidak boleh kosong."); setMasterEditSaving(false); return; }
       table = "petty_cash_bagians";
       updates = { nama: data.nama.trim() };
       entityLabel = data.nama.trim();
-    } else {
-      if (!data.nopol?.trim()) { showToast("error", "Gagal", "Nopol tidak boleh kosong."); setMasterEditSaving(false); return; }
-      table = "petty_cash_units";
-      updates = { nama: data.nopol.trim(), nopol: data.nopol.trim(), bagian_id: data.bagian_id };
-      entityLabel = data.nopol.trim();
     }
 
     const { data: prev } = await supabase.from(table).select("*").eq("id", id).maybeSingle();
@@ -621,16 +602,14 @@ export default function PettyCashPage() {
     const { error } = await supabase.from(table).update(updates).eq("id", id);
     if (error) { showToast("error", "Gagal", error.message); setMasterEditSaving(false); return; }
 
-    const entityType = type === "kategori" ? "petty_cash_categories" : type === "bagian" ? "petty_cash_bagians" : "petty_cash_units";
     await logAudit({
-      supabase, action: "update", entityType, entityId: String(id),
+      supabase, action: "update", entityType: table, entityId: String(id),
       entityLabel, oldData: oldRow, newData: updates,
     });
     showToast("success", "Master Diperbarui");
     setMasterEdit(null);
     if (type === "kategori") await fetchCategories();
-    else if (type === "bagian") { await fetchBagians(); await fetchUnits(); }
-    else await fetchUnits();
+    else await fetchBagians();
     setMasterEditSaving(false);
   };
 
@@ -639,8 +618,8 @@ export default function PettyCashPage() {
     if (!masterDelete) return;
     setMasterDeleting(true);
     const { table, id, label } = masterDelete;
-    const tableName = table === "categories" ? "petty_cash_categories" : table === "bagians" ? "petty_cash_bagians" : "petty_cash_units";
-    const fkColumn = table === "categories" ? "category_id" : table === "bagians" ? "bagian_id" : "unit_id";
+    const tableName = table === "categories" ? "petty_cash_categories" : "petty_cash_bagians";
+    const fkColumn = table === "categories" ? "category_id" : "bagian_id";
 
     const { count: usageCount } = await supabase
       .from("petty_cash_transactions")
@@ -658,16 +637,14 @@ export default function PettyCashPage() {
     const { error } = await supabase.from(tableName).delete().eq("id", id);
     if (error) { showToast("error", "Gagal", error.message); setMasterDeleting(false); return; }
 
-    const entityType = tableName as "petty_cash_categories" | "petty_cash_bagians" | "petty_cash_units";
     await logAudit({
-      supabase, action: "delete", entityType, entityId: String(id),
+      supabase, action: "delete", entityType: tableName, entityId: String(id),
       entityLabel: label, oldData: oldRow,
     });
     showToast("success", "Master Dihapus");
     setMasterDelete(null);
     if (table === "categories") await fetchCategories();
-    else if (table === "bagians") { await fetchBagians(); await fetchUnits(); }
-    else await fetchUnits();
+    else await fetchBagians();
     setMasterDeleting(false);
   };
 
@@ -681,7 +658,7 @@ export default function PettyCashPage() {
         t.tanggal,
         `"${t.category?.nama || ""}"`,
         `"${t.bagian?.nama || ""}"`,
-        `"${t.unit?.nama || ""}"`,
+        `"${t.unit || ""}"`,
         `"${t.keterangan.replace(/"/g, "'")}"`,
         t.cash_in, t.cash_out, t.runningBalance ?? 0,
       ].join(","));
@@ -714,7 +691,7 @@ export default function PettyCashPage() {
     doc.text(`Dicetak: ${new Date().toLocaleString("id-ID")}`, pw / 2, 33, { align: "center" });
 
     const body = displayed.map((t) => [
-      fmtDate(t.tanggal), t.category?.nama || "-", t.bagian?.nama || "-", t.unit?.nama || "-",
+      fmtDate(t.tanggal), t.category?.nama || "-", t.bagian?.nama || "-", t.unit || "-",
       t.keterangan, t.cash_in > 0 ? formatCurrency(t.cash_in) : "-", t.cash_out > 0 ? formatCurrency(t.cash_out) : "-",
       formatCurrency(t.runningBalance ?? 0),
     ]);
@@ -945,7 +922,7 @@ export default function PettyCashPage() {
                           ) : <span className="text-muted-foreground">-</span>}
                         </td>
                         <td className="px-5 py-3 text-xs text-foreground">{row.bagian?.nama || "-"}</td>
-                        <td className="px-5 py-3 text-xs text-muted-foreground">{row.unit?.nama || "-"}</td>
+                        <td className="px-5 py-3 text-xs text-muted-foreground uppercase">{row.unit || "-"}</td>
                         <td className="px-5 py-3 text-xs text-foreground max-w-[280px]">{row.keterangan}</td>
                         <td className="px-5 py-3 text-right text-sm font-semibold text-success whitespace-nowrap">
                           {row.cash_in > 0 ? formatCurrency(row.cash_in) : <span className="text-muted-foreground">-</span>}
@@ -1059,7 +1036,7 @@ export default function PettyCashPage() {
                 <Settings className="w-4 h-4 text-primary" />
                 <h3 className="text-sm font-bold text-foreground">Master Data</h3>
                 <div className="ml-3 flex items-center gap-1 bg-muted rounded-lg p-0.5">
-                  {(["kategori", "bagian", "unit"] as const).map((t) => (
+                  {(["kategori", "bagian"] as const).map((t) => (
                     <button key={t} onClick={() => setMasterTab(t)}
                       className={cn("px-2.5 py-1 rounded text-[11px] font-semibold capitalize transition-all",
                         masterTab === t ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
@@ -1147,55 +1124,6 @@ export default function PettyCashPage() {
                     )}
                   </div>
                 )}
-                {masterTab === "unit" && (
-                  <div className="space-y-2">
-                    {units.map((u) => {
-                      const bagian = bagians.find((b) => b.id === u.bagian_id);
-                      return (
-                        <div key={u.id}>
-                          {masterEdit?.type === "unit" && masterEdit.id === u.id ? (
-                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/30">
-                              <select value={masterEdit.data.bagian_id} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, bagian_id: Number(e.target.value) } })} className="px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none text-foreground">
-                                <option value="0">Pilih bagian...</option>
-                                {bagians.map((b) => <option key={b.id} value={b.id}>{b.nama}</option>)}
-                              </select>
-                              <input type="text" placeholder="Nopol *" value={masterEdit.data.nopol ?? ""} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nopol: e.target.value.toUpperCase() } })} className={cn(inputClass, "flex-1 text-xs py-2 uppercase")} autoFocus />
-                              <input type="text" placeholder="Keterangan (opsional)" value={masterEdit.data.nama} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nama: e.target.value } })} className="w-40 px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
-                              <button onClick={saveMasterEdit} disabled={masterEditSaving} title="Simpan" className="p-1.5 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
-                              <button onClick={cancelMasterEdit} title="Batal" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30 hover:bg-muted/50">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-xs font-semibold text-foreground uppercase">{u.nopol || u.nama}</span>
-                                {u.nama && u.nopol && <span className="text-[10px] text-muted-foreground truncate">— {u.nama}</span>}
-                                {bagian && <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{bagian.nama}</span>}
-                              </div>
-                              {canEdit && (
-                                <div className="flex items-center gap-0.5 flex-shrink-0">
-                                  <button onClick={() => startEditUnit(u)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                                  <button onClick={() => setMasterDelete({ table: "units", id: u.id, label: u.nopol || u.nama })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {units.length === 0 && <p className="text-[10px] text-muted-foreground italic">Belum ada unit</p>}
-                    {canEdit && (
-                      <div className="flex items-center gap-2 pt-2 border-t border-border/50">
-                        <select value={newUnit.bagian_id || ""} onChange={(e) => setNewUnit({ ...newUnit, bagian_id: Number(e.target.value) })} className="px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none text-foreground">
-                          <option value="">Pilih bagian...</option>
-                          {bagians.map((b) => <option key={b.id} value={b.id}>{b.nama}</option>)}
-                        </select>
-                        <input type="text" placeholder="Nopol * (cth: B 1234 ABC)" value={newUnit.nopol} onChange={(e) => setNewUnit({ ...newUnit, nopol: e.target.value.toUpperCase() })} className={cn(inputClass, "flex-1 text-xs py-2 uppercase")} />
-                        <input type="text" placeholder="Keterangan (opsional)" value={newUnit.nama} onChange={(e) => setNewUnit({ ...newUnit, nama: e.target.value })} className="w-40 px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
-                        <Button size="sm" icon={Plus} onClick={handleAddUnit}>Tambah</Button>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -1253,19 +1181,14 @@ export default function PettyCashPage() {
                           <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Bagian *</label>
                           <Select
                             value={String(form.bagian_id)}
-                            onChange={(v) => setForm({ ...form, bagian_id: Number(v), unit_id: 0 })}
+                            onChange={(v) => setForm({ ...form, bagian_id: Number(v) })}
                             options={bagians.map((b) => ({ value: String(b.id), label: b.nama }))}
                             placeholder="Pilih bagian"
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Unit <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
-                          <Select
-                            value={String(form.unit_id)}
-                            onChange={(v) => setForm({ ...form, unit_id: Number(v) })}
-                            options={[{ value: "0", label: "—" }, ...unitsForBagian.map((u) => ({ value: String(u.id), label: u.nopol || u.nama }))]}
-                            placeholder="Pilih unit"
-                          />
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Unit <span className="text-muted-foreground/50 font-normal">(opsional, nopol atau 'Semua Unit')</span></label>
+                          <input type="text" list="unit-history-list" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="cth: B 1234 ABC / Semua Unit" className={cn(inputClass, "uppercase")} />
                         </div>
                       </div>
                       <div>
@@ -1317,7 +1240,6 @@ export default function PettyCashPage() {
                             </thead>
                             <tbody className="divide-y divide-border/50">
                               {bulkRows.map((row, idx) => {
-                                const rowUnits = row.bagian_id ? units.filter((u) => u.bagian_id === row.bagian_id) : [];
                                 return (
                                   <tr key={row.key} className="hover:bg-muted/20">
                                     <td className="px-2 py-1.5 text-center text-[10px] text-muted-foreground font-semibold">{idx + 1}</td>
@@ -1335,18 +1257,13 @@ export default function PettyCashPage() {
                                     <td className="px-2 py-1.5">
                                       <Select
                                         value={String(row.bagian_id)}
-                                        onChange={(v) => updateBulkRow(row.key, { bagian_id: Number(v), unit_id: 0 })}
+                                        onChange={(v) => updateBulkRow(row.key, { bagian_id: Number(v) })}
                                         options={bagians.map((b) => ({ value: String(b.id), label: b.nama }))}
                                         placeholder="Bagian"
                                       />
                                     </td>
                                     <td className="px-2 py-1.5">
-                                      <Select
-                                        value={String(row.unit_id)}
-                                        onChange={(v) => updateBulkRow(row.key, { unit_id: Number(v) })}
-                                        options={[{ value: "0", label: "—" }, ...rowUnits.map((u) => ({ value: String(u.id), label: u.nopol || u.nama }))]}
-                                        placeholder="Unit"
-                                      />
+                                      <input type="text" list="unit-history-list" value={row.unit} onChange={(e) => updateBulkRow(row.key, { unit: e.target.value })} placeholder="Unit" className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50 uppercase" />
                                     </td>
                                     <td className="px-2 py-1.5">
                                       <input type="text" placeholder="Keterangan" value={row.keterangan}
@@ -1445,6 +1362,11 @@ export default function PettyCashPage() {
             </div>
           </Portal>
         )}
+
+        {/* ═══ UNIT AUTOCOMPLETE (datalist) ═══ */}
+        <datalist id="unit-history-list">
+          {unitHistory.map((u) => <option key={u} value={u} />)}
+        </datalist>
 
         {/* ═══ SETTINGS MODAL ═══ */}
         {showSettingsModal && (

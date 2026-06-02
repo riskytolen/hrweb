@@ -505,24 +505,12 @@ export interface DbPettyCashBagian {
   created_at: string;
 }
 
-export interface DbPettyCashUnit {
-  id: number;
-  bagian_id: number;
-  nama: string;
-  nopol: string | null;
-  urutan: number;
-  status: "Aktif" | "Tidak Aktif";
-  created_at: string;
-  // joined
-  bagian?: DbPettyCashBagian;
-}
-
 export interface DbPettyCashTransaction {
   id: number;
   tanggal: string;
   category_id: number;
   bagian_id: number;
-  unit_id: number | null;
+  unit: string | null;
   keterangan: string;
   cash_in: number;
   cash_out: number;
@@ -533,5 +521,4 @@ export interface DbPettyCashTransaction {
   // joined
   category?: DbPettyCashCategory;
   bagian?: DbPettyCashBagian;
-  unit?: DbPettyCashUnit;
 }
