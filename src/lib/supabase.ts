@@ -471,3 +471,66 @@ export interface DbAuditLog {
   metadata: Record<string, unknown> | null;
   created_at: string;
 }
+
+// ─── Petty Cash System ───
+
+export interface DbPettyCashSettings {
+  id: number;
+  initial_balance: number;
+  low_balance_threshold: number;
+  custodian_id: string | null;
+  catatan: string | null;
+  updated_at: string;
+  updated_by: string | null;
+  // joined
+  custodian?: DbPegawai;
+}
+
+export interface DbPettyCashCategory {
+  id: number;
+  nama: string;
+  icon: string | null;
+  color: string;
+  type: "income" | "expense" | "both";
+  urutan: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+}
+
+export interface DbPettyCashBagian {
+  id: number;
+  nama: string;
+  urutan: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+}
+
+export interface DbPettyCashUnit {
+  id: number;
+  bagian_id: number;
+  nama: string;
+  urutan: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  // joined
+  bagian?: DbPettyCashBagian;
+}
+
+export interface DbPettyCashTransaction {
+  id: number;
+  tanggal: string;
+  category_id: number;
+  bagian_id: number;
+  unit_id: number | null;
+  keterangan: string;
+  cash_in: number;
+  cash_out: number;
+  receipt_url: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  category?: DbPettyCashCategory;
+  bagian?: DbPettyCashBagian;
+  unit?: DbPettyCashUnit;
+}

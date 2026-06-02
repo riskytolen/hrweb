@@ -109,7 +109,7 @@ const allSections: MenuSection[] = [
         icon: Briefcase,
         basePath: "/general-affair",
         items: [
-          { name: "Patty Cash", href: "/general-affair/patty-cash", icon: Wallet, comingSoon: true },
+          { name: "Patty Cash", href: "/general-affair/petty-cash", icon: Wallet, permission: "petty-cash" },
         ],
       },
     ],

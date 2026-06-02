@@ -51,7 +51,12 @@ export type AuditEntityType =
   | "announcements"
   | "legal_documents"
   | "company_settings"
-  | "leave_settings";
+  | "leave_settings"
+  | "petty_cash_transactions"
+  | "petty_cash_settings"
+  | "petty_cash_categories"
+  | "petty_cash_bagians"
+  | "petty_cash_units";
 
 export interface AuditLogParams {
   supabase: SupabaseClient;
@@ -210,6 +215,11 @@ export function entityLabel(entityType: string): string {
     legal_documents: "Dokumen Legal",
     company_settings: "Pengaturan Perusahaan",
     leave_settings: "Pengaturan Cuti",
+    petty_cash_transactions: "Transaksi Petty Cash",
+    petty_cash_settings: "Pengaturan Petty Cash",
+    petty_cash_categories: "Kategori Petty Cash",
+    petty_cash_bagians: "Bagian Petty Cash",
+    petty_cash_units: "Unit Petty Cash",
   };
   return labels[entityType] ?? entityType;
 }
