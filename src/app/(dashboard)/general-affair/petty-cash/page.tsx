@@ -141,7 +141,7 @@ export default function PettyCashPage() {
     return () => { document.body.style.overflow = ""; };
   }, [showForm, showTopUp, showSettingsModal]);
 
-  // â”€â”€â”€ Fetch â”€â”€â”€
+  // ─── Fetch ───
   const fetchSettings = useCallback(async () => {
     const { data } = await supabase
       .from("petty_cash_settings")
@@ -216,7 +216,7 @@ export default function PettyCashPage() {
 
   useEffect(() => { setPage(1); }, [search, filterCategory, filterBagian, filterUnit, dateStart, dateEnd]);
 
-  // â”€â”€â”€ Computed: running balance + filtered + stats â”€â”€â”€
+  // ─── Computed: running balance + filtered + stats ───
   const transactionsWithBalance = useMemo(() => {
     let bal = 0;
     return transactions.map((t) => {
@@ -302,7 +302,7 @@ export default function PettyCashPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [filtered]);
 
-  // â”€â”€â”€ Report: per Unit (cash_out) â”€â”€â”€
+  // ─── Report: per Unit (cash_out) ───
   const perUnit = useMemo(() => {
     const map = new Map<string, { nama: string; total: number; count: number; cashIn: number; cashOut: number }>();
     filtered.forEach((t) => {
@@ -320,7 +320,7 @@ export default function PettyCashPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [filtered]);
 
-  // â”€â”€â”€ Report: per Kategori (dinamis) â€” hitung untuk semua kategori yang ada di master, plus "Tanpa Kategori" untuk transaksi tanpa kategori â”€â”€â”€
+  // ─── Report: per Kategori (dinamis) â€” hitung untuk semua kategori yang ada di master, plus "Tanpa Kategori" untuk transaksi tanpa kategori ───
   const reportPerKategori = useMemo(() => {
     const allCats = categories.map((c) => ({ id: c.id, nama: c.nama, color: c.color, type: c.type, count: 0, cashIn: 0, cashOut: 0 }));
     filtered.forEach((t) => {
@@ -341,7 +341,7 @@ export default function PettyCashPage() {
     return allCats;
   }, [filtered, categories]);
 
-  // â”€â”€â”€ Report: per Bagian (dinamis) â€” semua bagian yang ada di master, plus "Tanpa Bagian" â”€â”€â”€
+  // ─── Report: per Bagian (dinamis) â€” semua bagian yang ada di master, plus "Tanpa Bagian" ───
   const reportPerBagian = useMemo(() => {
     const allBags = bagians.map((b) => ({ id: b.id, nama: b.nama, count: 0, cashIn: 0, cashOut: 0 }));
     filtered.forEach((t) => {
@@ -355,7 +355,7 @@ export default function PettyCashPage() {
     return allBags;
   }, [filtered, bagians]);
 
-  // â”€â”€â”€ Report: Matrix Bagian Ã— Kategori (cross-tab, dinamis dari semua kategori) â”€â”€â”€
+  // ─── Report: Matrix Bagian × Kategori (cross-tab, dinamis dari semua kategori) ───
   const reportMatrix = useMemo(() => {
     const matrix = new Map<number, Map<number, number>>();
     filtered.forEach((t) => {
@@ -367,7 +367,7 @@ export default function PettyCashPage() {
     return { matrix, allCategories: categories };
   }, [filtered, categories]);
 
-  // â”€â”€â”€ Form handlers â”€â”€â”€
+  // ─── Form handlers ───
   const makeEmptyBulkRow = (): BulkRow => ({
     key: `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     tanggal: localDateStr(),
@@ -596,7 +596,7 @@ export default function PettyCashPage() {
     await fetchTransactions();
   };
 
-  // â”€â”€â”€ Master data inline add â”€â”€â”€
+  // ─── Master data inline add ───
   const handleAddCategory = async () => {
     if (!newCategory.nama.trim()) return;
     const { error } = await supabase.from("petty_cash_categories").insert({
@@ -641,7 +641,7 @@ export default function PettyCashPage() {
     else await fetchUnits();
   };
 
-  // â”€â”€â”€ Master data: Edit â”€â”€â”€
+  // ─── Master data: Edit ───
   const startEditCategory = (c: CategoryLite) => setMasterEdit({ type: "kategori", id: c.id, data: { nama: c.nama, type: c.type, color: c.color } });
   const startEditBagian = (b: BagianLite) => setMasterEdit({ type: "bagian", id: b.id, data: { nama: b.nama } });
   const startEditUnit = (u: UnitLite) => setMasterEdit({ type: "unit", id: u.id, data: { nama: u.nama } });
@@ -690,7 +690,7 @@ export default function PettyCashPage() {
     setMasterEditSaving(false);
   };
 
-  // â”€â”€â”€ Master data: Delete â”€â”€â”€
+  // ─── Master data: Delete ───
   const confirmMasterDelete = async () => {
     if (!masterDelete) return;
     setMasterDeleting(true);
@@ -736,7 +736,7 @@ export default function PettyCashPage() {
     setMasterDeleting(false);
   };
 
-  // â”€â”€â”€ Export â”€â”€â”€
+  // ─── Export ───
   const exportCSV = () => {
     if (displayed.length === 0) return;
     const headers = ["Tanggal", "Kategori", "Bagian", "Unit", "Keterangan", "Cash In", "Cash Out", "Balance"];
@@ -773,7 +773,7 @@ export default function PettyCashPage() {
     doc.text("Laporan Petty Cash", pw / 2, 15, { align: "center" });
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
-    const dateRange = dateStart && dateEnd ? `${dateStart} â€“ ${dateEnd}` : "Semua periode";
+    const dateRange = dateStart && dateEnd ? `${dateStart} — ${dateEnd}` : "Semua periode";
     doc.text(`Periode: ${dateRange}`, pw / 2, 21, { align: "center" });
     doc.text(`Saldo Saat Ini: ${formatCurrency(stats.currentBalance)}`, pw / 2, 27, { align: "center" });
     doc.text(`Dicetak: ${new Date().toLocaleString("id-ID")}`, pw / 2, 33, { align: "center" });
@@ -932,7 +932,7 @@ export default function PettyCashPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 flex-shrink-0">
               <DatePicker value={dateStart} onChange={setDateStart} placeholder="Dari tanggal" />
-              <span className="text-xs text-muted-foreground">â€“</span>
+              <span className="text-xs text-muted-foreground">—</span>
               <DatePicker value={dateEnd} onChange={setDateEnd} placeholder="Sampai tanggal" />
               {(dateStart || dateEnd) && (
                 <button onClick={() => { setDateStart(""); setDateEnd(""); }} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Reset filter tanggal">
@@ -983,7 +983,7 @@ export default function PettyCashPage() {
           </div>
         </div>
 
-        {/* â•â•â• TABEL VIEW â•â•â• */}
+        {/* ═══ TABEL VIEW ═══ */}
         {viewMode === "tabel" && (
           <div className="bg-card rounded-2xl border border-border overflow-hidden">
             <div className="overflow-x-auto">
@@ -1049,7 +1049,7 @@ export default function PettyCashPage() {
           </div>
         )}
 
-        {/* â•â•â• RINGKASAN VIEW â•â•â• */}
+        {/* ═══ RINGKASAN VIEW ═══ */}
         {viewMode === "ringkasan" && (
           <div className="space-y-4">
             {/* Per Kategori */}
@@ -1132,7 +1132,7 @@ export default function PettyCashPage() {
           </div>
         )}
 
-        {/* â•â•â• LAPORAN VIEW (Dinamis) â•â•â• */}
+        {/* ═══ LAPORAN VIEW (Dinamis) ═══ */}
         {viewMode === "laporan" && (
           <div className="space-y-4">
             {/* Header summary cards */}
@@ -1152,7 +1152,7 @@ export default function PettyCashPage() {
                 <p className={cn("text-lg font-bold mt-1", stats.totalIn - stats.totalOut >= 0 ? "text-success" : "text-danger")}>
                   {formatCurrency(stats.totalIn - stats.totalOut)}
                 </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">In âˆ’ Out</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">In − Out</p>
               </div>
               <div className="bg-card rounded-2xl border border-border p-4">
                 <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Total Transaksi</p>
@@ -1350,12 +1350,12 @@ export default function PettyCashPage() {
               )}
             </div>
 
-            {/* Matrix: Bagian Ã— Kategori (cross-tab, kolom dinamis dari semua kategori) */}
+            {/* Matrix: Bagian × Kategori (cross-tab, kolom dinamis dari semua kategori) */}
             <div className="bg-card rounded-2xl border border-border overflow-hidden">
               <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Layers className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-bold text-foreground">Matrix: Bagian Ã— Kategori</h3>
+                  <h3 className="text-sm font-bold text-foreground">Matrix: Bagian × Kategori</h3>
                   <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-primary/10 text-primary">Cash Out</span>
                 </div>
                 <p className="text-[10px] text-muted-foreground">{categories.length} kolom kategori</p>
@@ -1551,7 +1551,7 @@ export default function PettyCashPage() {
               </div>
             </div>
 
-        {/* â•â•â• ADD/EDIT TRANSACTION MODAL â•â•â• */}
+        {/* ═══ ADD/EDIT TRANSACTION MODAL ═══ */}
         {showForm && (
           <Portal>
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -1754,7 +1754,7 @@ export default function PettyCashPage() {
           </Portal>
         )}
 
-        {/* â•â•â• TOP-UP MODAL â•â•â• */}
+        {/* ═══ TOP-UP MODAL ═══ */}
         {showTopUp && (
           <Portal>
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -1796,9 +1796,9 @@ export default function PettyCashPage() {
           </Portal>
         )}
 
-        {/* â•â•â• UNIT DROPDOWN OPTIONS â•â•â• */}
+        {/* ═══ UNIT DROPDOWN OPTIONS ═══ */}
 
-        {/* â•â•â• SETTINGS MODAL â•â•â• */}
+        {/* ═══ SETTINGS MODAL ═══ */}
         {showSettingsModal && (
           <Portal>
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -1816,7 +1816,7 @@ export default function PettyCashPage() {
                     <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Modal Awal (Imprest) *</label>
                     <CurrencyInput value={settingsForm.initial_balance}
                       onChange={(v) => setSettingsForm({ ...settingsForm, initial_balance: v })} />
-                    <p className="text-[10px] text-muted-foreground mt-1">Saldo awal yang di-set saat sistem diaktifkan. Saldo berjalan = modal + SUM(cash_in) âˆ’ SUM(cash_out).</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">Saldo awal yang di-set saat sistem diaktifkan. Saldo berjalan = modal + SUM(cash_in) − SUM(cash_out).</p>
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Threshold Saldo Rendah *</label>
@@ -1849,7 +1849,7 @@ export default function PettyCashPage() {
           </Portal>
         )}
 
-        {/* â•â•â• DELETE CONFIRM â•â•â• */}
+        {/* ═══ DELETE CONFIRM ═══ */}
         {deleteConfirm && (
           <Portal>
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -1871,7 +1871,7 @@ export default function PettyCashPage() {
           </Portal>
         )}
 
-        {/* â•â•â• MASTER DATA DELETE CONFIRM â•â•â• */}
+        {/* ═══ MASTER DATA DELETE CONFIRM ═══ */}
         {masterDelete && (
           <Portal>
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
