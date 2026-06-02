@@ -213,6 +213,7 @@ export default function PettyCashPage() {
     (async () => {
       setLoading(true);
       await Promise.all([fetchSettings(), fetchCategories(), fetchBagians(), fetchUnitHistory(), fetchEmployees()]);
+      setLoading(false);
     })();
   }, [fetchSettings, fetchCategories, fetchBagians, fetchUnitHistory, fetchEmployees]);
 
