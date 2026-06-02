@@ -185,7 +185,7 @@ function actionVerb(action: string): string {
 // ─── Main page ───
 export default function DashboardPage() {
   const { profile } = useAuth();
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const [kpi, setKpi] = useState<KpiData | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
@@ -200,8 +200,9 @@ export default function DashboardPage() {
   const prev = useMemo(() => getPreviousPeriod(), []);
   const today = useMemo(() => todayStr(), []);
 
-  // Live clock — update tiap menit
+  // Live clock — update tiap menit (client-only untuk hindari hydration mismatch)
   useEffect(() => {
+    setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(t);
   }, []);
@@ -568,13 +569,14 @@ export default function DashboardPage() {
             {initials}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-muted-foreground font-medium">{greeting()},</p>
+            <p className="text-xs text-muted-foreground font-medium" suppressHydrationWarning>{now ? greeting() : "Selamat"},</p>
             <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">{namaUser}</h1>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              {now.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
-              {" · "}
+            <p className="text-[11px] text-muted-foreground mt-0.5" suppressHydrationWarning>
+              {now
+                ? `${now.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · `
+                : "· "}
               <span className="tabular-nums">
-                {now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                {now ? now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "--:--"}
               </span>
             </p>
           </div>
