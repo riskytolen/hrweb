@@ -315,15 +315,6 @@ export default function PettyCashPage() {
     setFormError("");
     setShowForm(true);
   };
-
-  const openBulkAdd = () => {
-    setFormMode("bulk");
-    setBulkRows([makeEmptyBulkRow(), makeEmptyBulkRow(), makeEmptyBulkRow()]);
-    setEditingId(null);
-    setFormError("");
-    setShowForm(true);
-  };
-
   const addBulkRows = (count: number) => {
     setBulkRows((prev) => [...prev, ...Array.from({ length: count }, () => makeEmptyBulkRow())]);
   };
@@ -666,7 +657,6 @@ export default function PettyCashPage() {
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" icon={Settings} onClick={() => setShowSettingsModal(true)}>Pengaturan</Button>
               {canInput && <Button variant="outline" size="sm" icon={ArrowDownToLine} onClick={() => setShowTopUp(true)}>Top-up</Button>}
-              {canInput && <Button variant="outline" size="sm" icon={ListPlus} onClick={openBulkAdd}>Bulk</Button>}
               {canInput && <Button icon={Plus} size="sm" onClick={openAdd}>Transaksi</Button>}
             </div>
           }
