@@ -23,7 +23,7 @@ export function SkeletonTableRow({ cols, className }: { cols: number; className?
   );
 }
 
-/** Multiple skeleton rows */
+/** Multiple skeleton rows - HARUS digunakan di dalam <table><tbody> */
 export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
   return (
     <>
@@ -31,5 +31,23 @@ export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
         <SkeletonTableRow key={i} cols={cols} />
       ))}
     </>
+  );
+}
+
+/** Skeleton block untuk loading state di luar konteks <table> (mis. halaman kosong yang sedang loading) */
+export function SkeletonList({ rows = 5, cols = 4, className }: { rows?: number; cols?: number; className?: string }) {
+  return (
+    <div className={cn("space-y-3", className)}>
+      {Array.from({ length: rows }).map((_, r) => (
+        <div key={r} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-card border border-border">
+          {Array.from({ length: cols }).map((_, c) => (
+            <Skeleton
+              key={c}
+              className={cn("h-3 flex-1", c === 0 ? "max-w-[80px]" : c === cols - 1 ? "max-w-[60px]" : "")}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }

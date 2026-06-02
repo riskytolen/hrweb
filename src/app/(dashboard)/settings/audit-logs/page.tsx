@@ -10,7 +10,7 @@ import Button from "@/components/ui/Button";
 import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import DatePicker from "@/components/ui/DatePicker";
-import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
+import { Skeleton, SkeletonList } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import { supabase, type DbAuditLog } from "@/lib/supabase";
 import { actionLabel, actionColor, entityLabel } from "@/lib/audit";
@@ -137,7 +137,7 @@ export default function AuditLogsPage() {
     return (
       <div className="space-y-6 animate-fade-in">
         <Skeleton className="h-12 w-72" />
-        <SkeletonTable rows={5} cols={5} />
+        <SkeletonList rows={5} cols={5} />
       </div>
     );
   }
