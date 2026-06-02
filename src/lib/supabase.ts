@@ -509,6 +509,7 @@ export interface DbPettyCashUnit {
   id: number;
   bagian_id: number;
   nama: string;
+  nopol: string | null;
   urutan: number;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;

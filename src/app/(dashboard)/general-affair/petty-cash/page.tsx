@@ -30,7 +30,7 @@ type Transaction = DbPettyCashTransaction & {
 
 type CategoryLite = { id: number; nama: string; color: string; icon: string | null; type: "income" | "expense" | "both" };
 type BagianLite = { id: number; nama: string; status: string };
-type UnitLite = { id: number; bagian_id: number; nama: string; status: string };
+type UnitLite = { id: number; bagian_id: number; nama: string; nopol: string | null; status: string };
 type SettingsLite = DbPettyCashSettings & { custodian?: DbPegawai };
 type BulkRow = {
   key: string;
@@ -99,9 +99,17 @@ export default function PettyCashPage() {
   const [masterTab, setMasterTab] = useState<"kategori" | "bagian" | "unit">("kategori");
   const [newCategory, setNewCategory] = useState({ nama: "", type: "expense" as "income" | "expense" | "both", color: "#6b7280" });
   const [newBagian, setNewBagian] = useState("");
-  const [newUnit, setNewUnit] = useState({ bagian_id: 0, nama: "" });
+  const [newUnit, setNewUnit] = useState({ bagian_id: 0, nama: "", nopol: "" });
 
-  // Delete confirm
+  // Master delete confirm
+  const [masterDelete, setMasterDelete] = useState<{ table: "categories" | "bagians" | "units"; id: number; label: string } | null>(null);
+  const [masterDeleting, setMasterDeleting] = useState(false);
+
+  // Master inline edit state
+  const [masterEdit, setMasterEdit] = useState<{ type: "kategori" | "bagian" | "unit"; id: number; data: { nama: string; type?: string; color?: string; nopol?: string; bagian_id?: number } } | null>(null);
+  const [masterEditSaving, setMasterEditSaving] = useState(false);
+
+  // Delete confirm (transactions)
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; label: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -162,7 +170,7 @@ export default function PettyCashPage() {
   }, []);
 
   const fetchUnits = useCallback(async () => {
-    const { data } = await supabase.from("petty_cash_units").select("id, bagian_id, nama, status").eq("status", "Aktif").order("urutan");
+    const { data } = await supabase.from("petty_cash_units").select("id, bagian_id, nama, nopol, status").eq("status", "Aktif").order("urutan");
     if (data) setUnits(data as UnitLite[]);
   }, []);
 
@@ -557,11 +565,11 @@ export default function PettyCashPage() {
   const handleAddUnit = async () => {
     if (!newUnit.bagian_id || !newUnit.nama.trim()) return;
     const { error } = await supabase.from("petty_cash_units").insert({
-      bagian_id: newUnit.bagian_id, nama: newUnit.nama.trim(), urutan: 0, status: "Aktif",
+      bagian_id: newUnit.bagian_id, nama: newUnit.nama.trim(), nopol: newUnit.nopol.trim() || null, urutan: 0, status: "Aktif",
     });
     if (error) { showToast("error", "Gagal", error.message); return; }
     showToast("success", "Unit Ditambahkan");
-    setNewUnit({ bagian_id: 0, nama: "" });
+    setNewUnit({ bagian_id: 0, nama: "", nopol: "" });
     await fetchUnits();
   };
 
@@ -573,6 +581,93 @@ export default function PettyCashPage() {
     if (table === "petty_cash_categories") await fetchCategories();
     else if (table === "petty_cash_bagians") await fetchBagians();
     else await fetchUnits();
+  };
+
+  // ─── Master data: Edit ───
+  const startEditCategory = (c: CategoryLite) => setMasterEdit({ type: "kategori", id: c.id, data: { nama: c.nama, type: c.type, color: c.color } });
+  const startEditBagian = (b: BagianLite) => setMasterEdit({ type: "bagian", id: b.id, data: { nama: b.nama } });
+  const startEditUnit = (u: UnitLite) => setMasterEdit({ type: "unit", id: u.id, data: { nama: u.nama, nopol: u.nopol ?? "", bagian_id: u.bagian_id } });
+  const cancelMasterEdit = () => setMasterEdit(null);
+
+  const saveMasterEdit = async () => {
+    if (!masterEdit) return;
+    setMasterEditSaving(true);
+    const { type, id, data } = masterEdit;
+    let table: "petty_cash_categories" | "petty_cash_bagians" | "petty_cash_units";
+    let updates: Record<string, unknown> = {};
+    let oldRow: Record<string, unknown> | null = null;
+    let entityLabel = "";
+
+    if (type === "kategori") {
+      if (!data.nama?.trim()) { showToast("error", "Gagal", "Nama kategori tidak boleh kosong."); setMasterEditSaving(false); return; }
+      table = "petty_cash_categories";
+      updates = { nama: data.nama.trim(), type: data.type, color: data.color };
+      entityLabel = data.nama.trim();
+    } else if (type === "bagian") {
+      if (!data.nama?.trim()) { showToast("error", "Gagal", "Nama bagian tidak boleh kosong."); setMasterEditSaving(false); return; }
+      table = "petty_cash_bagians";
+      updates = { nama: data.nama.trim() };
+      entityLabel = data.nama.trim();
+    } else {
+      if (!data.nama?.trim()) { showToast("error", "Gagal", "Nama unit tidak boleh kosong."); setMasterEditSaving(false); return; }
+      table = "petty_cash_units";
+      updates = { nama: data.nama.trim(), nopol: data.nopol?.trim() || null };
+      entityLabel = data.nopol?.trim() ? `${data.nama.trim()} (${data.nopol.trim()})` : data.nama.trim();
+    }
+
+    const { data: prev } = await supabase.from(table).select("*").eq("id", id).maybeSingle();
+    oldRow = prev as Record<string, unknown> | null;
+    const { error } = await supabase.from(table).update(updates).eq("id", id);
+    if (error) { showToast("error", "Gagal", error.message); setMasterEditSaving(false); return; }
+
+    const entityType = type === "kategori" ? "petty_cash_categories" : type === "bagian" ? "petty_cash_bagians" : "petty_cash_units";
+    await logAudit({
+      supabase, action: "update", entityType, entityId: String(id),
+      entityLabel, oldData: oldRow, newData: updates,
+    });
+    showToast("success", "Master Diperbarui");
+    setMasterEdit(null);
+    if (type === "kategori") await fetchCategories();
+    else if (type === "bagian") { await fetchBagians(); await fetchUnits(); }
+    else await fetchUnits();
+    setMasterEditSaving(false);
+  };
+
+  // ─── Master data: Delete ───
+  const confirmMasterDelete = async () => {
+    if (!masterDelete) return;
+    setMasterDeleting(true);
+    const { table, id, label } = masterDelete;
+    const tableName = table === "categories" ? "petty_cash_categories" : table === "bagians" ? "petty_cash_bagians" : "petty_cash_units";
+    const fkColumn = table === "categories" ? "category_id" : table === "bagians" ? "bagian_id" : "unit_id";
+
+    const { count: usageCount } = await supabase
+      .from("petty_cash_transactions")
+      .select("id", { count: "exact", head: true })
+      .eq(fkColumn, id);
+
+    if ((usageCount ?? 0) > 0) {
+      showToast("error", "Tidak Bisa Dihapus", `"${label}" dipakai di ${usageCount} transaksi. Nonaktifkan saja (toggle off).`);
+      setMasterDelete(null);
+      setMasterDeleting(false);
+      return;
+    }
+
+    const { data: oldRow } = await supabase.from(tableName).select("*").eq("id", id).maybeSingle();
+    const { error } = await supabase.from(tableName).delete().eq("id", id);
+    if (error) { showToast("error", "Gagal", error.message); setMasterDeleting(false); return; }
+
+    const entityType = tableName as "petty_cash_categories" | "petty_cash_bagians" | "petty_cash_units";
+    await logAudit({
+      supabase, action: "delete", entityType, entityId: String(id),
+      entityLabel: label, oldData: oldRow,
+    });
+    showToast("success", "Master Dihapus");
+    setMasterDelete(null);
+    if (table === "categories") await fetchCategories();
+    else if (table === "bagians") { await fetchBagians(); await fetchUnits(); }
+    else await fetchUnits();
+    setMasterDeleting(false);
   };
 
   // ─── Export ───
@@ -976,23 +1071,45 @@ export default function PettyCashPage() {
                 {masterTab === "kategori" && (
                   <div className="space-y-2">
                     {categories.map((c) => (
-                      <div key={c.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30 hover:bg-muted/50">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
-                          <span className="text-xs font-semibold text-foreground truncate">{c.nama}</span>
-                          <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded", c.type === "income" ? "bg-success/10 text-success" : c.type === "expense" ? "bg-danger/10 text-danger" : "bg-blue-500/10 text-blue-500")}>{c.type}</span>
-                        </div>
+                      <div key={c.id}>
+                        {masterEdit?.type === "kategori" && masterEdit.id === c.id ? (
+                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/30">
+                            <input type="color" value={masterEdit.data.color ?? c.color} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, color: e.target.value } })} className="w-7 h-7 rounded-lg border border-border cursor-pointer flex-shrink-0" />
+                            <input type="text" value={masterEdit.data.nama} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nama: e.target.value } })} className={cn(inputClass, "flex-1 text-xs py-2")} />
+                            <select value={masterEdit.data.type} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, type: e.target.value } })} className="px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none text-foreground">
+                              <option value="expense">Expense</option>
+                              <option value="income">Income</option>
+                              <option value="both">Both</option>
+                            </select>
+                            <button onClick={saveMasterEdit} disabled={masterEditSaving} title="Simpan" className="p-1.5 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                            <button onClick={cancelMasterEdit} title="Batal" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30 hover:bg-muted/50">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
+                              <span className="text-xs font-semibold text-foreground truncate">{c.nama}</span>
+                              <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded", c.type === "income" ? "bg-success/10 text-success" : c.type === "expense" ? "bg-danger/10 text-danger" : "bg-blue-500/10 text-blue-500")}>{c.type}</span>
+                            </div>
+                            {canEdit && (
+                              <div className="flex items-center gap-0.5 flex-shrink-0">
+                                <button onClick={() => startEditCategory(c)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => setMasterDelete({ table: "categories", id: c.id, label: c.nama })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                     {canEdit && (
                       <div className="flex items-center gap-2 pt-2 border-t border-border/50">
+                        <input type="color" value={newCategory.color} onChange={(e) => setNewCategory({ ...newCategory, color: e.target.value })} className="w-8 h-8 rounded-lg border border-border cursor-pointer" />
                         <input type="text" placeholder="Kategori baru..." value={newCategory.nama} onChange={(e) => setNewCategory({ ...newCategory, nama: e.target.value })} className={cn(inputClass, "flex-1 text-xs py-2")} />
                         <select value={newCategory.type} onChange={(e) => setNewCategory({ ...newCategory, type: e.target.value as "income" | "expense" | "both" })} className="px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none text-foreground">
                           <option value="expense">Expense</option>
                           <option value="income">Income</option>
                           <option value="both">Both</option>
                         </select>
-                        <input type="color" value={newCategory.color} onChange={(e) => setNewCategory({ ...newCategory, color: e.target.value })} className="w-8 h-8 rounded-lg border border-border cursor-pointer" />
                         <Button size="sm" icon={Plus} onClick={handleAddCategory}>Tambah</Button>
                       </div>
                     )}
@@ -1001,8 +1118,24 @@ export default function PettyCashPage() {
                 {masterTab === "bagian" && (
                   <div className="space-y-2">
                     {bagians.map((b) => (
-                      <div key={b.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30">
-                        <span className="text-xs font-semibold text-foreground">{b.nama}</span>
+                      <div key={b.id}>
+                        {masterEdit?.type === "bagian" && masterEdit.id === b.id ? (
+                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/30">
+                            <input type="text" value={masterEdit.data.nama} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nama: e.target.value } })} className={cn(inputClass, "flex-1 text-xs py-2")} autoFocus />
+                            <button onClick={saveMasterEdit} disabled={masterEditSaving} title="Simpan" className="p-1.5 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                            <button onClick={cancelMasterEdit} title="Batal" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30 hover:bg-muted/50">
+                            <span className="text-xs font-semibold text-foreground">{b.nama}</span>
+                            {canEdit && (
+                              <div className="flex items-center gap-0.5">
+                                <button onClick={() => startEditBagian(b)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => setMasterDelete({ table: "bagians", id: b.id, label: b.nama })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                     {canEdit && (
@@ -1019,10 +1152,37 @@ export default function PettyCashPage() {
                       const us = units.filter((u) => u.bagian_id === b.id);
                       return (
                         <div key={b.id} className="px-3 py-2 rounded-lg bg-muted/30">
-                          <p className="text-xs font-bold text-foreground mb-1.5">{b.nama}</p>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <p className="text-xs font-bold text-foreground">{b.nama}</p>
+                            <span className="text-[9px] text-muted-foreground">{us.length} unit</span>
+                          </div>
                           {us.length === 0 ? <p className="text-[10px] text-muted-foreground italic">Belum ada unit</p> : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {us.map((u) => <span key={u.id} className="text-[10px] font-medium px-2 py-0.5 rounded bg-card border border-border text-foreground">{u.nama}</span>)}
+                            <div className="space-y-1">
+                              {us.map((u) => (
+                                <div key={u.id}>
+                                  {masterEdit?.type === "unit" && masterEdit.id === u.id ? (
+                                    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-primary/5 border border-primary/30">
+                                      <input type="text" placeholder="Nama unit" value={masterEdit.data.nama} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nama: e.target.value } })} className={cn(inputClass, "flex-1 text-xs py-1.5")} autoFocus />
+                                      <input type="text" placeholder="Nopol (opsional)" value={masterEdit.data.nopol ?? ""} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nopol: e.target.value } })} className="w-32 px-2 py-1.5 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50 uppercase" />
+                                      <button onClick={saveMasterEdit} disabled={masterEditSaving} title="Simpan" className="p-1 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50"><Check className="w-3 h-3" /></button>
+                                      <button onClick={cancelMasterEdit} title="Batal" className="p-1 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3 h-3" /></button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-card border border-border hover:border-primary/30">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-[10px] font-semibold text-foreground truncate">{u.nama}</span>
+                                        {u.nopol && <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">{u.nopol}</span>}
+                                      </div>
+                                      {canEdit && (
+                                        <div className="flex items-center gap-0.5 flex-shrink-0">
+                                          <button onClick={() => startEditUnit(u)} title="Edit" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary"><Pencil className="w-3 h-3" /></button>
+                                          <button onClick={() => setMasterDelete({ table: "units", id: u.id, label: u.nopol ? `${u.nama} (${u.nopol})` : u.nama })} title="Hapus" className="p-1 rounded hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3 h-3" /></button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -1034,7 +1194,8 @@ export default function PettyCashPage() {
                           <option value="">Pilih bagian...</option>
                           {bagians.map((b) => <option key={b.id} value={b.id}>{b.nama}</option>)}
                         </select>
-                        <input type="text" placeholder="Unit baru..." value={newUnit.nama} onChange={(e) => setNewUnit({ ...newUnit, nama: e.target.value })} className={cn(inputClass, "flex-1 text-xs py-2")} />
+                        <input type="text" placeholder="Nama unit..." value={newUnit.nama} onChange={(e) => setNewUnit({ ...newUnit, nama: e.target.value })} className={cn(inputClass, "flex-1 text-xs py-2")} />
+                        <input type="text" placeholder="Nopol" value={newUnit.nopol} onChange={(e) => setNewUnit({ ...newUnit, nopol: e.target.value.toUpperCase() })} className="w-28 px-2 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50 uppercase" />
                         <Button size="sm" icon={Plus} onClick={handleAddUnit}>Tambah</Button>
                       </div>
                     )}
@@ -1357,6 +1518,31 @@ export default function PettyCashPage() {
                 <div className="flex items-center justify-end gap-2 mt-4">
                   <Button variant="outline" size="sm" onClick={() => setDeleteConfirm(null)} disabled={deleting}>Batal</Button>
                   <Button size="sm" icon={Trash2} onClick={handleDelete} disabled={deleting} className="bg-danger text-white hover:bg-danger/90">{deleting ? "Menghapus..." : "Hapus"}</Button>
+                </div>
+              </div>
+            </div>
+          </Portal>
+        )}
+
+        {/* ═══ MASTER DATA DELETE CONFIRM ═══ */}
+        {masterDelete && (
+          <Portal>
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setMasterDelete(null)} />
+              <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in p-5">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-danger/10 flex items-center justify-center flex-shrink-0"><Trash2 className="w-5 h-5 text-danger" /></div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-bold text-foreground">Hapus Master Data?</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      <strong className="text-foreground">{masterDelete.label}</strong> akan dihapus permanen dari master {masterDelete.table === "categories" ? "Kategori" : masterDelete.table === "bagians" ? "Bagian" : "Unit"}.
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-1.5 italic">Item yang sudah dipakai di transaksi tidak bisa dihapus (nonaktifkan saja).</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 mt-4">
+                  <Button variant="outline" size="sm" onClick={() => setMasterDelete(null)} disabled={masterDeleting}>Batal</Button>
+                  <Button size="sm" icon={Trash2} onClick={confirmMasterDelete} disabled={masterDeleting} className="bg-danger text-white hover:bg-danger/90">{masterDeleting ? "Menghapus..." : "Hapus"}</Button>
                 </div>
               </div>
             </div>
