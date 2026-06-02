@@ -379,22 +379,20 @@ export default function PettyCashPage() {
       bulkRows.forEach((r, i) => {
         if (!r.tanggal) { invalidRows.push(i + 1); return; }
         if (!r.category_id) { invalidRows.push(i + 1); return; }
-        if (!r.bagian_id) { invalidRows.push(i + 1); return; }
-        if (!r.keterangan.trim()) { invalidRows.push(i + 1); return; }
         if (r.cash_in === 0 && r.cash_out === 0) { invalidRows.push(i + 1); return; }
         if (r.cash_in > 0 && r.cash_out > 0) { invalidRows.push(i + 1); return; }
       });
       if (invalidRows.length > 0) {
-        return setFormError(`Baris ${invalidRows.join(", ")} belum lengkap. Periksa tanggal, kategori, bagian, keterangan, dan nominal.`);
+        return setFormError(`Baris ${invalidRows.join(", ")} belum lengkap. Periksa tanggal, kategori, dan nominal.`);
       }
-      const validRows = bulkRows.filter((r) => r.tanggal && r.category_id && r.bagian_id && r.keterangan.trim() && (r.cash_in > 0 || r.cash_out > 0) && !(r.cash_in > 0 && r.cash_out > 0));
+      const validRows = bulkRows.filter((r) => r.tanggal && r.category_id && (r.cash_in > 0 || r.cash_out > 0) && !(r.cash_in > 0 && r.cash_out > 0));
       if (validRows.length === 0) return setFormError("Minimal 1 baris harus valid.");
 
       setFormSaving(true);
       const payload = validRows.map((r) => ({
         tanggal: r.tanggal,
         category_id: r.category_id,
-        bagian_id: r.bagian_id,
+        bagian_id: r.bagian_id || null,
         unit: r.unit.trim() || null,
         keterangan: r.keterangan.trim(),
         cash_in: r.cash_in,
@@ -418,8 +416,6 @@ export default function PettyCashPage() {
     // Single mode (add or edit)
     if (!form.tanggal) return setFormError("Tanggal wajib diisi.");
     if (!form.category_id) return setFormError("Kategori wajib dipilih.");
-    if (!form.bagian_id) return setFormError("Bagian wajib dipilih.");
-    if (!form.keterangan.trim()) return setFormError("Keterangan wajib diisi.");
     if (form.cash_in === 0 && form.cash_out === 0) return setFormError("Isi nominal Cash In atau Cash Out.");
     if (form.cash_in > 0 && form.cash_out > 0) return setFormError("Transaksi hanya boleh Cash In atau Cash Out, bukan keduanya.");
 
@@ -427,7 +423,7 @@ export default function PettyCashPage() {
     const payload = {
       tanggal: form.tanggal,
       category_id: form.category_id,
-      bagian_id: form.bagian_id,
+      bagian_id: form.bagian_id || null,
       unit: form.unit.trim() || null,
       keterangan: form.keterangan.trim(),
       cash_in: form.cash_in,
@@ -1179,7 +1175,7 @@ export default function PettyCashPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Bagian *</label>
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Bagian <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
                           <Select
                             value={String(form.bagian_id)}
                             onChange={(v) => setForm({ ...form, bagian_id: Number(v) })}
@@ -1193,7 +1189,7 @@ export default function PettyCashPage() {
                         </div>
                       </div>
                       <div>
-                        <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Keterangan *</label>
+                        <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Keterangan <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
                         <input type="text" placeholder="Misal: Beli snack rapat Mingguan" value={form.keterangan}
                           onChange={(e) => setForm({ ...form, keterangan: e.target.value })}
                           className={inputClass} />
