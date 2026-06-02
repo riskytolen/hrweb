@@ -505,6 +505,14 @@ export interface DbPettyCashBagian {
   created_at: string;
 }
 
+export interface DbPettyCashUnit {
+  id: number;
+  nama: string;
+  urutan: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+}
+
 export interface DbPettyCashTransaction {
   id: number;
   tanggal: string;

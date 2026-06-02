@@ -16,7 +16,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
-import { supabase, type DbPettyCashTransaction, type DbPettyCashCategory, type DbPettyCashBagian, type DbPettyCashSettings, type DbPegawai } from "@/lib/supabase";
+import { supabase, type DbPettyCashTransaction, type DbPettyCashCategory, type DbPettyCashBagian, type DbPettyCashUnit, type DbPettyCashSettings, type DbPegawai } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -29,6 +29,7 @@ type Transaction = DbPettyCashTransaction & {
 
 type CategoryLite = { id: number; nama: string; color: string; icon: string | null; type: "income" | "expense" | "both" };
 type BagianLite = { id: number; nama: string; status: string };
+type UnitLite = { id: number; nama: string; status: string };
 type SettingsLite = DbPettyCashSettings & { custodian?: DbPegawai };
 type BulkRow = {
   key: string;
@@ -61,7 +62,7 @@ export default function PettyCashPage() {
   const [settings, setSettings] = useState<SettingsLite | null>(null);
   const [categories, setCategories] = useState<CategoryLite[]>([]);
   const [bagians, setBagians] = useState<BagianLite[]>([]);
-  const [unitHistory, setUnitHistory] = useState<string[]>([]);
+  const [units, setUnits] = useState<UnitLite[]>([]);
   const [employees, setEmployees] = useState<{ id: string; nama: string }[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
 
@@ -94,16 +95,17 @@ export default function PettyCashPage() {
   const [settingsSaving, setSettingsSaving] = useState(false);
 
   // Master data inline editors
-  const [masterTab, setMasterTab] = useState<"kategori" | "bagian">("kategori");
+  const [masterTab, setMasterTab] = useState<"kategori" | "bagian" | "unit">("kategori");
   const [newCategory, setNewCategory] = useState({ nama: "", type: "expense" as "income" | "expense" | "both", color: "#6b7280" });
   const [newBagian, setNewBagian] = useState("");
+  const [newUnit, setNewUnit] = useState("");
 
   // Master delete confirm
-  const [masterDelete, setMasterDelete] = useState<{ table: "categories" | "bagians"; id: number; label: string } | null>(null);
+  const [masterDelete, setMasterDelete] = useState<{ table: "categories" | "bagians" | "units"; id: number; label: string } | null>(null);
   const [masterDeleting, setMasterDeleting] = useState(false);
 
   // Master inline edit state
-  const [masterEdit, setMasterEdit] = useState<{ type: "kategori" | "bagian"; id: number; data: { nama: string; type?: string; color?: string } } | null>(null);
+  const [masterEdit, setMasterEdit] = useState<{ type: "kategori" | "bagian" | "unit"; id: number; data: { nama: string; type?: string; color?: string } } | null>(null);
   const [masterEditSaving, setMasterEditSaving] = useState(false);
 
   // Delete confirm (transactions)
@@ -166,17 +168,9 @@ export default function PettyCashPage() {
     if (data) setBagians(data as BagianLite[]);
   }, []);
 
-  const fetchUnitHistory = useCallback(async () => {
-    const { data } = await supabase
-      .from("petty_cash_transactions")
-      .select("unit")
-      .not("unit", "is", null)
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (data) {
-      const unique = Array.from(new Set(data.map((r) => r.unit as string).filter(Boolean)));
-      setUnitHistory(unique);
-    }
+  const fetchUnits = useCallback(async () => {
+    const { data } = await supabase.from("petty_cash_units").select("id, nama, status").eq("status", "Aktif").order("urutan");
+    if (data) setUnits(data as UnitLite[]);
   }, []);
 
   const fetchEmployees = useCallback(async () => {
@@ -205,17 +199,15 @@ export default function PettyCashPage() {
       from += PAGE;
     }
     setTransactions(all as Transaction[]);
-    const uniqueUnits = Array.from(new Set(all.map((t) => t.unit).filter(Boolean)));
-    if (uniqueUnits.length > 0) setUnitHistory(uniqueUnits as string[]);
   }, [dateStart, dateEnd]);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([fetchSettings(), fetchCategories(), fetchBagians(), fetchUnitHistory(), fetchEmployees()]);
+      await Promise.all([fetchSettings(), fetchCategories(), fetchBagians(), fetchUnits(), fetchEmployees()]);
       setLoading(false);
     })();
-  }, [fetchSettings, fetchCategories, fetchBagians, fetchUnitHistory, fetchEmployees]);
+  }, [fetchSettings, fetchCategories, fetchBagians, fetchUnits, fetchEmployees]);
 
   useEffect(() => {
     if (!loading) fetchTransactions();
@@ -559,25 +551,38 @@ export default function PettyCashPage() {
     await fetchBagians();
   };
 
-  const handleToggleStatus = async (table: "petty_cash_categories" | "petty_cash_bagians", id: number, current: string) => {
+  const handleAddUnit = async () => {
+    if (!newUnit.trim()) { showToast("error", "Gagal", "Nama unit tidak boleh kosong."); return; }
+    const { error } = await supabase.from("petty_cash_units").insert({
+      nama: newUnit.trim().toUpperCase(), urutan: 0, status: "Aktif",
+    });
+    if (error) { showToast("error", "Gagal", error.message); return; }
+    showToast("success", "Unit Ditambahkan");
+    setNewUnit("");
+    await fetchUnits();
+  };
+
+  const handleToggleStatus = async (table: "petty_cash_categories" | "petty_cash_bagians" | "petty_cash_units", id: number, current: string) => {
     const newStatus = current === "Aktif" ? "Tidak Aktif" : "Aktif";
     const { error } = await supabase.from(table).update({ status: newStatus }).eq("id", id);
     if (error) { showToast("error", "Gagal", error.message); return; }
     showToast("success", `Status Diubah ke ${newStatus}`);
     if (table === "petty_cash_categories") await fetchCategories();
-    else await fetchBagians();
+    else if (table === "petty_cash_bagians") await fetchBagians();
+    else await fetchUnits();
   };
 
   // ─── Master data: Edit ───
   const startEditCategory = (c: CategoryLite) => setMasterEdit({ type: "kategori", id: c.id, data: { nama: c.nama, type: c.type, color: c.color } });
   const startEditBagian = (b: BagianLite) => setMasterEdit({ type: "bagian", id: b.id, data: { nama: b.nama } });
+  const startEditUnit = (u: UnitLite) => setMasterEdit({ type: "unit", id: u.id, data: { nama: u.nama } });
   const cancelMasterEdit = () => setMasterEdit(null);
 
   const saveMasterEdit = async () => {
     if (!masterEdit) return;
     setMasterEditSaving(true);
     const { type, id, data } = masterEdit;
-    let table: "petty_cash_categories" | "petty_cash_bagians";
+    let table: "petty_cash_categories" | "petty_cash_bagians" | "petty_cash_units";
     let updates: Record<string, unknown> = {};
     let oldRow: Record<string, unknown> | null = null;
     let entityLabel = "";
@@ -587,11 +592,16 @@ export default function PettyCashPage() {
       table = "petty_cash_categories";
       updates = { nama: data.nama.trim(), type: data.type, color: data.color };
       entityLabel = data.nama.trim();
-    } else {
+    } else if (type === "bagian") {
       if (!data.nama?.trim()) { showToast("error", "Gagal", "Nama bagian tidak boleh kosong."); setMasterEditSaving(false); return; }
       table = "petty_cash_bagians";
       updates = { nama: data.nama.trim() };
       entityLabel = data.nama.trim();
+    } else {
+      if (!data.nama?.trim()) { showToast("error", "Gagal", "Nama unit tidak boleh kosong."); setMasterEditSaving(false); return; }
+      table = "petty_cash_units";
+      updates = { nama: data.nama.trim().toUpperCase() };
+      entityLabel = data.nama.trim().toUpperCase();
     }
 
     const { data: prev } = await supabase.from(table).select("*").eq("id", id).maybeSingle();
@@ -606,7 +616,8 @@ export default function PettyCashPage() {
     showToast("success", "Master Diperbarui");
     setMasterEdit(null);
     if (type === "kategori") await fetchCategories();
-    else await fetchBagians();
+    else if (type === "bagian") await fetchBagians();
+    else await fetchUnits();
     setMasterEditSaving(false);
   };
 
@@ -615,15 +626,25 @@ export default function PettyCashPage() {
     if (!masterDelete) return;
     setMasterDeleting(true);
     const { table, id, label } = masterDelete;
-    const tableName = table === "categories" ? "petty_cash_categories" : "petty_cash_bagians";
-    const fkColumn = table === "categories" ? "category_id" : "bagian_id";
+    const tableName = table === "categories" ? "petty_cash_categories" : table === "bagians" ? "petty_cash_bagians" : "petty_cash_units";
+    const fkColumn = table === "categories" ? "category_id" : table === "bagians" ? "bagian_id" : null;
 
-    const { count: usageCount } = await supabase
-      .from("petty_cash_transactions")
-      .select("id", { count: "exact", head: true })
-      .eq(fkColumn, id);
+    let usageCount = 0;
+    if (fkColumn) {
+      const { count } = await supabase
+        .from("petty_cash_transactions")
+        .select("id", { count: "exact", head: true })
+        .eq(fkColumn, id);
+      usageCount = count ?? 0;
+    } else {
+      const { count } = await supabase
+        .from("petty_cash_transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("unit", label);
+      usageCount = count ?? 0;
+    }
 
-    if ((usageCount ?? 0) > 0) {
+    if (usageCount > 0) {
       showToast("error", "Tidak Bisa Dihapus", `"${label}" dipakai di ${usageCount} transaksi. Nonaktifkan saja (toggle off).`);
       setMasterDelete(null);
       setMasterDeleting(false);
@@ -641,7 +662,8 @@ export default function PettyCashPage() {
     showToast("success", "Master Dihapus");
     setMasterDelete(null);
     if (table === "categories") await fetchCategories();
-    else await fetchBagians();
+    else if (table === "bagians") await fetchBagians();
+    else await fetchUnits();
     setMasterDeleting(false);
   };
 
@@ -1033,7 +1055,7 @@ export default function PettyCashPage() {
                 <Settings className="w-4 h-4 text-primary" />
                 <h3 className="text-sm font-bold text-foreground">Master Data</h3>
                 <div className="ml-3 flex items-center gap-1 bg-muted rounded-lg p-0.5">
-                  {(["kategori", "bagian"] as const).map((t) => (
+                  {(["kategori", "bagian", "unit"] as const).map((t) => (
                     <button key={t} onClick={() => setMasterTab(t)}
                       className={cn("px-2.5 py-1 rounded text-[11px] font-semibold capitalize transition-all",
                         masterTab === t ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
@@ -1121,6 +1143,38 @@ export default function PettyCashPage() {
                     )}
                   </div>
                 )}
+                {masterTab === "unit" && (
+                  <div className="space-y-2">
+                    {units.map((u) => (
+                      <div key={u.id}>
+                        {masterEdit?.type === "unit" && masterEdit.id === u.id ? (
+                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/30">
+                            <input type="text" value={masterEdit.data.nama} onChange={(e) => setMasterEdit({ ...masterEdit, data: { ...masterEdit.data, nama: e.target.value.toUpperCase() } })} className={cn(inputClass, "flex-1 text-xs py-2 uppercase")} autoFocus placeholder="Nopol / nama unit" />
+                            <button onClick={saveMasterEdit} disabled={masterEditSaving} title="Simpan" className="p-1.5 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                            <button onClick={cancelMasterEdit} title="Batal" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30 hover:bg-muted/50">
+                            <span className="text-xs font-semibold text-foreground uppercase">{u.nama}</span>
+                            {canEdit && (
+                              <div className="flex items-center gap-0.5">
+                                <button onClick={() => startEditUnit(u)} title="Edit" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => setMasterDelete({ table: "units", id: u.id, label: u.nama })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {units.length === 0 && <p className="text-[10px] text-muted-foreground italic">Belum ada unit</p>}
+                    {canEdit && (
+                      <div className="flex items-center gap-2 pt-2 border-t border-border/50">
+                        <input type="text" placeholder="Nopol / unit baru (cth: B 1234 ABC)..." value={newUnit} onChange={(e) => setNewUnit(e.target.value.toUpperCase())} className={cn(inputClass, "flex-1 text-xs py-2 uppercase")} />
+                        <Button size="sm" icon={Plus} onClick={handleAddUnit}>Tambah</Button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1184,8 +1238,14 @@ export default function PettyCashPage() {
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Unit <span className="text-muted-foreground/50 font-normal">(opsional, nopol atau 'Semua Unit')</span></label>
-                          <input type="text" list="unit-history-list" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="cth: B 1234 ABC / Semua Unit" className={cn(inputClass, "uppercase")} />
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Unit <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
+                          <Select
+                            value={form.unit}
+                            onChange={(v) => setForm({ ...form, unit: v })}
+                            options={[{ value: "", label: "—" }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
+                            placeholder="Pilih unit"
+                            searchable
+                          />
                         </div>
                       </div>
                       <div>
@@ -1260,7 +1320,12 @@ export default function PettyCashPage() {
                                       />
                                     </td>
                                     <td className="px-2 py-1.5">
-                                      <input type="text" list="unit-history-list" value={row.unit} onChange={(e) => updateBulkRow(row.key, { unit: e.target.value })} placeholder="Unit" className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50 uppercase" />
+                                      <Select
+                                        value={row.unit}
+                                        onChange={(v) => updateBulkRow(row.key, { unit: v })}
+                                        options={[{ value: "", label: "—" }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
+                                        placeholder="Unit"
+                                      />
                                     </td>
                                     <td className="px-2 py-1.5">
                                       <input type="text" placeholder="Keterangan" value={row.keterangan}
@@ -1360,10 +1425,7 @@ export default function PettyCashPage() {
           </Portal>
         )}
 
-        {/* ═══ UNIT AUTOCOMPLETE (datalist) ═══ */}
-        <datalist id="unit-history-list">
-          {unitHistory.map((u) => <option key={u} value={u} />)}
-        </datalist>
+        {/* ═══ UNIT DROPDOWN OPTIONS ═══ */}
 
         {/* ═══ SETTINGS MODAL ═══ */}
         {showSettingsModal && (
