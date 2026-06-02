@@ -5,7 +5,7 @@ import {
   Wallet, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   ChevronLeft, ChevronRight, ChevronDown, Download, FileText, Filter, ArrowDownToLine,
   Calendar, Settings, TrendingUp, TrendingDown, BarChart3, Coins, ArrowUpRight, ArrowDownRight,
-  Briefcase, Layers, Tag,
+  Briefcase, Layers, Tag, ListPlus, Rows3, Copy,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -31,6 +31,16 @@ type CategoryLite = { id: number; nama: string; color: string; icon: string | nu
 type BagianLite = { id: number; nama: string; status: string };
 type UnitLite = { id: number; bagian_id: number; nama: string; status: string };
 type SettingsLite = DbPettyCashSettings & { custodian?: DbPegawai };
+type BulkRow = {
+  key: string;
+  tanggal: string;
+  category_id: number;
+  bagian_id: number;
+  unit_id: number;
+  keterangan: string;
+  cash_in: number;
+  cash_out: number;
+};
 
 const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -66,9 +76,11 @@ export default function PettyCashPage() {
   // Add/Edit form
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [formMode, setFormMode] = useState<"single" | "bulk">("single");
   const [form, setForm] = useState({
     tanggal: localDateStr(), category_id: 0, bagian_id: 0, unit_id: 0, keterangan: "", cash_in: 0, cash_out: 0,
   });
+  const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -285,12 +297,62 @@ export default function PettyCashPage() {
   }, [form.bagian_id, units]);
 
   // ─── Form handlers ───
+  const makeEmptyBulkRow = (): BulkRow => ({
+    key: `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tanggal: localDateStr(),
+    category_id: categories[0]?.id || 0,
+    bagian_id: bagians[0]?.id || 0,
+    unit_id: 0,
+    keterangan: "",
+    cash_in: 0,
+    cash_out: 0,
+  });
+
   const openAdd = () => {
     setForm({ tanggal: localDateStr(), category_id: categories[0]?.id || 0, bagian_id: bagians[0]?.id || 0, unit_id: 0, keterangan: "", cash_in: 0, cash_out: 0 });
+    setEditingId(null);
+    setFormMode("single");
+    setFormError("");
+    setShowForm(true);
+  };
+
+  const openBulkAdd = () => {
+    setFormMode("bulk");
+    setBulkRows([makeEmptyBulkRow(), makeEmptyBulkRow(), makeEmptyBulkRow()]);
     setEditingId(null);
     setFormError("");
     setShowForm(true);
   };
+
+  const addBulkRows = (count: number) => {
+    setBulkRows((prev) => [...prev, ...Array.from({ length: count }, () => makeEmptyBulkRow())]);
+  };
+
+  const removeBulkRow = (key: string) => {
+    setBulkRows((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.key !== key)));
+  };
+
+  const updateBulkRow = (key: string, patch: Partial<BulkRow>) => {
+    setBulkRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  };
+
+  const duplicateBulkRow = (key: string) => {
+    setBulkRows((prev) => {
+      const idx = prev.findIndex((r) => r.key === key);
+      if (idx === -1) return prev;
+      const src = prev[idx];
+      const copy: BulkRow = { ...src, key: `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
+      const next = [...prev];
+      next.splice(idx + 1, 0, copy);
+      return next;
+    });
+  };
+
+  const bulkTotals = useMemo(() => {
+    const inTotal = bulkRows.reduce((s, r) => s + (r.cash_in || 0), 0);
+    const outTotal = bulkRows.reduce((s, r) => s + (r.cash_out || 0), 0);
+    return { inTotal, outTotal, count: bulkRows.length };
+  }, [bulkRows]);
 
   const openEdit = (t: Transaction) => {
     setForm({
@@ -309,6 +371,50 @@ export default function PettyCashPage() {
 
   const handleSave = async () => {
     setFormError("");
+
+    // Bulk mode validation & insert
+    if (formMode === "bulk" && !editingId) {
+      const invalidRows: number[] = [];
+      bulkRows.forEach((r, i) => {
+        if (!r.tanggal) { invalidRows.push(i + 1); return; }
+        if (!r.category_id) { invalidRows.push(i + 1); return; }
+        if (!r.bagian_id) { invalidRows.push(i + 1); return; }
+        if (!r.keterangan.trim()) { invalidRows.push(i + 1); return; }
+        if (r.cash_in === 0 && r.cash_out === 0) { invalidRows.push(i + 1); return; }
+        if (r.cash_in > 0 && r.cash_out > 0) { invalidRows.push(i + 1); return; }
+      });
+      if (invalidRows.length > 0) {
+        return setFormError(`Baris ${invalidRows.join(", ")} belum lengkap. Periksa tanggal, kategori, bagian, keterangan, dan nominal.`);
+      }
+      const validRows = bulkRows.filter((r) => r.tanggal && r.category_id && r.bagian_id && r.keterangan.trim() && (r.cash_in > 0 || r.cash_out > 0) && !(r.cash_in > 0 && r.cash_out > 0));
+      if (validRows.length === 0) return setFormError("Minimal 1 baris harus valid.");
+
+      setFormSaving(true);
+      const payload = validRows.map((r) => ({
+        tanggal: r.tanggal,
+        category_id: r.category_id,
+        bagian_id: r.bagian_id,
+        unit_id: r.unit_id || null,
+        keterangan: r.keterangan.trim(),
+        cash_in: r.cash_in,
+        cash_out: r.cash_out,
+      }));
+      const { data: inserted, error } = await supabase.from("petty_cash_transactions").insert(payload).select("id");
+      if (error) { setFormError(error.message); setFormSaving(false); return; }
+      await logAudit({
+        supabase, action: "create", entityType: "petty_cash_transactions",
+        entityLabel: `Bulk insert ${payload.length} transaksi`,
+        metadata: { count: payload.length, total_in: bulkTotals.inTotal, total_out: bulkTotals.outTotal, ids: inserted?.map((d) => d.id) },
+      });
+      showToast("success", `${payload.length} Transaksi Disimpan`, `Total cash in ${formatCurrency(bulkTotals.inTotal)}, cash out ${formatCurrency(bulkTotals.outTotal)}.`);
+      setFormSaving(false);
+      setShowForm(false);
+      setBulkRows([]);
+      await fetchTransactions();
+      return;
+    }
+
+    // Single mode (add or edit)
     if (!form.tanggal) return setFormError("Tanggal wajib diisi.");
     if (!form.category_id) return setFormError("Kategori wajib dipilih.");
     if (!form.bagian_id) return setFormError("Bagian wajib dipilih.");
@@ -560,6 +666,7 @@ export default function PettyCashPage() {
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" icon={Settings} onClick={() => setShowSettingsModal(true)}>Pengaturan</Button>
               {canInput && <Button variant="outline" size="sm" icon={ArrowDownToLine} onClick={() => setShowTopUp(true)}>Top-up</Button>}
+              {canInput && <Button variant="outline" size="sm" icon={ListPlus} onClick={openBulkAdd}>Bulk</Button>}
               {canInput && <Button icon={Plus} size="sm" onClick={openAdd}>Transaksi</Button>}
             </div>
           }
@@ -952,73 +1059,198 @@ export default function PettyCashPage() {
           <Portal>
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowForm(false)} />
-              <div className="relative w-full max-w-xl bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]">
-                <div className="flex items-center justify-between p-5 border-b border-border">
-                  <h3 className="text-base font-bold text-foreground">{editingId ? "Edit Transaksi" : "Tambah Transaksi"}</h3>
-                  <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+              <div className={cn("relative w-full bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]", formMode === "bulk" && !editingId ? "max-w-5xl" : "max-w-xl")}>
+                <div className="flex items-center justify-between p-5 border-b border-border gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <h3 className="text-base font-bold text-foreground whitespace-nowrap">
+                      {editingId ? "Edit Transaksi" : formMode === "bulk" ? "Tambah Transaksi (Bulk)" : "Tambah Transaksi"}
+                    </h3>
+                    {!editingId && (
+                      <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
+                        <button onClick={() => setFormMode("single")}
+                          className={cn("flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold transition-all",
+                            formMode === "single" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                          <Rows3 className="w-3 h-3" />Tunggal
+                        </button>
+                        <button onClick={() => { setFormMode("bulk"); if (bulkRows.length === 0) setBulkRows([makeEmptyBulkRow(), makeEmptyBulkRow(), makeEmptyBulkRow()]); }}
+                          className={cn("flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold transition-all",
+                            formMode === "bulk" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                          <ListPlus className="w-3 h-3" />Bulk
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground flex-shrink-0"><X className="w-4 h-4" /></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-5 space-y-3">
                   {formError && (
                     <div className="bg-danger/10 border border-danger/30 rounded-xl px-3 py-2.5 text-xs text-danger">{formError}</div>
                   )}
-                  <div>
-                    <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Tanggal *</label>
-                    <DatePicker value={form.tanggal} onChange={(v) => setForm({ ...form, tanggal: v })} placeholder="Pilih tanggal" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Kategori *</label>
-                    <Select
-                      value={String(form.category_id)}
-                      onChange={(v) => setForm({ ...form, category_id: Number(v) })}
-                      options={categories.map((c) => ({ value: String(c.id), label: c.nama }))}
-                      placeholder="Pilih kategori"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Bagian *</label>
-                      <Select
-                        value={String(form.bagian_id)}
-                        onChange={(v) => setForm({ ...form, bagian_id: Number(v), unit_id: 0 })}
-                        options={bagians.map((b) => ({ value: String(b.id), label: b.nama }))}
-                        placeholder="Pilih bagian"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Unit <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
-                      <Select
-                        value={String(form.unit_id)}
-                        onChange={(v) => setForm({ ...form, unit_id: Number(v) })}
-                        options={[{ value: "0", label: "—" }, ...unitsForBagian.map((u) => ({ value: String(u.id), label: u.nama }))]}
-                        placeholder="Pilih unit"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Keterangan *</label>
-                    <input type="text" placeholder="Misal: Beli snack rapat Mingguan" value={form.keterangan}
-                      onChange={(e) => setForm({ ...form, keterangan: e.target.value })}
-                      className={inputClass} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-semibold text-success mb-1.5 block">Cash In (masuk)</label>
-                      <input type="number" min={0} placeholder="0" value={form.cash_in || ""}
-                        onChange={(e) => setForm({ ...form, cash_in: e.target.value === "" ? 0 : Number(e.target.value), cash_out: e.target.value === "" || Number(e.target.value) === 0 ? form.cash_out : 0 })}
-                        className={cn(inputClass, "text-success font-semibold")} />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-danger mb-1.5 block">Cash Out (keluar)</label>
-                      <input type="number" min={0} placeholder="0" value={form.cash_out || ""}
-                        onChange={(e) => setForm({ ...form, cash_out: e.target.value === "" ? 0 : Number(e.target.value), cash_in: e.target.value === "" || Number(e.target.value) === 0 ? form.cash_in : 0 })}
-                        className={cn(inputClass, "text-danger font-semibold")} />
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">Isi salah satu: Cash In untuk top-up/pemasukan, Cash Out untuk pengeluaran.</p>
+                  {formMode === "single" || editingId ? (
+                    <>
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Tanggal *</label>
+                        <DatePicker value={form.tanggal} onChange={(v) => setForm({ ...form, tanggal: v })} placeholder="Pilih tanggal" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Kategori *</label>
+                        <Select
+                          value={String(form.category_id)}
+                          onChange={(v) => setForm({ ...form, category_id: Number(v) })}
+                          options={categories.map((c) => ({ value: String(c.id), label: c.nama }))}
+                          placeholder="Pilih kategori"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Bagian *</label>
+                          <Select
+                            value={String(form.bagian_id)}
+                            onChange={(v) => setForm({ ...form, bagian_id: Number(v), unit_id: 0 })}
+                            options={bagians.map((b) => ({ value: String(b.id), label: b.nama }))}
+                            placeholder="Pilih bagian"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Unit <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
+                          <Select
+                            value={String(form.unit_id)}
+                            onChange={(v) => setForm({ ...form, unit_id: Number(v) })}
+                            options={[{ value: "0", label: "—" }, ...unitsForBagian.map((u) => ({ value: String(u.id), label: u.nama }))]}
+                            placeholder="Pilih unit"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Keterangan *</label>
+                        <input type="text" placeholder="Misal: Beli snack rapat Mingguan" value={form.keterangan}
+                          onChange={(e) => setForm({ ...form, keterangan: e.target.value })}
+                          className={inputClass} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-semibold text-success mb-1.5 block">Cash In (masuk)</label>
+                          <input type="number" min={0} placeholder="0" value={form.cash_in || ""}
+                            onChange={(e) => setForm({ ...form, cash_in: e.target.value === "" ? 0 : Number(e.target.value), cash_out: e.target.value === "" || Number(e.target.value) === 0 ? form.cash_out : 0 })}
+                            className={cn(inputClass, "text-success font-semibold")} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-danger mb-1.5 block">Cash Out (keluar)</label>
+                          <input type="number" min={0} placeholder="0" value={form.cash_out || ""}
+                            onChange={(e) => setForm({ ...form, cash_out: e.target.value === "" ? 0 : Number(e.target.value), cash_in: e.target.value === "" || Number(e.target.value) === 0 ? form.cash_in : 0 })}
+                            className={cn(inputClass, "text-danger font-semibold")} />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">Isi salah satu: Cash In untuk top-up/pemasukan, Cash Out untuk pengeluaran.</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] text-muted-foreground">Tambahkan beberapa transaksi sekaligus. Setiap baris = 1 transaksi.</p>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" icon={Plus} onClick={() => addBulkRows(1)}>Baris</Button>
+                          <Button variant="outline" size="sm" icon={Plus} onClick={() => addBulkRows(5)}>+5</Button>
+                        </div>
+                      </div>
+                      <div className="border border-border rounded-xl overflow-hidden">
+                        <div className="max-h-[55vh] overflow-y-auto">
+                          <table className="w-full">
+                            <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+                              <tr className="border-b border-border">
+                                <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-8">#</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Tanggal</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[140px]">Kategori</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[120px]">Bagian</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[100px]">Unit</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[180px]">Keterangan</th>
+                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-24">Cash In</th>
+                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-24">Cash Out</th>
+                                <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-16">Aksi</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/50">
+                              {bulkRows.map((row, idx) => {
+                                const rowUnits = row.bagian_id ? units.filter((u) => u.bagian_id === row.bagian_id) : [];
+                                return (
+                                  <tr key={row.key} className="hover:bg-muted/20">
+                                    <td className="px-2 py-1.5 text-center text-[10px] text-muted-foreground font-semibold">{idx + 1}</td>
+                                    <td className="px-2 py-1.5">
+                                      <DatePicker value={row.tanggal} onChange={(v) => updateBulkRow(row.key, { tanggal: v })} placeholder="Tgl" />
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <Select
+                                        value={String(row.category_id)}
+                                        onChange={(v) => updateBulkRow(row.key, { category_id: Number(v) })}
+                                        options={categories.map((c) => ({ value: String(c.id), label: c.nama }))}
+                                        placeholder="Kategori"
+                                      />
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <Select
+                                        value={String(row.bagian_id)}
+                                        onChange={(v) => updateBulkRow(row.key, { bagian_id: Number(v), unit_id: 0 })}
+                                        options={bagians.map((b) => ({ value: String(b.id), label: b.nama }))}
+                                        placeholder="Bagian"
+                                      />
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <Select
+                                        value={String(row.unit_id)}
+                                        onChange={(v) => updateBulkRow(row.key, { unit_id: Number(v) })}
+                                        options={[{ value: "0", label: "—" }, ...rowUnits.map((u) => ({ value: String(u.id), label: u.nama }))]}
+                                        placeholder="Unit"
+                                      />
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <input type="text" placeholder="Keterangan" value={row.keterangan}
+                                        onChange={(e) => updateBulkRow(row.key, { keterangan: e.target.value })}
+                                        className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <input type="number" min={0} placeholder="0" value={row.cash_in || ""}
+                                        onChange={(e) => updateBulkRow(row.key, { cash_in: e.target.value === "" ? 0 : Number(e.target.value), cash_out: e.target.value === "" || Number(e.target.value) === 0 ? row.cash_out : 0 })}
+                                        className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-right text-success font-semibold" />
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <input type="number" min={0} placeholder="0" value={row.cash_out || ""}
+                                        onChange={(e) => updateBulkRow(row.key, { cash_out: e.target.value === "" ? 0 : Number(e.target.value), cash_in: e.target.value === "" || Number(e.target.value) === 0 ? row.cash_in : 0 })}
+                                        className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-right text-danger font-semibold" />
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                      <div className="flex items-center justify-center gap-0.5">
+                                        <button onClick={() => duplicateBulkRow(row.key)} title="Duplikasi baris" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary"><Copy className="w-3 h-3" /></button>
+                                        <button onClick={() => removeBulkRow(row.key)} disabled={bulkRows.length <= 1} title="Hapus baris" className="p-1 rounded hover:bg-danger-light text-muted-foreground hover:text-danger disabled:opacity-30 disabled:cursor-not-allowed"><Trash2 className="w-3 h-3" /></button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                            <tfoot className="sticky bottom-0 bg-muted/80 backdrop-blur-sm border-t-2 border-border">
+                              <tr>
+                                <td colSpan={6} className="px-2 py-2 text-right text-[10px] font-semibold text-muted-foreground uppercase">Total {bulkTotals.count} baris</td>
+                                <td className="px-2 py-2 text-right text-sm font-bold text-success">{bulkTotals.inTotal > 0 ? formatCurrency(bulkTotals.inTotal) : "-"}</td>
+                                <td className="px-2 py-2 text-right text-sm font-bold text-danger">{bulkTotals.outTotal > 0 ? formatCurrency(bulkTotals.outTotal) : "-"}</td>
+                                <td className="px-2 py-2"></td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">Baris kosong akan dilewati saat simpan. Hanya baris valid (tanggal + kategori + bagian + keterangan + nominal) yang akan disimpan.</p>
+                    </>
+                  )}
                 </div>
-                <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setShowForm(false)} disabled={formSaving}>Batal</Button>
-                  <Button size="sm" icon={Check} onClick={handleSave} disabled={formSaving}>{formSaving ? "Menyimpan..." : "Simpan"}</Button>
+                <div className="px-5 py-3 border-t border-border flex items-center justify-between gap-2">
+                  <p className="text-[10px] text-muted-foreground">
+                    {formMode === "bulk" && !editingId
+                      ? <>Akan menyimpan <strong className="text-foreground">{bulkTotals.count}</strong> baris. Saldo akhir: <strong className={cn(bulkTotals.outTotal - bulkTotals.inTotal > stats.currentBalance ? "text-danger" : "text-foreground")}>{formatCurrency(stats.currentBalance + bulkTotals.inTotal - bulkTotals.outTotal)}</strong></>
+                      : <>&nbsp;</>}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setShowForm(false)} disabled={formSaving}>Batal</Button>
+                    <Button size="sm" icon={Check} onClick={handleSave} disabled={formSaving || (formMode === "bulk" && !editingId && bulkRows.length === 0)}>{formSaving ? "Menyimpan..." : formMode === "bulk" && !editingId ? `Simpan ${bulkTotals.count} Baris` : "Simpan"}</Button>
+                  </div>
                 </div>
               </div>
             </div>
