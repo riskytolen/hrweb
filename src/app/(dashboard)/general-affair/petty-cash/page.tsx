@@ -13,6 +13,7 @@ import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import DatePicker from "@/components/ui/DatePicker";
+import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase, type DbPettyCashTransaction, type DbPettyCashCategory, type DbPettyCashBagian, type DbPettyCashUnit, type DbPettyCashSettings, type DbPegawai } from "@/lib/supabase";
@@ -1120,15 +1121,15 @@ export default function PettyCashPage() {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-[10px] font-semibold text-success mb-1.5 block">Cash In (masuk)</label>
-                          <input type="number" min={0} placeholder="0" value={form.cash_in || ""}
-                            onChange={(e) => setForm({ ...form, cash_in: e.target.value === "" ? 0 : Number(e.target.value), cash_out: e.target.value === "" || Number(e.target.value) === 0 ? form.cash_out : 0 })}
-                            className={cn(inputClass, "text-success font-semibold")} />
+                          <CurrencyInput value={form.cash_in}
+                            onChange={(v) => setForm({ ...form, cash_in: v, cash_out: v === 0 ? form.cash_out : 0 })}
+                            className="text-success font-semibold" />
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold text-danger mb-1.5 block">Cash Out (keluar)</label>
-                          <input type="number" min={0} placeholder="0" value={form.cash_out || ""}
-                            onChange={(e) => setForm({ ...form, cash_out: e.target.value === "" ? 0 : Number(e.target.value), cash_in: e.target.value === "" || Number(e.target.value) === 0 ? form.cash_in : 0 })}
-                            className={cn(inputClass, "text-danger font-semibold")} />
+                          <CurrencyInput value={form.cash_out}
+                            onChange={(v) => setForm({ ...form, cash_out: v, cash_in: v === 0 ? form.cash_in : 0 })}
+                            className="text-danger font-semibold" />
                         </div>
                       </div>
                       <p className="text-[10px] text-muted-foreground">Isi salah satu: Cash In untuk top-up/pemasukan, Cash Out untuk pengeluaran.</p>
@@ -1153,8 +1154,8 @@ export default function PettyCashPage() {
                                 <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[120px]">Bagian</th>
                                 <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[100px]">Unit</th>
                                 <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[180px]">Keterangan</th>
-                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-24">Cash In</th>
-                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-24">Cash Out</th>
+                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Cash In</th>
+                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Cash Out</th>
                                 <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-16">Aksi</th>
                               </tr>
                             </thead>
@@ -1197,14 +1198,14 @@ export default function PettyCashPage() {
                                         className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
                                     </td>
                                     <td className="px-2 py-1.5">
-                                      <input type="number" min={0} placeholder="0" value={row.cash_in || ""}
-                                        onChange={(e) => updateBulkRow(row.key, { cash_in: e.target.value === "" ? 0 : Number(e.target.value), cash_out: e.target.value === "" || Number(e.target.value) === 0 ? row.cash_out : 0 })}
-                                        className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-right text-success font-semibold" />
+                                      <CurrencyInput size="sm" value={row.cash_in}
+                                        onChange={(v) => updateBulkRow(row.key, { cash_in: v, cash_out: v === 0 ? row.cash_out : 0 })}
+                                        className="text-success font-semibold" />
                                     </td>
                                     <td className="px-2 py-1.5">
-                                      <input type="number" min={0} placeholder="0" value={row.cash_out || ""}
-                                        onChange={(e) => updateBulkRow(row.key, { cash_out: e.target.value === "" ? 0 : Number(e.target.value), cash_in: e.target.value === "" || Number(e.target.value) === 0 ? row.cash_in : 0 })}
-                                        className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-right text-danger font-semibold" />
+                                      <CurrencyInput size="sm" value={row.cash_out}
+                                        onChange={(v) => updateBulkRow(row.key, { cash_out: v, cash_in: v === 0 ? row.cash_in : 0 })}
+                                        className="text-danger font-semibold" />
                                     </td>
                                     <td className="px-2 py-1.5">
                                       <div className="flex items-center justify-center gap-0.5">
@@ -1268,9 +1269,9 @@ export default function PettyCashPage() {
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Nominal *</label>
-                    <input type="number" min={0} placeholder="500000" value={topUpForm.nominal || ""}
-                      onChange={(e) => setTopUpForm({ ...topUpForm, nominal: e.target.value === "" ? 0 : Number(e.target.value) })}
-                      className={cn(inputClass, "text-lg font-bold text-success")} />
+                    <CurrencyInput value={topUpForm.nominal}
+                      onChange={(v) => setTopUpForm({ ...topUpForm, nominal: v })}
+                      className="text-lg font-bold text-success" />
                     <p className="text-[10px] text-muted-foreground mt-1">{topUpForm.nominal > 0 ? formatCurrency(topUpForm.nominal) : "Isi nominal top-up"}</p>
                   </div>
                   <div>
@@ -1305,16 +1306,14 @@ export default function PettyCashPage() {
                 <div className="flex-1 overflow-y-auto p-5 space-y-3">
                   <div>
                     <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Modal Awal (Imprest) *</label>
-                    <input type="number" min={0} value={settingsForm.initial_balance || ""}
-                      onChange={(e) => setSettingsForm({ ...settingsForm, initial_balance: e.target.value === "" ? 0 : Number(e.target.value) })}
-                      className={inputClass} />
+                    <CurrencyInput value={settingsForm.initial_balance}
+                      onChange={(v) => setSettingsForm({ ...settingsForm, initial_balance: v })} />
                     <p className="text-[10px] text-muted-foreground mt-1">Saldo awal yang di-set saat sistem diaktifkan. Saldo berjalan = modal + SUM(cash_in) − SUM(cash_out).</p>
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Threshold Saldo Rendah *</label>
-                    <input type="number" min={0} value={settingsForm.low_balance_threshold || ""}
-                      onChange={(e) => setSettingsForm({ ...settingsForm, low_balance_threshold: e.target.value === "" ? 0 : Number(e.target.value) })}
-                      className={inputClass} />
+                    <CurrencyInput value={settingsForm.low_balance_threshold}
+                      onChange={(v) => setSettingsForm({ ...settingsForm, low_balance_threshold: v })} />
                     <p className="text-[10px] text-muted-foreground mt-1">Sistem akan menampilkan peringatan saat saldo di bawah nilai ini.</p>
                   </div>
                   <div>
