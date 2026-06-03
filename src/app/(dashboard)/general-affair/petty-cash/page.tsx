@@ -5,7 +5,7 @@ import {
   Wallet, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
   ChevronLeft, ChevronRight, ChevronDown, Download, FileText, Filter, ArrowDownToLine,
   Calendar, Settings, TrendingUp, TrendingDown, BarChart3, Coins, ArrowUpRight, ArrowDownRight,
-  Briefcase, Layers, Tag, ListPlus, Rows3, Copy, Activity, Truck, Building2,
+  Briefcase, Layers, Tag, ListPlus, Rows3, Copy,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -73,6 +73,13 @@ export default function PettyCashPage() {
   const [filterBagian, setFilterBagian] = useState("Semua");
   const [filterUnit, setFilterUnit] = useState("");
   const [search, setSearch] = useState("");
+
+  // Laporan: per-row filters (setiap kategori punya filter bagian & unit sendiri)
+  const [rowFilters, setRowFilters] = useState<Record<number, { bagian: string; unit: string }>>({});
+  const updateRowFilter = (catId: number, field: "bagian" | "unit", value: string) => {
+    setRowFilters((prev) => ({ ...prev, [catId]: { ...prev[catId] || { bagian: "", unit: "" }, [field]: value } }));
+  };
+  const resetAllRowFilters = () => setRowFilters({});
 
   // Add/Edit form
   const [showForm, setShowForm] = useState(false);
@@ -319,71 +326,6 @@ export default function PettyCashPage() {
     });
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [filtered]);
-
-  // ─── Report: per Unit (cash_out) ───
-  const perUnit = useMemo(() => {
-    const map = new Map<string, { nama: string; total: number; count: number; cashIn: number; cashOut: number }>();
-    filtered.forEach((t) => {
-      const key = t.unit || "(Tanpa Unit)";
-      const existing = map.get(key);
-      if (existing) {
-        existing.total += t.cash_out;
-        existing.cashIn += t.cash_in;
-        existing.cashOut += t.cash_out;
-        existing.count += 1;
-      } else {
-        map.set(key, { nama: key, total: t.cash_out, cashIn: t.cash_in, cashOut: t.cash_out, count: 1 });
-      }
-    });
-    return Array.from(map.values()).sort((a, b) => b.total - a.total);
-  }, [filtered]);
-
-  // ─── Report: per Kategori (dinamis) — hitung untuk semua kategori yang ada di master, plus "Tanpa Kategori" untuk transaksi tanpa kategori ───
-  const reportPerKategori = useMemo(() => {
-    const allCats = categories.map((c) => ({ id: c.id, nama: c.nama, color: c.color, type: c.type, count: 0, cashIn: 0, cashOut: 0 }));
-    filtered.forEach((t) => {
-      const cat = allCats.find((c) => c.id === t.category_id);
-      if (cat) {
-        cat.count += 1;
-        cat.cashIn += t.cash_in;
-        cat.cashOut += t.cash_out;
-      } else {
-        const orphan = allCats.find((c) => c.id === -1);
-        if (orphan) {
-          orphan.count += 1;
-          orphan.cashIn += t.cash_in;
-          orphan.cashOut += t.cash_out;
-        }
-      }
-    });
-    return allCats;
-  }, [filtered, categories]);
-
-  // ─── Report: per Bagian (dinamis) — semua bagian yang ada di master, plus "Tanpa Bagian" ───
-  const reportPerBagian = useMemo(() => {
-    const allBags = bagians.map((b) => ({ id: b.id, nama: b.nama, count: 0, cashIn: 0, cashOut: 0 }));
-    filtered.forEach((t) => {
-      const bag = allBags.find((b) => b.id === t.bagian_id);
-      if (bag) {
-        bag.count += 1;
-        bag.cashIn += t.cash_in;
-        bag.cashOut += t.cash_out;
-      }
-    });
-    return allBags;
-  }, [filtered, bagians]);
-
-  // ─── Report: Matrix Bagian × Kategori (cross-tab, dinamis dari semua kategori) ───
-  const reportMatrix = useMemo(() => {
-    const matrix = new Map<number, Map<number, number>>();
-    filtered.forEach((t) => {
-      if (t.cash_out === 0) return;
-      if (!matrix.has(t.bagian_id)) matrix.set(t.bagian_id, new Map());
-      const row = matrix.get(t.bagian_id)!;
-      row.set(t.category_id, (row.get(t.category_id) || 0) + t.cash_out);
-    });
-    return { matrix, allCategories: categories };
-  }, [filtered, categories]);
 
   // ─── Form handlers ───
   const makeEmptyBulkRow = (): BulkRow => ({
@@ -1155,10 +1097,10 @@ export default function PettyCashPage() {
           </div>
         )}
 
-        {/* ═══ LAPORAN VIEW (Dinamis) ═══ */}
+        {/* ═══ LAPORAN VIEW (Tabel Interaktif) ═══ */}
         {viewMode === "laporan" && (
           <div className="space-y-4">
-            {/* Header summary cards */}
+            {/* Summary cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="bg-card rounded-2xl border border-border p-4">
                 <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Total Cash In</p>
@@ -1171,252 +1113,91 @@ export default function PettyCashPage() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">{stats.countOut}x transaksi</p>
               </div>
               <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Net (Saldo Periode)</p>
-                <p className={cn("text-lg font-bold mt-1", stats.totalIn - stats.totalOut >= 0 ? "text-success" : "text-danger")}>
-                  {formatCurrency(stats.totalIn - stats.totalOut)}
-                </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">In − Out</p>
+                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Net (In - Out)</p>
+                <p className={cn("text-lg font-bold mt-1", stats.totalIn - stats.totalOut >= 0 ? "text-foreground" : "text-danger")}>{formatCurrency(stats.totalIn - stats.totalOut)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Saldo awal: {formatCurrency(settings?.initial_balance ?? 0)}</p>
               </div>
               <div className="bg-card rounded-2xl border border-border p-4">
                 <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Total Transaksi</p>
                 <p className="text-lg font-bold text-foreground mt-1">{filtered.length}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Di periode & filter aktif</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{categories.length} kategori aktif</p>
               </div>
             </div>
 
-            {/* Report filter info */}
-            <div className="bg-card rounded-2xl border border-border px-4 py-2.5 flex items-center gap-3 flex-wrap text-[11px] text-muted-foreground">
-              <Activity className="w-3.5 h-3.5 text-primary" />
-              <span>Filter aktif:</span>
-              {dateStart && <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">Dari {fmtDate(dateStart)}</span>}
-              {dateEnd && <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">Sampai {fmtDate(dateEnd)}</span>}
-              {filterCategory !== "Semua" && <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">Kategori: {categories.find((c) => c.id === Number(filterCategory))?.nama}</span>}
-              {filterBagian !== "Semua" && <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">Bagian: {bagians.find((b) => b.id === Number(filterBagian))?.nama}</span>}
-              {filterUnit && <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">Unit: {filterUnit}</span>}
-              {dateStart === "" && dateEnd === "" && filterCategory === "Semua" && filterBagian === "Semua" && !filterUnit && <span className="italic">Semua data (tanpa filter)</span>}
-            </div>
-
-            {/* Per Kategori (Dinamis — semua kategori yang ada di master) */}
+            {/* Interactive report table */}
             <div className="bg-card rounded-2xl border border-border overflow-hidden">
               <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Tag className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-bold text-foreground">Rekap per Kategori</h3>
-                  <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-primary/10 text-primary">Dinamis</span>
+                  <BarChart3 className="w-4 h-4 text-primary" />
+                  <h3 className="text-sm font-bold text-foreground">Laporan per Kategori</h3>
+                  <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{categories.length} kategori</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground">{categories.length} kategori terdaftar</p>
+                <button onClick={resetAllRowFilters} className="text-[10px] text-muted-foreground hover:text-primary font-semibold transition-colors px-2 py-1 rounded-lg hover:bg-muted">
+                  Reset Filter
+                </button>
               </div>
-              {loading ? <SkeletonTable rows={3} cols={4} /> : (
-                <div className="overflow-x-auto">
+              <div className="overflow-x-auto">
+                {loading ? <SkeletonTable rows={5} cols={6} /> : categories.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic px-5 py-8 text-center">Belum ada kategori di Master Data</p>
+                ) : (
                   <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-border bg-muted/30">
-                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Kategori</th>
-                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">Tipe</th>
-                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">Transaksi</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36">Cash In</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36">Cash Out</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">% Out</th>
+                    <thead className="bg-muted/40 border-b border-border">
+                      <tr>
+                        <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider w-10">#</th>
+                        <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider min-w-[140px]">Kategori</th>
+                        <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider min-w-[160px]">Bagian</th>
+                        <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider min-w-[160px]">Unit</th>
+                        <th className="px-3 py-2.5 text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider w-16">Trx</th>
+                        <th className="px-3 py-2.5 text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider min-w-[130px]">Detail Cost</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {reportPerKategori.map((c) => {
-                        const pct = stats.totalOut > 0 ? (c.cashOut / stats.totalOut) * 100 : 0;
+                    <tbody className="divide-y divide-border/40">
+                      {categories.map((cat, idx) => {
+                        const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
+                        const matchingTrx = filtered.filter((t) => {
+                          if (t.category_id !== cat.id) return false;
+                          if (rf.bagian && t.bagian_id !== Number(rf.bagian)) return false;
+                          if (rf.unit && (t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                          return true;
+                        });
+                        const totalCost = matchingTrx.reduce((s, t) => s + t.cash_out, 0);
+                        const trxCount = matchingTrx.length;
                         return (
-                          <tr key={c.id} className="hover:bg-muted/20">
-                            <td className="px-5 py-2.5">
+                          <tr key={cat.id} className="hover:bg-muted/20 transition-colors">
+                            <td className="px-3 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
+                            <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
-                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
-                                <span className="text-xs font-semibold text-foreground">{c.nama}</span>
+                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />
+                                <span className="text-xs font-semibold text-foreground">{cat.nama}</span>
                               </div>
                             </td>
-                            <td className="px-5 py-2.5 text-center">
-                              <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded",
-                                c.type === "income" ? "bg-success/10 text-success" : c.type === "expense" ? "bg-danger/10 text-danger" : "bg-blue-500/10 text-blue-500")}>
-                                {c.type}
-                              </span>
+                            <td className="px-3 py-2.5">
+                              <select
+                                value={rf.bagian}
+                                onChange={(e) => updateRowFilter(cat.id, "bagian", e.target.value)}
+                                className="w-full px-2 py-1.5 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
+                              >
+                                <option value="">Semua Bagian</option>
+                                {bagians.map((b) => (
+                                  <option key={b.id} value={String(b.id)}>{b.nama}</option>
+                                ))}
+                              </select>
                             </td>
-                            <td className="px-5 py-2.5 text-center text-xs text-muted-foreground">{c.count}</td>
-                            <td className={cn("px-5 py-2.5 text-right text-xs font-semibold", c.cashIn > 0 ? "text-success" : "text-muted-foreground")}>
-                              {c.cashIn > 0 ? formatCurrency(c.cashIn) : "-"}
+                            <td className="px-3 py-2.5">
+                              <select
+                                value={rf.unit}
+                                onChange={(e) => updateRowFilter(cat.id, "unit", e.target.value)}
+                                className="w-full px-2 py-1.5 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer uppercase"
+                              >
+                                <option value="">Semua Unit</option>
+                                {units.map((u) => (
+                                  <option key={u.id} value={u.nama}>{u.nama}</option>
+                                ))}
+                              </select>
                             </td>
-                            <td className={cn("px-5 py-2.5 text-right text-xs font-semibold", c.cashOut > 0 ? "text-danger" : "text-muted-foreground")}>
-                              {c.cashOut > 0 ? formatCurrency(c.cashOut) : "-"}
-                            </td>
-                            <td className="px-5 py-2.5 text-right text-xs text-muted-foreground">{c.cashOut > 0 ? `${pct.toFixed(1)}%` : "-"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot className="bg-muted/40 border-t-2 border-border">
-                      <tr>
-                        <td className="px-5 py-2.5 text-xs font-bold text-foreground" colSpan={2}>TOTAL</td>
-                        <td className="px-5 py-2.5 text-center text-xs font-bold text-foreground">{reportPerKategori.reduce((a, c) => a + c.count, 0)}</td>
-                        <td className="px-5 py-2.5 text-right text-xs font-bold text-success">{formatCurrency(reportPerKategori.reduce((a, c) => a + c.cashIn, 0))}</td>
-                        <td className="px-5 py-2.5 text-right text-xs font-bold text-danger">{formatCurrency(reportPerKategori.reduce((a, c) => a + c.cashOut, 0))}</td>
-                        <td className="px-5 py-2.5 text-right text-xs font-bold text-foreground">100%</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Per Bagian (Dinamis) */}
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Briefcase className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-bold text-foreground">Rekap per Bagian</h3>
-                </div>
-                <p className="text-[10px] text-muted-foreground">{bagians.length} bagian terdaftar</p>
-              </div>
-              {loading ? <SkeletonTable rows={3} cols={4} /> : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-border bg-muted/30">
-                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Bagian</th>
-                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">Transaksi</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36">Cash In</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36">Cash Out</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">% Out</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {reportPerBagian.map((b) => {
-                        const pct = stats.totalOut > 0 ? (b.cashOut / stats.totalOut) * 100 : 0;
-                        return (
-                          <tr key={b.id} className="hover:bg-muted/20">
-                            <td className="px-5 py-2.5 text-xs font-semibold text-foreground">{b.nama}</td>
-                            <td className="px-5 py-2.5 text-center text-xs text-muted-foreground">{b.count}</td>
-                            <td className={cn("px-5 py-2.5 text-right text-xs font-semibold", b.cashIn > 0 ? "text-success" : "text-muted-foreground")}>
-                              {b.cashIn > 0 ? formatCurrency(b.cashIn) : "-"}
-                            </td>
-                            <td className={cn("px-5 py-2.5 text-right text-xs font-semibold", b.cashOut > 0 ? "text-danger" : "text-muted-foreground")}>
-                              {b.cashOut > 0 ? formatCurrency(b.cashOut) : "-"}
-                            </td>
-                            <td className="px-5 py-2.5 text-right text-xs text-muted-foreground">{b.cashOut > 0 ? `${pct.toFixed(1)}%` : "-"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot className="bg-muted/40 border-t-2 border-border">
-                      <tr>
-                        <td className="px-5 py-2.5 text-xs font-bold text-foreground">TOTAL</td>
-                        <td className="px-5 py-2.5 text-center text-xs font-bold text-foreground">{reportPerBagian.reduce((a, b) => a + b.count, 0)}</td>
-                        <td className="px-5 py-2.5 text-right text-xs font-bold text-success">{formatCurrency(reportPerBagian.reduce((a, b) => a + b.cashIn, 0))}</td>
-                        <td className="px-5 py-2.5 text-right text-xs font-bold text-danger">{formatCurrency(reportPerBagian.reduce((a, b) => a + b.cashOut, 0))}</td>
-                        <td className="px-5 py-2.5 text-right text-xs font-bold text-foreground">100%</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Per Unit (Top 10 + Total) */}
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Coins className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-bold text-foreground">Rekap per Unit</h3>
-                  <span className="text-[10px] text-muted-foreground">(dari data transaksi)</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground">{perUnit.length} unit aktif</p>
-              </div>
-              {loading ? <SkeletonTable rows={3} cols={4} /> : perUnit.length === 0 ? (
-                <div className="text-center py-10 text-sm text-muted-foreground">Belum ada transaksi.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-border bg-muted/30">
-                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-12">#</th>
-                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Unit</th>
-                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">Transaksi</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36">Cash In</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36">Cash Out</th>
-                        <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">% Out</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {perUnit.slice(0, 10).map((u, i) => {
-                        const pct = stats.totalOut > 0 ? (u.cashOut / stats.totalOut) * 100 : 0;
-                        return (
-                          <tr key={u.nama} className="hover:bg-muted/20">
-                            <td className="px-5 py-2.5 text-xs text-muted-foreground">{i + 1}</td>
-                            <td className="px-5 py-2.5 text-xs font-semibold text-foreground uppercase">{u.nama}</td>
-                            <td className="px-5 py-2.5 text-center text-xs text-muted-foreground">{u.count}</td>
-                            <td className={cn("px-5 py-2.5 text-right text-xs font-semibold", u.cashIn > 0 ? "text-success" : "text-muted-foreground")}>
-                              {u.cashIn > 0 ? formatCurrency(u.cashIn) : "-"}
-                            </td>
-                            <td className={cn("px-5 py-2.5 text-right text-xs font-semibold", u.cashOut > 0 ? "text-danger" : "text-muted-foreground")}>
-                              {u.cashOut > 0 ? formatCurrency(u.cashOut) : "-"}
-                            </td>
-                            <td className="px-5 py-2.5 text-right text-xs text-muted-foreground">{u.cashOut > 0 ? `${pct.toFixed(1)}%` : "-"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    {perUnit.length > 10 && (
-                      <tfoot className="bg-muted/30 border-t border-border">
-                        <tr>
-                          <td colSpan={6} className="px-5 py-2 text-center text-[10px] text-muted-foreground italic">
-                            +{perUnit.length - 10} unit lainnya tidak ditampilkan
-                          </td>
-                        </tr>
-                      </tfoot>
-                    )}
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Matrix: Bagian × Kategori (cross-tab, kolom dinamis dari semua kategori) */}
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-bold text-foreground">Matrix: Bagian × Kategori</h3>
-                  <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-primary/10 text-primary">Cash Out</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground">{categories.length} kolom kategori</p>
-              </div>
-              {loading ? <SkeletonTable rows={3} cols={4} /> : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-border bg-muted/30">
-                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2.5 sticky left-0 bg-muted/30 z-10 min-w-[140px]">Bagian \ Kategori</th>
-                        {categories.map((c) => (
-                          <th key={c.id} className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[100px]">
-                            <div className="flex items-center justify-end gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: c.color }} />
-                              {c.nama}
-                            </div>
-                          </th>
-                        ))}
-                        <th className="text-right text-xs font-semibold text-foreground uppercase tracking-wider px-3 py-2.5 sticky right-0 bg-muted/60 z-10 min-w-[120px] border-l border-border">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {reportPerBagian.map((b) => {
-                        const row = reportMatrix.matrix.get(b.id);
-                        const rowTotal = categories.reduce((sum, c) => sum + (row?.get(c.id) || 0), 0);
-                        return (
-                          <tr key={b.id} className="hover:bg-muted/20">
-                            <td className="px-3 py-2.5 text-xs font-semibold text-foreground sticky left-0 bg-card z-10 min-w-[140px]">{b.nama}</td>
-                            {categories.map((c) => {
-                              const val = row?.get(c.id) || 0;
-                              return (
-                                <td key={c.id} className={cn("px-2 py-2.5 text-right text-[11px] tabular-nums", val > 0 ? "text-foreground font-semibold" : "text-muted-foreground/40")}>
-                                  {val > 0 ? formatCurrency(val) : "—"}
-                                </td>
-                              );
-                            })}
-                            <td className={cn("px-3 py-2.5 text-right text-xs font-bold sticky right-0 bg-card z-10 border-l border-border", rowTotal > 0 ? "text-foreground" : "text-muted-foreground/40")}>
-                              {rowTotal > 0 ? formatCurrency(rowTotal) : "—"}
+                            <td className="px-3 py-2.5 text-center text-xs text-muted-foreground">{trxCount > 0 ? `${trxCount}x` : "-"}</td>
+                            <td className={cn("px-3 py-2.5 text-right text-sm font-bold tabular-nums", totalCost > 0 ? "text-danger" : "text-muted-foreground/40")}>
+                              {totalCost > 0 ? formatCurrency(totalCost) : "-"}
                             </td>
                           </tr>
                         );
@@ -1424,23 +1205,42 @@ export default function PettyCashPage() {
                     </tbody>
                     <tfoot className="bg-muted/40 border-t-2 border-border">
                       <tr>
-                        <td className="px-3 py-2.5 text-xs font-bold text-foreground sticky left-0 bg-muted/40 z-10">TOTAL</td>
-                        {categories.map((c) => {
-                          const colTotal = filtered.filter((t) => t.category_id === c.id).reduce((sum, t) => sum + t.cash_out, 0);
-                          return (
-                            <td key={c.id} className={cn("px-2 py-2.5 text-right text-[11px] font-bold tabular-nums", colTotal > 0 ? "text-danger" : "text-muted-foreground/40")}>
-                              {colTotal > 0 ? formatCurrency(colTotal) : "—"}
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-2.5 text-right text-xs font-bold text-foreground sticky right-0 bg-muted/40 z-10 border-l border-border">
-                          {formatCurrency(filtered.reduce((s, t) => s + t.cash_out, 0))}
+                        <td colSpan={4} className="px-3 py-2.5 text-xs font-bold text-foreground">GRAND TOTAL</td>
+                        <td className="px-3 py-2.5 text-center text-xs font-bold text-foreground">
+                          {(() => {
+                            let total = 0;
+                            categories.forEach((cat) => {
+                              const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
+                              total += filtered.filter((t) => {
+                                if (t.category_id !== cat.id) return false;
+                                if (rf.bagian && t.bagian_id !== Number(rf.bagian)) return false;
+                                if (rf.unit && (t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                                return true;
+                              }).length;
+                            });
+                            return `${total}x`;
+                          })()}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm font-bold text-danger tabular-nums">
+                          {(() => {
+                            let total = 0;
+                            categories.forEach((cat) => {
+                              const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
+                              total += filtered.filter((t) => {
+                                if (t.category_id !== cat.id) return false;
+                                if (rf.bagian && t.bagian_id !== Number(rf.bagian)) return false;
+                                if (rf.unit && (t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                                return true;
+                              }).reduce((s, t) => s + t.cash_out, 0);
+                            });
+                            return formatCurrency(total);
+                          })()}
                         </td>
                       </tr>
                     </tfoot>
                   </table>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         )}
