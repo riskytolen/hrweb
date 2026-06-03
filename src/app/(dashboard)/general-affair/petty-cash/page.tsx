@@ -1311,32 +1311,43 @@ export default function PettyCashPage() {
                       </div>
                       <div>
                         <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Kategori *</label>
-                        <Select
+                        <select
                           value={String(form.category_id)}
-                          onChange={(v) => setForm({ ...form, category_id: Number(v) })}
-                          options={categories.map((c) => ({ value: String(c.id), label: c.nama }))}
-                          placeholder="Pilih kategori"
-                        />
+                          onChange={(e) => setForm({ ...form, category_id: Number(e.target.value) })}
+                          className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
+                        >
+                          <option value="0">Pilih kategori...</option>
+                          {categories.map((c) => (
+                            <option key={c.id} value={String(c.id)}>{c.nama}</option>
+                          ))}
+                        </select>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Bagian <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
-                          <Select
+                          <select
                             value={String(form.bagian_id)}
-                            onChange={(v) => setForm({ ...form, bagian_id: Number(v) })}
-                            options={[{ value: "0", label: "—" }, ...bagians.map((b) => ({ value: String(b.id), label: b.nama }))]}
-                            placeholder="Pilih bagian"
-                          />
+                            onChange={(e) => setForm({ ...form, bagian_id: Number(e.target.value) })}
+                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
+                          >
+                            <option value="0">— (Tanpa Bagian)</option>
+                            {bagians.map((b) => (
+                              <option key={b.id} value={String(b.id)}>{b.nama}</option>
+                            ))}
+                          </select>
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Unit <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
-                          <Select
+                          <select
                             value={form.unit}
-                            onChange={(v) => setForm({ ...form, unit: v })}
-                            options={[{ value: "", label: "—" }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
-                            placeholder="Pilih unit"
-                            searchable
-                          />
+                            onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer uppercase"
+                          >
+                            <option value="">— (Tanpa Unit)</option>
+                            {units.map((u) => (
+                              <option key={u.id} value={u.nama}>{u.nama}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                       <div>
@@ -1541,12 +1552,16 @@ export default function PettyCashPage() {
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Penanggung Jawab</label>
-                    <Select
+                    <select
                       value={settingsForm.custodian_id}
-                      onChange={(v) => setSettingsForm({ ...settingsForm, custodian_id: v })}
-                      options={[{ value: "", label: "—" }, ...employees.map((e) => ({ value: e.id, label: e.nama }))]}
-                      placeholder="Pilih penanggung jawab"
-                    />
+                      onChange={(e) => setSettingsForm({ ...settingsForm, custodian_id: e.target.value })}
+                      className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
+                    >
+                      <option value="">— (Tidak ada)</option>
+                      {employees.map((e) => (
+                        <option key={e.id} value={e.id}>{e.nama}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Catatan</label>
