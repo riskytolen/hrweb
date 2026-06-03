@@ -332,7 +332,7 @@ export default function PettyCashPage() {
     key: `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     tanggal: localDateStr(),
     category_id: categories[0]?.id || 0,
-    bagian_id: bagians[0]?.id || 0,
+    bagian_id: 0,
     unit: "",
     keterangan: "",
     cash_in: 0,
@@ -340,7 +340,7 @@ export default function PettyCashPage() {
   });
 
   const openAdd = () => {
-    setForm({ tanggal: localDateStr(), category_id: categories[0]?.id || 0, bagian_id: bagians[0]?.id || 0, unit: "", keterangan: "", cash_in: 0, cash_out: 0 });
+    setForm({ tanggal: localDateStr(), category_id: categories[0]?.id || 0, bagian_id: 0, unit: "", keterangan: "", cash_in: 0, cash_out: 0 });
     setEditingId(null);
     setFormMode("single");
     setFormError("");
@@ -1430,7 +1430,7 @@ export default function PettyCashPage() {
                           <Select
                             value={String(form.bagian_id)}
                             onChange={(v) => setForm({ ...form, bagian_id: Number(v) })}
-                            options={bagians.map((b) => ({ value: String(b.id), label: b.nama }))}
+                            options={[{ value: "0", label: "—" }, ...bagians.map((b) => ({ value: String(b.id), label: b.nama }))]}
                             placeholder="Pilih bagian"
                           />
                         </div>
