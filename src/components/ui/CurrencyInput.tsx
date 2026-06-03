@@ -28,7 +28,7 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const raw = e.target.value.replace(/[^\d]/g, "");
       const num = raw === "" ? 0 : Number(raw);
-      setDisplay(raw === "" ? "" : formatRupiah(num));
+      setDisplay(raw);
       onChange(num);
     };
 
@@ -55,7 +55,7 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
         </span>
         <input
           ref={ref}
-          type={focused ? "number" : "text"}
+          type="text"
           inputMode="numeric"
           value={display}
           onChange={handleChange}
