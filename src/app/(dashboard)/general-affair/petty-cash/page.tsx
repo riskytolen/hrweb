@@ -1385,7 +1385,7 @@ export default function PettyCashPage() {
           <Portal>
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowForm(false)} />
-              <div className={cn("relative w-full bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]", formMode === "bulk" && !editingId ? "max-w-2xl" : "max-w-xl")}>
+              <div className={cn("relative w-full bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]", formMode === "bulk" && !editingId ? "max-w-5xl" : "max-w-xl")}>
                 <div className="flex items-center justify-between p-5 border-b border-border gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <h3 className="text-base font-bold text-foreground whitespace-nowrap">
@@ -1479,97 +1479,98 @@ export default function PettyCashPage() {
                           <Button variant="outline" size="sm" icon={Plus} onClick={() => addBulkRows(5)}>+5</Button>
                         </div>
                       </div>
-                      <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
-                        {bulkRows.map((row, idx) => (
-                          <div key={row.key} className="bg-muted/20 border border-border rounded-xl p-3 space-y-2.5 hover:border-primary/30 transition-colors">
-                            {/* Row header */}
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Transaksi #{idx + 1}</span>
-                              <div className="flex items-center gap-1">
-                                <button onClick={() => duplicateBulkRow(row.key)} title="Duplikasi" className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-primary transition-colors"><Copy className="w-3.5 h-3.5" /></button>
-                                <button onClick={() => removeBulkRow(row.key)} disabled={bulkRows.length <= 1} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger/10 text-muted-foreground hover:text-danger disabled:opacity-30 disabled:cursor-not-allowed transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                              </div>
-                            </div>
-                            {/* Row 1: Tanggal + Kategori */}
-                            <div className="grid grid-cols-2 gap-2.5">
-                              <div>
-                                <label className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Tanggal *</label>
-                                <DatePicker value={row.tanggal} onChange={(v) => updateBulkRow(row.key, { tanggal: v })} placeholder="Pilih tanggal" />
-                              </div>
-                              <div>
-                                <label className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Kategori *</label>
-                                <select
-                                  value={String(row.category_id)}
-                                  onChange={(e) => updateBulkRow(row.key, { category_id: Number(e.target.value) })}
-                                  className="w-full px-2.5 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
-                                >
-                                  <option value="0">Pilih kategori...</option>
-                                  {categories.map((c) => (
-                                    <option key={c.id} value={String(c.id)}>{c.nama}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                            {/* Row 2: Bagian + Unit */}
-                            <div className="grid grid-cols-2 gap-2.5">
-                              <div>
-                                <label className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Bagian <span className="text-muted-foreground/50 normal-case">(opsional)</span></label>
-                                <select
-                                  value={String(row.bagian_id)}
-                                  onChange={(e) => updateBulkRow(row.key, { bagian_id: Number(e.target.value) })}
-                                  className="w-full px-2.5 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
-                                >
-                                  <option value="0">Pilih bagian...</option>
-                                  {bagians.map((b) => (
-                                    <option key={b.id} value={String(b.id)}>{b.nama}</option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div>
-                                <label className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Unit <span className="text-muted-foreground/50 normal-case">(opsional)</span></label>
-                                <select
-                                  value={row.unit}
-                                  onChange={(e) => updateBulkRow(row.key, { unit: e.target.value })}
-                                  className="w-full px-2.5 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer uppercase"
-                                >
-                                  <option value="">Pilih unit...</option>
-                                  {units.map((u) => (
-                                    <option key={u.id} value={u.nama}>{u.nama}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                            {/* Row 3: Keterangan */}
-                            <div>
-                              <label className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Keterangan <span className="text-muted-foreground/50 normal-case">(opsional)</span></label>
-                              <input type="text" placeholder="Misal: Beli solar 50 liter..." value={row.keterangan}
-                                onChange={(e) => updateBulkRow(row.key, { keterangan: e.target.value })}
-                                className="w-full px-2.5 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
-                            </div>
-                            {/* Row 4: Cash In + Cash Out */}
-                            <div className="grid grid-cols-2 gap-2.5">
-                              <div>
-                                <label className="text-[9px] font-semibold text-success uppercase tracking-wider mb-1 block">Cash In</label>
-                                <CurrencyInput size="sm" value={row.cash_in}
-                                  onChange={(v) => updateBulkRow(row.key, { cash_in: v, cash_out: v === 0 ? row.cash_out : 0 })}
-                                  className="text-success font-semibold" />
-                              </div>
-                              <div>
-                                <label className="text-[9px] font-semibold text-danger uppercase tracking-wider mb-1 block">Cash Out</label>
-                                <CurrencyInput size="sm" value={row.cash_out}
-                                  onChange={(v) => updateBulkRow(row.key, { cash_out: v, cash_in: v === 0 ? row.cash_in : 0 })}
-                                  className="text-danger font-semibold" />
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      {/* Bulk totals bar */}
-                      <div className="flex items-center justify-between bg-muted/40 rounded-xl px-4 py-2.5 border border-border">
-                        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total {bulkTotals.count} transaksi</span>
-                        <div className="flex items-center gap-4">
-                          <span className="text-xs font-bold text-success">{bulkTotals.inTotal > 0 ? `In: ${formatCurrency(bulkTotals.inTotal)}` : ""}</span>
-                          <span className="text-xs font-bold text-danger">{bulkTotals.outTotal > 0 ? `Out: ${formatCurrency(bulkTotals.outTotal)}` : ""}</span>
+                      <div className="border border-border rounded-xl overflow-hidden">
+                        <div className="max-h-[55vh] overflow-auto">
+                          <table className="w-full">
+                            <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+                              <tr className="border-b border-border">
+                                <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-8">#</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Tanggal</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[140px]">Kategori</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[120px]">Bagian</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[130px]">Unit</th>
+                                <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[180px]">Keterangan</th>
+                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Cash In</th>
+                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Cash Out</th>
+                                <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-16">Aksi</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/50">
+                              {bulkRows.map((row, idx) => (
+                                <tr key={row.key} className="hover:bg-muted/20">
+                                  <td className="px-2 py-1.5 text-center text-[10px] text-muted-foreground font-semibold">{idx + 1}</td>
+                                  <td className="px-2 py-1.5">
+                                    <DatePicker value={row.tanggal} onChange={(v) => updateBulkRow(row.key, { tanggal: v })} placeholder="Tgl" />
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <select
+                                      value={String(row.category_id)}
+                                      onChange={(e) => updateBulkRow(row.key, { category_id: Number(e.target.value) })}
+                                      className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
+                                    >
+                                      <option value="0">Kategori...</option>
+                                      {categories.map((c) => (
+                                        <option key={c.id} value={String(c.id)}>{c.nama}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <select
+                                      value={String(row.bagian_id)}
+                                      onChange={(e) => updateBulkRow(row.key, { bagian_id: Number(e.target.value) })}
+                                      className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
+                                    >
+                                      <option value="0">Bagian...</option>
+                                      {bagians.map((b) => (
+                                        <option key={b.id} value={String(b.id)}>{b.nama}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <select
+                                      value={row.unit}
+                                      onChange={(e) => updateBulkRow(row.key, { unit: e.target.value })}
+                                      className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer uppercase"
+                                    >
+                                      <option value="">Unit...</option>
+                                      {units.map((u) => (
+                                        <option key={u.id} value={u.nama}>{u.nama}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <input type="text" placeholder="Keterangan" value={row.keterangan}
+                                      onChange={(e) => updateBulkRow(row.key, { keterangan: e.target.value })}
+                                      className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <CurrencyInput size="sm" value={row.cash_in}
+                                      onChange={(v) => updateBulkRow(row.key, { cash_in: v, cash_out: v === 0 ? row.cash_out : 0 })}
+                                      className="text-success font-semibold" />
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <CurrencyInput size="sm" value={row.cash_out}
+                                      onChange={(v) => updateBulkRow(row.key, { cash_out: v, cash_in: v === 0 ? row.cash_in : 0 })}
+                                      className="text-danger font-semibold" />
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <div className="flex items-center justify-center gap-0.5">
+                                      <button onClick={() => duplicateBulkRow(row.key)} title="Duplikasi baris" className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary"><Copy className="w-3 h-3" /></button>
+                                      <button onClick={() => removeBulkRow(row.key)} disabled={bulkRows.length <= 1} title="Hapus baris" className="p-1 rounded hover:bg-danger-light text-muted-foreground hover:text-danger disabled:opacity-30 disabled:cursor-not-allowed"><Trash2 className="w-3 h-3" /></button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="sticky bottom-0 bg-muted/80 backdrop-blur-sm border-t-2 border-border">
+                              <tr>
+                                <td colSpan={6} className="px-2 py-2 text-right text-[10px] font-semibold text-muted-foreground uppercase">Total {bulkTotals.count} baris</td>
+                                <td className="px-2 py-2 text-right text-sm font-bold text-success">{bulkTotals.inTotal > 0 ? formatCurrency(bulkTotals.inTotal) : "-"}</td>
+                                <td className="px-2 py-2 text-right text-sm font-bold text-danger">{bulkTotals.outTotal > 0 ? formatCurrency(bulkTotals.outTotal) : "-"}</td>
+                                <td className="px-2 py-2"></td>
+                              </tr>
+                            </tfoot>
+                          </table>
                         </div>
                       </div>
                       <p className="text-[10px] text-muted-foreground">Baris kosong akan dilewati saat simpan. Hanya baris valid (tanggal + kategori + nominal) yang akan disimpan.</p>
