@@ -18,32 +18,75 @@ function formatRupiah(amount: number): string {
 
 export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputProps>(
   ({ value, onChange, className, size = "default", ...props }, ref) => {
-    const [display, setDisplay] = React.useState(() => formatRupiah(value));
-    const [focused, setFocused] = React.useState(false);
+    const innerRef = React.useRef<HTMLInputElement | null>(null);
+    const cursorRef = React.useRef<number | null>(null);
 
+    const [display, setDisplay] = React.useState(() => formatRupiah(value));
+
+    // Sync display when value changes externally (e.g. reset form)
+    const lastValueRef = React.useRef(value);
     React.useEffect(() => {
-      if (!focused) setDisplay(formatRupiah(value));
-    }, [value, focused]);
+      if (value !== lastValueRef.current) {
+        lastValueRef.current = value;
+        setDisplay(formatRupiah(value));
+      }
+    }, [value]);
+
+    // Restore cursor position after React re-renders the formatted value
+    React.useLayoutEffect(() => {
+      if (cursorRef.current !== null && innerRef.current) {
+        innerRef.current.setSelectionRange(cursorRef.current, cursorRef.current);
+        cursorRef.current = null;
+      }
+    });
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const raw = e.target.value.replace(/[^\d]/g, "");
+      const el = e.target;
+      const caretBefore = el.selectionStart ?? 0;
+      const oldVal = el.value;
+
+      // Count how many digit chars are to the LEFT of the caret in the old value
+      const digitsBeforeCaret = oldVal.slice(0, caretBefore).replace(/[^\d]/g, "").length;
+
+      const raw = oldVal.replace(/[^\d]/g, "");
       const num = raw === "" ? 0 : Number(raw);
-      setDisplay(raw);
+      const formatted = formatRupiah(num);
+
+      // Find the caret position in the new formatted string so that the same
+      // number of digits are to its left
+      let newCaret = 0;
+      let counted = 0;
+      for (let i = 0; i < formatted.length; i++) {
+        if (counted >= digitsBeforeCaret) break;
+        if (/\d/.test(formatted[i])) counted++;
+        newCaret = i + 1;
+      }
+
+      cursorRef.current = newCaret;
+      lastValueRef.current = num;
+      setDisplay(formatted);
       onChange(num);
     };
 
     const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
-      setFocused(true);
-      setDisplay(value > 0 ? String(value) : "");
-      e.target.select();
+      // Keep formatted display — user sees "25.000.000" while typing
+      setTimeout(() => e.target.select(), 0);
       props.onFocus?.(e);
     };
 
     const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-      setFocused(false);
       setDisplay(formatRupiah(value));
       props.onBlur?.(e);
     };
+
+    const setRef = React.useCallback(
+      (node: HTMLInputElement | null) => {
+        innerRef.current = node;
+        if (typeof ref === "function") ref(node);
+        else if (ref) (ref as React.MutableRefObject<HTMLInputElement | null>).current = node;
+      },
+      [ref]
+    );
 
     return (
       <div className="relative">
@@ -54,7 +97,7 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
           Rp
         </span>
         <input
-          ref={ref}
+          ref={setRef}
           type="text"
           inputMode="numeric"
           value={display}
