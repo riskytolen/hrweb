@@ -1101,7 +1101,7 @@ export default function PettyCashPage() {
         {viewMode === "laporan" && (
           <div className="space-y-4">
             {/* Summary cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="bg-card rounded-2xl border border-border p-4">
                 <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Total Cash In</p>
                 <p className="text-lg font-bold text-success mt-1">{formatCurrency(stats.totalIn)}</p>
@@ -1113,14 +1113,9 @@ export default function PettyCashPage() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">{stats.countOut}x transaksi</p>
               </div>
               <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Net (In - Out)</p>
-                <p className={cn("text-lg font-bold mt-1", stats.totalIn - stats.totalOut >= 0 ? "text-foreground" : "text-danger")}>{formatCurrency(stats.totalIn - stats.totalOut)}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Saldo awal: {formatCurrency(settings?.initial_balance ?? 0)}</p>
-              </div>
-              <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Total Transaksi</p>
-                <p className="text-lg font-bold text-foreground mt-1">{filtered.length}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">{categories.length} kategori aktif</p>
+                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Saldo Saat Ini</p>
+                <p className={cn("text-lg font-bold mt-1", stats.currentBalance >= 0 ? "text-foreground" : "text-danger")}>{formatCurrency(stats.currentBalance)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{filtered.length} transaksi</p>
               </div>
             </div>
 
