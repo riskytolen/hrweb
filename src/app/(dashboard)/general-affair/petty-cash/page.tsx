@@ -371,9 +371,8 @@ export default function PettyCashPage() {
   };
 
   const bulkTotals = useMemo(() => {
-    const inTotal = bulkRows.reduce((s, r) => s + (r.cash_in || 0), 0);
     const outTotal = bulkRows.reduce((s, r) => s + (r.cash_out || 0), 0);
-    return { inTotal, outTotal, count: bulkRows.length };
+    return { outTotal, count: bulkRows.length };
   }, [bulkRows]);
 
   const openEdit = (t: Transaction) => {
@@ -397,17 +396,16 @@ export default function PettyCashPage() {
     // Bulk mode validation & insert
     if (formMode === "bulk" && !editingId) {
       const invalidRows: number[] = [];
-      bulkRows.forEach((r, i) => {
-        if (!r.tanggal) { invalidRows.push(i + 1); return; }
-        if (!r.category_id) { invalidRows.push(i + 1); return; }
-        if (r.cash_in === 0 && r.cash_out === 0) { invalidRows.push(i + 1); return; }
-        if (r.cash_in > 0 && r.cash_out > 0) { invalidRows.push(i + 1); return; }
-      });
-      if (invalidRows.length > 0) {
-        return setFormError(`Baris ${invalidRows.join(", ")} belum lengkap. Periksa tanggal, kategori, dan nominal.`);
-      }
-      const validRows = bulkRows.filter((r) => r.tanggal && r.category_id && (r.cash_in > 0 || r.cash_out > 0) && !(r.cash_in > 0 && r.cash_out > 0));
-      if (validRows.length === 0) return setFormError("Minimal 1 baris harus valid.");
+        bulkRows.forEach((r, i) => {
+          if (!r.tanggal) { invalidRows.push(i + 1); return; }
+          if (!r.category_id) { invalidRows.push(i + 1); return; }
+          if (r.cash_out === 0) { invalidRows.push(i + 1); return; }
+        });
+        if (invalidRows.length > 0) {
+          return setFormError(`Baris ${invalidRows.join(", ")} belum lengkap. Periksa tanggal, kategori, dan nominal.`);
+        }
+        const validRows = bulkRows.filter((r) => r.tanggal && r.category_id && r.cash_out > 0);
+        if (validRows.length === 0) return setFormError("Minimal 1 baris harus valid.");
 
       setFormSaving(true);
       const payload = validRows.map((r) => ({
@@ -424,9 +422,9 @@ export default function PettyCashPage() {
       await logAudit({
         supabase, action: "create", entityType: "petty_cash_transactions",
         entityLabel: `Bulk insert ${payload.length} transaksi`,
-        metadata: { count: payload.length, total_in: bulkTotals.inTotal, total_out: bulkTotals.outTotal, ids: inserted?.map((d) => d.id) },
-      });
-      showToast("success", `${payload.length} Transaksi Disimpan`, `Total cash in ${formatCurrency(bulkTotals.inTotal)}, cash out ${formatCurrency(bulkTotals.outTotal)}.`);
+          metadata: { count: payload.length, total_out: bulkTotals.outTotal, ids: inserted?.map((d) => d.id) },
+        });
+        showToast("success", `${payload.length} Transaksi Disimpan`, `Total cash out ${formatCurrency(bulkTotals.outTotal)}.`);
       setFormSaving(false);
       setShowForm(false);
       setBulkRows([]);
@@ -437,8 +435,7 @@ export default function PettyCashPage() {
     // Single mode (add or edit)
     if (!form.tanggal) return setFormError("Tanggal wajib diisi.");
     if (!form.category_id) return setFormError("Kategori wajib dipilih.");
-    if (form.cash_in === 0 && form.cash_out === 0) return setFormError("Isi nominal Cash In atau Cash Out.");
-    if (form.cash_in > 0 && form.cash_out > 0) return setFormError("Transaksi hanya boleh Cash In atau Cash Out, bukan keduanya.");
+    if (form.cash_out === 0) return setFormError("Nominal pengeluaran wajib diisi.");
 
     setFormSaving(true);
     const payload = {
@@ -1454,21 +1451,13 @@ export default function PettyCashPage() {
                           onChange={(e) => setForm({ ...form, keterangan: e.target.value })}
                           className={inputClass} />
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-[10px] font-semibold text-success mb-1.5 block">Cash In (masuk)</label>
-                          <CurrencyInput value={form.cash_in}
-                            onChange={(v) => setForm({ ...form, cash_in: v, cash_out: v === 0 ? form.cash_out : 0 })}
-                            className="text-success font-semibold" />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-semibold text-danger mb-1.5 block">Cash Out (keluar)</label>
-                          <CurrencyInput value={form.cash_out}
-                            onChange={(v) => setForm({ ...form, cash_out: v, cash_in: v === 0 ? form.cash_in : 0 })}
-                            className="text-danger font-semibold" />
-                        </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-danger mb-1.5 block">Nominal *</label>
+                        <CurrencyInput value={form.cash_out}
+                          onChange={(v) => setForm({ ...form, cash_out: v, cash_in: 0 })}
+                          className="text-danger font-semibold" />
+                        <p className="text-[10px] text-muted-foreground mt-1.5">Nominal pengeluaran. Untuk top-up saldo, gunakan tombol Top-up.</p>
                       </div>
-                      <p className="text-[10px] text-muted-foreground">Isi salah satu: Cash In untuk top-up/pemasukan, Cash Out untuk pengeluaran.</p>
                     </>
                   ) : (
                     <>
@@ -1490,8 +1479,7 @@ export default function PettyCashPage() {
                                 <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[120px]">Bagian</th>
                                 <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[130px]">Unit</th>
                                 <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 min-w-[180px]">Keterangan</th>
-                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Cash In</th>
-                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Cash Out</th>
+                                <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-32">Nominal</th>
                                 <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-2 w-16">Aksi</th>
                               </tr>
                             </thead>
@@ -1544,13 +1532,8 @@ export default function PettyCashPage() {
                                       className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground placeholder:text-muted-foreground/50" />
                                   </td>
                                   <td className="px-2 py-1.5">
-                                    <CurrencyInput size="sm" value={row.cash_in}
-                                      onChange={(v) => updateBulkRow(row.key, { cash_in: v, cash_out: v === 0 ? row.cash_out : 0 })}
-                                      className="text-success font-semibold" />
-                                  </td>
-                                  <td className="px-2 py-1.5">
                                     <CurrencyInput size="sm" value={row.cash_out}
-                                      onChange={(v) => updateBulkRow(row.key, { cash_out: v, cash_in: v === 0 ? row.cash_in : 0 })}
+                                      onChange={(v) => updateBulkRow(row.key, { cash_out: v, cash_in: 0 })}
                                       className="text-danger font-semibold" />
                                   </td>
                                   <td className="px-2 py-1.5">
@@ -1565,7 +1548,6 @@ export default function PettyCashPage() {
                             <tfoot className="sticky bottom-0 bg-muted/80 backdrop-blur-sm border-t-2 border-border">
                               <tr>
                                 <td colSpan={6} className="px-2 py-2 text-right text-[10px] font-semibold text-muted-foreground uppercase">Total {bulkTotals.count} baris</td>
-                                <td className="px-2 py-2 text-right text-sm font-bold text-success">{bulkTotals.inTotal > 0 ? formatCurrency(bulkTotals.inTotal) : "-"}</td>
                                 <td className="px-2 py-2 text-right text-sm font-bold text-danger">{bulkTotals.outTotal > 0 ? formatCurrency(bulkTotals.outTotal) : "-"}</td>
                                 <td className="px-2 py-2"></td>
                               </tr>
@@ -1580,7 +1562,7 @@ export default function PettyCashPage() {
                 <div className="px-5 py-3 border-t border-border flex items-center justify-between gap-2">
                   <p className="text-[10px] text-muted-foreground">
                     {formMode === "bulk" && !editingId
-                      ? <>Akan menyimpan <strong className="text-foreground">{bulkTotals.count}</strong> baris. Saldo akhir: <strong className={cn(bulkTotals.outTotal - bulkTotals.inTotal > stats.currentBalance ? "text-danger" : "text-foreground")}>{formatCurrency(stats.currentBalance + bulkTotals.inTotal - bulkTotals.outTotal)}</strong></>
+                      ? <>Akan menyimpan <strong className="text-foreground">{bulkTotals.count}</strong> baris. Saldo akhir: <strong className={cn(bulkTotals.outTotal > stats.currentBalance ? "text-danger" : "text-foreground")}>{formatCurrency(stats.currentBalance - bulkTotals.outTotal)}</strong></>
                       : <>&nbsp;</>}
                   </p>
                   <div className="flex items-center gap-2">
