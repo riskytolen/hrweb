@@ -56,7 +56,7 @@ export default function PettyCashPage() {
   const canEdit = permLevel === "edit";
 
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"tabel" | "ringkasan" | "laporan" | "master">("tabel");
+  const [viewMode, setViewMode] = useState<"tabel" | "laporan" | "master">("tabel");
   const [page, setPage] = useState(1);
 
   const [settings, setSettings] = useState<SettingsLite | null>(null);
@@ -288,44 +288,6 @@ export default function PettyCashPage() {
       : 0;
     return { totalIn, totalOut, countIn, countOut, txCount, lastBalance, currentBalance };
   }, [filtered, settings, transactions]);
-
-  // Per-kategori breakdown
-  const perCategory = useMemo(() => {
-    const map = new Map<number, { nama: string; color: string; total: number; count: number }>();
-    filtered.forEach((t) => {
-      if (t.cash_out === 0) return;
-      const key = t.category_id;
-      const cat = t.category;
-      if (!cat) return;
-      const existing = map.get(key);
-      if (existing) {
-        existing.total += t.cash_out;
-        existing.count += 1;
-      } else {
-        map.set(key, { nama: cat.nama, color: cat.color, total: t.cash_out, count: 1 });
-      }
-    });
-    return Array.from(map.values()).sort((a, b) => b.total - a.total);
-  }, [filtered]);
-
-  // Per-bagian breakdown
-  const perBagian = useMemo(() => {
-    const map = new Map<number, { nama: string; total: number; count: number }>();
-    filtered.forEach((t) => {
-      if (t.cash_out === 0) return;
-      const key = t.bagian_id;
-      const bag = t.bagian;
-      if (!bag) return;
-      const existing = map.get(key);
-      if (existing) {
-        existing.total += t.cash_out;
-        existing.count += 1;
-      } else {
-        map.set(key, { nama: bag.nama, total: t.cash_out, count: 1 });
-      }
-    });
-    return Array.from(map.values()).sort((a, b) => b.total - a.total);
-  }, [filtered]);
 
   // ─── Form handlers ───
   const makeEmptyBulkRow = (): BulkRow => ({
@@ -872,11 +834,6 @@ export default function PettyCashPage() {
               viewMode === "tabel" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
             <Layers className="w-3.5 h-3.5" />Tabel
           </button>
-          <button onClick={() => setViewMode("ringkasan")}
-            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-              viewMode === "ringkasan" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-            <BarChart3 className="w-3.5 h-3.5" />Ringkasan
-          </button>
           <button onClick={() => setViewMode("laporan")}
             className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
               viewMode === "laporan" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
@@ -1008,89 +965,6 @@ export default function PettyCashPage() {
               </table>
             </div>
             <Pagination currentPage={page} totalItems={displayed.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
-          </div>
-        )}
-
-        {/* ═══ RINGKASAN VIEW ═══ */}
-        {viewMode === "ringkasan" && (
-          <div className="space-y-4">
-            {/* Per Kategori */}
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Tag className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-bold text-foreground">Pengeluaran per Kategori</h3>
-                </div>
-                <p className="text-[10px] text-muted-foreground">{perCategory.length} kategori</p>
-              </div>
-              {loading ? <SkeletonTable rows={3} cols={4} /> : perCategory.length === 0 ? (
-                <div className="text-center py-10 text-sm text-muted-foreground">Belum ada data cash out di periode ini.</div>
-              ) : (
-                <div className="divide-y divide-border/50">
-                  {perCategory.map((c) => {
-                    const pct = stats.totalOut > 0 ? (c.total / stats.totalOut) * 100 : 0;
-                    return (
-                      <div key={c.nama} className="px-5 py-3">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
-                            <span className="text-xs font-semibold text-foreground">{c.nama}</span>
-                            <span className="text-[10px] text-muted-foreground">{c.count}x transaksi</span>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-bold text-foreground">{formatCurrency(c.total)}</p>
-                            <p className="text-[10px] text-muted-foreground">{pct.toFixed(1)}%</p>
-                          </div>
-                        </div>
-                        <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: c.color }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Per Bagian */}
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Briefcase className="w-4 h-4 text-primary" />
-                  <h3 className="text-sm font-bold text-foreground">Pengeluaran per Bagian</h3>
-                </div>
-                <p className="text-[10px] text-muted-foreground">{perBagian.length} bagian</p>
-              </div>
-              {loading ? <SkeletonTable rows={3} cols={4} /> : perBagian.length === 0 ? (
-                <div className="text-center py-10 text-sm text-muted-foreground">Belum ada data cash out di periode ini.</div>
-              ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/30">
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-12">#</th>
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Bagian</th>
-                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">Transaksi</th>
-                      <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-32">Total</th>
-                      <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-24">%</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/50">
-                    {perBagian.map((b, i) => {
-                      const pct = stats.totalOut > 0 ? (b.total / stats.totalOut) * 100 : 0;
-                      return (
-                        <tr key={b.nama}>
-                          <td className="px-5 py-2.5 text-xs text-muted-foreground">{i + 1}</td>
-                          <td className="px-5 py-2.5 text-xs font-semibold text-foreground">{b.nama}</td>
-                          <td className="px-5 py-2.5 text-center text-xs text-muted-foreground">{b.count}</td>
-                          <td className="px-5 py-2.5 text-right text-sm font-semibold text-foreground">{formatCurrency(b.total)}</td>
-                          <td className="px-5 py-2.5 text-right text-xs text-muted-foreground">{pct.toFixed(1)}%</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
           </div>
         )}
 
