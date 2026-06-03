@@ -97,6 +97,10 @@ export default function PettyCashPage() {
 
   // Master data inline editors
   const [masterTab, setMasterTab] = useState<"kategori" | "bagian" | "unit">("kategori");
+  const [masterPageKat, setMasterPageKat] = useState(1);
+  const [masterPageBag, setMasterPageBag] = useState(1);
+  const [masterPageUnit, setMasterPageUnit] = useState(1);
+  const MASTER_PAGE_SIZE = 10;
   const [newCategory, setNewCategory] = useState({ nama: "", type: "expense" as "income" | "expense" | "both", color: "#6b7280" });
   const [newBagian, setNewBagian] = useState("");
   const [newUnit, setNewUnit] = useState("");
@@ -215,6 +219,7 @@ export default function PettyCashPage() {
   }, [loading, fetchTransactions]);
 
   useEffect(() => { setPage(1); }, [search, filterCategory, filterBagian, filterUnit, dateStart, dateEnd]);
+  useEffect(() => { setMasterPageKat(1); setMasterPageBag(1); setMasterPageUnit(1); }, [masterTab]);
 
   // ─── Computed: running balance + filtered + stats ───
   const transactionsWithBalance = useMemo(() => {
@@ -249,6 +254,19 @@ export default function PettyCashPage() {
   const paged = useMemo(
     () => displayed.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [displayed, page]
+  );
+
+  const pagedKategori = useMemo(
+    () => categories.slice((masterPageKat - 1) * MASTER_PAGE_SIZE, masterPageKat * MASTER_PAGE_SIZE),
+    [categories, masterPageKat]
+  );
+  const pagedBagian = useMemo(
+    () => bagians.slice((masterPageBag - 1) * MASTER_PAGE_SIZE, masterPageBag * MASTER_PAGE_SIZE),
+    [bagians, masterPageBag]
+  );
+  const pagedUnit = useMemo(
+    () => units.slice((masterPageUnit - 1) * MASTER_PAGE_SIZE, masterPageUnit * MASTER_PAGE_SIZE),
+    [units, masterPageUnit]
   );
 
   const stats = useMemo(() => {
@@ -1446,7 +1464,7 @@ export default function PettyCashPage() {
               <div className="p-4">
                 {masterTab === "kategori" && (
                   <div className="space-y-2">
-                    {categories.map((c) => (
+                    {pagedKategori.map((c) => (
                       <div key={c.id}>
                         {masterEdit?.type === "kategori" && masterEdit.id === c.id ? (
                           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/30">
@@ -1489,11 +1507,14 @@ export default function PettyCashPage() {
                         <Button size="sm" icon={Plus} onClick={handleAddCategory}>Tambah</Button>
                       </div>
                     )}
+                    {categories.length > MASTER_PAGE_SIZE && (
+                      <Pagination currentPage={masterPageKat} totalItems={categories.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPageKat} />
+                    )}
                   </div>
                 )}
                 {masterTab === "bagian" && (
                   <div className="space-y-2">
-                    {bagians.map((b) => (
+                    {pagedBagian.map((b) => (
                       <div key={b.id}>
                         {masterEdit?.type === "bagian" && masterEdit.id === b.id ? (
                           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/30">
@@ -1520,11 +1541,14 @@ export default function PettyCashPage() {
                         <Button size="sm" icon={Plus} onClick={handleAddBagian}>Tambah</Button>
                       </div>
                     )}
+                    {bagians.length > MASTER_PAGE_SIZE && (
+                      <Pagination currentPage={masterPageBag} totalItems={bagians.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPageBag} />
+                    )}
                   </div>
                 )}
                 {masterTab === "unit" && (
                   <div className="space-y-2">
-                    {units.map((u) => (
+                    {pagedUnit.map((u) => (
                       <div key={u.id}>
                         {masterEdit?.type === "unit" && masterEdit.id === u.id ? (
                           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/30">
@@ -1551,6 +1575,9 @@ export default function PettyCashPage() {
                         <input type="text" placeholder="Nopol / unit baru (cth: B 1234 ABC)..." value={newUnit} onChange={(e) => setNewUnit(e.target.value.toUpperCase())} className={cn(inputClass, "flex-1 text-xs py-2 uppercase")} />
                         <Button size="sm" icon={Plus} onClick={handleAddUnit}>Tambah</Button>
                       </div>
+                    )}
+                    {units.length > MASTER_PAGE_SIZE && (
+                      <Pagination currentPage={masterPageUnit} totalItems={units.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPageUnit} />
                     )}
                   </div>
                 )}
