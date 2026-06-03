@@ -1148,8 +1148,14 @@ export default function PettyCashPage() {
                         const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
                         const matchingTrx = filtered.filter((t) => {
                           if (t.category_id !== cat.id) return false;
-                          if (rf.bagian && t.bagian_id !== Number(rf.bagian)) return false;
-                          if (rf.unit && (t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                          if (rf.bagian) {
+                            if (rf.bagian === "0") { if (t.bagian_id !== null) return false; }
+                            else if (t.bagian_id !== Number(rf.bagian)) return false;
+                          }
+                          if (rf.unit) {
+                            if (rf.unit === "0") { if (t.unit) return false; }
+                            else if ((t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                          }
                           return true;
                         });
                         const totalCost = matchingTrx.reduce((s, t) => s + t.cash_out, 0);
@@ -1170,6 +1176,7 @@ export default function PettyCashPage() {
                                 className="w-full px-2 py-1.5 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
                               >
                                 <option value="">Semua Bagian</option>
+                                <option value="0">Tanpa Bagian</option>
                                 {bagians.map((b) => (
                                   <option key={b.id} value={String(b.id)}>{b.nama}</option>
                                 ))}
@@ -1182,6 +1189,7 @@ export default function PettyCashPage() {
                                 className="w-full px-2 py-1.5 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer uppercase"
                               >
                                 <option value="">Semua Unit</option>
+                                <option value="0">Tanpa Unit</option>
                                 {units.map((u) => (
                                   <option key={u.id} value={u.nama}>{u.nama}</option>
                                 ))}
@@ -1205,8 +1213,14 @@ export default function PettyCashPage() {
                               const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
                               total += filtered.filter((t) => {
                                 if (t.category_id !== cat.id) return false;
-                                if (rf.bagian && t.bagian_id !== Number(rf.bagian)) return false;
-                                if (rf.unit && (t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                                if (rf.bagian) {
+                                  if (rf.bagian === "0") { if (t.bagian_id !== null) return false; }
+                                  else if (t.bagian_id !== Number(rf.bagian)) return false;
+                                }
+                                if (rf.unit) {
+                                  if (rf.unit === "0") { if (t.unit) return false; }
+                                  else if ((t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                                }
                                 return true;
                               }).length;
                             });
@@ -1220,8 +1234,14 @@ export default function PettyCashPage() {
                               const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
                               total += filtered.filter((t) => {
                                 if (t.category_id !== cat.id) return false;
-                                if (rf.bagian && t.bagian_id !== Number(rf.bagian)) return false;
-                                if (rf.unit && (t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                                if (rf.bagian) {
+                                  if (rf.bagian === "0") { if (t.bagian_id !== null) return false; }
+                                  else if (t.bagian_id !== Number(rf.bagian)) return false;
+                                }
+                                if (rf.unit) {
+                                  if (rf.unit === "0") { if (t.unit) return false; }
+                                  else if ((t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
+                                }
                                 return true;
                               }).reduce((s, t) => s + t.cash_out, 0);
                             });
