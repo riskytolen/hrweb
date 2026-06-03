@@ -56,7 +56,7 @@ export default function PettyCashPage() {
   const canEdit = permLevel === "edit";
 
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"tabel" | "ringkasan" | "laporan">("tabel");
+  const [viewMode, setViewMode] = useState<"tabel" | "ringkasan" | "laporan" | "master">("tabel");
   const [page, setPage] = useState(1);
 
   const [settings, setSettings] = useState<SettingsLite | null>(null);
@@ -925,6 +925,11 @@ export default function PettyCashPage() {
               viewMode === "laporan" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
             <FileText className="w-3.5 h-3.5" />Laporan
           </button>
+          <button onClick={() => setViewMode("master")}
+            className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+              viewMode === "master" ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+            <Settings className="w-3.5 h-3.5" />Master Data
+          </button>
         </div>
 
         {/* Filter toolbar */}
@@ -1422,8 +1427,9 @@ export default function PettyCashPage() {
           </div>
         )}
 
-        {/* Master data tabs */}
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
+        {/* ═══ MASTER DATA VIEW ═══ */}
+        {viewMode === "master" && (
+          <div className="bg-card rounded-2xl border border-border overflow-hidden">
               <div className="px-5 py-3.5 border-b border-border flex items-center gap-2">
                 <Settings className="w-4 h-4 text-primary" />
                 <h3 className="text-sm font-bold text-foreground">Master Data</h3>
@@ -1550,6 +1556,7 @@ export default function PettyCashPage() {
                 )}
               </div>
             </div>
+        )}
 
         {/* ═══ ADD/EDIT TRANSACTION MODAL ═══ */}
         {showForm && (
