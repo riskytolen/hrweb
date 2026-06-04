@@ -161,6 +161,9 @@ export default function PayrollPage() {
   const [wsChangedCells, setWsChangedCells] = useState<Map<number, Set<string>>>(new Map());
   const [wsSaving, setWsSaving] = useState(false);
   const [wsExpandedId, setWsExpandedId] = useState<number | null>(null);
+  /** Breakdown potongan absen per row di worksheet (lazy-fetch on expand) */
+  const [wsAbsenBreakdown, setWsAbsenBreakdown] = useState<Record<number, { telat: number; alpha: number; lainnya: number; items: AbsenBreakdownItem[] } | null>>({});
+  const [wsAbsenLoading, setWsAbsenLoading] = useState<Record<number, boolean>>({});
   const [showBatchFill, setShowBatchFill] = useState(false);
   const [batchField, setBatchField] = useState("");
   const [batchValue, setBatchValue] = useState("");
@@ -1038,6 +1041,38 @@ export default function PayrollPage() {
     if (payrolls.length > 0) initWsData(payrolls);
   }, [payrolls, initWsData]);
 
+  // Fetch breakdown potongan absen untuk row yang di-expand di worksheet
+  useEffect(() => {
+    if (wsExpandedId === null) return;
+    const row = payrolls.find((r) => r.id === wsExpandedId);
+    if (!row) return;
+    if (wsAbsenBreakdown[wsExpandedId] !== undefined) return; // already fetched
+    setWsAbsenLoading((prev) => ({ ...prev, [wsExpandedId]: true }));
+    const startDate = row.periode_mulai || getPeriodRange(row.periode).start;
+    const endDate = row.periode_selesai || getPeriodRange(row.periode).end;
+    supabase
+      .from("attendance_records")
+      .select("tanggal, status, denda, durasi_telat")
+      .gte("tanggal", startDate)
+      .lte("tanggal", endDate)
+      .eq("employee_id", row.employee_id)
+      .gt("denda", 0)
+      .order("tanggal", { ascending: true })
+      .then(({ data }) => {
+        let telat = 0, alpha = 0, lainnya = 0;
+        (data || []).forEach((d) => {
+          if (d.status === "Telat" || d.status === "Terlambat") telat += d.denda;
+          else if (d.status === "Alpha") alpha += d.denda;
+          else lainnya += d.denda;
+        });
+        setWsAbsenBreakdown((prev) => ({
+          ...prev,
+          [wsExpandedId]: { telat, alpha, lainnya, items: (data || []) as AbsenBreakdownItem[] },
+        }));
+        setWsAbsenLoading((prev) => ({ ...prev, [wsExpandedId]: false }));
+      });
+  }, [wsExpandedId, payrolls, wsAbsenBreakdown]);
+
   /** Total cell yang berubah di seluruh worksheet (untuk header counter). */
   const wsTotalChanged = useMemo(() => {
     let total = 0;
@@ -1802,31 +1837,88 @@ export default function PayrollPage() {
                                     <h4 className="text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider">Potongan</h4>
                                   </div>
                                   <div className="space-y-1.5">
-                                    {POTONGAN_FIELDS.map((f) => (
-                                      <div key={f.key} className="flex items-center gap-2">
-                                        <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
-                                        {f.readonly ? (
-                                          <span className="flex-1 text-right text-[11px] font-medium text-rose-600/70 dark:text-rose-400/70 tabular-nums">{formatCurrency(vals[f.key] || 0)}</span>
-                                        ) : (
-                                          <div className="flex-1 relative">
-                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">Rp</span>
-                                            <input
-                                              type="text"
-                                              value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
-                                              onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
-                                              placeholder="0"
-                                              onClick={(e) => e.stopPropagation()}
-                                              className={cn(
-                                                "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
-                                                isCellChanged(row.id, f.key)
-                                                  ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
-                                                  : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
-                                              )}
-                                            />
+                                    {POTONGAN_FIELDS.map((f) => {
+                                      const isPotAbsen = f.key === "potongan_absen";
+                                      const wsBreakdown = isPotAbsen ? wsAbsenBreakdown[row.id] : null;
+                                      const wsBreakdownLoading = isPotAbsen ? !!wsAbsenLoading[row.id] : false;
+                                      return (
+                                        <div key={f.key} className={cn(isPotAbsen ? "space-y-1.5" : "flex items-center gap-2")}>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
+                                            {f.readonly ? (
+                                              <span className="flex-1 text-right text-[11px] font-medium text-rose-600/70 dark:text-rose-400/70 tabular-nums">{formatCurrency(vals[f.key] || 0)}</span>
+                                            ) : (
+                                              <div className="flex-1 relative">
+                                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">Rp</span>
+                                                <input
+                                                  type="text"
+                                                  value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
+                                                  onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
+                                                  placeholder="0"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  className={cn(
+                                                    "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
+                                                    isCellChanged(row.id, f.key)
+                                                      ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
+                                                      : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                                  )}
+                                                />
+                                              </div>
+                                            )}
                                           </div>
-                                        )}
-                                      </div>
-                                    ))}
+                                          {isPotAbsen && (
+                                            <div>
+                                              {wsBreakdownLoading ? (
+                                                <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
+                                              ) : wsBreakdown && wsBreakdown.items.length > 0 ? (
+                                                <div className="rounded-lg border border-rose-200/60 dark:border-rose-500/20 bg-rose-50/30 dark:bg-rose-500/[0.03] overflow-hidden">
+                                                  <div className="px-2.5 py-1.5 bg-rose-100/40 dark:bg-rose-500/10 border-b border-rose-200/60 dark:border-rose-500/20 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px]">
+                                                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-muted-foreground">
+                                                      <span>Telat: <strong className="text-foreground tabular-nums">{formatCurrency(wsBreakdown.telat)}</strong></span>
+                                                      {wsBreakdown.alpha > 0 && <span>Alpha: <strong className="text-foreground tabular-nums">{formatCurrency(wsBreakdown.alpha)}</strong></span>}
+                                                      {wsBreakdown.lainnya > 0 && <span>Lainnya: <strong className="text-foreground tabular-nums">{formatCurrency(wsBreakdown.lainnya)}</strong></span>}
+                                                    </div>
+                                                    <span className="ml-auto text-[10px] font-semibold text-muted-foreground">{wsBreakdown.items.length} kejadian</span>
+                                                  </div>
+                                                  <div className="max-h-28 overflow-y-auto divide-y divide-rose-200/40 dark:divide-rose-500/10">
+                                                    {wsBreakdown.items.map((it, idx) => {
+                                                      const isAlpha = it.status === "Alpha";
+                                                      const isTelat = it.status === "Telat" || it.status === "Terlambat";
+                                                      const dateLabel = new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
+                                                      const statusLabel = isAlpha
+                                                        ? "Alpha"
+                                                        : isTelat
+                                                          ? (it.durasi_telat ? `Telat (${it.durasi_telat}m)` : "Telat")
+                                                          : it.status;
+                                                      return (
+                                                        <div
+                                                          key={idx}
+                                                          className={cn(
+                                                            "grid grid-cols-[50px_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-1 text-[10px]",
+                                                            idx % 2 === 0 ? "bg-transparent" : "bg-rose-50/40 dark:bg-rose-500/[0.04]"
+                                                          )}
+                                                        >
+                                                          <span className="tabular-nums text-muted-foreground font-medium">{dateLabel}</span>
+                                                          <span className={cn(
+                                                            "font-semibold truncate",
+                                                            isAlpha ? "text-rose-600 dark:text-rose-400" : isTelat ? "text-amber-600 dark:text-amber-400" : "text-foreground"
+                                                          )}>
+                                                            {statusLabel}
+                                                          </span>
+                                                          <span className="font-bold text-foreground tabular-nums whitespace-nowrap">{formatCurrency(it.denda)}</span>
+                                                        </div>
+                                                      );
+                                                    })}
+                                                  </div>
+                                                </div>
+                                              ) : wsBreakdown ? (
+                                                <div className="text-[10px] text-muted-foreground text-right italic">Tidak ada denda di periode ini</div>
+                                              ) : null}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
                                     <div className="flex items-center gap-2 pt-2 mt-1 border-t border-rose-200/50 dark:border-rose-500/10">
                                       <span className="text-[11px] font-bold text-foreground w-32">Total</span>
                                       <span className="flex-1 text-right text-xs font-bold text-rose-700 dark:text-rose-400 tabular-nums">{formatCurrency(computed.totalPotongan)}</span>
