@@ -495,7 +495,7 @@ export default function PayrollPage() {
     let telat = 0;
     let alpha = 0;
     (attData || []).forEach(d => {
-      if (d.status === "Telat") telat += d.denda;
+      if (d.status === "Telat" || d.status === "Terlambat") telat += d.denda;
       else if (d.status === "Alpha") alpha += d.denda;
       // SP is not recorded in attendance_records, it comes from legal_documents if added later
     });
