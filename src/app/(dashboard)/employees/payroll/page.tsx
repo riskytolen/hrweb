@@ -164,6 +164,9 @@ export default function PayrollPage() {
   /** Breakdown potongan absen per row di worksheet (lazy-fetch on expand) */
   const [wsAbsenBreakdown, setWsAbsenBreakdown] = useState<Record<number, { telat: number; alpha: number; lainnya: number; items: AbsenBreakdownItem[] } | null>>({});
   const [wsAbsenLoading, setWsAbsenLoading] = useState<Record<number, boolean>>({});
+  /** Breakdown lembur per row di worksheet */
+  const [wsLemburBreakdown, setWsLemburBreakdown] = useState<Record<number, { total: number; items: LemburBreakdownItem[] } | null>>({});
+  const [wsLemburLoading, setWsLemburLoading] = useState<Record<number, boolean>>({});
   const [showBatchFill, setShowBatchFill] = useState(false);
   const [batchField, setBatchField] = useState("");
   const [batchValue, setBatchValue] = useState("");
@@ -470,7 +473,10 @@ export default function PayrollPage() {
 
   // ─── Open detail panel ───
   type AbsenBreakdownItem = { tanggal: string; status: string; denda: number; durasi_telat: number | null };
+  type LemburBreakdownItem = { tanggal: string; jam_mulai: string; jam_selesai: string; durasi_menit: number; rate_per_jam: number; total_lembur: number; alasan: string | null };
   const [absenBreakdown, setAbsenBreakdown] = useState<{ telat: number; alpha: number; lainnya: number; items: AbsenBreakdownItem[] } | null>(null);
+  const [lemburBreakdown, setLemburBreakdown] = useState<LemburBreakdownItem[] | null>(null);
+  const [lemburBreakdownLoading, setLemburBreakdownLoading] = useState(false);
   const [absenBreakdownLoading, setAbsenBreakdownLoading] = useState(false);
 
   const openDetail = async (row: PayrollRow) => {
@@ -483,6 +489,7 @@ export default function PayrollPage() {
     setEditCatatan(row.catatan || "");
     setShowDetail(true);
     setAbsenBreakdown(null);
+    setLemburBreakdown(null);
     fetchHistory(row.employee_id);
     
     // Fetch breakdown denda — pakai periode_mulai & periode_selesai yang tersimpan di slip
@@ -508,6 +515,19 @@ export default function PayrollPage() {
     });
     setAbsenBreakdown({ telat, alpha, lainnya, items: (attData || []) as AbsenBreakdownItem[] });
     setAbsenBreakdownLoading(false);
+
+    // Fetch breakdown lembur (status Disetujui) untuk periode yang sama
+    setLemburBreakdownLoading(true);
+    const { data: lemburData } = await supabase
+      .from("overtime_requests")
+      .select("tanggal, jam_mulai, jam_selesai, durasi_menit, rate_per_jam, total_lembur, alasan")
+      .eq("status", "Disetujui")
+      .eq("employee_id", row.employee_id)
+      .gte("tanggal", startDate)
+      .lte("tanggal", endDate)
+      .order("tanggal", { ascending: true });
+    setLemburBreakdown((lemburData || []) as LemburBreakdownItem[]);
+    setLemburBreakdownLoading(false);
   };
 
   // ─── Fetch history ───
@@ -1071,7 +1091,28 @@ export default function PayrollPage() {
         }));
         setWsAbsenLoading((prev) => ({ ...prev, [wsExpandedId]: false }));
       });
-  }, [wsExpandedId, payrolls, wsAbsenBreakdown]);
+
+    // Fetch breakdown lembur disetujui untuk row yang sama
+    if (wsLemburBreakdown[wsExpandedId] === undefined) {
+      setWsLemburLoading((prev) => ({ ...prev, [wsExpandedId]: true }));
+      supabase
+        .from("overtime_requests")
+        .select("tanggal, jam_mulai, jam_selesai, durasi_menit, rate_per_jam, total_lembur, alasan")
+        .eq("status", "Disetujui")
+        .eq("employee_id", row.employee_id)
+        .gte("tanggal", startDate)
+        .lte("tanggal", endDate)
+        .order("tanggal", { ascending: true })
+        .then(({ data }) => {
+          const total = (data || []).reduce((s, x) => s + (x.total_lembur || 0), 0);
+          setWsLemburBreakdown((prev) => ({
+            ...prev,
+            [wsExpandedId]: { total, items: (data || []) as LemburBreakdownItem[] },
+          }));
+          setWsLemburLoading((prev) => ({ ...prev, [wsExpandedId]: false }));
+        });
+    }
+  }, [wsExpandedId, payrolls, wsAbsenBreakdown, wsLemburBreakdown]);
 
   /** Total cell yang berubah di seluruh worksheet (untuk header counter). */
   const wsTotalChanged = useMemo(() => {
@@ -1796,31 +1837,78 @@ export default function PayrollPage() {
                                     <h4 className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Pendapatan</h4>
                                   </div>
                                   <div className="space-y-1.5">
-                                    {PENDAPATAN_FIELDS.map((f) => (
-                                      <div key={f.key} className="flex items-center gap-2">
-                                        <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
-                                        {f.readonly ? (
-                                          <span className="flex-1 text-right text-[11px] font-medium text-emerald-600/70 dark:text-emerald-400/70 tabular-nums">{formatCurrency(vals[f.key] || 0)}</span>
-                                        ) : (
-                                          <div className="flex-1 relative">
-                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">Rp</span>
-                                            <input
-                                              type="text"
-                                              value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
-                                              onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
-                                              placeholder="0"
-                                              onClick={(e) => e.stopPropagation()}
-                                              className={cn(
-                                                "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
-                                                isCellChanged(row.id, f.key)
-                                                  ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
-                                                  : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
-                                              )}
-                                            />
+                                    {PENDAPATAN_FIELDS.map((f) => {
+                                      const isLembur = f.key === "lembur";
+                                      const wsLembur = isLembur ? wsLemburBreakdown[row.id] : null;
+                                      const wsLemburLoad = isLembur ? !!wsLemburLoading[row.id] : false;
+                                      return (
+                                        <div key={f.key} className={cn(isLembur ? "space-y-1.5" : "flex items-center gap-2")}>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
+                                            {f.readonly ? (
+                                              <span className="flex-1 text-right text-[11px] font-medium text-emerald-600/70 dark:text-emerald-400/70 tabular-nums">{formatCurrency(vals[f.key] || 0)}</span>
+                                            ) : (
+                                              <div className="flex-1 relative">
+                                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">Rp</span>
+                                                <input
+                                                  type="text"
+                                                  value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
+                                                  onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
+                                                  placeholder="0"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  className={cn(
+                                                    "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
+                                                    isCellChanged(row.id, f.key)
+                                                      ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
+                                                      : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                                  )}
+                                                />
+                                              </div>
+                                            )}
                                           </div>
-                                        )}
-                                      </div>
-                                    ))}
+                                          {isLembur && (
+                                            <div>
+                                              {wsLemburLoad ? (
+                                                <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
+                                              ) : wsLembur && wsLembur.items.length > 0 ? (
+                                                <div className="rounded-lg border border-emerald-200/60 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-500/[0.03] overflow-hidden">
+                                                  <div className="px-2.5 py-1.5 bg-emerald-100/40 dark:bg-emerald-500/10 border-b border-emerald-200/60 dark:border-emerald-500/20 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px]">
+                                                    <span className="text-muted-foreground">Total: <strong className="text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(wsLembur.total)}</strong></span>
+                                                    <span className="ml-auto text-[10px] font-semibold text-muted-foreground">{wsLembur.items.length} pengajuan</span>
+                                                  </div>
+                                                  <div className="max-h-28 overflow-y-auto divide-y divide-emerald-200/40 dark:divide-emerald-500/10">
+                                                    {wsLembur.items.map((it, idx) => {
+                                                      const dateLabel = new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
+                                                      const jamMulai = it.jam_mulai?.slice(0, 5) || "";
+                                                      const jamSelesai = it.jam_selesai?.slice(0, 5) || "";
+                                                      const durasiJam = it.durasi_menit ? (it.durasi_menit / 60).toFixed(1).replace(/\.0$/, "") : "0";
+                                                      return (
+                                                        <div
+                                                          key={idx}
+                                                          className={cn(
+                                                            "grid grid-cols-[50px_minmax(0,1fr)_auto_auto] items-center gap-2 px-2.5 py-1 text-[10px]",
+                                                            idx % 2 === 0 ? "bg-transparent" : "bg-emerald-50/40 dark:bg-emerald-500/[0.04]"
+                                                          )}
+                                                        >
+                                                          <span className="tabular-nums text-muted-foreground font-medium">{dateLabel}</span>
+                                                          <span className="font-semibold text-foreground truncate">
+                                                            {jamMulai && jamSelesai ? `${jamMulai}–${jamSelesai} (${durasiJam}j)` : `${durasiJam}j`}
+                                                          </span>
+                                                          <span className="text-muted-foreground tabular-nums whitespace-nowrap">@ {formatCurrency(it.rate_per_jam || 0)}/j</span>
+                                                          <span className="font-bold text-emerald-700 dark:text-emerald-400 tabular-nums whitespace-nowrap">{formatCurrency(it.total_lembur || 0)}</span>
+                                                        </div>
+                                                      );
+                                                    })}
+                                                  </div>
+                                                </div>
+                                              ) : wsLembur ? (
+                                                <div className="text-[10px] text-muted-foreground text-right italic">Tidak ada lembur disetujui di periode ini</div>
+                                              ) : null}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
                                     <div className="flex items-center gap-2 pt-2 mt-1 border-t border-emerald-200/50 dark:border-emerald-500/10">
                                       <span className="text-[11px] font-bold text-foreground w-32">Total</span>
                                       <span className="flex-1 text-right text-xs font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(computed.totalPendapatan)}</span>
@@ -2191,32 +2279,77 @@ export default function PayrollPage() {
                       <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">Pendapatan</h4>
                     </div>
                     <div className="space-y-2.5">
-                      {PENDAPATAN_FIELDS.map((f) => (
-                        <div key={f.key} className="flex items-center gap-3">
-                          <label className="text-xs text-muted-foreground w-36 flex-shrink-0">
-                            {f.label}
-                            {f.readonly && <span className="text-[9px] text-primary ml-1">(auto)</span>}
-                          </label>
-                          <div className="flex-1 relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
-                            <input
-                              type="text"
-                              value={formatInputCurrency(editForm[f.key] || 0)}
-                              onChange={(e) => {
-                                if (f.readonly) return;
-                                const val = parseCurrencyInput(e.target.value);
-                                setEditForm((prev) => ({ ...prev, [f.key]: val }));
-                              }}
-                              readOnly={f.readonly}
-                              className={cn(
-                                inputClass,
-                                "pl-9 text-right",
-                                f.readonly && "bg-muted/60 text-muted-foreground cursor-not-allowed"
-                              )}
-                            />
+                      {PENDAPATAN_FIELDS.map((f) => {
+                        const isLembur = f.key === "lembur";
+                        return (
+                          <div key={f.key} className={cn(isLembur ? "space-y-2" : "flex items-center gap-3")}>
+                            <div className="flex items-center gap-3">
+                              <label className="text-xs text-muted-foreground w-36 flex-shrink-0">
+                                {f.label}
+                                {f.readonly && <span className="text-[9px] text-primary ml-1">(auto)</span>}
+                              </label>
+                              <div className="flex-1 relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">Rp</span>
+                                <input
+                                  type="text"
+                                  value={formatInputCurrency(editForm[f.key] || 0)}
+                                  onChange={(e) => {
+                                    if (f.readonly) return;
+                                    const val = parseCurrencyInput(e.target.value);
+                                    setEditForm((prev) => ({ ...prev, [f.key]: val }));
+                                  }}
+                                  readOnly={f.readonly}
+                                  className={cn(
+                                    inputClass,
+                                    "pl-9 text-right",
+                                    f.readonly && "bg-muted/60 text-muted-foreground cursor-not-allowed"
+                                  )}
+                                />
+                              </div>
+                            </div>
+                            {isLembur && (
+                              <div>
+                                {lemburBreakdownLoading ? (
+                                  <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
+                                ) : lemburBreakdown && lemburBreakdown.length > 0 ? (
+                                  <div className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+                                    <div className="px-3 py-2 bg-muted/30 border-b border-border flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
+                                      <span className="text-muted-foreground">Total lembur disetujui: <strong className="text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(lemburBreakdown.reduce((s, x) => s + (x.total_lembur || 0), 0))}</strong></span>
+                                      <span className="ml-auto text-[10px] font-semibold text-muted-foreground">{lemburBreakdown.length} pengajuan</span>
+                                    </div>
+                                    <div className="max-h-40 overflow-y-auto divide-y divide-border/60">
+                                      {lemburBreakdown.map((it, idx) => {
+                                        const dateLabel = new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
+                                        const jamMulai = it.jam_mulai?.slice(0, 5) || "";
+                                        const jamSelesai = it.jam_selesai?.slice(0, 5) || "";
+                                        const durasiJam = it.durasi_menit ? (it.durasi_menit / 60).toFixed(1).replace(/\.0$/, "") : "0";
+                                        return (
+                                          <div
+                                            key={idx}
+                                            className={cn(
+                                              "grid grid-cols-[58px_minmax(0,1fr)_auto_auto] items-center gap-2 px-3 py-1.5 text-[10px]",
+                                              idx % 2 === 0 ? "bg-transparent" : "bg-muted/20"
+                                            )}
+                                          >
+                                            <span className="tabular-nums text-muted-foreground font-medium">{dateLabel}</span>
+                                            <span className="font-semibold text-foreground truncate">
+                                              {jamMulai && jamSelesai ? `${jamMulai}–${jamSelesai} (${durasiJam}j)` : `${durasiJam}j`}
+                                            </span>
+                                            <span className="text-muted-foreground tabular-nums whitespace-nowrap">@ {formatCurrency(it.rate_per_jam || 0)}/j</span>
+                                            <span className="font-bold text-emerald-700 dark:text-emerald-400 tabular-nums whitespace-nowrap">{formatCurrency(it.total_lembur || 0)}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ) : lemburBreakdown ? (
+                                  <div className="text-[10px] text-muted-foreground text-right italic">Tidak ada lembur disetujui di periode ini</div>
+                                ) : null}
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                       <div className="flex items-center gap-3 pt-2 border-t border-border">
                         <span className="text-xs font-bold text-foreground w-36">Total Pendapatan</span>
                         <span className="flex-1 text-right text-sm font-bold text-success">{formatCurrency(computedTotalPendapatan)}</span>
