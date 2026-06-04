@@ -731,6 +731,17 @@ export default function RecruitmentPage() {
                           const statusStr = detail.status || "-";
                           const posisiStr = detail.posisi_dilamar || "-";
                           const didikanStr = detail.pendidikan_terakhir || "-";
+                          
+                          let umurStr = "-";
+                          if (detail.tanggal_lahir) {
+                            const b = new Date(detail.tanggal_lahir);
+                            const now = new Date();
+                            let age = now.getFullYear() - b.getFullYear();
+                            const m = now.getMonth() - b.getMonth();
+                            if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+                            umurStr = age + " tahun";
+                          }
+
                           const emailStr = detail.email || "-";
                           const alamatStr = detail.alamat || "-";
                           const simStr = detail.sim ? "SIM " + detail.sim : "Tidak Ada";
@@ -738,7 +749,7 @@ export default function RecruitmentPage() {
                           const pglmnStr = detail.pengalaman_kerja || "-";
                           const cvStr = detail.cv_url || "Belum dilampirkan";
                           
-                          const text = "*Data Pelamar - Jamslogistic*\n\n*Nama:* " + detail.nama + "\n*Status:* " + statusStr + "\n*Posisi:* " + posisiStr + "\n*Pendidikan:* " + didikanStr + "\n*No. HP:* " + detail.no_hp + "\n*Email:* " + emailStr + "\n*Alamat:* " + alamatStr + "\n*SIM:* " + simStr + "\n*Bisa Mengemudi:* " + nyupirStr + "\n*Pengalaman Kerja:* " + pglmnStr + "\n\n*CV:* " + cvStr;
+                          const text = "*Data Pelamar - Jamslogistic*\n\n*Nama:* " + detail.nama + "\n*Status:* " + statusStr + "\n*Umur:* " + umurStr + "\n*Posisi:* " + posisiStr + "\n*Pendidikan:* " + didikanStr + "\n*No. HP:* " + detail.no_hp + "\n*Email:* " + emailStr + "\n*Alamat:* " + alamatStr + "\n*SIM:* " + simStr + "\n*Bisa Mengemudi:* " + nyupirStr + "\n*Pengalaman Kerja:* " + pglmnStr + "\n\n*CV:* " + cvStr;
                           navigator.clipboard.writeText(text);
                           showToast("success", "Tersalin", "Data pelamar berhasil disalin untuk WhatsApp.");
                         }}
