@@ -2147,25 +2147,27 @@ export default function PayrollPage() {
                             {f.label}
                             {f.readonly && <span className="text-[9px] text-primary ml-1">(auto)</span>}
                           </label>
-                          <div className="flex-1 relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
-                            <input
-                              type="text"
-                              value={formatInputCurrency(editForm[f.key] || 0)}
-                              onChange={(e) => {
-                                if (f.readonly) return;
-                                const val = parseCurrencyInput(e.target.value);
-                                setEditForm((prev) => ({ ...prev, [f.key]: val }));
-                              }}
-                              readOnly={f.readonly}
-                              className={cn(
-                                inputClass,
-                                "pl-9 text-right",
-                                f.readonly && "bg-muted/60 text-muted-foreground cursor-not-allowed"
-                              )}
-                            />
+                          <div className="flex-1 min-w-0">
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">Rp</span>
+                              <input
+                                type="text"
+                                value={formatInputCurrency(editForm[f.key] || 0)}
+                                onChange={(e) => {
+                                  if (f.readonly) return;
+                                  const val = parseCurrencyInput(e.target.value);
+                                  setEditForm((prev) => ({ ...prev, [f.key]: val }));
+                                }}
+                                readOnly={f.readonly}
+                                className={cn(
+                                  inputClass,
+                                  "pl-9 text-right",
+                                  f.readonly && "bg-muted/60 text-muted-foreground cursor-not-allowed"
+                                )}
+                              />
+                            </div>
                             {f.key === "potongan_absen" && (
-                              <div className="mt-2">
+                              <div className="mt-3">
                                 {absenBreakdownLoading ? (
                                   <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
                                 ) : absenBreakdown && absenBreakdown.items.length > 0 ? (
