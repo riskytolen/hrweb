@@ -159,9 +159,11 @@ export default function PayrollPage() {
   /** "semua" | "kosong" — preview filter untuk batch fill */
   const [batchFilter, setBatchFilter] = useState<"semua" | "kosong">("semua");
 
-  // ─── Bulk Select & Delete ───
+  // ─── Bulk Select & Actions ───
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkFinalConfirm, setBulkFinalConfirm] = useState(false);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   // ─── Delete confirm ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -653,6 +655,57 @@ export default function PayrollPage() {
       setShowDetail(false);
       setSelectedPayroll(null);
     }
+  };
+
+  const handleBulkFinal = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkUpdating(true);
+    
+    const idsToUpdate = Array.from(selectedIds);
+    // Hanya proses slip yang statusnya masih "Draft"
+    const draftsToUpdate = payrolls.filter((p) => idsToUpdate.includes(p.id) && p.status === "Draft");
+    
+    if (draftsToUpdate.length === 0) {
+      showToast("error", "Info", "Semua slip yang dipilih sudah Final.");
+      setBulkUpdating(false);
+      setBulkFinalConfirm(false);
+      return;
+    }
+
+    const draftIds = draftsToUpdate.map(p => p.id);
+    
+    const { error } = await supabase
+      .from("payrolls")
+      .update({ status: "Final" })
+      .in("id", draftIds);
+      
+    if (error) {
+      showToast("error", "Gagal Memfinalkan", error.message);
+      setBulkUpdating(false);
+      setBulkFinalConfirm(false);
+      return;
+    }
+    
+    await logAudit({
+      supabase,
+      action: "update",
+      entityType: "payrolls",
+      entityId: `bulk-final-${draftIds.length}`,
+      entityLabel: `Bulk update ${draftIds.length} slip gaji ke Final`,
+      metadata: { ids: draftIds, records: draftsToUpdate.map(r => ({ id: r.id, nama: r.pegawaiNama })) }
+    });
+    
+    setPayrolls((prev) => prev.map((p) => draftIds.includes(p.id) ? { ...p, status: "Final" } : p));
+    showToast("success", "Slip Difinalkan", `${draftIds.length} slip gaji berhasil diubah menjadi Final.`);
+    
+    // Update selected payroll if it's currently open
+    if (selectedPayroll && draftIds.includes(selectedPayroll.id)) {
+      setSelectedPayroll((prev) => prev ? { ...prev, status: "Final" } : null);
+    }
+    
+    setBulkUpdating(false);
+    setBulkFinalConfirm(false);
+    setSelectedIds(new Set()); // Reset selection setelah aksi berhasil
   };
 
   // ─── Export Excel (xlsx) untuk semua slip dalam periode ───
@@ -1444,6 +1497,7 @@ export default function PayrollPage() {
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>Batal</Button>
+              <Button variant="outline" size="sm" icon={CircleCheckBig} onClick={() => setBulkFinalConfirm(true)} className="text-success border-success/30 hover:bg-success/10 hover:text-success">Finalkan {selectedIds.size} Slip</Button>
               <Button size="sm" icon={Trash2} onClick={() => setBulkDeleteConfirm(true)} className="bg-danger text-white hover:bg-danger/90 border-danger">Hapus {selectedIds.size} Slip</Button>
             </div>
           </div>
@@ -2215,6 +2269,34 @@ export default function PayrollPage() {
                     {saving ? "Menyimpan..." : "Simpan"}
                   </Button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ Bulk Final Confirmation Modal ═══ */}
+      {bulkFinalConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !bulkUpdating && setBulkFinalConfirm(false)} />
+            <div className="relative bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm mx-4 animate-fade-in">
+              <div className="px-6 py-5 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-success/10 flex items-center justify-center mx-auto mb-4">
+                  <CircleCheckBig className="w-6 h-6 text-success" />
+                </div>
+                <h3 className="text-sm font-bold text-foreground mb-1">Finalkan {selectedIds.size} Slip Gaji?</h3>
+                <p className="text-xs text-muted-foreground">
+                  Semua slip gaji yang dipilih akan diubah statusnya menjadi <strong>Final</strong> dan tidak dapat diedit lagi oleh admin biasa.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 px-6 py-4 border-t border-border">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setBulkFinalConfirm(false)} disabled={bulkUpdating}>
+                  Batal
+                </Button>
+                <Button size="sm" className="flex-1 bg-success hover:bg-success/90 text-white border-success" icon={bulkUpdating ? Loader2 : CircleCheckBig} onClick={handleBulkFinal} disabled={bulkUpdating}>
+                  {bulkUpdating ? "Memproses..." : "Ya, Finalkan"}
+                </Button>
               </div>
             </div>
           </div>
