@@ -466,7 +466,10 @@ export default function PayrollPage() {
   };
 
   // ─── Open detail panel ───
-  const openDetail = (row: PayrollRow) => {
+  const [absenBreakdown, setAbsenBreakdown] = useState<{ telat: number; alpha: number } | null>(null);
+  const [absenBreakdownLoading, setAbsenBreakdownLoading] = useState(false);
+
+  const openDetail = async (row: PayrollRow) => {
     setSelectedPayroll(row);
     // Initialize edit form with current values
     const form: Record<string, number> = {};
@@ -475,7 +478,29 @@ export default function PayrollPage() {
     setEditForm(form);
     setEditCatatan(row.catatan || "");
     setShowDetail(true);
+    setAbsenBreakdown(null);
     fetchHistory(row.employee_id);
+    
+    // Fetch breakdown denda
+    setAbsenBreakdownLoading(true);
+    const pr = getPeriodRange(row.periode);
+    const { data: attData } = await supabase
+      .from("attendance_records")
+      .select("status, denda")
+      .gte("tanggal", pr.start)
+      .lte("tanggal", pr.end)
+      .eq("employee_id", row.employee_id)
+      .gt("denda", 0);
+      
+    let telat = 0;
+    let alpha = 0;
+    (attData || []).forEach(d => {
+      if (d.status === "Telat") telat += d.denda;
+      else if (d.status === "Alpha") alpha += d.denda;
+      // SP is not recorded in attendance_records, it comes from legal_documents if added later
+    });
+    setAbsenBreakdown({ telat, alpha });
+    setAbsenBreakdownLoading(false);
   };
 
   // ─── Fetch history ───
@@ -2135,6 +2160,19 @@ export default function PayrollPage() {
                                 f.readonly && "bg-muted/60 text-muted-foreground cursor-not-allowed"
                               )}
                             />
+                            {f.key === "potongan_absen" && (
+                              <div className="mt-1.5 text-[10px] text-muted-foreground flex items-center justify-end gap-2">
+                                {absenBreakdownLoading ? (
+                                  <span className="animate-pulse">Memuat detail...</span>
+                                ) : absenBreakdown ? (
+                                  <>
+                                    <span>Telat: <strong className="text-foreground">{formatCurrency(absenBreakdown.telat)}</strong></span>
+                                    <span>&middot;</span>
+                                    <span>Alpha: <strong className="text-foreground">{formatCurrency(absenBreakdown.alpha)}</strong></span>
+                                  </>
+                                ) : null}
+                              </div>
+                            )}
                           </div>
                         </div>
                       ))}
