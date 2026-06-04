@@ -466,7 +466,8 @@ export default function PayrollPage() {
   };
 
   // ─── Open detail panel ───
-  const [absenBreakdown, setAbsenBreakdown] = useState<{ telat: number; alpha: number } | null>(null);
+  type AbsenBreakdownItem = { tanggal: string; status: string; denda: number; durasi_telat: number | null };
+  const [absenBreakdown, setAbsenBreakdown] = useState<{ telat: number; alpha: number; lainnya: number; items: AbsenBreakdownItem[] } | null>(null);
   const [absenBreakdownLoading, setAbsenBreakdownLoading] = useState(false);
 
   const openDetail = async (row: PayrollRow) => {
@@ -481,25 +482,28 @@ export default function PayrollPage() {
     setAbsenBreakdown(null);
     fetchHistory(row.employee_id);
     
-    // Fetch breakdown denda
+    // Fetch breakdown denda — pakai periode_mulai & periode_selesai yang tersimpan di slip
     setAbsenBreakdownLoading(true);
-    const pr = getPeriodRange(row.periode);
+    const startDate = row.periode_mulai || getPeriodRange(row.periode).start;
+    const endDate = row.periode_selesai || getPeriodRange(row.periode).end;
     const { data: attData } = await supabase
       .from("attendance_records")
-      .select("status, denda")
-      .gte("tanggal", pr.start)
-      .lte("tanggal", pr.end)
+      .select("tanggal, status, denda, durasi_telat")
+      .gte("tanggal", startDate)
+      .lte("tanggal", endDate)
       .eq("employee_id", row.employee_id)
-      .gt("denda", 0);
+      .gt("denda", 0)
+      .order("tanggal", { ascending: true });
       
     let telat = 0;
     let alpha = 0;
+    let lainnya = 0;
     (attData || []).forEach(d => {
       if (d.status === "Telat" || d.status === "Terlambat") telat += d.denda;
       else if (d.status === "Alpha") alpha += d.denda;
-      // SP is not recorded in attendance_records, it comes from legal_documents if added later
+      else lainnya += d.denda;
     });
-    setAbsenBreakdown({ telat, alpha });
+    setAbsenBreakdown({ telat, alpha, lainnya, items: (attData || []) as AbsenBreakdownItem[] });
     setAbsenBreakdownLoading(false);
   };
 
@@ -2161,15 +2165,43 @@ export default function PayrollPage() {
                               )}
                             />
                             {f.key === "potongan_absen" && (
-                              <div className="mt-1.5 text-[10px] text-muted-foreground flex items-center justify-end gap-2">
+                              <div className="mt-1.5">
                                 {absenBreakdownLoading ? (
-                                  <span className="animate-pulse">Memuat detail...</span>
+                                  <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
+                                ) : absenBreakdown && absenBreakdown.items.length > 0 ? (
+                                  <div className="rounded-lg border border-border bg-muted/20 p-2 space-y-1">
+                                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pb-1 border-b border-border/60">
+                                      <div className="flex gap-3">
+                                        <span>Telat: <strong className="text-foreground">{formatCurrency(absenBreakdown.telat)}</strong></span>
+                                        {absenBreakdown.alpha > 0 && <span>Alpha: <strong className="text-foreground">{formatCurrency(absenBreakdown.alpha)}</strong></span>}
+                                        {absenBreakdown.lainnya > 0 && <span>Lainnya: <strong className="text-foreground">{formatCurrency(absenBreakdown.lainnya)}</strong></span>}
+                                      </div>
+                                      <span className="text-[9px]">{absenBreakdown.items.length} kejadian</span>
+                                    </div>
+                                    <div className="max-h-32 overflow-y-auto space-y-0.5">
+                                      {absenBreakdown.items.map((it, idx) => {
+                                        const isAlpha = it.status === "Alpha";
+                                        const isTelat = it.status === "Telat" || it.status === "Terlambat";
+                                        const dateLabel = new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
+                                        return (
+                                          <div key={idx} className="flex items-center justify-between text-[10px] gap-2">
+                                            <div className="flex items-center gap-2 text-muted-foreground">
+                                              <span className="tabular-nums w-12">{dateLabel}</span>
+                                              <span className={cn(
+                                                "font-semibold w-16",
+                                                isAlpha ? "text-rose-600 dark:text-rose-400" : isTelat ? "text-amber-600 dark:text-amber-400" : "text-foreground"
+                                              )}>
+                                                {isAlpha ? "Alpha" : isTelat ? `Telat${it.durasi_telat ? ` (${it.durasi_telat}m)` : ""}` : it.status}
+                                              </span>
+                                            </div>
+                                            <span className="font-bold text-foreground tabular-nums">{formatCurrency(it.denda)}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
                                 ) : absenBreakdown ? (
-                                  <>
-                                    <span>Telat: <strong className="text-foreground">{formatCurrency(absenBreakdown.telat)}</strong></span>
-                                    <span>&middot;</span>
-                                    <span>Alpha: <strong className="text-foreground">{formatCurrency(absenBreakdown.alpha)}</strong></span>
-                                  </>
+                                  <div className="text-[10px] text-muted-foreground text-right italic">Tidak ada denda di periode ini</div>
                                 ) : null}
                               </div>
                             )}
