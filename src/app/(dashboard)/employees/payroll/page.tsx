@@ -2165,36 +2165,47 @@ export default function PayrollPage() {
                               )}
                             />
                             {f.key === "potongan_absen" && (
-                              <div className="mt-1.5">
+                              <div className="mt-2">
                                 {absenBreakdownLoading ? (
                                   <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
                                 ) : absenBreakdown && absenBreakdown.items.length > 0 ? (
-                                  <div className="rounded-lg border border-border bg-muted/20 p-2 space-y-1">
-                                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pb-1 border-b border-border/60">
-                                      <div className="flex gap-3">
-                                        <span>Telat: <strong className="text-foreground">{formatCurrency(absenBreakdown.telat)}</strong></span>
-                                        {absenBreakdown.alpha > 0 && <span>Alpha: <strong className="text-foreground">{formatCurrency(absenBreakdown.alpha)}</strong></span>}
-                                        {absenBreakdown.lainnya > 0 && <span>Lainnya: <strong className="text-foreground">{formatCurrency(absenBreakdown.lainnya)}</strong></span>}
+                                  <div className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+                                    {/* Header ringkasan */}
+                                    <div className="px-3 py-2 bg-muted/30 border-b border-border flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                                        <span>Telat: <strong className="text-foreground tabular-nums">{formatCurrency(absenBreakdown.telat)}</strong></span>
+                                        {absenBreakdown.alpha > 0 && <span>Alpha: <strong className="text-foreground tabular-nums">{formatCurrency(absenBreakdown.alpha)}</strong></span>}
+                                        {absenBreakdown.lainnya > 0 && <span>Lainnya: <strong className="text-foreground tabular-nums">{formatCurrency(absenBreakdown.lainnya)}</strong></span>}
                                       </div>
-                                      <span className="text-[9px]">{absenBreakdown.items.length} kejadian</span>
+                                      <span className="ml-auto text-[10px] font-semibold text-muted-foreground">{absenBreakdown.items.length} kejadian</span>
                                     </div>
-                                    <div className="max-h-32 overflow-y-auto space-y-0.5">
+                                    {/* List kejadian — grid 3 kolom: Tgl · Status · Nominal */}
+                                    <div className="max-h-40 overflow-y-auto divide-y divide-border/60">
                                       {absenBreakdown.items.map((it, idx) => {
                                         const isAlpha = it.status === "Alpha";
                                         const isTelat = it.status === "Telat" || it.status === "Terlambat";
                                         const dateLabel = new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
+                                        const statusLabel = isAlpha
+                                          ? "Alpha"
+                                          : isTelat
+                                            ? (it.durasi_telat ? `Telat (${it.durasi_telat}m)` : "Telat")
+                                            : it.status;
                                         return (
-                                          <div key={idx} className="flex items-center justify-between text-[10px] gap-2">
-                                            <div className="flex items-center gap-2 text-muted-foreground">
-                                              <span className="tabular-nums w-12">{dateLabel}</span>
-                                              <span className={cn(
-                                                "font-semibold w-16",
-                                                isAlpha ? "text-rose-600 dark:text-rose-400" : isTelat ? "text-amber-600 dark:text-amber-400" : "text-foreground"
-                                              )}>
-                                                {isAlpha ? "Alpha" : isTelat ? `Telat${it.durasi_telat ? ` (${it.durasi_telat}m)` : ""}` : it.status}
-                                              </span>
-                                            </div>
-                                            <span className="font-bold text-foreground tabular-nums">{formatCurrency(it.denda)}</span>
+                                          <div
+                                            key={idx}
+                                            className={cn(
+                                              "grid grid-cols-[58px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-[10px]",
+                                              idx % 2 === 0 ? "bg-transparent" : "bg-muted/20"
+                                            )}
+                                          >
+                                            <span className="tabular-nums text-muted-foreground font-medium">{dateLabel}</span>
+                                            <span className={cn(
+                                              "font-semibold truncate",
+                                              isAlpha ? "text-rose-600 dark:text-rose-400" : isTelat ? "text-amber-600 dark:text-amber-400" : "text-foreground"
+                                            )}>
+                                              {statusLabel}
+                                            </span>
+                                            <span className="font-bold text-foreground tabular-nums whitespace-nowrap">{formatCurrency(it.denda)}</span>
                                           </div>
                                         );
                                       })}
