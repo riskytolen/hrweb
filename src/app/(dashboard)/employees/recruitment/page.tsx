@@ -1,8 +1,8 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle,
+  UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle, Copy,
   Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink, Eye, Car,
   Calendar, Heart, Clock, MapPinned, Globe,
 } from "lucide-react";
@@ -241,14 +241,14 @@ export default function RecruitmentPage() {
             );
             return;
           }
-          // Sync sukses â†’ tampilkan toast dari sync (sudah informatif: "Training Dimulai" / "Diterima")
+          // Sync sukses → tampilkan toast dari sync (sudah informatif: "Training Dimulai" / "Diterima")
           if (cvWarning) {
             showToast("error", "Pelamar Ditambahkan, CV Gagal", cvWarning);
           } else {
             showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
           }
         } else {
-          // Status awal "Lamaran Masuk" / "Terpilih" / "Ditolak" â†’ tidak perlu pegawai
+          // Status awal "Lamaran Masuk" / "Terpilih" / "Ditolak" → tidak perlu pegawai
           if (cvWarning) {
             showToast("error", "Pelamar Ditambahkan, CV Gagal", cvWarning);
           } else {
@@ -296,7 +296,7 @@ export default function RecruitmentPage() {
     }
   };
 
-  // â”€â”€â”€ Helper: generate ID pegawai â”€â”€â”€
+  // ─── Helper: generate ID pegawai ───
   const generateEmployeeId = async (): Promise<string> => {
     const { data: allIds } = await supabase.from("pegawai").select("id");
     const existingSet = new Set(allIds?.map((e) => e.id) || []);
@@ -308,7 +308,7 @@ export default function RecruitmentPage() {
     return generated;
   };
 
-  // â”€â”€â”€ Helper: insert pegawai dari data recruitment â”€â”€â”€
+  // ─── Helper: insert pegawai dari data recruitment ───
   const insertPegawaiFromRecruitment = async (
     rec: DbRecruitment,
     pegawaiStatus: string,
@@ -331,9 +331,9 @@ export default function RecruitmentPage() {
 
   /**
    * Sync pegawai berdasarkan status recruitment.
-   * Return { ok, message } â€” ok=false berarti pemanggil HARUS membatalkan update status recruitment.
+   * Return { ok, message } — ok=false berarti pemanggil HARUS membatalkan update status recruitment.
    *
-   * @param joinDate Untuk status "Diterima" â€” tanggal mulai aktif yang dipilih admin (YYYY-MM-DD).
+   * @param joinDate Untuk status "Diterima" — tanggal mulai aktif yang dipilih admin (YYYY-MM-DD).
    *                 Default: hari ini (local time).
    */
   const syncPegawaiForStatus = async (
@@ -388,7 +388,7 @@ export default function RecruitmentPage() {
       return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status diubah ke Ditolak.` } };
     }
 
-    // Status mundur (Terpilih, Lamaran Masuk) â†’ hapus pegawai jika ada
+    // Status mundur (Terpilih, Lamaran Masuk) → hapus pegawai jika ada
     if (existingEmp) {
       const { error } = await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
       if (error) return { ok: false, toast: { type: "error", title: "Gagal Hapus Pegawai", message: error.message } };
@@ -413,7 +413,7 @@ export default function RecruitmentPage() {
         return;
       }
 
-      // 2) Pegawai berhasil di-sync â†’ update status recruitment
+      // 2) Pegawai berhasil di-sync → update status recruitment
       const updatePayload: Record<string, unknown> = { status };
       if (status === "Training") {
         const today = localDateStr();
@@ -429,7 +429,7 @@ export default function RecruitmentPage() {
         .single();
 
       if (error || !updated) {
-        // Status recruitment gagal di-update padahal pegawai sudah dibuat â€” kasus jarang.
+        // Status recruitment gagal di-update padahal pegawai sudah dibuat — kasus jarang.
         // Tampilkan error supaya user bisa klik ulang.
         showToast("error", "Status Belum Tersimpan", error?.message || "Refresh halaman dan coba lagi.");
         return;
@@ -442,7 +442,7 @@ export default function RecruitmentPage() {
         action: "status_change",
         entityType: "recruitments",
         entityId: id,
-        entityLabel: `${current.nama} â†’ ${status}`,
+        entityLabel: `${current.nama} → ${status}`,
         oldData: { ...current } as unknown as Record<string, unknown>,
         newData: { ...updated } as unknown as Record<string, unknown>,
         metadata: {
@@ -583,7 +583,7 @@ export default function RecruitmentPage() {
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </div>
 
-      {/* â•â•â• FORM MODAL â•â•â• */}
+      {/* ═══ FORM MODAL ═══ */}
       {showForm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -707,7 +707,7 @@ export default function RecruitmentPage() {
         </Portal>
       )}
 
-      {/* â•â•â• DETAIL SLIDE-OVER â•â•â• */}
+      {/* ═══ DETAIL SLIDE-OVER ═══ */}
       {detail && (
         <Portal>
           <div className="fixed inset-0 z-50 flex justify-end">
@@ -722,8 +722,31 @@ export default function RecruitmentPage() {
                   <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-3">
                     <UserPlus className="w-8 h-8 text-primary/70" />
                   </div>
-                  <h3 className="text-lg font-bold text-foreground">{detail.nama}</h3>
-                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-md mt-1 inline-block" style={{ backgroundColor: `${STATUS_OPTIONS.find((s) => s.value === detail.status)?.color}20`, color: STATUS_OPTIONS.find((s) => s.value === detail.status)?.color }}>{detail.status}</span>
+                                      <h3 className="text-lg font-bold text-foreground">{detail.nama}</h3>
+                    <div className="flex flex-col items-center justify-center gap-3 mt-2">
+                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-md inline-block" style={{ backgroundColor: STATUS_OPTIONS.find((s) => s.value === detail.status)?.color + '20', color: STATUS_OPTIONS.find((s) => s.value === detail.status)?.color }}>{detail.status}</span>
+                      <button 
+                        title="Copy Data Pelamar"
+                        onClick={() => {
+                          const statusStr = detail.status || "-";
+                          const posisiStr = detail.posisi_dilamar || "-";
+                          const didikanStr = detail.pendidikan_terakhir || "-";
+                          const emailStr = detail.email || "-";
+                          const alamatStr = detail.alamat || "-";
+                          const simStr = detail.sim ? "SIM " + detail.sim : "Tidak Ada";
+                          const nyupirStr = detail.bisa_nyupir ? "Ya" : "Tidak";
+                          const pglmnStr = detail.pengalaman_kerja || "-";
+                          const cvStr = detail.cv_url || "Belum dilampirkan";
+                          
+                          const text = "*Data Pelamar - Jamslogistic*\n\n*Nama:* " + detail.nama + "\n*Status:* " + statusStr + "\n*Posisi:* " + posisiStr + "\n*Pendidikan:* " + didikanStr + "\n*No. HP:* " + detail.no_hp + "\n*Email:* " + emailStr + "\n*Alamat:* " + alamatStr + "\n*SIM:* " + simStr + "\n*Bisa Mengemudi:* " + nyupirStr + "\n*Pengalaman Kerja:* " + pglmnStr + "\n\n*CV:* " + cvStr;
+                          navigator.clipboard.writeText(text);
+                          showToast("success", "Tersalin", "Data pelamar berhasil disalin untuk WhatsApp.");
+                        }}
+                        className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg border border-border bg-muted/50 text-muted-foreground hover:bg-primary hover:text-primary-foreground hover:border-primary transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Copy untuk WhatsApp
+                      </button>
+                    </div>
                 </div>
 
                 <div className="space-y-3">
@@ -747,7 +770,7 @@ export default function RecruitmentPage() {
                   ))}
                 </div>
 
-                {/* â”€â”€â”€ Data Tambahan dari Form Landing â”€â”€â”€ */}
+                {/* ─── Data Tambahan dari Form Landing ─── */}
                 {(detail.tanggal_lahir
                   || detail.lama_kerja_terakhir
                   || detail.daerah_kerja_terakhir
@@ -889,7 +912,7 @@ export default function RecruitmentPage() {
         </Portal>
       )}
 
-      {/* â•â•â• DELETE CONFIRM â•â•â• */}
+      {/* ═══ DELETE CONFIRM ═══ */}
       {deleteConfirm && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -911,7 +934,7 @@ export default function RecruitmentPage() {
         </Portal>
       )}
 
-      {/* â•â•â• ACCEPT (DITERIMA) â€” pilih tanggal mulai aktif â•â•â• */}
+      {/* ═══ ACCEPT (DITERIMA) — pilih tanggal mulai aktif ═══ */}
       {acceptModal && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -950,7 +973,7 @@ export default function RecruitmentPage() {
 }
 
 
-// ─── Helper subcomponent ───
+// --- Helper subcomponent ---
 type LucideIcon = React.ComponentType<{ className?: string }>;
 function DataTambahan({
   icon: Icon,
