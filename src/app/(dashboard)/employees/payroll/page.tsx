@@ -159,6 +159,10 @@ export default function PayrollPage() {
   /** "semua" | "kosong" — preview filter untuk batch fill */
   const [batchFilter, setBatchFilter] = useState<"semua" | "kosong">("semua");
 
+  // ─── Bulk Select & Delete ───
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+
   // ─── Delete confirm ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -599,10 +603,53 @@ export default function PayrollPage() {
       oldData: oldRecord ? { ...oldRecord } as unknown as Record<string, unknown> : null,
     });
     setPayrolls((prev) => prev.filter((p) => p.id !== deleteConfirm.id));
+    // Remove from selection if exists
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(deleteConfirm.id);
+      return next;
+    });
     showToast("success", "Slip Dihapus", `Slip gaji ${deleteConfirm.nama} berhasil dihapus.`);
     setDeleting(false);
     setDeleteConfirm(null);
     if (selectedPayroll?.id === deleteConfirm.id) {
+      setShowDetail(false);
+      setSelectedPayroll(null);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setDeleting(true);
+    
+    const idsToDelete = Array.from(selectedIds);
+    // Optimistically get records for audit
+    const oldRecords = payrolls.filter((p) => idsToDelete.includes(p.id));
+    
+    const { error } = await supabase.from("payrolls").delete().in("id", idsToDelete);
+    if (error) {
+      showToast("error", "Gagal Menghapus", error.message);
+      setDeleting(false);
+      setBulkDeleteConfirm(false);
+      return;
+    }
+    
+    await logAudit({
+      supabase,
+      action: "delete",
+      entityType: "payrolls",
+      entityId: `bulk-${idsToDelete.length}`,
+      entityLabel: `Bulk delete ${idsToDelete.length} slip gaji`,
+      metadata: { ids: idsToDelete, records: oldRecords.map(r => ({ id: r.id, nama: r.pegawaiNama, periode: r.periode })) }
+    });
+    
+    setPayrolls((prev) => prev.filter((p) => !idsToDelete.includes(p.id)));
+    showToast("success", "Slip Dihapus", `${idsToDelete.length} slip gaji berhasil dihapus.`);
+    setDeleting(false);
+    setBulkDeleteConfirm(false);
+    setSelectedIds(new Set());
+    
+    if (selectedPayroll && idsToDelete.includes(selectedPayroll.id)) {
       setShowDetail(false);
       setSelectedPayroll(null);
     }
@@ -1389,11 +1436,37 @@ export default function PayrollPage() {
 
       {/* ═══ Ringkasan Tabel + Tombol Worksheet ═══ */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
+        {selectedIds.size > 0 && (
+          <div className="bg-primary/10 border-b border-primary/20 px-5 py-3 flex items-center justify-between animate-fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">{selectedIds.size}</div>
+              <p className="text-sm font-semibold text-primary">Slip gaji dipilih</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>Batal</Button>
+              <Button size="sm" icon={Trash2} onClick={() => setBulkDeleteConfirm(true)} className="bg-danger text-white hover:bg-danger/90 border-danger">Hapus {selectedIds.size} Slip</Button>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-muted/50">
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
+                <th className="px-5 py-3.5 w-12 text-center">
+                  <input type="checkbox" className="rounded border-muted-foreground/30 text-primary cursor-pointer w-4 h-4"
+                    checked={paged.length > 0 && paged.every(r => selectedIds.has(r.id))}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedIds(new Set([...selectedIds, ...paged.map(r => r.id)]));
+                      } else {
+                        const next = new Set(selectedIds);
+                        paged.forEach(r => next.delete(r.id));
+                        setSelectedIds(next);
+                      }
+                    }}
+                  />
+                </th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-3.5 w-12">#</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Total Pendapatan</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Total Potongan</th>
@@ -1404,9 +1477,9 @@ export default function PayrollPage() {
             </thead>
             <tbody className="divide-y divide-border/50">
               {loading ? (
-                <SkeletonTable rows={6} cols={7} />
+                <SkeletonTable rows={6} cols={8} />
               ) : paged.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-16 text-sm text-muted-foreground">
+                <tr><td colSpan={8} className="text-center py-16 text-sm text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <CreditCard className="w-10 h-10 text-muted-foreground/20" />
                     <p>Belum ada slip gaji untuk periode ini</p>
@@ -1414,19 +1487,30 @@ export default function PayrollPage() {
                   </div>
                 </td></tr>
               ) : paged.map((row, idx) => (
-                <tr key={row.id} className="hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => openDetail(row)}>
-                  <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                  <td className="px-5 py-3.5">
+                <tr key={row.id} className={cn("hover:bg-muted/30 transition-colors", selectedIds.has(row.id) && "bg-primary/5")}>
+                  <td className="px-5 py-3.5 text-center">
+                    <input type="checkbox" className="rounded border-muted-foreground/30 text-primary cursor-pointer w-4 h-4"
+                      checked={selectedIds.has(row.id)}
+                      onChange={(e) => {
+                        const next = new Set(selectedIds);
+                        if (e.target.checked) next.add(row.id);
+                        else next.delete(row.id);
+                        setSelectedIds(next);
+                      }}
+                    />
+                  </td>
+                  <td className="px-2 py-3.5 text-xs text-muted-foreground cursor-pointer" onClick={() => openDetail(row)}>{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                  <td className="px-5 py-3.5 cursor-pointer" onClick={() => openDetail(row)}>
                     <p className="text-sm font-semibold text-foreground">{row.pegawaiNama}</p>
                     <p className="text-xs text-muted-foreground">{row.pegawaiJabatan}</p>
                   </td>
-                  <td className="px-5 py-3.5 text-right text-sm font-semibold text-success">{formatCurrency(row.total_pendapatan)}</td>
-                  <td className="px-5 py-3.5 text-right text-sm font-semibold text-danger">{formatCurrency(row.total_potongan)}</td>
-                  <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground">{formatCurrency(row.netto)}</td>
-                  <td className="px-5 py-3.5 text-center">
+                  <td className="px-5 py-3.5 text-right text-sm font-semibold text-success cursor-pointer" onClick={() => openDetail(row)}>{formatCurrency(row.total_pendapatan)}</td>
+                  <td className="px-5 py-3.5 text-right text-sm font-semibold text-danger cursor-pointer" onClick={() => openDetail(row)}>{formatCurrency(row.total_potongan)}</td>
+                  <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground cursor-pointer" onClick={() => openDetail(row)}>{formatCurrency(row.netto)}</td>
+                  <td className="px-5 py-3.5 text-center cursor-pointer" onClick={() => openDetail(row)}>
                     <Badge variant={row.status === "Final" ? "success" : "muted"}>{row.status}</Badge>
                   </td>
-                  <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-5 py-3.5">
                     <div className="flex items-center justify-center gap-1">
                       <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary" title="Download PDF">
                         <Download className="w-3.5 h-3.5" />
@@ -2131,6 +2215,34 @@ export default function PayrollPage() {
                     {saving ? "Menyimpan..." : "Simpan"}
                   </Button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ Bulk Delete Confirmation Modal ═══ */}
+      {bulkDeleteConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setBulkDeleteConfirm(false)} />
+            <div className="relative bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm mx-4 animate-fade-in">
+              <div className="px-6 py-5 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle className="w-6 h-6 text-danger" />
+                </div>
+                <h3 className="text-sm font-bold text-foreground mb-1">Hapus {selectedIds.size} Slip Gaji?</h3>
+                <p className="text-xs text-muted-foreground">
+                  Semua slip gaji yang dipilih akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 px-6 py-4 border-t border-border">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setBulkDeleteConfirm(false)} disabled={deleting}>
+                  Batal
+                </Button>
+                <Button variant="danger" size="sm" className="flex-1" icon={deleting ? Loader2 : Trash2} onClick={handleBulkDelete} disabled={deleting}>
+                  {deleting ? "Menghapus..." : "Hapus Semua"}
+                </Button>
               </div>
             </div>
           </div>
