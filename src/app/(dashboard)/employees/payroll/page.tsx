@@ -46,24 +46,32 @@ const PAGE_SIZE = 15;
 const CUT_OFF_DAY = 7;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
-// ─── Period helpers (same as income page) ───
+// ─── Period helpers ───
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
   const [year, month] = periodKey.split("-").map(Number);
-  const startDate = new Date(year, month - 1, CUT_OFF_DAY);
-  const endDate = new Date(year, month, CUT_OFF_DAY + 1);
-  const start = startDate.toISOString().slice(0, 10);
-  const end = endDate.toISOString().slice(0, 10);
-  const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} \u2013 ${CUT_OFF_DAY + 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
+  // Rentang: tgl 8 bulan sebelumnya s/d tgl 7 bulan ini
+  const startDate = new Date(year, month - 2, 8);
+  const endDate = new Date(year, month - 1, 7);
+  
+  // Format to YYYY-MM-DD
+  // Use local dates to avoid timezone shift
+  const start = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-08`;
+  const end = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-07`;
+  
+  const label = `8 ${startDate.toLocaleDateString("id-ID", { month: "short", year: "numeric" })} \u2013 7 ${endDate.toLocaleDateString("id-ID", { month: "short", year: "numeric" })}`;
   return { start, end, label };
 }
 
 function getCurrentPeriodKey(): string {
   const now = new Date();
-  if (now.getDate() < CUT_OFF_DAY) {
-    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+  // Jika sekarang sebelum tgl 8, maka masuk ke siklus cut-off yang berakhir tgl 7 bulan ini.
+  // Period key kita set sebagai "YYYY-MM" dimana MM adalah bulan akhir cut-off (bulan ini)
+  if (now.getDate() <= 7) {
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   }
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  // Jika tgl 8 ke atas, masuk ke siklus cut-off yang berakhir tgl 7 bulan DEPAN.
+  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function formatPeriodLabel(periodKey: string): string {
