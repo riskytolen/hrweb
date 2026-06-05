@@ -13,7 +13,7 @@ import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, localDateStr, addDaysLocal } from "@/lib/utils";
-import { supabase, type DbRecruitment } from "@/lib/supabase";
+import { supabase, type DbRecruitment, type NonActivePeriod } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
@@ -344,7 +344,7 @@ export default function RecruitmentPage() {
     // Cek apakah sudah ada pegawai dari recruitment ini
     const { data: existingEmp } = await supabase
       .from("pegawai")
-      .select("id, status")
+      .select("id, status, tanggal_keluar, non_active_periods")
       .eq("recruitment_id", rec.id)
       .limit(1)
       .maybeSingle();
@@ -365,10 +365,35 @@ export default function RecruitmentPage() {
     if (newStatus === "Diterima") {
       const effectiveJoinDate = joinDate || localDateStr();
       if (existingEmp) {
-        const { error } = await supabase.from("pegawai").update({
+        const updates: Record<string, unknown> = {
           status: "Aktif",
-          tanggal_bergabung: effectiveJoinDate,
-        }).eq("recruitment_id", rec.id);
+          tanggal_keluar: null,
+        };
+
+        const oldStatus = existingEmp.status;
+        const oldKeluar = existingEmp.tanggal_keluar;
+        const oldPeriods = (existingEmp.non_active_periods || []) as NonActivePeriod[];
+
+        if (oldStatus === "Training") {
+          updates.tanggal_bergabung = effectiveJoinDate;
+        } else if (oldStatus === "Tidak Aktif" && oldKeluar) {
+          const newPeriod: NonActivePeriod = {
+            from: addDaysLocal(oldKeluar, 1),
+            to: addDaysLocal(effectiveJoinDate, -1),
+          };
+          if (newPeriod.from <= newPeriod.to) {
+            updates.non_active_periods = [...oldPeriods, newPeriod];
+            await supabase
+              .from("attendance_records")
+              .delete()
+              .eq("employee_id", existingEmp.id)
+              .gte("tanggal", newPeriod.from)
+              .lte("tanggal", newPeriod.to)
+              .eq("is_manual", false);
+          }
+        }
+
+        const { error } = await supabase.from("pegawai").update(updates).eq("recruitment_id", rec.id);
         if (error) return { ok: false, toast: { type: "error", title: "Gagal Update Pegawai", message: error.message } };
         return { ok: true, toast: { type: "success", title: "Diterima & Aktif", message: `${rec.nama} (${existingEmp.id}) sekarang pegawai aktif sejak ${effectiveJoinDate}.` } };
       }

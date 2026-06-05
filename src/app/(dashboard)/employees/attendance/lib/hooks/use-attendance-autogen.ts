@@ -7,7 +7,7 @@ import {
   AUTO_NOTE_PREFIXES,
   DEFAULT_DENDA_ALPHA,
 } from "../attendance-constants";
-import { localDateStr, computeDendaAlpha } from "../attendance-helpers";
+import { localDateStr, computeDendaAlpha, isInNonActivePeriod } from "../attendance-helpers";
 import type { EmployeeLite, PenaltyLite, PublicHoliday } from "../attendance-types";
 
 type AutoGenArgs = {
@@ -75,6 +75,7 @@ export function useAttendanceAutoGen({
     for (const emp of employees) {
       if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
       if (emp.tanggal_keluar && dateFilter > emp.tanggal_keluar) continue;
+      if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;
 
       const override = overrideMap.get(emp.id);
       const empOffDays = offDayMap.get(emp.id);
@@ -173,6 +174,7 @@ export function useAttendanceAutoGen({
     for (const emp of employees) {
       if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
       if (emp.tanggal_keluar && dateFilter > emp.tanggal_keluar) continue;
+      if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;
 
       const override = overrideMap.get(emp.id);
       const empOffDays = offDayMap.get(emp.id);

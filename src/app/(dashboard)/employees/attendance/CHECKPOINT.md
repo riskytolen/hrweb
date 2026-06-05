@@ -3,7 +3,7 @@
 Incremental refactor `src/app/(dashboard)/employees/attendance/page.tsx` (3.290 LOC → 181 LOC, **-94.5%**).
 Strategi: extract per milestone, pertahankan `page.tsx` kompilabel di setiap step.
 
-**Last updated:** 2026-06-05 — **M11-Composition complete** (AttendancePageHeader + AttendanceModals composition, page.tsx 139 LOC, 92/92 tests passing)
+**Last updated:** 2026-06-05 — **M15-Multi-cycle rehire complete** (non_active_periods JSONB + rehire fix, page.tsx 124 LOC, 105/105 tests passing)
 
 ## Ringkasan Capaian
 
@@ -21,9 +21,9 @@ Strategi: extract per milestone, pertahankan `page.tsx` kompilabel di setiap ste
 | M8 | Components: small UI pieces | ✅ done | 397 | -84 | `DeleteConfirm` + `ToastUI` + `ViewToggle` + `ExportMenuButton` extracted |
 | M9 | Hook: auto-generate libur + alpha | ✅ done | 205 | -192 | `useAttendanceAutoGen` extracted |
 | M10 | Hook: delete record | ✅ done | 188 | -17 | `useAttendanceDelete` extracted |
-| M11 | Composition: header + modals | ✅ done | 139 | -49 | `AttendancePageHeader` + `AttendanceModals` composition |
+| M11 | Composition: header + modals | ✅ done | 124 | -64 | `AttendancePageHeader` + `AttendanceModals` composition |
 
-**Total: -3.151 lines (-95.8%)**, 12 new components (3.077 LOC), 4 new hooks (538 LOC), 92/92 tests passing, 0 TS errors.
+**Total: -3.166 lines (-96.2%)**, 12 new components (3.077 LOC), 4 new hooks (538 LOC), 105/105 tests passing, 0 TS errors.
 
 ## M5b — Components: off-day + holiday detail (PR #6)
 
@@ -707,3 +707,62 @@ User laporan: mode kalender muncul "Tidak ada pegawai sesuai pencarian". Mode ta
 - **Schema assumption check** harus jadi part of refactor planning — query column existence sebelum add ke type/SELECT
 - **Hook error logging**: `useAttendanceStaticData` silently swallows error (Promise.all + default). Untuk future, pertimbangkan expose error di return value
 - **Missing test coverage**: hooks tidak punya unit test — bug tersembunyi. Setup jsdom/happy-dom + testing-library jadi higher priority setelah ini
+
+## M14 — Recruitment rehire: `tanggal_keluar = null` explicit
+
+### Tujuan
+Fix bug di `recruitment/page.tsx:368-371` yang tidak reset `tanggal_keluar` saat rehire. Sebelumnya, status di-set ke "Aktif" tapi `tanggal_keluar` masih berisi exit date lama — auto-gen masih skip dates setelah exit date (bug).
+
+### Fix
+- Tambah `tanggal_keluar: null` di `supabase.from("pegawai").update({...})` di rehire branch
+- 1-line change di recruitment page
+
+### Verifikasi
+- [x] `npx tsc --noEmit` — 0 errors
+- [x] 92/92 tests passing (no test change)
+
+## M15 — Multi-cycle rehire support via `non_active_periods` JSONB
+
+### Tujuan
+Defensive fix untuk skenario fire+rehire berulang. Sebelumnya: setiap rehire `tanggal_bergabung` di-overwrite ke rejoin date, yang membuat auto-gen skip SEMUA dates sebelum rejoin — termasuk first cycle (yang seharusnya valid). Root issue: original `tanggal_bergabung` semantic adalah "first hire date", bukan "current cycle start".
+
+### Pendekatan
+Tambah `non_active_periods: jsonb` ke `pegawai` — array of `{from, to}` date ranges (inclusive) untuk track historical non-active periods. Current non-active period (kalau `status = "Tidak Aktif"`) tetap di-track via `tanggal_keluar`.
+
+### Schema
+- Migration: `ALTER TABLE public.pegawai ADD COLUMN non_active_periods jsonb NOT NULL DEFAULT '[]'::jsonb;`
+- No backfill needed — current reactivated employees (Al Piqran, Donny, Engkit) punya `non_active_periods = []`, auto-gen tetap work karena records sudah di-cleanup manual (M14 + bulk delete)
+- RLS inherits existing policies (no policy change needed)
+
+### File changes
+- `src/lib/supabase.ts`: tambah `NonActivePeriod` interface + `non_active_periods: NonActivePeriod[]` di `DbPegawai`
+- `src/app/(dashboard)/employees/attendance/lib/attendance-helpers.ts`: tambah `isInNonActivePeriod(date, periods)` helper
+- `src/app/(dashboard)/employees/attendance/lib/attendance-types.ts`: extend `EmployeeLite` dengan `non_active_periods?: NonActivePeriod[]`
+- `src/app/(dashboard)/employees/attendance/lib/hooks/use-attendance-static-data.ts`: tambah `non_active_periods` di SELECT
+- `src/app/(dashboard)/employees/attendance/lib/hooks/use-attendance-autogen.ts`: tambah `if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;` di top-of-loop untuk `autoGenerateLibur` dan `autoGenerateAlpha`
+- `src/app/(dashboard)/employees/recruitment/page.tsx`:
+  - Import `NonActivePeriod`, `addDaysLocal`
+  - Extend existingEmp SELECT dengan `tanggal_keluar, non_active_periods`
+  - Rehire branch: detect `oldStatus === "Tidak Aktif" && oldKeluar` → compute `newPeriod = [oldKeluar + 1, effectiveJoinDate - 1]`, append to `non_active_periods`, cleanup `attendance_records` di range tersebut (filter `is_manual = false`)
+  - Preserve `tanggal_bergabung` untuk rehire after firing (jangan update — original hire date)
+- `src/app/(dashboard)/employees/page.tsx`:
+  - Import `NonActivePeriod`, `addDaysLocal`
+  - `executeSaveEdit`: detect rehire (`oldStatus === "Tidak Aktif" && newStatus !== "Tidak Aktif"` && `oldKeluar`) → compute period `[oldKeluar + 1, today - 1]`, append, cleanup records
+  - Preserve `tanggal_bergabung` field (user can still manually edit via form)
+
+### Edge cases handled
+- `oldKeluar = null` (mis. legacy data): skip period append, no cleanup
+- `oldStatus = "Training"` (first hire from training): update `tanggal_bergabung` (was null), no period append
+- `oldStatus = "Aktif"` (re-selecting Diterima on already-aktif): no changes
+- Period invalid (`from > to`): skip period append, no cleanup — no damage
+- Employee with empty `non_active_periods` (current state): no impact, auto-gen works as before
+
+### Verifikasi
+- [x] `npx tsc --noEmit` — 0 errors
+- [x] `npm test -- --run` — 105/105 tests passing (was 101, +4 new for `isInNonActivePeriod`)
+- [x] Manual verification: Al Piqran records look correct (2026-05-14 to 2026-05-21 manual + 2026-05-21 Libur + 2026-06-04 Alpha) — no backfill needed
+
+### Future considerations
+- Display `non_active_periods` di Data Pegawai detail view (optional UX improvement)
+- Hook unit tests (useToast, useDropdown, useTableFilters) — masih deferred, butuh jsdom/happy-dom setup
+- B1 cleanup logic masih punya latent bug (top-of-loop `continue` skips B1 check) — out of scope untuk M15

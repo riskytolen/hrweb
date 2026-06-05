@@ -1,4 +1,5 @@
 import { MIN_DATE, SUMMARY_CUT_OFF_DAY } from "./attendance-constants";
+import type { NonActivePeriod } from "@/lib/supabase";
 
 export type PenaltyLite = {
   division_id: number;
@@ -169,9 +170,9 @@ export function getDateRange(start: string, end: string | null): string[] {
 }
 
 /**
- * Tentukan daftar employee IDs yang terdampak holiday.
- * - "semua" → return semua employee.id dari input list
- * - "pegawai" → return pegawai_ids spesifik (default [])
+ * Resolve employee IDs yang terpengaruh oleh public holiday `h` dari list `employees`.
+ * - "semua" → return semua IDs
+ * - "pegawai" → return hanya IDs di h.pegawai_ids
  * - "divisi" → belum diimplementasi di sini, return [] (caller handle separately)
  */
 export function getAffectedEmployeeIds(
@@ -181,4 +182,20 @@ export function getAffectedEmployeeIds(
   if (h.berlaku_untuk === "semua") return employees.map((e) => e.id);
   if (h.berlaku_untuk === "pegawai") return h.pegawai_ids || [];
   return [];
+}
+
+/**
+ * Check whether `date` (YYYY-MM-DD) falls within ANY of the supplied historical
+ * non-active periods (inclusive on both bounds). Used by auto-gen to skip generating
+ * attendance records for dates when the employee was not active.
+ */
+export function isInNonActivePeriod(
+  date: string,
+  periods: NonActivePeriod[] | null | undefined,
+): boolean {
+  if (!periods || periods.length === 0) return false;
+  for (const p of periods) {
+    if (date >= p.from && date <= p.to) return true;
+  }
+  return false;
 }

@@ -50,7 +50,7 @@ export function useAttendanceStaticData() {
     const [empRes, divRes, schRes, penRes, offRes, ovrRes, holRes] = await Promise.all([
       supabase
         .from("pegawai")
-        .select("id, nama, status, tanggal_bergabung, tanggal_keluar")
+        .select("id, nama, status, tanggal_bergabung, tanggal_keluar, non_active_periods")
         .or(`status.eq.Aktif,and(status.eq.Tidak Aktif,tanggal_keluar.gte.${MIN_DATE})`)
         .order("nama"),
       supabase.from("divisions").select("id, nama, color").eq("status", "Aktif").order("nama"),

@@ -7,6 +7,12 @@ export const supabase = createBrowserClient(
 
 // ─── Database Types ───
 
+/** Inclusive date range for a historical non-active period (used by `pegawai.non_active_periods`). */
+export interface NonActivePeriod {
+  from: string;
+  to: string;
+}
+
 export interface DbDivision {
   id: number;
   nama: string;
@@ -115,6 +121,12 @@ export interface DbPegawai {
   tanggal_berakhir_pkwt: string | null;
   /** Tanggal terakhir efektif kerja saat status diubah ke "Tidak Aktif". NULL jika masih aktif. */
   tanggal_keluar: string | null;
+  /**
+   * Historical non-active periods (inclusive date ranges) from past termination/rehire cycles.
+   * The CURRENT non-active period (if any) is tracked by `tanggal_keluar` and NOT mirrored here.
+   * Format: `[{ from: "YYYY-MM-DD", to: "YYYY-MM-DD" }, ...]`
+   */
+  non_active_periods: NonActivePeriod[];
   gaji_pokok: number;
   recruitment_id: number | null;
   created_at: string;

@@ -1,4 +1,4 @@
-import type { DbAttendanceRecord } from "@/lib/supabase";
+import type { DbAttendanceRecord, NonActivePeriod } from "@/lib/supabase";
 import type { PenaltyLite } from "./attendance-helpers";
 
 export type EmployeeLite = {
@@ -7,6 +7,7 @@ export type EmployeeLite = {
   status: string;
   tanggal_bergabung: string | null;
   tanggal_keluar: string | null;
+  non_active_periods?: NonActivePeriod[];
 };
 
 export type OffDayEntry = { employee_id: string; day_of_week: number };

@@ -38,9 +38,9 @@ import DatePicker from "@/components/ui/DatePicker";
 import Select from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import Pagination from "@/components/ui/Pagination";
-import { supabase, type DbPegawai } from "@/lib/supabase";
+import { supabase, type DbPegawai, type NonActivePeriod } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
-import { cn, formatShortDate, toTitleCase, localDateStr } from "@/lib/utils";
+import { cn, formatShortDate, toTitleCase, localDateStr, addDaysLocal } from "@/lib/utils";
 import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -419,16 +419,32 @@ export default function EmployeesPage() {
 
     const newStatus = editData.status as string;
     const oldStatus = selectedEmployee.status;
+    const oldKeluar = selectedEmployee.tanggal_keluar;
+    const oldPeriods = (selectedEmployee.non_active_periods || []) as NonActivePeriod[];
+
+    let rehirePeriod: NonActivePeriod | null = null;
 
     // Aturan tanggal_keluar:
     // - Status menjadi "Tidak Aktif" → set dari overrides.tanggal_keluar (modal)
     // - Status keluar dari "Tidak Aktif" → reset ke null (rehire/koreksi)
+    //   + append non-active period ke non_active_periods (untuk skip auto-gen)
     // - Selain itu, biarkan apa adanya (jangan kirim ke DB)
-    const statusUpdates: Record<string, string | null> = {};
+    const statusUpdates: Record<string, unknown> = {};
     if (newStatus === "Tidak Aktif" && oldStatus !== "Tidak Aktif") {
       statusUpdates.tanggal_keluar = overrides.tanggal_keluar || localDateStr();
     } else if (oldStatus === "Tidak Aktif" && newStatus !== "Tidak Aktif") {
       statusUpdates.tanggal_keluar = null;
+      if (oldKeluar) {
+        const today = localDateStr();
+        const candidate: NonActivePeriod = {
+          from: addDaysLocal(oldKeluar, 1),
+          to: addDaysLocal(today, -1),
+        };
+        if (candidate.from <= candidate.to) {
+          statusUpdates.non_active_periods = [...oldPeriods, candidate];
+          rehirePeriod = candidate;
+        }
+      }
     }
 
     const { error } = await supabase
@@ -470,6 +486,18 @@ export default function EmployeesPage() {
           .from("user_profiles")
           .update({ status: "Tidak Aktif" })
           .eq("employee_id", selectedEmployee.id);
+      }
+
+      // Side-effect: rehire — cleanup auto-generated records yang di-generate
+      // saat employee non-aktif (jika ada yang lolos filter, mis. karena race condition)
+      if (rehirePeriod) {
+        await supabase
+          .from("attendance_records")
+          .delete()
+          .eq("employee_id", selectedEmployee.id)
+          .gte("tanggal", rehirePeriod.from)
+          .lte("tanggal", rehirePeriod.to)
+          .eq("is_manual", false);
       }
 
       // Audit log: status change atau update data

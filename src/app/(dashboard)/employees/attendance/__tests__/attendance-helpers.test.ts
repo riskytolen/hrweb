@@ -13,6 +13,7 @@ import {
   getCalPeriod,
   getDateRange,
   getAffectedEmployeeIds,
+  isInNonActivePeriod,
 } from "../lib/attendance-helpers";
 import { MIN_DATE, SUMMARY_CUT_OFF_DAY } from "../lib/attendance-constants";
 
@@ -265,6 +266,40 @@ describe("attendance-helpers", () => {
     it("default ke new Date() (tidak throw)", () => {
       expect(() => getSummaryCurrentPeriodKey()).not.toThrow();
       expect(getSummaryCurrentPeriodKey()).toMatch(/^\d{4}-\d{2}$/);
+    });
+  });
+
+  describe("isInNonActivePeriod", () => {
+    it("returns false untuk null/undefined/empty periods", () => {
+      expect(isInNonActivePeriod("2026-06-01", null)).toBe(false);
+      expect(isInNonActivePeriod("2026-06-01", undefined)).toBe(false);
+      expect(isInNonActivePeriod("2026-06-01", [])).toBe(false);
+    });
+
+    it("returns true untuk date DI DALAM satu period (inclusive both bounds)", () => {
+      const periods = [{ from: "2026-05-22", to: "2026-06-03" }];
+      expect(isInNonActivePeriod("2026-05-22", periods)).toBe(true);
+      expect(isInNonActivePeriod("2026-05-30", periods)).toBe(true);
+      expect(isInNonActivePeriod("2026-06-03", periods)).toBe(true);
+    });
+
+    it("returns false untuk date SEBELUM or SESUDAH period", () => {
+      const periods = [{ from: "2026-05-22", to: "2026-06-03" }];
+      expect(isInNonActivePeriod("2026-05-21", periods)).toBe(false);
+      expect(isInNonActivePeriod("2026-06-04", periods)).toBe(false);
+    });
+
+    it("returns true jika date matches ANY of multiple periods", () => {
+      const periods = [
+        { from: "2024-01-01", to: "2024-03-31" },
+        { from: "2025-06-01", to: "2025-08-31" },
+        { from: "2026-05-22", to: "2026-06-03" },
+      ];
+      expect(isInNonActivePeriod("2024-02-15", periods)).toBe(true);
+      expect(isInNonActivePeriod("2025-07-15", periods)).toBe(true);
+      expect(isInNonActivePeriod("2026-05-30", periods)).toBe(true);
+      expect(isInNonActivePeriod("2024-04-01", periods)).toBe(false);
+      expect(isInNonActivePeriod("2025-09-01", periods)).toBe(false);
     });
   });
 
