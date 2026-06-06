@@ -500,6 +500,18 @@ export default function EmployeesPage() {
           .eq("is_manual", false);
       }
 
+      // Side-effect: fire — cleanup auto-generated records pada tanggal keluar
+      // dan setelahnya (records manual disimpan — admin eksplisit input)
+      const fireDate = statusUpdates.tanggal_keluar as string | null;
+      if (newStatus === "Tidak Aktif" && oldStatus !== "Tidak Aktif" && fireDate) {
+        await supabase
+          .from("attendance_records")
+          .delete()
+          .eq("employee_id", selectedEmployee.id)
+          .gte("tanggal", fireDate)
+          .eq("is_manual", false);
+      }
+
       // Audit log: status change atau update data
       const isStatusChange = newStatus !== oldStatus;
       await logAudit({
@@ -2334,7 +2346,7 @@ export default function EmployeesPage() {
               </div>
               <h3 className="text-base font-bold text-foreground text-center">Nonaktifkan &ldquo;{exitModal.namaForDisplay}&rdquo;?</h3>
               <p className="text-sm text-muted-foreground mt-2 text-center">
-                Pegawai akan ditandai sebagai Tidak Aktif sejak tanggal yang dipilih. Akun login akan otomatis di-disable. Hari setelah tanggal ini tidak akan dihitung Alpha.
+                Pegawai akan ditandai sebagai Tidak Aktif sejak tanggal yang dipilih. Akun login akan otomatis di-disable. Hari ini dan setelahnya tidak akan dihitung Alpha, dan absensi otomatis pada tanggal tersebut akan dihapus (record manual tetap disimpan).
               </p>
 
               <div className="mt-5">

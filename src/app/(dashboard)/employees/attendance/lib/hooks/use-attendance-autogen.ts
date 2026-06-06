@@ -74,7 +74,7 @@ export function useAttendanceAutoGen({
 
     for (const emp of employees) {
       if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
-      if (emp.tanggal_keluar && dateFilter > emp.tanggal_keluar) continue;
+      if (emp.tanggal_keluar && dateFilter >= emp.tanggal_keluar) continue;
       if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;
 
       const override = overrideMap.get(emp.id);
@@ -173,7 +173,7 @@ export function useAttendanceAutoGen({
 
     for (const emp of employees) {
       if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
-      if (emp.tanggal_keluar && dateFilter > emp.tanggal_keluar) continue;
+      if (emp.tanggal_keluar && dateFilter >= emp.tanggal_keluar) continue;
       if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;
 
       const override = overrideMap.get(emp.id);
@@ -185,7 +185,7 @@ export function useAttendanceAutoGen({
       const existing = existingRecs?.find((r) => r.employee_id === emp.id);
 
       if (existing) {
-        const isNonRelevant = emp.status === "Tidak Aktif" || (emp.tanggal_keluar && dateFilter > emp.tanggal_keluar);
+        const isNonRelevant = emp.status === "Tidak Aktif" || (emp.tanggal_keluar && dateFilter >= emp.tanggal_keluar);
         if (
           isNonRelevant &&
           !existing.is_manual &&
