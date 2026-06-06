@@ -48,14 +48,14 @@ import StatusBadge, { type LegacyPayrollStatus } from "./components/StatusBadge"
 import ProrataBadge from "./components/ProrataBadge";
 import BreakdownAbsen, { type AbsenItem } from "./components/BreakdownAbsen";
 import BreakdownLembur, { type LemburItem } from "./components/BreakdownLembur";
+import WorksheetEditor from "./components/WorksheetEditor";
+import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
-type PayrollRow = DbPayroll & { pegawaiNama?: string; pegawaiJabatan?: string };
 
 const PAGE_SIZE = 15;
 const CUT_OFF_DAY = 7;
-const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
 // ─── Period helpers ───
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
@@ -91,38 +91,7 @@ function formatPeriodLabel(periodKey: string): string {
   return d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
 }
 
-// ─── Currency input helper ───
-function parseCurrencyInput(val: string): number {
-  return parseInt(val.replace(/\D/g, "")) || 0;
-}
-
-function formatInputCurrency(val: number): string {
-  if (val === 0) return "";
-  return new Intl.NumberFormat("id-ID").format(val);
-}
-
-// ─── Pendapatan & Potongan field definitions ───
-const PENDAPATAN_FIELDS: { key: string; label: string; readonly?: boolean }[] = [
-  { key: "gaji_pokok", label: "Gaji Pokok" },
-  { key: "pendapatan_titik", label: "Pendapatan Titik", readonly: true },
-  { key: "lembur", label: "Lembur", readonly: true },
-  { key: "extra_job", label: "Extra Job" },
-  { key: "uang_makan", label: "Uang Makan" },
-  { key: "insentif", label: "Insentif" },
-  { key: "tunjangan_jabatan", label: "Tunjangan Jabatan" },
-  { key: "transport", label: "Transport" },
-  { key: "tunjangan_lain", label: "Tunjangan Lain" },
-  { key: "tambahan_lain", label: "Tambahan Lain" },
-];
-
-const POTONGAN_FIELDS: { key: string; label: string; readonly?: boolean }[] = [
-  { key: "koperasi", label: "Koperasi" },
-  { key: "pinjaman_perusahaan", label: "Pinjaman Perusahaan" },
-  { key: "potongan_absen", label: "Potongan Absen", readonly: true },
-  { key: "potongan_lain", label: "Potongan Lain" },
-  { key: "jht", label: "JHT" },
-  { key: "bpjs_kesehatan", label: "BPJS Kesehatan" },
-];
+// ─── Pendapatan & Potongan field definitions & currency helpers — see ./constants.ts ───
 
 export default function PayrollPage() {
   const { user, getPermissionLevel, isSuperAdmin } = useAuth();
@@ -167,7 +136,6 @@ export default function PayrollPage() {
 
   // ─── Workflow state: Worksheet → Draft → Final ───
   const [activeMainTab, setActiveMainTab] = useState<"worksheet" | "draft" | "final" | "laporan">("worksheet");
-  const [showWorksheet, setShowWorksheet] = useState(false);
   const [wsData, setWsData] = useState<Record<number, Record<string, number>>>({});
   /** Map<payrollId, Set<fieldKey>> — track cell-level changes untuk highlight */
   const [wsChangedCells, setWsChangedCells] = useState<Map<number, Set<string>>>(new Map());
@@ -217,10 +185,10 @@ export default function PayrollPage() {
 
   // ─── Lock body scroll ───
   useEffect(() => {
-    if (showGenerate || showDetail || showWorksheet) document.body.style.overflow = "hidden";
+    if (showGenerate || showDetail) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showGenerate, showDetail, showWorksheet]);
+  }, [showGenerate, showDetail]);
 
   // ─── Fetch employees ───
   const fetchEmployees = async () => {
@@ -563,8 +531,6 @@ export default function PayrollPage() {
   };
 
   // ─── Open detail panel ───
-  type AbsenBreakdownItem = { tanggal: string; status: string; denda: number; durasi_telat: number | null };
-  type LemburBreakdownItem = { tanggal: string; jam_mulai: string; jam_selesai: string; durasi_menit: number; rate_per_jam: number; total_lembur: number; alasan: string | null };
   const [absenBreakdown, setAbsenBreakdown] = useState<{ telat: number; alpha: number; lainnya: number; items: AbsenBreakdownItem[] } | null>(null);
   const [lemburBreakdown, setLemburBreakdown] = useState<LemburBreakdownItem[] | null>(null);
   const [lemburBreakdownLoading, setLemburBreakdownLoading] = useState(false);
@@ -1651,9 +1617,6 @@ export default function PayrollPage() {
             <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing || loading}>
               {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
             </Button>
-            <Button variant="outline" icon={Pencil} size="sm" onClick={() => setShowWorksheet(true)} disabled={worksheetCount === 0}>
-              Edit Cells
-            </Button>
           </div>
         }
       />
@@ -1948,19 +1911,51 @@ export default function PayrollPage() {
         }}
       />
 
-      {/* ═══ Ringkasan Tabel + Tombol Worksheet ═══ */}
+      {/* ═══ Tab Body: Worksheet (inline editor) atau Ringkasan Tabel (Draft/Final/Laporan) ═══ */}
+      {activeMainTab === "worksheet" ? (
+        worksheetCount > 0 ? (
+          <WorksheetEditor
+            payrolls={payrolls}
+            filtered={filtered}
+            wsData={wsData}
+            wsChangedCells={wsChangedCells}
+            wsAbsenBreakdown={wsAbsenBreakdown}
+            wsAbsenLoading={wsAbsenLoading}
+            wsLemburBreakdown={wsLemburBreakdown}
+            wsLemburLoading={wsLemburLoading}
+            wsSaving={wsSaving}
+            wsExpandedId={wsExpandedId}
+            wsRowsChanged={wsRowsChanged}
+            wsTotalChanged={wsTotalChanged}
+            search={search}
+            setSearch={setSearch}
+            period={period}
+            prevPeriod={prevPeriod}
+            nextPeriod={nextPeriod}
+            handleWsChange={handleWsChange}
+            handleWsSaveAll={handleWsSaveAll}
+            initWsData={initWsData}
+            isCellChanged={isCellChanged}
+            wsComputeTotals={wsComputeTotals}
+            setWsExpandedId={setWsExpandedId}
+            exportSlipPDF={exportSlipPDF}
+            setDeleteConfirm={setDeleteConfirm}
+            onOpenBatchFill={() => { setBatchField(""); setBatchValue(""); setShowBatchFill(true); }}
+          />
+        ) : (
+          <EmptyState
+            icon={CreditCard}
+            title="Belum ada worksheet"
+            description={"Klik \u201cHitung Worksheet\u201d untuk membuat draft slip gaji."}
+          />
+        )
+      ) : (
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         <BatchActionBar
           count={selectedIds.size}
           onClear={() => setSelectedIds(new Set())}
           actions={(() => {
             const acts: { type: "buat" | "finalkan" | "batalkan" | "hapus"; onClick: () => void }[] = [];
-            if (activeMainTab === "worksheet") {
-              acts.push({
-                type: "buat",
-                onClick: () => setBuatSlipConfirm({ ids: Array.from(selectedIds), mode: "bulk" }),
-              });
-            }
             if (activeMainTab === "draft") {
               acts.push({
                 type: "batalkan",
@@ -2012,12 +2007,7 @@ export default function PayrollPage() {
                 <tr><td colSpan={8} className="text-center py-16 text-sm text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <CreditCard className="w-10 h-10 text-muted-foreground/20" />
-                    {activeMainTab === "worksheet" ? (
-                      <>
-                        <p>Belum ada worksheet untuk periode ini</p>
-                        <p className="text-xs text-muted-foreground/60">Klik &quot;Hitung Worksheet&quot; untuk membuat draft slip gaji</p>
-                      </>
-                    ) : activeMainTab === "draft" ? (
+                    {activeMainTab === "draft" ? (
                       <>
                         <p>Belum ada slip di tab Draft</p>
                         <p className="text-xs text-muted-foreground/60">Pilih slip di tab Worksheet, lalu klik &quot;Buat Slip&quot;</p>
@@ -2086,372 +2076,9 @@ export default function PayrollPage() {
         </div>
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </div>
+      )}
 
       </>)}
-
-      {/* ═══════════════════════════════════════════════ */}
-      {/* ═══ WORKSHEET FULLSCREEN ═══ */}
-      {/* ═══════════════════════════════════════════════ */}
-      {showWorksheet && (
-        <Portal>
-          <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
-            {/* ── Header ── */}
-            <div className="flex items-center justify-between px-5 py-2.5 border-b border-border bg-card flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20">
-                  <CreditCard className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-foreground">Worksheet Penggajian</h2>
-                  <div className="flex items-center gap-2.5 mt-0.5 text-[10px] text-muted-foreground">
-                    <span><strong className="text-foreground">{filtered.length}</strong> pegawai</span>
-                    <span className="w-px h-3 bg-border" />
-                    <span>Netto: <strong className="text-primary">{formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}</strong></span>
-                    {wsRowsChanged > 0 && (
-                      <>
-                        <span className="w-px h-3 bg-border" />
-                        <span className="flex items-center gap-1 text-warning">
-                          <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
-                          <strong>{wsRowsChanged}</strong> baris &middot; <strong>{wsTotalChanged}</strong> cell diubah
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center bg-muted rounded-xl p-0.5">
-                  <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-3.5 h-3.5" /></button>
-                  <span className="text-[11px] font-bold text-foreground px-2.5 min-w-[200px] text-center">{period.label}</span>
-                  <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronRight className="w-3.5 h-3.5" /></button>
-                </div>
-                <div className="flex items-center gap-1.5 bg-muted rounded-xl px-2.5 py-1.5 w-44">
-                  <Search className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                  <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => setSearch(e.target.value)}
-                    className="bg-transparent text-[11px] outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
-                </div>
-                <button onClick={() => { setBatchField(""); setBatchValue(""); setShowBatchFill(true); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">
-                  <Zap className="w-3 h-3" />Batch Fill
-                </button>
-                {wsRowsChanged > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => initWsData(payrolls)} disabled={wsSaving}
-                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">
-                      Reset
-                    </button>
-                    <Button icon={wsSaving ? Loader2 : Save} size="sm" onClick={handleWsSaveAll} disabled={wsSaving}>
-                      {wsSaving ? "Menyimpan..." : `Simpan (${wsRowsChanged})`}
-                    </Button>
-                  </div>
-                )}
-                <button onClick={() => setShowWorksheet(false)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors" title="Tutup">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* ── Table ── */}
-            <div className="flex-1 overflow-auto">
-              <table className="w-full border-collapse min-w-[900px]">
-                <thead className="sticky top-0 z-10">
-                  <tr className="border-b-2 border-border bg-muted/80">
-                    <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-10">#</th>
-                    <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3">Pegawai</th>
-                    <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-3 w-[130px]">Gaji Pokok</th>
-                    <th className="text-right text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider px-4 py-3 w-[130px]">Pend. Titik <span className="block text-[7px] font-normal normal-case opacity-60">otomatis</span></th>
-                    <th className="text-right text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider px-4 py-3 w-[140px] bg-emerald-50/50 dark:bg-emerald-500/[0.04]">Total Pendapatan</th>
-                    <th className="text-right text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider px-4 py-3 w-[140px] bg-rose-50/50 dark:bg-rose-500/[0.04]">Total Potongan</th>
-                    <th className="text-right text-[10px] font-bold text-primary uppercase tracking-wider px-4 py-3 w-[150px] bg-primary/[0.04]">Netto</th>
-                    <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-3 w-[80px]">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0 ? (
-                    <tr><td colSpan={8} className="text-center py-24 text-sm text-muted-foreground">
-                      <CreditCard className="w-10 h-10 text-muted-foreground/15 mx-auto mb-2" />
-                      Belum ada slip gaji untuk periode ini
-                    </td></tr>
-                  ) : filtered.map((row, idx) => {
-                    const vals = wsData[row.id] || {};
-                    const computed = wsComputeTotals(row.id);
-                    const isChanged = wsChangedCells.has(row.id);
-                    const isEven = idx % 2 === 0;
-                    return (
-                      <React.Fragment key={row.id}>
-                        {/* Main row */}
-                        <tr
-                          className={cn(
-                            "border-b transition-colors cursor-pointer",
-                            isChanged ? "bg-amber-50/60 dark:bg-amber-500/[0.04] border-amber-200/50 dark:border-amber-500/10" : isEven ? "bg-card border-border/40" : "bg-muted/20 border-border/40",
-                            wsExpandedId === row.id ? "border-b-0" : "hover:bg-primary/[0.03]"
-                          )}
-                          onClick={() => setWsExpandedId(wsExpandedId === row.id ? null : row.id)}
-                        >
-                          <td className="px-4 py-3 text-[10px] text-muted-foreground">{idx + 1}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-semibold text-foreground truncate">{row.pegawaiNama}</p>
-                                <p className="text-[10px] text-muted-foreground truncate">{row.pegawaiJabatan}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-right text-xs font-medium text-foreground tabular-nums">{formatCurrency(vals.gaji_pokok || 0)}</td>
-                          <td className="px-4 py-3 text-right text-xs font-medium text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(vals.pendapatan_titik || 0)}</td>
-                          <td className="px-4 py-3 text-right text-xs font-bold text-emerald-700 dark:text-emerald-400 tabular-nums bg-emerald-50/30 dark:bg-emerald-500/[0.02]">{formatCurrency(computed.totalPendapatan)}</td>
-                          <td className="px-4 py-3 text-right text-xs font-bold text-rose-700 dark:text-rose-400 tabular-nums bg-rose-50/30 dark:bg-rose-500/[0.02]">{formatCurrency(computed.totalPotongan)}</td>
-                          <td className="px-4 py-3 text-right text-sm font-bold text-foreground tabular-nums bg-primary/[0.02]">{formatCurrency(computed.netto)}</td>
-                          <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-center gap-0.5">
-                              <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary transition-colors" title="PDF">
-                                <Download className="w-3 h-3" />
-                              </button>
-                              <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors" title="Hapus">
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-
-                        {/* Expanded detail row */}
-                        {wsExpandedId === row.id && (
-                          <tr className={cn("border-b border-border", isChanged ? "bg-amber-50/30 dark:bg-amber-500/[0.02]" : "bg-muted/10")}>
-                            <td />
-                            <td colSpan={7} className="px-4 py-4">
-                              <div className="grid grid-cols-2 gap-6 max-w-4xl">
-                                {/* Pendapatan */}
-                                <div>
-                                  <div className="flex items-center gap-2 mb-3">
-                                    <div className="w-5 h-5 rounded-md bg-emerald-100 dark:bg-emerald-500/10 flex items-center justify-center">
-                                      <TrendingDown className="w-3 h-3 text-emerald-600 dark:text-emerald-400 rotate-180" />
-                                    </div>
-                                    <h4 className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Pendapatan</h4>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {PENDAPATAN_FIELDS.map((f) => {
-                                      const isLembur = f.key === "lembur";
-                                      const wsLembur = isLembur ? wsLemburBreakdown[row.id] : null;
-                                      const wsLemburLoad = isLembur ? !!wsLemburLoading[row.id] : false;
-                                      return (
-                                        <div key={f.key} className={cn(isLembur ? "space-y-1.5" : "flex items-center gap-2")}>
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
-                                            {f.readonly ? (
-                                              <span className="flex-1 text-right text-[11px] font-medium text-emerald-600/70 dark:text-emerald-400/70 tabular-nums">{formatCurrency(vals[f.key] || 0)}</span>
-                                            ) : (
-                                              <div className="flex-1 relative">
-                                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">Rp</span>
-                                                <input
-                                                  type="text"
-                                                  value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
-                                                  onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
-                                                  placeholder="0"
-                                                  onClick={(e) => e.stopPropagation()}
-                                                  className={cn(
-                                                    "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
-                                                    isCellChanged(row.id, f.key)
-                                                      ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
-                                                      : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
-                                                  )}
-                                                />
-                                              </div>
-                                            )}
-                                          </div>
-                                          {isLembur && (
-                                            <div>
-                                              {wsLemburLoad ? (
-                                                <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
-                                              ) : wsLembur && wsLembur.items.length > 0 ? (
-                                                <div className="rounded-lg border border-emerald-200/60 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-500/[0.03] overflow-hidden">
-                                                  <div className="px-2.5 py-1.5 bg-emerald-100/40 dark:bg-emerald-500/10 border-b border-emerald-200/60 dark:border-emerald-500/20 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px]">
-                                                    <span className="text-muted-foreground">Total: <strong className="text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(wsLembur.total)}</strong></span>
-                                                    <span className="ml-auto text-[10px] font-semibold text-muted-foreground">{wsLembur.items.length} pengajuan</span>
-                                                  </div>
-                                                  <div className="max-h-28 overflow-y-auto divide-y divide-emerald-200/40 dark:divide-emerald-500/10">
-                                                    {wsLembur.items.map((it, idx) => {
-                                                      const dateLabel = new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
-                                                      const jamMulai = it.jam_mulai?.slice(0, 5) || "";
-                                                      const jamSelesai = it.jam_selesai?.slice(0, 5) || "";
-                                                      const durasiJam = it.durasi_menit ? (it.durasi_menit / 60).toFixed(1).replace(/\.0$/, "") : "0";
-                                                      return (
-                                                        <div
-                                                          key={idx}
-                                                          className={cn(
-                                                            "grid grid-cols-[50px_minmax(0,1fr)_auto_auto] items-center gap-2 px-2.5 py-1 text-[10px]",
-                                                            idx % 2 === 0 ? "bg-transparent" : "bg-emerald-50/40 dark:bg-emerald-500/[0.04]"
-                                                          )}
-                                                        >
-                                                          <span className="tabular-nums text-muted-foreground font-medium">{dateLabel}</span>
-                                                          <span className="font-semibold text-foreground truncate">
-                                                            {jamMulai && jamSelesai ? `${jamMulai}–${jamSelesai} (${durasiJam}j)` : `${durasiJam}j`}
-                                                          </span>
-                                                          <span className="text-muted-foreground tabular-nums whitespace-nowrap">@ {formatCurrency(it.rate_per_jam || 0)}/j</span>
-                                                          <span className="font-bold text-emerald-700 dark:text-emerald-400 tabular-nums whitespace-nowrap">{formatCurrency(it.total_lembur || 0)}</span>
-                                                        </div>
-                                                      );
-                                                    })}
-                                                  </div>
-                                                </div>
-                                              ) : wsLembur ? (
-                                                <div className="text-[10px] text-muted-foreground text-right italic">Tidak ada lembur disetujui di periode ini</div>
-                                              ) : null}
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                    <div className="flex items-center gap-2 pt-2 mt-1 border-t border-emerald-200/50 dark:border-emerald-500/10">
-                                      <span className="text-[11px] font-bold text-foreground w-32">Total</span>
-                                      <span className="flex-1 text-right text-xs font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(computed.totalPendapatan)}</span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Potongan */}
-                                <div>
-                                  <div className="flex items-center gap-2 mb-3">
-                                    <div className="w-5 h-5 rounded-md bg-rose-100 dark:bg-rose-500/10 flex items-center justify-center">
-                                      <TrendingDown className="w-3 h-3 text-rose-600 dark:text-rose-400" />
-                                    </div>
-                                    <h4 className="text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider">Potongan</h4>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    {POTONGAN_FIELDS.map((f) => {
-                                      const isPotAbsen = f.key === "potongan_absen";
-                                      const wsBreakdown = isPotAbsen ? wsAbsenBreakdown[row.id] : null;
-                                      const wsBreakdownLoading = isPotAbsen ? !!wsAbsenLoading[row.id] : false;
-                                      return (
-                                        <div key={f.key} className={cn(isPotAbsen ? "space-y-1.5" : "flex items-center gap-2")}>
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
-                                            {f.readonly ? (
-                                              <span className="flex-1 text-right text-[11px] font-medium text-rose-600/70 dark:text-rose-400/70 tabular-nums">{formatCurrency(vals[f.key] || 0)}</span>
-                                            ) : (
-                                              <div className="flex-1 relative">
-                                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground/50">Rp</span>
-                                                <input
-                                                  type="text"
-                                                  value={vals[f.key] ? formatInputCurrency(vals[f.key]) : ""}
-                                                  onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
-                                                  placeholder="0"
-                                                  onClick={(e) => e.stopPropagation()}
-                                                  className={cn(
-                                                    "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
-                                                    isCellChanged(row.id, f.key)
-                                                      ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
-                                                      : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
-                                                  )}
-                                                />
-                                              </div>
-                                            )}
-                                          </div>
-                                          {isPotAbsen && (
-                                            <div>
-                                              {wsBreakdownLoading ? (
-                                                <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
-                                              ) : wsBreakdown && wsBreakdown.items.length > 0 ? (
-                                                <div className="rounded-lg border border-rose-200/60 dark:border-rose-500/20 bg-rose-50/30 dark:bg-rose-500/[0.03] overflow-hidden">
-                                                  <div className="px-2.5 py-1.5 bg-rose-100/40 dark:bg-rose-500/10 border-b border-rose-200/60 dark:border-rose-500/20 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px]">
-                                                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-muted-foreground">
-                                                      <span>Telat: <strong className="text-foreground tabular-nums">{formatCurrency(wsBreakdown.telat)}</strong></span>
-                                                      {wsBreakdown.alpha > 0 && <span>Alpha: <strong className="text-foreground tabular-nums">{formatCurrency(wsBreakdown.alpha)}</strong></span>}
-                                                      {wsBreakdown.lainnya > 0 && <span>Lainnya: <strong className="text-foreground tabular-nums">{formatCurrency(wsBreakdown.lainnya)}</strong></span>}
-                                                    </div>
-                                                    <span className="ml-auto text-[10px] font-semibold text-muted-foreground">{wsBreakdown.items.length} kejadian</span>
-                                                  </div>
-                                                  <div className="max-h-28 overflow-y-auto divide-y divide-rose-200/40 dark:divide-rose-500/10">
-                                                    {wsBreakdown.items.map((it, idx) => {
-                                                      const isAlpha = it.status === "Alpha";
-                                                      const isTelat = it.status === "Telat" || it.status === "Terlambat";
-                                                      const dateLabel = new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
-                                                      const statusLabel = isAlpha
-                                                        ? "Alpha"
-                                                        : isTelat
-                                                          ? (it.durasi_telat ? `Telat (${it.durasi_telat}m)` : "Telat")
-                                                          : it.status;
-                                                      return (
-                                                        <div
-                                                          key={idx}
-                                                          className={cn(
-                                                            "grid grid-cols-[50px_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-1 text-[10px]",
-                                                            idx % 2 === 0 ? "bg-transparent" : "bg-rose-50/40 dark:bg-rose-500/[0.04]"
-                                                          )}
-                                                        >
-                                                          <span className="tabular-nums text-muted-foreground font-medium">{dateLabel}</span>
-                                                          <span className={cn(
-                                                            "font-semibold truncate",
-                                                            isAlpha ? "text-rose-600 dark:text-rose-400" : isTelat ? "text-amber-600 dark:text-amber-400" : "text-foreground"
-                                                          )}>
-                                                            {statusLabel}
-                                                          </span>
-                                                          <span className="font-bold text-foreground tabular-nums whitespace-nowrap">{formatCurrency(it.denda)}</span>
-                                                        </div>
-                                                      );
-                                                    })}
-                                                  </div>
-                                                </div>
-                                              ) : wsBreakdown ? (
-                                                <div className="text-[10px] text-muted-foreground text-right italic">Tidak ada denda di periode ini</div>
-                                              ) : null}
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                    <div className="flex items-center gap-2 pt-2 mt-1 border-t border-rose-200/50 dark:border-rose-500/10">
-                                      <span className="text-[11px] font-bold text-foreground w-32">Total</span>
-                                      <span className="flex-1 text-right text-xs font-bold text-rose-700 dark:text-rose-400 tabular-nums">{formatCurrency(computed.totalPotongan)}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Netto bar */}
-                              <div className="mt-4 flex items-center justify-between px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary/5 to-primary/10 border border-primary/10 max-w-4xl">
-                                <span className="text-xs font-bold text-foreground">Gaji Bersih (Netto)</span>
-                                <span className={cn("text-lg font-bold tabular-nums", computed.netto >= 0 ? "text-primary" : "text-danger")}>{formatCurrency(computed.netto)}</span>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-                {/* Footer */}
-                {filtered.length > 0 && (
-                  <tfoot className="sticky bottom-0 z-10">
-                    <tr className="border-t-2 border-border bg-card shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.08)]">
-                      <td className="px-4 py-3" />
-                      <td className="px-4 py-3">
-                        <p className="text-[10px] font-bold text-foreground uppercase tracking-wider">Grand Total</p>
-                        <p className="text-[9px] text-muted-foreground">{filtered.length} pegawai</p>
-                      </td>
-                      <td className="px-4 py-3 text-right text-[11px] font-bold text-muted-foreground tabular-nums">
-                        {formatCurrency(filtered.reduce((s, r) => s + ((wsData[r.id] || {}).gaji_pokok || 0), 0))}
-                      </td>
-                      <td className="px-4 py-3 text-right text-[11px] font-bold text-muted-foreground tabular-nums">
-                        {formatCurrency(filtered.reduce((s, r) => s + ((wsData[r.id] || {}).pendapatan_titik || 0), 0))}
-                      </td>
-                      <td className="px-4 py-3 text-right text-xs font-extrabold text-emerald-700 dark:text-emerald-400 tabular-nums bg-emerald-50/50 dark:bg-emerald-500/[0.04]">
-                        {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).totalPendapatan, 0))}
-                      </td>
-                      <td className="px-4 py-3 text-right text-xs font-extrabold text-rose-700 dark:text-rose-400 tabular-nums bg-rose-50/50 dark:bg-rose-500/[0.04]">
-                        {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).totalPotongan, 0))}
-                      </td>
-                      <td className="px-4 py-3 text-right text-sm font-extrabold text-primary tabular-nums bg-primary/[0.04]">
-                        {formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0))}
-                      </td>
-                      <td />
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </div>
-        </Portal>
-      )}
 
       {/* ═══ Batch Fill Modal ═══ */}
       {showBatchFill && (
