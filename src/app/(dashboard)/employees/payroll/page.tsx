@@ -25,6 +25,9 @@ import {
   Pencil,
   Check,
   Banknote,
+  FileCheck,
+  RotateCcw,
+  BarChart3,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -114,7 +117,7 @@ const POTONGAN_FIELDS: { key: string; label: string; readonly?: boolean }[] = [
 ];
 
 export default function PayrollPage() {
-  const { getPermissionLevel, isSuperAdmin } = useAuth();
+  const { user, getPermissionLevel, isSuperAdmin } = useAuth();
   const permLevel = getPermissionLevel("payroll");
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
@@ -154,13 +157,20 @@ export default function PayrollPage() {
   const [gapokEditValue, setGapokEditValue] = useState("");
   const [gapokSaving, setGapokSaving] = useState(false);
 
-  // ─── Worksheet state ───
+  // ─── Workflow state: Worksheet → Draft → Final ───
+  const [activeMainTab, setActiveMainTab] = useState<"worksheet" | "draft" | "final" | "laporan">("worksheet");
   const [showWorksheet, setShowWorksheet] = useState(false);
   const [wsData, setWsData] = useState<Record<number, Record<string, number>>>({});
   /** Map<payrollId, Set<fieldKey>> — track cell-level changes untuk highlight */
   const [wsChangedCells, setWsChangedCells] = useState<Map<number, Set<string>>>(new Map());
   const [wsSaving, setWsSaving] = useState(false);
   const [wsExpandedId, setWsExpandedId] = useState<number | null>(null);
+  /** Loading state untuk computeWorksheet (auto-recompute) */
+  const [wsComputing, setWsComputing] = useState(false);
+  /** Konfirmasi dialog: buat slip dari worksheet */
+  const [buatSlipConfirm, setBuatSlipConfirm] = useState<{ ids: number[]; mode: "single" | "bulk" } | null>(null);
+  /** Trigger reload data setelah action (worksheet/draft/final) */
+  const [reloadKey, setReloadKey] = useState(0);
   /** Breakdown potongan absen per row di worksheet (lazy-fetch on expand) */
   const [wsAbsenBreakdown, setWsAbsenBreakdown] = useState<Record<number, { telat: number; alpha: number; lainnya: number; items: AbsenBreakdownItem[] } | null>>({});
   const [wsAbsenLoading, setWsAbsenLoading] = useState<Record<number, boolean>>({});
@@ -252,7 +262,7 @@ export default function PayrollPage() {
   useEffect(() => {
     setLoading(true);
     fetchPayrolls().then(() => setLoading(false));
-  }, [periodKey, fetchPayrolls]);
+  }, [periodKey, fetchPayrolls, reloadKey]);
 
   // ─── Generate slip gaji ───
   const handleGenerate = async () => {
@@ -1336,8 +1346,14 @@ export default function PayrollPage() {
   const gapokTotalGapok = employees.reduce((s, e) => s + (e.gaji_pokok || 0), 0);
   const gapokBelumDiisi = employees.filter((e) => !e.gaji_pokok).length;
 
-  // ─── Filter & paginate ───
-  const filtered = payrolls.filter((p) =>
+  // ─── Filter & paginate (by tab + search) ───
+  const tabFiltered = (() => {
+    if (activeMainTab === "laporan") return payrolls.filter((p) => p.status === "Final");
+    if (activeMainTab === "worksheet") return payrolls.filter((p) => p.status === "Worksheet");
+    if (activeMainTab === "final") return payrolls.filter((p) => p.status === "Final");
+    return payrolls.filter((p) => p.status === "Draft");
+  })();
+  const filtered = tabFiltered.filter((p) =>
     (p.pegawaiNama || "").toLowerCase().includes(search.toLowerCase()) ||
     p.employee_id.toLowerCase().includes(search.toLowerCase())
   );
@@ -1349,6 +1365,7 @@ export default function PayrollPage() {
   const totalPegawai = payrolls.length;
   const draftCount = payrolls.filter((p) => p.status === "Draft").length;
   const finalCount = payrolls.filter((p) => p.status === "Final").length;
+  const worksheetCount = payrolls.filter((p) => p.status === "Worksheet").length;
 
   // ─── Period navigation ───
   const prevPeriod = () => {
@@ -1362,6 +1379,245 @@ export default function PayrollPage() {
     const next = new Date(y, m, 1);
     setPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
     setPage(1);
+  };
+
+  // ─── Compute Worksheet (auto-recompute) ───
+  const handleComputeWorksheet = async (specificPeriod?: string) => {
+    const targetPeriod = specificPeriod || periodKey;
+    setWsComputing(true);
+    const genPeriod = getPeriodRange(targetPeriod);
+    try {
+      // Hapus worksheet rows existing untuk periode ini
+      await supabase
+        .from("payrolls")
+        .delete()
+        .eq("periode", targetPeriod)
+        .eq("status", "Worksheet");
+
+      // 1. Fetch semua pegawai
+      const { data: allEmps, error: empErr } = await supabase
+        .from("pegawai")
+        .select("id, nama, gaji_pokok, tanggal_bergabung, tanggal_keluar, status")
+        .order("nama");
+      if (empErr || !allEmps) {
+        showToast("error", "Gagal Memuat Pegawai", (empErr as { message?: string } | null)?.message || "Unknown error");
+        setWsComputing(false);
+        return;
+      }
+
+      // 2. Fetch delivery points, attendance, lembur dalam periode
+      const { data: dpData } = await supabase
+        .from("delivery_points")
+        .select("employee_id, total")
+        .gte("tanggal", genPeriod.start)
+        .lte("tanggal", genPeriod.end)
+        .in("employee_id", allEmps.map((e) => e.id));
+      const dpTotals = new Map<string, number>();
+      (dpData || []).forEach((d: { employee_id: string; total: number }) => {
+        dpTotals.set(d.employee_id, (dpTotals.get(d.employee_id) || 0) + d.total);
+      });
+
+      const { data: attData } = await supabase
+        .from("attendance_records")
+        .select("employee_id, denda, tanggal, status")
+        .gte("tanggal", genPeriod.start)
+        .lte("tanggal", genPeriod.end)
+        .in("employee_id", allEmps.map((e) => e.id));
+      const dendaTotals = new Map<string, number>();
+      (attData || []).forEach((d: { employee_id: string; denda: number }) => {
+        dendaTotals.set(d.employee_id, (dendaTotals.get(d.employee_id) || 0) + d.denda);
+      });
+
+      const { data: lemburData } = await supabase
+        .from("overtime_requests")
+        .select("employee_id, total_lembur")
+        .eq("status", "Disetujui")
+        .gte("tanggal", genPeriod.start)
+        .lte("tanggal", genPeriod.end)
+        .in("employee_id", allEmps.map((e) => e.id));
+      const lemburTotals = new Map<string, number>();
+      (lemburData || []).forEach((d: { employee_id: string; total_lembur: number | null }) => {
+        lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
+      });
+
+      // 3. Fetch off_days
+      const { data: offDaysData } = await supabase
+        .from("employee_off_days")
+        .select("employee_id, day_of_week")
+        .in("employee_id", allEmps.map((e) => e.id));
+      const offDayMap = new Map<string, Set<number>>();
+      (offDaysData || []).forEach((od: { employee_id: string; day_of_week: number }) => {
+        if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
+        offDayMap.get(od.employee_id)!.add(od.day_of_week);
+      });
+
+      const countCalendarDays = (startStr: string, endStr: string): number => {
+        if (startStr > endStr) return 0;
+        const [sy, sm, sd] = startStr.split("-").map(Number);
+        const [ey, em, ed] = endStr.split("-").map(Number);
+        const startMs = Date.UTC(sy, sm - 1, sd);
+        const endMs = Date.UTC(ey, em - 1, ed);
+        return Math.floor((endMs - startMs) / 86400000) + 1;
+      };
+
+      // 4. Bangun insert rows untuk pegawai yang eligible
+      type Emp = { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_bergabung: string | null; tanggal_keluar: string | null };
+      const statusLookup = new Map<string, string>();
+      (allEmps as Emp[]).forEach((e) => statusLookup.set(e.id, e.status));
+
+      const inserts = (allEmps as Emp[]).flatMap((e) => {
+        const empOff = offDayMap.get(e.id) || new Set<number>();
+        const tglBergabung = e.tanggal_bergabung;
+        const tglKeluar = e.tanggal_keluar;
+        const totalHariKalender = countCalendarDays(genPeriod.start, genPeriod.end);
+        const gapokFull = e.gaji_pokok || 0;
+
+        const isProratedJoin = tglBergabung && tglBergabung > genPeriod.start && tglBergabung <= genPeriod.end;
+        const isProratedExit = tglKeluar && tglKeluar >= genPeriod.start && tglKeluar < genPeriod.end;
+        const isOutsidePeriod = (tglBergabung && tglBergabung > genPeriod.end) || (tglKeluar && tglKeluar < genPeriod.start);
+        const isInactiveNoExitDate = statusLookup.get(e.id) === "Tidak Aktif" && !tglKeluar;
+
+        let gapokProrata = gapokFull;
+        let catatanProrata: string | null = null;
+
+        if (isInactiveNoExitDate) {
+          const hariDenganCatatan = new Set(
+            (attData || []).filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
+          ).size;
+          if (hariDenganCatatan === 0) return []; // Skip: Tidak Aktif tanpa catatan absen
+          const factor = Math.min(hariDenganCatatan / totalHariKalender, 1);
+          gapokProrata = Math.round(gapokFull * factor);
+          const pct = Math.round(factor * 100);
+          catatanProrata = `Tidak aktif — prorata per hari kalender: ${hariDenganCatatan}/${totalHariKalender} hari (${pct}%)`;
+        } else if (isOutsidePeriod) {
+          gapokProrata = 0;
+          if (tglBergabung && tglBergabung > genPeriod.end) {
+            catatanProrata = `Belum bergabung di periode ini (bergabung ${tglBergabung})`;
+          } else if (tglKeluar && tglKeluar < genPeriod.start) {
+            catatanProrata = `Sudah tidak aktif sebelum periode ini (keluar ${tglKeluar})`;
+          }
+        } else if (isProratedJoin || isProratedExit) {
+          // Simplified: tidak ada perhitungan hari kerja di sini karena V1 single admin
+          if (isProratedJoin) {
+            catatanProrata = `Prorata: bergabung ${tglBergabung}`;
+          }
+          if (isProratedExit) {
+            catatanProrata = (catatanProrata || "") + `Prorata: keluar ${tglKeluar}`;
+          }
+        }
+
+        const sourceTitik = dpTotals.get(e.id) || 0;
+        const sourceLembur = lemburTotals.get(e.id) || 0;
+        const sourceGapok = gapokProrata;
+        const totalPendapatan = gapokProrata + sourceTitik + sourceLembur;
+        const totalPotongan = dendaTotals.get(e.id) || 0;
+        const netto = totalPendapatan - totalPotongan;
+
+        return [{
+          employee_id: e.id,
+          periode: targetPeriod,
+          periode_mulai: genPeriod.start,
+          periode_selesai: genPeriod.end,
+          gaji_pokok: gapokProrata,
+          pendapatan_titik: sourceTitik,
+          extra_job: 0,
+          uang_makan: 0,
+          insentif: 0,
+          tunjangan_jabatan: 0,
+          transport: 0,
+          tunjangan_lain: 0,
+          tambahan_lain: 0,
+          lembur: sourceLembur,
+          koperasi: 0,
+          pinjaman_perusahaan: 0,
+          potongan_absen: totalPotongan,
+          potongan_lain: 0,
+          jht: 0,
+          bpjs_kesehatan: 0,
+          total_pendapatan: totalPendapatan,
+          total_potongan: totalPotongan,
+          netto: netto,
+          status: "Worksheet",
+          catatan: catatanProrata,
+          last_recomputed_at: new Date().toISOString(),
+          source_gaji_pokok: sourceGapok,
+          source_titik: sourceTitik,
+          source_lembur: sourceLembur,
+        }];
+      });
+
+      if (inserts.length === 0) {
+        showToast("error", "Tidak Ada Data", "Tidak ada pegawai dengan catatan kehadiran di periode ini.");
+        setWsComputing(false);
+        return;
+      }
+
+      const { error: insErr } = await supabase.from("payrolls").insert(inserts);
+      if (insErr) {
+        showToast("error", "Gagal Menyimpan", insErr.message);
+        setWsComputing(false);
+        return;
+      }
+
+      showToast("success", "Worksheet Diperbarui", `${inserts.length} baris worksheet di-recompute untuk ${formatPeriodLabel(targetPeriod)}.`);
+      // Audit log
+      await logAudit({
+        supabase,
+        action: "generate",
+        entityType: "payrolls",
+        entityLabel: `Worksheet ${formatPeriodLabel(targetPeriod)}`,
+        metadata: {
+          periode: targetPeriod,
+          jumlah_baris: inserts.length,
+          rentang: `${genPeriod.start} – ${genPeriod.end}`,
+        },
+      });
+      // Reload
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      showToast("error", "Error", (e as Error).message);
+    }
+    setWsComputing(false);
+  };
+
+  // ─── Buat Slip dari Worksheet (Worksheet → Draft) ───
+  const handleBuatSlip = async (ids: number[]) => {
+    if (ids.length === 0) return;
+    const { error } = await supabase
+      .from("payrolls")
+      .update({ status: "Draft", last_recomputed_at: null })
+      .in("id", ids)
+      .eq("status", "Worksheet");
+    if (error) {
+      showToast("error", "Gagal", error.message);
+      return;
+    }
+    showToast("success", "Slip Berhasil Dibuat", `${ids.length} slip dipindahkan ke tab Draft.`);
+    await logAudit({
+      supabase,
+      action: "status_change",
+      entityType: "payrolls",
+      entityLabel: `${ids.length} slip dari worksheet`,
+      metadata: { jumlah: ids.length, dari: "Worksheet", ke: "Draft" },
+    });
+    setBuatSlipConfirm(null);
+    setReloadKey((k) => k + 1);
+  };
+
+  // ─── Batalkan Draft (Draft → Worksheet) ───
+  const handleBatalkanDraft = async (ids: number[]) => {
+    if (ids.length === 0) return;
+    const { error } = await supabase
+      .from("payrolls")
+      .update({ status: "Worksheet" })
+      .in("id", ids)
+      .eq("status", "Draft");
+    if (error) {
+      showToast("error", "Gagal", error.message);
+      return;
+    }
+    showToast("success", "Draft Dibatalkan", `${ids.length} slip dikembalikan ke tab Worksheet.`);
+    setReloadKey((k) => k + 1);
   };
 
   return (
@@ -1387,8 +1643,8 @@ export default function PayrollPage() {
             }}>
               Export PDF
             </Button>
-            <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowWorksheet(true)} disabled={payrolls.length === 0}>
-              Worksheet
+            <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing}>
+              {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
             </Button>
             {canInput && <Button icon={Zap} size="sm" onClick={() => { setGeneratePeriod(periodKey); setShowGenerate(true); }}>
               Generate Slip
@@ -1673,6 +1929,70 @@ export default function PayrollPage() {
         </div>
       </div>
 
+      {/* ═══ Sub-tab: Worksheet / Draft / Final / Laporan ═══ */}
+      <div className="bg-card rounded-2xl border border-border p-1.5 inline-flex items-center gap-1 overflow-x-auto">
+        <button
+          onClick={() => { setActiveMainTab("worksheet"); setPage(1); }}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap",
+            activeMainTab === "worksheet"
+              ? "bg-primary text-white shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          )}
+        >
+          <FileText className="w-3.5 h-3.5" />
+          Worksheet
+          <span className={cn(
+            "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+            activeMainTab === "worksheet" ? "bg-white/20 text-white" : "bg-muted-foreground/10 text-muted-foreground"
+          )}>{worksheetCount}</span>
+        </button>
+        <button
+          onClick={() => { setActiveMainTab("draft"); setPage(1); }}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap",
+            activeMainTab === "draft"
+              ? "bg-primary text-white shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          )}
+        >
+          <Clock className="w-3.5 h-3.5" />
+          Draft
+          <span className={cn(
+            "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+            activeMainTab === "draft" ? "bg-white/20 text-white" : "bg-warning/15 text-warning"
+          )}>{draftCount}</span>
+        </button>
+        <button
+          onClick={() => { setActiveMainTab("final"); setPage(1); }}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap",
+            activeMainTab === "final"
+              ? "bg-primary text-white shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          )}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Final
+          <span className={cn(
+            "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold",
+            activeMainTab === "final" ? "bg-white/20 text-white" : "bg-success/15 text-success"
+          )}>{finalCount}</span>
+        </button>
+        <button
+          onClick={() => { setActiveMainTab("laporan"); setPage(1); }}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap",
+            activeMainTab === "laporan"
+              ? "bg-primary text-white shadow-sm"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          )}
+        >
+          <BarChart3 className="w-3.5 h-3.5" />
+          Laporan
+        </button>
+      </div>
+
       {/* ═══ Ringkasan Tabel + Tombol Worksheet ═══ */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         {selectedIds.size > 0 && (
@@ -1752,6 +2072,16 @@ export default function PayrollPage() {
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-center gap-1">
+                      {row.status === "Worksheet" && canEdit && (
+                        <button onClick={() => setBuatSlipConfirm({ ids: [row.id], mode: "single" })} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary" title="Buat Slip (Worksheet → Draft)">
+                          <FileCheck className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {row.status === "Draft" && canEdit && (
+                        <button onClick={() => handleBatalkanDraft([row.id])} className="p-1.5 rounded-lg hover:bg-warning-light text-muted-foreground hover:text-warning" title="Batalkan (kembali ke Worksheet)">
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary" title="Download PDF">
                         <Download className="w-3.5 h-3.5" />
                       </button>
@@ -2741,6 +3071,34 @@ export default function PayrollPage() {
                 </Button>
                 <Button variant="danger" size="sm" className="flex-1" icon={deleting ? Loader2 : Trash2} onClick={handleDelete} disabled={deleting}>
                   {deleting ? "Menghapus..." : "Hapus"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ Buat Slip Confirmation (Worksheet → Draft) ═══ */}
+      {buatSlipConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setBuatSlipConfirm(null)} />
+            <div className="relative bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm mx-4 animate-fade-in">
+              <div className="px-6 py-5 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                  <FileCheck className="w-6 h-6 text-primary" />
+                </div>
+                <h3 className="text-sm font-bold text-foreground mb-1">Buat Slip dari Worksheet?</h3>
+                <p className="text-xs text-muted-foreground">
+                  <strong>{buatSlipConfirm.ids.length} slip</strong> akan dipindahkan ke tab <strong>Draft</strong>. Data akan ter-freeze dan siap untuk diedit sebelum difinalkan. Anda masih bisa membatalkan dari tab Draft.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 px-6 py-4 border-t border-border">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setBuatSlipConfirm(null)}>
+                  Batal
+                </Button>
+                <Button variant="primary" size="sm" className="flex-1" icon={FileCheck} onClick={() => handleBuatSlip(buatSlipConfirm.ids)}>
+                  Buat Slip
                 </Button>
               </div>
             </div>

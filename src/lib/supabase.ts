@@ -164,10 +164,16 @@ export interface DbPayroll {
   total_potongan: number;
   // Netto
   netto: number;
-  status: "Draft" | "Final";
+  status: "Worksheet" | "Draft" | "Final";
   catatan: string | null;
   created_at: string;
   updated_at: string;
+  /** Kapan worksheet terakhir di-recompute. NULL untuk slip Draft/Final. */
+  last_recomputed_at: string | null;
+  /** Snapshot auto-computed nilai gapok saat worksheet di-compute. Untuk audit. */
+  source_gaji_pokok: number | null;
+  source_titik: number | null;
+  source_lembur: number | null;
   // joined
   pegawai?: DbPegawai;
 }
