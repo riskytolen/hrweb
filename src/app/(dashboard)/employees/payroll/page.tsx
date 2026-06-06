@@ -1620,6 +1620,15 @@ export default function PayrollPage() {
                 </Button>
               </>
             )}
+            <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+              <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-xs font-bold text-foreground px-2.5 min-w-[200px] text-center whitespace-nowrap">{period.label}</span>
+              <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
             <Button
               variant={activeTab === "gapok" ? "primary" : "outline"}
               icon={Banknote}
@@ -1849,33 +1858,6 @@ export default function PayrollPage() {
             />
           </>
         )}
-      </div>
-
-      {/* ═══ Filter & Period Navigator ═══ */}
-      <div className="bg-card rounded-2xl border border-border p-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2.5 flex-1">
-            <Search className="w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Cari nama pegawai atau ID..."
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
-            />
-          </div>
-          <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
-            <button onClick={prevPeriod} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <div className="px-3 py-1.5 text-center min-w-[240px]">
-              <p className="text-xs font-bold text-foreground">{period.label}</p>
-            </div>
-            <button onClick={nextPeriod} className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* ═══ Stepper: Worksheet → Draft → Final → Laporan ═══ */}
