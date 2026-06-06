@@ -37,7 +37,7 @@ const DOC_CONFIG: Record<DocType, {
   cv: { label: "CV", urlField: "cv_url", subfolder: "cv", required: () => true, accept: "image/jpeg,image/png", icon: FileText },
   ktp: { label: "KTP", urlField: "ktp_url", subfolder: "ktp", required: () => true, accept: "image/jpeg,image/png", icon: IdCard },
   pas_foto: { label: "Pas Foto", urlField: "pas_foto_url", subfolder: "pas-foto", required: () => true, accept: "image/jpeg,image/png", icon: Camera },
-  sim: { label: "SIM", urlField: "sim_url", subfolder: "sim", required: (p) => p === "Driver", accept: "image/jpeg,image/png", icon: CreditCard },
+  sim: { label: "SIM Mobil", urlField: "sim_url", subfolder: "sim", required: (p) => p === "Driver", accept: "image/jpeg,image/png", icon: CreditCard },
 };
 
 const DOC_TYPES: readonly DocType[] = ["cv", "ktp", "pas_foto", "sim"] as const;
