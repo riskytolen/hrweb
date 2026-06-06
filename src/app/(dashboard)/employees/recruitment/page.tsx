@@ -57,13 +57,6 @@ const POSISI_OPTIONS = [
   { value: "Staf Office", label: "Staf Office" },
   { value: "Maintenance", label: "Maintenance" },
 ];
-const SIM_OPTIONS = [
-  { value: "", label: "Tidak Ada" },
-  { value: "A", label: "SIM A" },
-  { value: "B1", label: "SIM B1" },
-  { value: "B2", label: "SIM B2" },
-  { value: "C", label: "SIM C" },
-];
 
 export default function RecruitmentPage() {
   const { getPermissionLevel } = useAuth();
@@ -80,7 +73,7 @@ export default function RecruitmentPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
     nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK",
-    pengalaman_kerja: "", alamat: "", sim: "", status: "Lamaran Masuk", catatan: "",
+    pengalaman_kerja: "", alamat: "", status: "Lamaran Masuk", catatan: "",
     tanggal_training_mulai: "", tanggal_training_selesai: "",
   });
   const [docFiles, setDocFiles] = useState<Record<DocType, File | null>>({ cv: null, ktp: null, pas_foto: null, sim: null });
@@ -150,7 +143,7 @@ export default function RecruitmentPage() {
   };
 
   const openAdd = () => {
-    setForm({ nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK", pengalaman_kerja: "", alamat: "", sim: "", status: "Lamaran Masuk", catatan: "", tanggal_training_mulai: "", tanggal_training_selesai: "" });
+    setForm({ nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK", pengalaman_kerja: "", alamat: "", status: "Lamaran Masuk", catatan: "", tanggal_training_mulai: "", tanggal_training_selesai: "" });
     setDocFiles({ cv: null, ktp: null, pas_foto: null, sim: null });
     setFormErrors(new Set());
     setEditingId(null);
@@ -161,7 +154,7 @@ export default function RecruitmentPage() {
     setForm({
       nama: r.nama, no_hp: r.no_hp, email: r.email || "", posisi_dilamar: r.posisi_dilamar,
       pendidikan_terakhir: r.pendidikan_terakhir, pengalaman_kerja: r.pengalaman_kerja || "",
-      alamat: r.alamat || "", sim: r.sim || "", status: r.status, catatan: r.catatan || "",
+      alamat: r.alamat || "", status: r.status, catatan: r.catatan || "",
       tanggal_training_mulai: r.tanggal_training_mulai || "", tanggal_training_selesai: r.tanggal_training_selesai || "",
     });
     setDocFiles({ cv: null, ktp: null, pas_foto: null, sim: null });
@@ -197,7 +190,6 @@ export default function RecruitmentPage() {
       nama: form.nama, no_hp: form.no_hp, email: form.email || null,
       posisi_dilamar: form.posisi_dilamar, pendidikan_terakhir: form.pendidikan_terakhir,
       pengalaman_kerja: form.pengalaman_kerja || null, alamat: form.alamat || null,
-      sim: form.sim || null,
       status: form.status, catatan: form.catatan || null,
       tanggal_training_mulai: form.tanggal_training_mulai || null,
       tanggal_training_selesai: form.tanggal_training_selesai || null,
@@ -789,11 +781,6 @@ export default function RecruitmentPage() {
                     <textarea rows={2} placeholder="Alamat lengkap" value={form.alamat} onChange={(e) => setForm({ ...form, alamat: e.target.value })} className={cn(inputClass, "resize-none")} />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-foreground mb-1.5 block">SIM</label>
-                    <Select value={form.sim} onChange={(val) => setForm({ ...form, sim: val })}
-                      options={SIM_OPTIONS} placeholder="Pilih SIM" />
-                  </div>
-                  <div>
                     <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
                     <Select value={form.status} onChange={(val) => setForm({ ...form, status: val })}
                       options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))} />
@@ -929,7 +916,6 @@ export default function RecruitmentPage() {
 
                           const emailStr = detail.email || "-";
                           const alamatStr = detail.alamat || "-";
-                          const simStr = detail.sim ? "SIM " + detail.sim : "Tidak Ada";
                           const nyupirStr = detail.bisa_nyupir ? "Ya" : "Tidak";
                           const pglmnStr = detail.pengalaman_kerja || "-";
 
@@ -949,7 +935,6 @@ export default function RecruitmentPage() {
                             `*No. HP:* ${detail.no_hp}\n` +
                             `*Email:* ${emailStr}\n` +
                             `*Alamat:* ${alamatStr}\n` +
-                            `*SIM:* ${simStr}\n` +
                             `*Bisa Mengemudi:* ${nyupirStr}\n` +
                             `*Pengalaman Kerja:* ${pglmnStr}\n\n` +
                             `*Dokumen:*\n${docLines}`;
@@ -970,7 +955,6 @@ export default function RecruitmentPage() {
                     { icon: Briefcase, label: "Posisi Dilamar", value: detail.posisi_dilamar },
                     { icon: GraduationCap, label: "Pendidikan", value: detail.pendidikan_terakhir },
                     { icon: MapPin, label: "Alamat", value: detail.alamat || "-" },
-                    { icon: Car, label: "SIM", value: detail.sim ? `SIM ${detail.sim}` : "Tidak Ada" },
                   ].map((item) => (
                     <div key={item.label} className="flex items-start gap-3">
                       <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
