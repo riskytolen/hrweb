@@ -28,6 +28,7 @@ import {
   FileCheck,
   RotateCcw,
   BarChart3,
+  ShieldCheck,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -1615,6 +1616,19 @@ export default function PayrollPage() {
                 }}>
                   Export PDF
                 </Button>
+                {activeMainTab === "draft" && filtered.length > 0 && (
+                  <Button
+                    variant="primary"
+                    icon={ShieldCheck}
+                    size="sm"
+                    onClick={() => {
+                      setSelectedIds(new Set(filtered.map((r) => r.id)));
+                      setBulkFinalConfirm(true);
+                    }}
+                  >
+                    Finalkan ({filtered.length})
+                  </Button>
+                )}
                 <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing || loading}>
                   {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
                 </Button>
