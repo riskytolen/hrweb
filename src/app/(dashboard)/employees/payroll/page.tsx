@@ -1820,17 +1820,14 @@ export default function PayrollPage() {
               icon={DollarSign}
               label="Total Netto"
               value={formatCurrency(totalNetto)}
-              gradient="from-primary/15 via-primary/5 to-transparent"
               iconBg="bg-primary/15"
               iconColor="text-primary"
-              breakdown={`Pendapatan ${formatCurrency(totalPendapatanAll)}`}
             />
             <_HeroMetric
               icon={Users}
               label="Jumlah Pegawai"
               value={String(totalPegawai)}
               unit="slip"
-              gradient="from-success/15 via-success/5 to-transparent"
               iconBg="bg-success/15"
               iconColor="text-success"
             />
@@ -1839,7 +1836,6 @@ export default function PayrollPage() {
               label="Draft"
               value={String(draftCount)}
               unit="belum final"
-              gradient="from-warning/15 via-warning/5 to-transparent"
               iconBg="bg-warning/15"
               iconColor="text-warning"
             />
@@ -1848,7 +1844,6 @@ export default function PayrollPage() {
               label="Final"
               value={String(finalCount)}
               unit="terkunci"
-              gradient="from-success/15 via-success/5 to-transparent"
               iconBg="bg-success/15"
               iconColor="text-success"
             />
@@ -2631,32 +2626,26 @@ export default function PayrollPage() {
 // HERO METRIC CARD
 // ═════════════════════════════════════════════════════════
 function _HeroMetric({
-  icon: Icon, label, value, unit, gradient, iconBg, iconColor, breakdown,
+  icon: Icon, label, value, unit, iconBg, iconColor,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string;
   unit?: string;
-  gradient: string;
   iconBg: string;
   iconColor: string;
-  breakdown?: string;
 }) {
   return (
-    <div className="relative bg-card rounded-2xl border border-border p-4 overflow-hidden">
-      <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none", gradient)} />
-      <div className="relative">
-        <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center mb-2.5", iconBg)}>
-          <Icon className={cn("w-4 h-4", iconColor)} />
+    <div className="bg-card rounded-xl border border-border px-3 py-2.5 flex items-center gap-2.5">
+      <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0", iconBg)}>
+        <Icon className={cn("w-3.5 h-3.5", iconColor)} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider leading-tight truncate">{label}</p>
+        <div className="flex items-baseline gap-1">
+          <p className="text-sm font-bold text-foreground tabular-nums truncate">{value}</p>
+          {unit && <p className="text-[10px] text-muted-foreground truncate">{unit}</p>}
         </div>
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</p>
-        <div className="flex items-baseline gap-1.5 mt-1">
-          <p className="text-xl font-bold text-foreground tabular-nums truncate">{value}</p>
-          {unit && <p className="text-xs text-muted-foreground font-medium">{unit}</p>}
-        </div>
-        {breakdown && (
-          <p className="text-[10px] text-muted-foreground mt-1.5 truncate">{breakdown}</p>
-        )}
       </div>
     </div>
   );
