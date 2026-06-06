@@ -1596,26 +1596,44 @@ export default function PayrollPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Penggajian"
-        description="Kelola slip gaji pegawai perusahaan"
+        description={activeTab === "gapok" ? "Kelola gaji pokok master data pegawai" : "Kelola slip gaji pegawai perusahaan"}
         icon={CreditCard}
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" icon={FileSpreadsheet} size="sm" onClick={exportExcel} disabled={payrolls.length === 0}>
-              Export Excel
-            </Button>
-            <Button variant="outline" icon={Download} size="sm" onClick={() => {
-              const finalSlips = payrolls.filter((p) => p.status === "Final");
-              if (finalSlips.length === 0) {
-                showToast("error", "Tidak Ada Slip Final", "Belum ada slip gaji berstatus Final untuk di-export.");
-                return;
-              }
-              finalSlips.forEach((p) => exportSlipPDF(p));
-              showToast("success", "Export PDF", `${finalSlips.length} slip gaji sedang di-download.`);
-            }}>
-              Export PDF
-            </Button>
-            <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing || loading}>
-              {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
+            {activeTab === "slip" && (
+              <>
+                <Button variant="outline" icon={FileSpreadsheet} size="sm" onClick={exportExcel} disabled={payrolls.length === 0}>
+                  Export Excel
+                </Button>
+                <Button variant="outline" icon={Download} size="sm" onClick={() => {
+                  const finalSlips = payrolls.filter((p) => p.status === "Final");
+                  if (finalSlips.length === 0) {
+                    showToast("error", "Tidak Ada Slip Final", "Belum ada slip gaji berstatus Final untuk di-export.");
+                    return;
+                  }
+                  finalSlips.forEach((p) => exportSlipPDF(p));
+                  showToast("success", "Export PDF", `${finalSlips.length} slip gaji sedang di-download.`);
+                }}>
+                  Export PDF
+                </Button>
+                <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing || loading}>
+                  {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
+                </Button>
+              </>
+            )}
+            <Button
+              variant={activeTab === "gapok" ? "primary" : "outline"}
+              icon={Banknote}
+              size="sm"
+              onClick={() => setActiveTab(activeTab === "gapok" ? "slip" : "gapok")}
+            >
+              Data Gaji Pokok
+              {gapokBelumDiisi > 0 && !loading && (
+                <span className={cn(
+                  "ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full",
+                  activeTab === "gapok" ? "bg-white/20 text-white" : "bg-danger text-white"
+                )}>{gapokBelumDiisi}</span>
+              )}
             </Button>
           </div>
         }
@@ -1642,37 +1660,6 @@ export default function PayrollPage() {
           </div>
         </Portal>
       )}
-
-      {/* ═══ Tab Switcher ═══ */}
-      <div className="bg-card rounded-2xl border border-border p-1.5 inline-flex items-center gap-1">
-        <button
-          onClick={() => setActiveTab("slip")}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all",
-            activeTab === "slip"
-              ? "bg-primary text-white shadow-sm"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          <CreditCard className="w-3.5 h-3.5" />
-          Slip Gaji
-        </button>
-        <button
-          onClick={() => setActiveTab("gapok")}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all",
-            activeTab === "gapok"
-              ? "bg-primary text-white shadow-sm"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          <Banknote className="w-3.5 h-3.5" />
-          Data Gaji Pokok
-          {gapokBelumDiisi > 0 && !loading && (
-            <span className="ml-0.5 text-[9px] font-bold bg-danger text-white px-1.5 py-0.5 rounded-full">{gapokBelumDiisi}</span>
-          )}
-        </button>
-      </div>
 
       {/* ═══════════════════════════════════════ */}
       {/* ═══ TAB: DATA GAJI POKOK ═══ */}
