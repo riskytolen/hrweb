@@ -313,7 +313,7 @@ export default function PayrollPage() {
       // 5. Fetch attendance denda totals for each employee in period
       const { data: attData } = await supabase
         .from("attendance_records")
-        .select("employee_id, denda, tanggal")
+        .select("employee_id, denda, tanggal, status")
         .gte("tanggal", genPeriod.start)
         .lte("tanggal", genPeriod.end)
         .in("employee_id", newEmps.map((e) => e.id));
@@ -422,21 +422,27 @@ export default function PayrollPage() {
         const isInactiveNoExitDate = statusLookup.get(e.id) === "Tidak Aktif" && !tglKeluar;
 
         // Pegawai Tidak Aktif tanpa tanggal_keluar: masih di-generate karena ada
-        // penghasilan yang harus dibayar, tapi gapok di-prorata sampai **tanggal absen
-        // terakhir** di periode (kalau ada). Kalau tidak ada catatan absen, gapok penuh
-        // (asumsi: hubungan kerja putus setelah periode ini, bukan di tengah).
+        // penghasilan yang harus dibayar. Gapok di-prorata per **hari kerja hadir**
+        // (Hadir + Terlambat) dibanding total hari kerja di periode (exclude off-day).
+        // - Tidak ada catatan absen → gapok penuh (asumsi: hubungan kerja masih aktif,
+        //   ada penghasilan dari titik/lembur saja)
+        // - Ada catatan absen → prorata Hadir+Terlambat / total hari kerja
+        // - Total hari kerja = 0 (semua off-day) → gapok penuh, beri catatan
         if (isInactiveNoExitDate) {
-          const lastAttDate = (attData || [])
-            .filter((a) => a.employee_id === e.id)
-            .reduce<string | null>((max, a) => (!max || a.tanggal > max ? a.tanggal : max), null);
-          if (lastAttDate && lastAttDate < genPeriod.end) {
-            const hariKerjaEfektif = countWorkingDays(genPeriod.start, lastAttDate, empOff);
-            const factor = totalHariKerja > 0 ? hariKerjaEfektif / totalHariKerja : 0;
-            gapokProrata = Math.round(gapokFull * factor);
-            const tglLabel = new Date(lastAttDate + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" });
-            catatanProrata = `Tidak aktif — prorata sampai absen terakhir ${tglLabel} (${hariKerjaEfektif}/${totalHariKerja} hari kerja)`;
+          if (totalHariKerja === 0) {
+            catatanProrata = `Tidak aktif — jadwal kosong di periode ini (semua off-day), gapok penuh`;
           } else {
-            catatanProrata = `Tidak aktif — gaji final periode ini (tanggal keluar belum di-set)`;
+            const hariHadir = (attData || []).filter(
+              (a) => a.employee_id === e.id && (a.status === "Hadir" || a.status === "Terlambat")
+            ).length;
+            if (hariHadir === 0) {
+              catatanProrata = `Tidak aktif — tidak ada catatan absen Hadir/Terlambat di periode (gapok penuh, ada penghasilan dari titik/lembur)`;
+            } else {
+              const factor = Math.min(hariHadir / totalHariKerja, 1);
+              gapokProrata = Math.round(gapokFull * factor);
+              const pct = Math.round(factor * 100);
+              catatanProrata = `Tidak aktif — prorata per hari kerja hadir: ${hariHadir}/${totalHariKerja} hari (${pct}%)`;
+            }
           }
         }
 
