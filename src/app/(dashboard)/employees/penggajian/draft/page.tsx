@@ -35,7 +35,7 @@ interface PegawaiLite {
   nama: string;
   divisi: string;
   jabatan: string;
-  status_karyawan: string;
+  status: string;
   tanggal_masuk: string;
   tanggal_keluar: string | null;
   gaji_pokok: number;
@@ -89,7 +89,7 @@ function DraftPageInner() {
       // Pegawai (untuk hitung worksheet)
       const { data: peg } = await supabase
         .from("pegawai")
-        .select("id, nama, divisi, jabatan, status_karyawan, tanggal_masuk, tanggal_keluar, gaji_pokok")
+        .select("id, nama, divisi, jabatan, status, tanggal_masuk, tanggal_keluar, gaji_pokok")
         .order("nama", { ascending: true });
       setPegawaiList((peg ?? []) as PegawaiLite[]);
 
@@ -156,7 +156,7 @@ function DraftPageInner() {
         .eq("status", "DRAFT");
 
       const eligiblePegawai = pegawaiList.filter(
-        (p) => p.status_karyawan === "Aktif" || p.status_karyawan === "Training" || p.status_karyawan === "Tidak Aktif",
+        (p) => p.status === "Aktif" || p.status === "Training" || p.status === "Tidak Aktif",
       );
 
       if (eligiblePegawai.length === 0) {
@@ -223,7 +223,7 @@ function DraftPageInner() {
             nama: p.nama,
             divisi: p.divisi ?? "",
             jabatan: p.jabatan ?? "",
-            statusKaryawan: p.status_karyawan as any,
+            statusKaryawan: p.status as any,
             tanggalMasuk: p.tanggal_masuk,
             tanggalKeluar: p.tanggal_keluar,
             gajiPokok: p.gaji_pokok,
