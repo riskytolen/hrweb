@@ -195,7 +195,6 @@ export default function PayrollPage() {
     const { data, error } = await supabase
       .from("pegawai")
       .select("id, nama, status, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening, gaji_pokok")
-      .eq("status", "Aktif")
       .order("nama");
     if (error) { showToast("error", "Gagal Memuat Pegawai", error.message); return; }
     if (data) setEmployees(data.map((d: Record<string, unknown>) => ({
