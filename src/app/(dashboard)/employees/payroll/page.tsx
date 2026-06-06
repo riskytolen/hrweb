@@ -349,16 +349,20 @@ export default function PayrollPage() {
       });
       const empsWithData = newEmps.filter((e) => {
         if (statusLookup.get(e.id) === "Aktif") return true;
-        // Tidak Aktif: skip kalau tidak punya data aktual di periode
-        const hasData = (dpTotals.get(e.id) || 0) > 0
-          || (dendaTotals.get(e.id) || 0) > 0
-          || (lemburTotals.get(e.id) || 0) > 0
-          || (attData || []).some((a) => a.employee_id === e.id);
-        return hasData;
+        // Tidak Aktif: skip kalau tidak punya catatan absen di periode
+        // (tidak ada kehadiran = tidak ada gapok; titik/lembur tanpa absen = anomali)
+        const exitDate = exitDateLookup.get(e.id);
+        // Tidak Aktif + tanggal_keluar valid → tetap include, prorata via isProratedExit
+        if (exitDate) return true;
+        // Tidak Aktif + NULL tanggal_keluar → hanya include kalau ada catatan absen
+        const hariAdaCatatan = new Set(
+          (attData || []).filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
+        ).size;
+        return hariAdaCatatan > 0;
       });
-      const skippedInactive = newEmps.length - empsWithData.length;
+      const skippedNoAbsen = newEmps.length - empsWithData.length;
       if (empsWithData.length === 0) {
-        showToast("error", "Tidak Ada Slip Baru", "Tidak ada pegawai dengan penghasilan di periode ini.");
+        showToast("error", "Tidak Ada Slip Baru", "Tidak ada pegawai dengan catatan kehadiran di periode ini.");
         setGenerating(false);
         return;
       }
@@ -400,6 +404,16 @@ export default function PayrollPage() {
         return count;
       };
 
+      // Helper: hitung hari kalender inklusif di range tanggal (untuk prorata Tidak Aktif)
+      const countCalendarDays = (startStr: string, endStr: string): number => {
+        if (startStr > endStr) return 0;
+        const [sy, sm, sd] = startStr.split("-").map(Number);
+        const [ey, em, ed] = endStr.split("-").map(Number);
+        const startMs = Date.UTC(sy, sm - 1, sd);
+        const endMs = Date.UTC(ey, em - 1, ed);
+        return Math.floor((endMs - startMs) / 86400000) + 1;
+      };
+
       // 7. Build insert rows (exclude generated columns)
       const inserts = empsWithData.map((e) => {
         const empOff = offDayMap.get(e.id) || new Set<number>();
@@ -422,28 +436,21 @@ export default function PayrollPage() {
         const isInactiveNoExitDate = statusLookup.get(e.id) === "Tidak Aktif" && !tglKeluar;
 
         // Pegawai Tidak Aktif tanpa tanggal_keluar: masih di-generate karena ada
-        // penghasilan yang harus dibayar. Gapok di-prorata per **hari kerja hadir**
-        // (Hadir + Terlambat) dibanding total hari kerja di periode (exclude off-day).
-        // - Tidak ada catatan absen → gapok penuh (asumsi: hubungan kerja masih aktif,
-        //   ada penghasilan dari titik/lembur saja)
-        // - Ada catatan absen → prorata Hadir+Terlambat / total hari kerja
-        // - Total hari kerja = 0 (semua off-day) → gapok penuh, beri catatan
+        // penghasilan yang harus dibayar. Gapok di-prorata per **hari kalender**:
+        //   numerator   = unique hari dengan catatan absen (semua status, termasuk
+        //                 Alpha/Cuti/Libur/Sakit — dihitung sebagai hari masuk)
+        //   denominator = total hari kalender dalam periode (mis. 8 Mei–7 Juni = 31)
+        // Pegawai Tidak Aktif + NULL exit date + 0 catatan absen sudah di-skip
+        // di filter empsWithData, jadi di sini selalu ada >= 1 catatan.
         if (isInactiveNoExitDate) {
-          if (totalHariKerja === 0) {
-            catatanProrata = `Tidak aktif — jadwal kosong di periode ini (semua off-day), gapok penuh`;
-          } else {
-            const hariHadir = (attData || []).filter(
-              (a) => a.employee_id === e.id && (a.status === "Hadir" || a.status === "Terlambat")
-            ).length;
-            if (hariHadir === 0) {
-              catatanProrata = `Tidak aktif — tidak ada catatan absen Hadir/Terlambat di periode (gapok penuh, ada penghasilan dari titik/lembur)`;
-            } else {
-              const factor = Math.min(hariHadir / totalHariKerja, 1);
-              gapokProrata = Math.round(gapokFull * factor);
-              const pct = Math.round(factor * 100);
-              catatanProrata = `Tidak aktif — prorata per hari kerja hadir: ${hariHadir}/${totalHariKerja} hari (${pct}%)`;
-            }
-          }
+          const totalHariKalender = countCalendarDays(genPeriod.start, genPeriod.end);
+          const hariDenganCatatan = new Set(
+            (attData || []).filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
+          ).size;
+          const factor = Math.min(hariDenganCatatan / totalHariKalender, 1);
+          gapokProrata = Math.round(gapokFull * factor);
+          const pct = Math.round(factor * 100);
+          catatanProrata = `Tidak aktif — prorata per hari kalender: ${hariDenganCatatan}/${totalHariKalender} hari (${pct}%)`;
         }
 
         if (isOutsidePeriod) {
@@ -506,8 +513,8 @@ export default function PayrollPage() {
       showToast(
         "success",
         "Generate Berhasil",
-        skippedInactive > 0
-          ? `${inserts.length} slip gaji dibuat (${skippedInactive} Tidak Aktif tanpa data di periode dilewati).`
+        skippedNoAbsen > 0
+          ? `${inserts.length} slip gaji dibuat (${skippedNoAbsen} Tidak Aktif tanpa catatan absen dilewati).`
           : `${inserts.length} slip gaji berhasil dibuat untuk periode ${formatPeriodLabel(generatePeriod)}.`
       );
       // Audit log
