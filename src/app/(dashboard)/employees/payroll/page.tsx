@@ -1643,12 +1643,12 @@ export default function PayrollPage() {
             }}>
               Export PDF
             </Button>
-            <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing}>
+            <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing || loading}>
               {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
             </Button>
-            {canInput && <Button icon={Zap} size="sm" onClick={() => { setGeneratePeriod(periodKey); setShowGenerate(true); }}>
-              Generate Slip
-            </Button>}
+            <Button variant="outline" icon={Pencil} size="sm" onClick={() => setShowWorksheet(true)} disabled={worksheetCount === 0}>
+              Edit Cells
+            </Button>
           </div>
         }
       />
@@ -2003,7 +2003,17 @@ export default function PayrollPage() {
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>Batal</Button>
-              <Button variant="outline" size="sm" icon={CircleCheckBig} onClick={() => setBulkFinalConfirm(true)} className="text-success border-success/30 hover:bg-success/10 hover:text-success">Finalkan {selectedIds.size} Slip</Button>
+              {activeMainTab === "worksheet" && (
+                <Button size="sm" icon={FileCheck} onClick={() => setBuatSlipConfirm({ ids: Array.from(selectedIds), mode: "bulk" })}
+                  className="bg-primary text-white hover:bg-primary/90 border-primary">Buat {selectedIds.size} Slip</Button>
+              )}
+              {activeMainTab === "draft" && (
+                <Button variant="outline" size="sm" icon={RotateCcw} onClick={() => handleBatalkanDraft(Array.from(selectedIds))}
+                  className="text-warning border-warning/30 hover:bg-warning/10 hover:text-warning">Batalkan {selectedIds.size} Slip</Button>
+              )}
+              {activeMainTab === "draft" && (
+                <Button variant="outline" size="sm" icon={CircleCheckBig} onClick={() => setBulkFinalConfirm(true)} className="text-success border-success/30 hover:bg-success/10 hover:text-success">Finalkan {selectedIds.size} Slip</Button>
+              )}
               <Button size="sm" icon={Trash2} onClick={() => setBulkDeleteConfirm(true)} className="bg-danger text-white hover:bg-danger/90 border-danger">Hapus {selectedIds.size} Slip</Button>
             </div>
           </div>
@@ -2042,8 +2052,27 @@ export default function PayrollPage() {
                 <tr><td colSpan={8} className="text-center py-16 text-sm text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <CreditCard className="w-10 h-10 text-muted-foreground/20" />
-                    <p>Belum ada slip gaji untuk periode ini</p>
-                    <p className="text-xs text-muted-foreground/60">Klik &quot;Generate Slip&quot; untuk membuat slip gaji</p>
+                    {activeMainTab === "worksheet" ? (
+                      <>
+                        <p>Belum ada worksheet untuk periode ini</p>
+                        <p className="text-xs text-muted-foreground/60">Klik &quot;Hitung Worksheet&quot; untuk membuat draft slip gaji</p>
+                      </>
+                    ) : activeMainTab === "draft" ? (
+                      <>
+                        <p>Belum ada slip di tab Draft</p>
+                        <p className="text-xs text-muted-foreground/60">Pilih slip di tab Worksheet, lalu klik &quot;Buat Slip&quot;</p>
+                      </>
+                    ) : activeMainTab === "final" ? (
+                      <>
+                        <p>Belum ada slip yang difinalkan</p>
+                        <p className="text-xs text-muted-foreground/60">Finalkan slip dari tab Draft untuk melihat laporan di sini</p>
+                      </>
+                    ) : (
+                      <>
+                        <p>Belum ada slip gaji untuk periode ini</p>
+                        <p className="text-xs text-muted-foreground/60">Pilih periode lain atau buat slip terlebih dahulu</p>
+                      </>
+                    )}
                   </div>
                 </td></tr>
               ) : paged.map((row, idx) => (
@@ -2551,93 +2580,6 @@ export default function PayrollPage() {
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
                 <Button variant="outline" size="sm" onClick={() => setShowBatchFill(false)}>Batal</Button>
                 <Button icon={Zap} size="sm" onClick={handleBatchFill} disabled={!batchField || !batchValue}>Terapkan</Button>
-              </div>
-            </div>
-          </div>
-        </Portal>
-      )}
-
-      {/* ═══ Generate Modal ═══ */}
-      {showGenerate && (
-        <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !generating && setShowGenerate(false)} />
-            <div className="relative bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md mx-4 animate-fade-in">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
-                    <Zap className="w-4.5 h-4.5 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-foreground">Generate Slip Gaji</h3>
-                    <p className="text-xs text-muted-foreground">Buat slip gaji untuk semua pegawai aktif</p>
-                  </div>
-                </div>
-                <button onClick={() => !generating && setShowGenerate(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="px-6 py-5 space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Periode</label>
-                  <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
-                    <button
-                      onClick={() => {
-                        const [y, m] = generatePeriod.split("-").map(Number);
-                        const prev = new Date(y, m - 2, 1);
-                        setGeneratePeriod(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
-                      }}
-                      className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <div className="px-3 py-1.5 text-center flex-1">
-                      <p className="text-xs font-bold text-foreground">{getPeriodRange(generatePeriod).label}</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        const [y, m] = generatePeriod.split("-").map(Number);
-                        const next = new Date(y, m, 1);
-                        setGeneratePeriod(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
-                      }}
-                      className="p-2 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="bg-muted/50 rounded-xl p-4 space-y-2">
-                  <p className="text-xs font-semibold text-foreground">Yang akan dilakukan:</p>
-                  <ul className="text-xs text-muted-foreground space-y-1.5">
-                    <li className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                      Mengambil semua pegawai berstatus Aktif/Training
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                      Menghitung pendapatan titik dari rekap titik pengantaran
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                      Menghitung potongan absen dari data kehadiran
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                      Melewati pegawai yang sudah memiliki slip
-                    </li>
-                  </ul>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border">
-                <Button variant="outline" size="sm" onClick={() => setShowGenerate(false)} disabled={generating}>
-                  Batal
-                </Button>
-                <Button icon={generating ? Loader2 : Zap} size="sm" onClick={handleGenerate} disabled={generating}>
-                  {generating ? "Generating..." : "Generate Slip"}
-                </Button>
               </div>
             </div>
           </div>
