@@ -51,6 +51,12 @@ const STATUS_OPTIONS = [
 ];
 
 const PENDIDIKAN_OPTIONS = ["SD", "SMP", "SMA/SMK", "D1", "D2", "D3", "S1", "S2", "S3"];
+const POSISI_OPTIONS = [
+  { value: "Driver", label: "Driver" },
+  { value: "Helper", label: "Helper" },
+  { value: "Staf Office", label: "Staf Office" },
+  { value: "Maintenance", label: "Maintenance" },
+];
 const SIM_OPTIONS = [
   { value: "", label: "Tidak Ada" },
   { value: "A", label: "SIM A" },
@@ -713,7 +719,8 @@ export default function RecruitmentPage() {
                   </div>
                   <div>
                     <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("posisi_dilamar") ? "text-danger" : "text-foreground")}>Posisi Dilamar <span className="text-danger">*</span></label>
-                    <input type="text" placeholder="Contoh: Driver" value={form.posisi_dilamar} onChange={(e) => { setForm({ ...form, posisi_dilamar: e.target.value }); setFormErrors((p) => { const n = new Set(p); n.delete("posisi_dilamar"); n.delete("doc_sim"); return n; }); }} className={cn(inputClass, formErrors.has("posisi_dilamar") && "border-danger")} />
+                    <Select value={form.posisi_dilamar} onChange={(val) => { setForm({ ...form, posisi_dilamar: val }); setFormErrors((p) => { const n = new Set(p); n.delete("posisi_dilamar"); n.delete("doc_sim"); return n; }); }}
+                      options={POSISI_OPTIONS} placeholder="Pilih posisi" hasError={formErrors.has("posisi_dilamar")} />
                   </div>
                   <div>
                     <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("pendidikan_terakhir") ? "text-danger" : "text-foreground")}>Pendidikan Terakhir <span className="text-danger">*</span></label>
