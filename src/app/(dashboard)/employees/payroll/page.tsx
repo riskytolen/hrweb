@@ -29,6 +29,7 @@ import {
   RotateCcw,
   BarChart3,
   ShieldCheck,
+  Lock,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -1941,6 +1942,20 @@ export default function PayrollPage() {
             </Button>
           </div>
         )}
+        {activeMainTab === "final" && filtered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-border bg-emerald-50/40 dark:bg-emerald-500/[0.04]">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-sm shadow-emerald-500/20 flex-shrink-0">
+                <Lock className="w-4 h-4 text-white" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-foreground">Slip Gaji Final</h2>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{filtered.length} slip telah dikunci — siap untuk pembayaran</p>
+              </div>
+            </div>
+            <StatusBadge status="Final" />
+          </div>
+        )}
         <BatchActionBar
           count={selectedIds.size}
           onClear={() => setSelectedIds(new Set())}
@@ -2170,10 +2185,24 @@ export default function PayrollPage() {
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDetail(false)} />
             <div className="relative w-full max-w-xl bg-card border-l border-border shadow-2xl flex flex-col animate-slide-in-right overflow-hidden">
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-gradient-to-r from-card via-card to-primary/[0.03] flex-shrink-0">
+              <div className={cn(
+                "flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0 bg-gradient-to-r",
+                selectedPayroll.status === "Final"
+                  ? "from-emerald-50/80 via-card to-card dark:from-emerald-500/[0.08] dark:via-card"
+                  : "from-card via-card to-primary/[0.03]"
+              )}>
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
-                    <FileText className="w-4.5 h-4.5 text-primary" />
+                  <div className={cn(
+                    "w-9 h-9 rounded-xl flex items-center justify-center",
+                    selectedPayroll.status === "Final"
+                      ? "bg-emerald-100 dark:bg-emerald-500/15"
+                      : "bg-primary-light"
+                  )}>
+                    {selectedPayroll.status === "Final" ? (
+                      <Lock className="w-4.5 h-4.5 text-emerald-700 dark:text-emerald-300" />
+                    ) : (
+                      <FileText className="w-4.5 h-4.5 text-primary" />
+                    )}
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-foreground">{selectedPayroll.pegawaiNama}</h3>
@@ -2181,12 +2210,25 @@ export default function PayrollPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant={selectedPayroll.status === "Final" ? "success" : "muted"}>{selectedPayroll.status}</Badge>
+                  <StatusBadge status={selectedPayroll.status as LegacyPayrollStatus} />
                   <button onClick={() => setShowDetail(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
+
+              {/* Lock banner untuk Final */}
+              {selectedPayroll.status === "Final" && (
+                <div className="mx-6 mt-5 px-3 py-2.5 rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-500/[0.06] flex items-center gap-2.5 flex-shrink-0">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                    <Lock className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200 leading-tight">Slip Terkunci</p>
+                    <p className="text-[10px] text-emerald-700/80 dark:text-emerald-300/80 leading-tight">Difinalkan dan siap untuk pembayaran. Tidak dapat diedit.</p>
+                  </div>
+                </div>
+              )}
 
               {/* Scrollable content */}
               <div className="flex-1 overflow-y-auto">
@@ -2220,11 +2262,11 @@ export default function PayrollPage() {
                                     const val = parseCurrencyInput(e.target.value);
                                     setEditForm((prev) => ({ ...prev, [f.key]: val }));
                                   }}
-                                  readOnly={f.readonly}
+                                  readOnly={f.readonly || selectedPayroll.status === "Final"}
                                   className={cn(
                                     inputClass,
                                     "pl-9 text-right",
-                                    f.readonly && "bg-muted/60 text-muted-foreground cursor-not-allowed"
+                                    (f.readonly || selectedPayroll.status === "Final") && "bg-muted/60 text-muted-foreground cursor-not-allowed"
                                   )}
                                 />
                               </div>
@@ -2305,11 +2347,11 @@ export default function PayrollPage() {
                                   const val = parseCurrencyInput(e.target.value);
                                   setEditForm((prev) => ({ ...prev, [f.key]: val }));
                                 }}
-                                readOnly={f.readonly}
+                                readOnly={f.readonly || selectedPayroll.status === "Final"}
                                 className={cn(
                                   inputClass,
                                   "pl-9 text-right",
-                                  f.readonly && "bg-muted/60 text-muted-foreground cursor-not-allowed"
+                                  (f.readonly || selectedPayroll.status === "Final") && "bg-muted/60 text-muted-foreground cursor-not-allowed"
                                 )}
                               />
                             </div>
@@ -2474,7 +2516,7 @@ export default function PayrollPage() {
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Tombol Kembalikan ke Draft hanya untuk super admin */}
+                  {/* Tombol Kembalikan ke Draft hanya untuk super admin (Final) */}
                   {selectedPayroll.status === "Final" ? (
                     isSuperAdmin && (
                       <Button
@@ -2488,24 +2530,25 @@ export default function PayrollPage() {
                       </Button>
                     )
                   ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleToggleStatus}
-                      disabled={saving}
-                    >
-                      Finalkan
-                    </Button>
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleToggleStatus}
+                        disabled={saving}
+                      >
+                        Finalkan
+                      </Button>
+                      <Button
+                        icon={saving ? Loader2 : Save}
+                        size="sm"
+                        onClick={handleSave}
+                        disabled={saving}
+                      >
+                        {saving ? "Menyimpan..." : "Simpan"}
+                      </Button>
+                    </>
                   )}
-                  <Button
-                    icon={saving ? Loader2 : Save}
-                    size="sm"
-                    onClick={handleSave}
-                    disabled={saving || (selectedPayroll.status === "Final" && !isSuperAdmin)}
-                    title={selectedPayroll.status === "Final" && !isSuperAdmin ? "Slip sudah Final, hanya super admin yang bisa edit" : undefined}
-                  >
-                    {saving ? "Menyimpan..." : "Simpan"}
-                  </Button>
                 </div>
               </div>
             </div>
@@ -2583,6 +2626,20 @@ export default function PayrollPage() {
                 <p className="text-xs text-muted-foreground">
                   Slip gaji <strong>{deleteConfirm.nama}</strong> akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
                 </p>
+                {(() => {
+                  const slip = payrolls.find((p) => p.id === deleteConfirm.id);
+                  if (slip?.status === "Final") {
+                    return (
+                      <div className="mt-3 px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-left flex items-start gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-snug">
+                          Slip ini berstatus <strong>Final</strong> (sudah dikunci). Penghapusan bersifat permanen dan tidak dapat dibatalkan.
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
               <div className="flex items-center gap-2 px-6 py-4 border-t border-border">
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeleteConfirm(null)} disabled={deleting}>
