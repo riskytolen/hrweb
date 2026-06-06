@@ -44,6 +44,14 @@ export function formatPeriodLabel(periodKey: string): string {
   return d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
 }
 
+/** Label rentang aktual cut-off, mis. "8 Mei – 7 Jun". Untuk UI header. */
+export function formatPeriodRange(periodKey: string): string {
+  const r = getPeriodRange(periodKey);
+  const start = new Date(r.mulai).toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+  const end = new Date(r.selesai).toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+  return `${start} – ${end}`;
+}
+
 function formatLocalDate(y: number, m0: number, d: number): string {
   return `${y}-${String(m0 + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }

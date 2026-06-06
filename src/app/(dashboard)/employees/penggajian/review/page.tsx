@@ -17,6 +17,7 @@ import {
   getCurrentPeriodKey,
   shiftPeriod,
   formatPeriodLabel,
+  formatPeriodRange,
 } from "@/lib/payroll-v2/period";
 import { formatRupiah } from "@/lib/payroll-v2/formatter";
 import type { PayrollRow as RowData, PayrollStatus } from "@/lib/payroll-v2/types";
@@ -234,11 +235,11 @@ function ReviewPageInner() {
     <div className="space-y-4">
       <PageHeader
         title="Review Slip"
-        description={`Periksa & finalkan · ${formatPeriodLabel(periodKey)}`}
+        description={`Periksa & finalkan · ${formatPeriodRange(periodKey)}`}
         icon={FileCheck}
         actions={
           <PeriodSwitcher
-            label={formatPeriodLabel(periodKey)}
+            label={formatPeriodRange(periodKey)}
             onPrev={() => setPeriodKey((k) => shiftPeriod(k, -1))}
             onNext={() => setPeriodKey((k) => shiftPeriod(k, 1))}
           />

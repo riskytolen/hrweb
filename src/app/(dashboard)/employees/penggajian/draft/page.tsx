@@ -18,6 +18,7 @@ import {
   getCurrentPeriodKey,
   shiftPeriod,
   formatPeriodLabel,
+  formatPeriodRange,
 } from "@/lib/payroll-v2/period";
 import type { PayrollRow as RowData, PayrollStatus } from "@/lib/payroll-v2/types";
 
@@ -417,12 +418,12 @@ function DraftPageInner() {
     <div className="space-y-4">
       <PageHeader
         title="Penggajian"
-        description={`Hitung & review slip gaji · ${formatPeriodLabel(periodKey)}`}
+        description={`Hitung & review slip gaji · ${formatPeriodRange(periodKey)}`}
         icon={Calculator}
         actions={
           <>
             <PeriodSwitcher
-              label={formatPeriodLabel(periodKey)}
+              label={formatPeriodRange(periodKey)}
               onPrev={() => setPeriodKey((k) => shiftPeriod(k, -1))}
               onNext={() => setPeriodKey((k) => shiftPeriod(k, 1))}
             />
