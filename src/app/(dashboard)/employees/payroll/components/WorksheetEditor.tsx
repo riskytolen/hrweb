@@ -12,6 +12,7 @@ import {
   TrendingDown,
   Save,
   Loader2,
+  FileCheck,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -50,7 +51,9 @@ interface WorksheetEditorProps {
 
   exportSlipPDF: (row: PayrollRow) => void;
   setDeleteConfirm: (v: { id: number; nama: string } | null) => void;
+  setBuatSlipConfirm: (v: { ids: number[]; mode: "single" | "bulk" } | null) => void;
   onOpenBatchFill: () => void;
+  canEdit: boolean;
 }
 
 export default function WorksheetEditor({
@@ -79,7 +82,9 @@ export default function WorksheetEditor({
   setWsExpandedId,
   exportSlipPDF,
   setDeleteConfirm,
+  setBuatSlipConfirm,
   onOpenBatchFill,
+  canEdit,
 }: WorksheetEditorProps) {
   return (
     <div className="bg-card rounded-2xl border border-border overflow-hidden">
@@ -132,6 +137,17 @@ export default function WorksheetEditor({
                 {wsSaving ? "Menyimpan..." : `Simpan (${wsRowsChanged})`}
               </Button>
             </div>
+          )}
+          {canEdit && (
+            <Button
+              variant="primary"
+              icon={FileCheck}
+              size="sm"
+              onClick={() => setBuatSlipConfirm({ ids: filtered.map((r) => r.id), mode: "bulk" })}
+              disabled={filtered.length === 0}
+            >
+              Buat Slip ({filtered.length})
+            </Button>
           )}
         </div>
       </div>
@@ -189,6 +205,11 @@ export default function WorksheetEditor({
                     <td className="px-4 py-3 text-right text-sm font-bold text-foreground tabular-nums bg-primary/[0.02]">{formatCurrency(computed.netto)}</td>
                     <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-0.5">
+                        {canEdit && (
+                          <button onClick={() => setBuatSlipConfirm({ ids: [row.id], mode: "single" })} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary transition-colors" title="Buat Slip (Worksheet \u2192 Draft)">
+                            <FileCheck className="w-3 h-3" />
+                          </button>
+                        )}
                         <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary transition-colors" title="PDF">
                           <Download className="w-3 h-3" />
                         </button>

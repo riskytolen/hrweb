@@ -1921,7 +1921,9 @@ export default function PayrollPage() {
             setWsExpandedId={setWsExpandedId}
             exportSlipPDF={exportSlipPDF}
             setDeleteConfirm={setDeleteConfirm}
+            setBuatSlipConfirm={setBuatSlipConfirm}
             onOpenBatchFill={() => { setBatchField(""); setBatchValue(""); setShowBatchFill(true); }}
+            canEdit={canEdit}
           />
         ) : (
           <EmptyState
