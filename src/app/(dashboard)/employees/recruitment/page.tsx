@@ -34,7 +34,7 @@ const DOC_CONFIG: Record<DocType, {
   accept: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = {
-  cv: { label: "CV", urlField: "cv_url", subfolder: "cv", required: () => false, accept: "image/jpeg,image/png", icon: FileText },
+  cv: { label: "CV", urlField: "cv_url", subfolder: "cv", required: () => true, accept: "image/jpeg,image/png", icon: FileText },
   ktp: { label: "KTP", urlField: "ktp_url", subfolder: "ktp", required: () => true, accept: "image/jpeg,image/png", icon: IdCard },
   pas_foto: { label: "Pas Foto", urlField: "pas_foto_url", subfolder: "pas-foto", required: () => true, accept: "image/jpeg,image/png", icon: Camera },
   sim: { label: "SIM", urlField: "sim_url", subfolder: "sim", required: (p) => p === "Driver", accept: "image/jpeg,image/png", icon: CreditCard },
