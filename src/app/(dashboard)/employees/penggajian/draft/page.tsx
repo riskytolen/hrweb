@@ -33,12 +33,11 @@ import StatusBadge from "../components/StatusBadge";
 interface PegawaiLite {
   id: string;
   nama: string;
-  divisi: string;
   jabatan: string;
   status: string;
-  tanggal_masuk: string;
-  tanggal_keluar: string | null;
-  gaji_pokok: number;
+  tanggalBergabung: string;
+  tanggalKeluar: string | null;
+  gajiPokok: number;
 }
 
 interface AbsenBreakdownItem {
@@ -89,9 +88,17 @@ function DraftPageInner() {
       // Pegawai (untuk hitung worksheet)
       const { data: peg } = await supabase
         .from("pegawai")
-        .select("id, nama, divisi, jabatan, status, tanggal_masuk, tanggal_keluar, gaji_pokok")
+        .select("id, nama, status, tanggal_bergabung, tanggal_keluar, gaji_pokok, jabatan:jabatan_id(nama)")
         .order("nama", { ascending: true });
-      setPegawaiList((peg ?? []) as PegawaiLite[]);
+      setPegawaiList(((peg ?? []) as any[]).map((p) => ({
+        id: p.id,
+        nama: p.nama,
+        jabatan: p.jabatan?.nama ?? "—",
+        status: p.status,
+        tanggalBergabung: p.tanggal_bergabung,
+        tanggalKeluar: p.tanggal_keluar,
+        gajiPokok: p.gaji_pokok,
+      })));
 
       // Payroll rows untuk periode ini
       const { data: pr } = await supabase
@@ -170,17 +177,17 @@ function DraftPageInner() {
       const [attRes, otRes] = await Promise.all([
         supabase
           .from("attendance_records")
-          .select("employee_id, tanggal, status, menit_telat")
+          .select("employee_id, tanggal, status, durasi_telat")
           .in("employee_id", empIds)
           .gte("tanggal", period.mulai)
           .lte("tanggal", period.selesai),
         supabase
           .from("overtime_requests")
-          .select("id, employee_id, tanggal_mulai, tanggal_selesai, jam_mulai, jam_selesai, total_jam, tarif_per_jam, total_bayar, status")
+          .select("id, employee_id, tanggal, jam_mulai, jam_selesai, durasi_menit, rate_per_jam, total_lembur, status")
           .in("employee_id", empIds)
           .eq("status", "Disetujui")
-          .gte("tanggal_mulai", period.mulai)
-          .lte("tanggal_mulai", period.selesai),
+          .gte("tanggal", period.mulai)
+          .lte("tanggal", period.selesai),
       ]);
 
       const attByEmp = new Map<string, any[]>();
@@ -201,17 +208,17 @@ function DraftPageInner() {
         const attendance = (attByEmp.get(p.id) ?? []).map((a) => ({
           tanggal: a.tanggal,
           status: a.status,
-          menitTelat: a.menit_telat ?? 0,
+          menitTelat: a.durasi_telat ?? 0,
         }));
         const overtime = (otByEmp.get(p.id) ?? []).map((o) => ({
           id: o.id,
-          tanggalMulai: o.tanggal_mulai,
-          tanggalSelesai: o.tanggal_selesai,
+          tanggalMulai: o.tanggal,
+          tanggalSelesai: o.tanggal,
           jamMulai: o.jam_mulai,
           jamSelesai: o.jam_selesai,
-          totalJam: o.total_jam,
-          tarifPerJam: o.tarif_per_jam,
-          totalBayar: o.total_bayar,
+          totalJam: (o.durasi_menit ?? 0) / 60,
+          tarifPerJam: o.rate_per_jam,
+          totalBayar: o.total_lembur,
           status: o.status,
         }));
 
@@ -221,12 +228,12 @@ function DraftPageInner() {
           employee: {
             id: p.id,
             nama: p.nama,
-            divisi: p.divisi ?? "",
+            divisi: "",
             jabatan: p.jabatan ?? "",
             statusKaryawan: p.status as any,
-            tanggalMasuk: p.tanggal_masuk,
-            tanggalKeluar: p.tanggal_keluar,
-            gajiPokok: p.gaji_pokok,
+            tanggalMasuk: p.tanggalBergabung,
+            tanggalKeluar: p.tanggalKeluar,
+            gajiPokok: p.gajiPokok,
           },
           period,
           attendance,
@@ -358,14 +365,14 @@ function DraftPageInner() {
     if (!absenBreakdown[row.id]) {
       const { data: att } = await supabase
         .from("attendance_records")
-        .select("tanggal, status, menit_telat")
+        .select("tanggal, status, durasi_telat")
         .eq("employee_id", empId)
         .in("status", ["Terlambat", "Alpha"])
         .gte("tanggal", period.mulai)
         .lte("tanggal", period.selesai)
         .order("tanggal", { ascending: true });
       const items: AbsenBreakdownItem[] = (att ?? []).map((a: any) => {
-        const telat = a.menit_telat ?? 0;
+        const telat = a.durasi_telat ?? 0;
         const unit = Math.max(1, Math.ceil(telat / 15));
         const nominal = a.status === "Alpha" ? 50_000 : unit * 3000;
         return { tanggal: a.tanggal, status: a.status as "Terlambat" | "Alpha", menitTelat: telat, nominal };
@@ -377,17 +384,17 @@ function DraftPageInner() {
     if (!lemburBreakdown[row.id]) {
       const { data: ot } = await supabase
         .from("overtime_requests")
-        .select("tanggal_mulai, total_jam, tarif_per_jam, total_bayar")
-        .eq("employee_id", empId)
+        .select("tanggal, durasi_menit, rate_per_jam, total_lembur")
+        .eq("employee_id", row.employeeId)
         .eq("status", "Disetujui")
-        .gte("tanggal_mulai", period.mulai)
-        .lte("tanggal_mulai", period.selesai)
-        .order("tanggal_mulai", { ascending: true });
+        .gte("tanggal", period.mulai)
+        .lte("tanggal", period.selesai)
+        .order("tanggal", { ascending: true });
       const items = (ot ?? []).map((o: any) => ({
-        tanggal: o.tanggal_mulai,
-        jam: o.total_jam,
-        tarif: o.tarif_per_jam,
-        total: o.total_bayar,
+        tanggal: o.tanggal,
+        jam: (o.durasi_menit ?? 0) / 60,
+        tarif: o.rate_per_jam,
+        total: o.total_lembur,
       }));
       const total = items.reduce((s: number, i: any) => s + i.total, 0);
       setLemburBreakdown((p) => ({ ...p, [row.id]: { items, total } }));

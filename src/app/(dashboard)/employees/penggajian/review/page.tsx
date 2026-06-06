@@ -188,14 +188,14 @@ function ReviewPageInner() {
     if (!absenBreakdown[row.id]) {
       const { data: att } = await supabase
         .from("attendance_records")
-        .select("tanggal, status, menit_telat")
+        .select("tanggal, status, durasi_telat")
         .eq("employee_id", row.employeeId)
         .in("status", ["Terlambat", "Alpha"])
         .gte("tanggal", period.mulai)
         .lte("tanggal", period.selesai)
         .order("tanggal", { ascending: true });
       const items = (att ?? []).map((a: any) => {
-        const telat = a.menit_telat ?? 0;
+        const telat = a.durasi_telat ?? 0;
         const unit = Math.max(1, Math.ceil(telat / 15));
         const denda = a.status === "Alpha" ? 50_000 : unit * 3000;
         return { tanggal: a.tanggal, status: a.status, menitTelat: telat, nominal: denda };
@@ -207,17 +207,17 @@ function ReviewPageInner() {
     if (!lemburBreakdown[row.id]) {
       const { data: ot } = await supabase
         .from("overtime_requests")
-        .select("tanggal_mulai, total_jam, tarif_per_jam, total_bayar")
+        .select("tanggal, durasi_menit, rate_per_jam, total_lembur")
         .eq("employee_id", row.employeeId)
         .eq("status", "Disetujui")
-        .gte("tanggal_mulai", period.mulai)
-        .lte("tanggal_mulai", period.selesai)
-        .order("tanggal_mulai", { ascending: true });
+        .gte("tanggal", period.mulai)
+        .lte("tanggal", period.selesai)
+        .order("tanggal", { ascending: true });
       const items = (ot ?? []).map((o: any) => ({
-        tanggal: o.tanggal_mulai,
-        jam: o.total_jam,
-        tarif: o.tarif_per_jam,
-        total: o.total_bayar,
+        tanggal: o.tanggal,
+        jam: (o.durasi_menit ?? 0) / 60,
+        tarif: o.rate_per_jam,
+        total: o.total_lembur,
       }));
       const total = items.reduce((s: number, i: any) => s + i.total, 0);
       setLemburBreakdown((p) => ({ ...p, [row.id]: { items, total } }));
