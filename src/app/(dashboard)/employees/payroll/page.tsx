@@ -40,6 +40,14 @@ import { supabase, type DbPayroll, type DbPegawai } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
+import PayrollStepper, { type StepperStep } from "./components/PayrollStepper";
+import BatchActionBar from "./components/BatchActionBar";
+import ConfirmDialog from "./components/ConfirmDialog";
+import EmptyState from "./components/EmptyState";
+import StatusBadge, { type LegacyPayrollStatus } from "./components/StatusBadge";
+import ProrataBadge from "./components/ProrataBadge";
+import BreakdownAbsen, { type AbsenItem } from "./components/BreakdownAbsen";
+import BreakdownLembur, { type LemburItem } from "./components/BreakdownLembur";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
@@ -1929,95 +1937,50 @@ export default function PayrollPage() {
         </div>
       </div>
 
-      {/* ═══ Sub-tab: Worksheet / Draft / Final / Laporan ═══ */}
-      <div className="bg-card rounded-2xl border border-border p-1.5 inline-flex items-center gap-1 overflow-x-auto">
-        <button
-          onClick={() => { setActiveMainTab("worksheet"); setPage(1); }}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap",
-            activeMainTab === "worksheet"
-              ? "bg-primary text-white shadow-sm"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          Worksheet
-          <span className={cn(
-            "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold",
-            activeMainTab === "worksheet" ? "bg-white/20 text-white" : "bg-muted-foreground/10 text-muted-foreground"
-          )}>{worksheetCount}</span>
-        </button>
-        <button
-          onClick={() => { setActiveMainTab("draft"); setPage(1); }}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap",
-            activeMainTab === "draft"
-              ? "bg-primary text-white shadow-sm"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          <Clock className="w-3.5 h-3.5" />
-          Draft
-          <span className={cn(
-            "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold",
-            activeMainTab === "draft" ? "bg-white/20 text-white" : "bg-warning/15 text-warning"
-          )}>{draftCount}</span>
-        </button>
-        <button
-          onClick={() => { setActiveMainTab("final"); setPage(1); }}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap",
-            activeMainTab === "final"
-              ? "bg-primary text-white shadow-sm"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          Final
-          <span className={cn(
-            "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold",
-            activeMainTab === "final" ? "bg-white/20 text-white" : "bg-success/15 text-success"
-          )}>{finalCount}</span>
-        </button>
-        <button
-          onClick={() => { setActiveMainTab("laporan"); setPage(1); }}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap",
-            activeMainTab === "laporan"
-              ? "bg-primary text-white shadow-sm"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-        >
-          <BarChart3 className="w-3.5 h-3.5" />
-          Laporan
-        </button>
-      </div>
+      {/* ═══ Stepper: Worksheet → Draft → Final → Laporan ═══ */}
+      <PayrollStepper
+        current={activeMainTab}
+        counts={{
+          worksheet: worksheetCount,
+          draft: draftCount,
+          final: finalCount,
+        }}
+        onChange={(s) => {
+          setActiveMainTab(s);
+          setPage(1);
+        }}
+      />
 
       {/* ═══ Ringkasan Tabel + Tombol Worksheet ═══ */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
-        {selectedIds.size > 0 && (
-          <div className="bg-primary/10 border-b border-primary/20 px-5 py-3 flex items-center justify-between animate-fade-in">
-            <div className="flex items-center gap-3">
-              <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">{selectedIds.size}</div>
-              <p className="text-sm font-semibold text-primary">Slip gaji dipilih</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>Batal</Button>
-              {activeMainTab === "worksheet" && (
-                <Button size="sm" icon={FileCheck} onClick={() => setBuatSlipConfirm({ ids: Array.from(selectedIds), mode: "bulk" })}
-                  className="bg-primary text-white hover:bg-primary/90 border-primary">Buat {selectedIds.size} Slip</Button>
-              )}
-              {activeMainTab === "draft" && (
-                <Button variant="outline" size="sm" icon={RotateCcw} onClick={() => handleBatalkanDraft(Array.from(selectedIds))}
-                  className="text-warning border-warning/30 hover:bg-warning/10 hover:text-warning">Batalkan {selectedIds.size} Slip</Button>
-              )}
-              {activeMainTab === "draft" && (
-                <Button variant="outline" size="sm" icon={CircleCheckBig} onClick={() => setBulkFinalConfirm(true)} className="text-success border-success/30 hover:bg-success/10 hover:text-success">Finalkan {selectedIds.size} Slip</Button>
-              )}
-              <Button size="sm" icon={Trash2} onClick={() => setBulkDeleteConfirm(true)} className="bg-danger text-white hover:bg-danger/90 border-danger">Hapus {selectedIds.size} Slip</Button>
-            </div>
-          </div>
-        )}
+        <BatchActionBar
+          count={selectedIds.size}
+          onClear={() => setSelectedIds(new Set())}
+          actions={(() => {
+            const acts: { type: "buat" | "finalkan" | "batalkan" | "hapus"; onClick: () => void }[] = [];
+            if (activeMainTab === "worksheet") {
+              acts.push({
+                type: "buat",
+                onClick: () => setBuatSlipConfirm({ ids: Array.from(selectedIds), mode: "bulk" }),
+              });
+            }
+            if (activeMainTab === "draft") {
+              acts.push({
+                type: "batalkan",
+                onClick: () => handleBatalkanDraft(Array.from(selectedIds)),
+              });
+              acts.push({
+                type: "finalkan",
+                onClick: () => setBulkFinalConfirm(true),
+              });
+            }
+            acts.push({
+              type: "hapus",
+              onClick: () => setBulkDeleteConfirm(true),
+            });
+            return acts;
+          })()}
+        />
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
