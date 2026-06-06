@@ -4,7 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   UserPlus, Plus, Search, Pencil, Trash2, X, Check, CircleCheckBig, AlertTriangle, Copy,
   Phone, Mail, Briefcase, GraduationCap, MapPin, FileText, Upload, ExternalLink, Eye, Car,
-  Calendar, Heart, Clock, MapPinned, Globe,
+  Calendar, Heart, Clock, MapPinned, Globe, IdCard, Camera, CreditCard,
+  Paperclip, FolderOpen,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -22,6 +23,24 @@ import DatePicker from "@/components/ui/DatePicker";
 
 const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
+
+type DocType = "cv" | "ktp" | "pas_foto" | "sim";
+
+const DOC_CONFIG: Record<DocType, {
+  label: string;
+  urlField: keyof DbRecruitment;
+  subfolder: string;
+  required: (posisi: string) => boolean;
+  accept: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = {
+  cv: { label: "CV", urlField: "cv_url", subfolder: "cv", required: () => false, accept: "image/jpeg,image/png", icon: FileText },
+  ktp: { label: "KTP", urlField: "ktp_url", subfolder: "ktp", required: () => true, accept: "image/jpeg,image/png", icon: IdCard },
+  pas_foto: { label: "Pas Foto", urlField: "pas_foto_url", subfolder: "pas-foto", required: () => true, accept: "image/jpeg,image/png", icon: Camera },
+  sim: { label: "SIM", urlField: "sim_url", subfolder: "sim", required: (p) => p === "Driver", accept: "image/jpeg,image/png", icon: CreditCard },
+};
+
+const DOC_TYPES: readonly DocType[] = ["cv", "ktp", "pas_foto", "sim"] as const;
 
 const STATUS_OPTIONS = [
   { value: "Lamaran Masuk", label: "Lamaran Masuk", color: "#6b7280" },
@@ -58,8 +77,8 @@ export default function RecruitmentPage() {
     pengalaman_kerja: "", alamat: "", sim: "", status: "Lamaran Masuk", catatan: "",
     tanggal_training_mulai: "", tanggal_training_selesai: "",
   });
-  const [cvFile, setCvFile] = useState<File | null>(null);
-  const [cvCompressing, setCvCompressing] = useState(false);
+  const [docFiles, setDocFiles] = useState<Record<DocType, File | null>>({ cv: null, ktp: null, pas_foto: null, sim: null });
+  const [docCompressing, setDocCompressing] = useState<Record<DocType, boolean>>({ cv: false, ktp: false, pas_foto: false, sim: false });
   const [formErrors, setFormErrors] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
@@ -73,6 +92,7 @@ export default function RecruitmentPage() {
   const [statusChanging, setStatusChanging] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [docsModalId, setDocsModalId] = useState<number | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((type: "success" | "error", title: string, message?: string) => {
@@ -102,26 +122,30 @@ export default function RecruitmentPage() {
     return () => { document.body.style.overflow = ""; };
   }, [showForm]);
 
-  const deleteOldCv = async (cvUrl: string) => {
-    const path = cvUrl.split("/recruitment-docs/")[1];
+  const deleteOldDoc = async (url: string) => {
+    const path = url.split("/recruitment-docs/")[1];
     if (path) await supabase.storage.from("recruitment-docs").remove([path]);
   };
 
-  const uploadCv = async (file: File, id: number, oldCvUrl?: string | null): Promise<{ url: string | null; error: string | null }> => {
-    // Hapus CV lama jika ada (mencegah orphaned files)
-    if (oldCvUrl) await deleteOldCv(oldCvUrl);
-
+  const uploadDoc = async (
+    type: DocType,
+    file: File,
+    id: number,
+    oldUrl?: string | null,
+  ): Promise<{ url: string | null; error: string | null }> => {
+    if (oldUrl) await deleteOldDoc(oldUrl);
+    const cfg = DOC_CONFIG[type];
     const ext = file.name.split(".").pop();
-    const path = `cv/${id}-${Date.now()}.${ext}`;
+    const path = `${cfg.subfolder}/${id}-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from("recruitment-docs").upload(path, file, { upsert: true });
-    if (error) return { url: null, error: `Gagal upload CV: ${error.message}` };
+    if (error) return { url: null, error: `Gagal upload ${cfg.label}: ${error.message}` };
     const { data } = supabase.storage.from("recruitment-docs").getPublicUrl(path);
     return { url: data.publicUrl, error: null };
   };
 
   const openAdd = () => {
     setForm({ nama: "", no_hp: "", email: "", posisi_dilamar: "", pendidikan_terakhir: "SMA/SMK", pengalaman_kerja: "", alamat: "", sim: "", status: "Lamaran Masuk", catatan: "", tanggal_training_mulai: "", tanggal_training_selesai: "" });
-    setCvFile(null);
+    setDocFiles({ cv: null, ktp: null, pas_foto: null, sim: null });
     setFormErrors(new Set());
     setEditingId(null);
     setShowForm(true);
@@ -134,7 +158,7 @@ export default function RecruitmentPage() {
       alamat: r.alamat || "", sim: r.sim || "", status: r.status, catatan: r.catatan || "",
       tanggal_training_mulai: r.tanggal_training_mulai || "", tanggal_training_selesai: r.tanggal_training_selesai || "",
     });
-    setCvFile(null);
+    setDocFiles({ cv: null, ktp: null, pas_foto: null, sim: null });
     setFormErrors(new Set());
     setEditingId(r.id);
     setShowForm(true);
@@ -146,6 +170,20 @@ export default function RecruitmentPage() {
     if (!form.no_hp.trim()) errs.add("no_hp");
     if (!form.posisi_dilamar.trim()) errs.add("posisi_dilamar");
     if (!form.pendidikan_terakhir) errs.add("pendidikan_terakhir");
+
+    // Validasi dokumen wajib (KTP, Pas Foto, SIM-kondisional).
+    // Lolos kalau: ada file baru dipilih, ATAU (mode edit) row existing sudah punya URL.
+    for (const type of DOC_TYPES) {
+      const cfg = DOC_CONFIG[type];
+      if (!cfg.required(form.posisi_dilamar)) continue;
+      if (docFiles[type]) continue;
+      if (editingId !== null) {
+        const row = list.find((r) => r.id === editingId);
+        const existingUrl = row?.[cfg.urlField];
+        if (existingUrl) continue;
+      }
+      errs.add(`doc_${type}`);
+    }
     if (errs.size > 0) { setFormErrors(errs); return; }
 
     setSaving(true);
@@ -163,18 +201,28 @@ export default function RecruitmentPage() {
       if (editingId !== null) {
         // --- UPDATE ---
         const existingRow = list.find((r) => r.id === editingId);
-        let cvUrl: string | null = null;
-        let cvWarning = false;
+        const docUrlUpdates: Partial<Record<DocType, string>> = {};
+        const docWarnings: DocType[] = [];
 
-        if (cvFile) {
-          const result = await uploadCv(cvFile, editingId, existingRow?.cv_url);
-          if (result.error) cvWarning = true;
-          else cvUrl = result.url;
+        for (const type of DOC_TYPES) {
+          const file = docFiles[type];
+          if (!file) continue;
+          const cfg = DOC_CONFIG[type];
+          const oldUrl = existingRow?.[cfg.urlField] as string | null | undefined;
+          const result = await uploadDoc(type, file, editingId, oldUrl);
+          if (result.error) docWarnings.push(type);
+          else if (result.url) docUrlUpdates[type] = result.url;
+        }
+
+        const updateFields: Record<string, unknown> = { ...payload };
+        for (const type of DOC_TYPES) {
+          const url = docUrlUpdates[type];
+          if (url) updateFields[DOC_CONFIG[type].urlField] = url;
         }
 
         const { error } = await supabase
           .from("recruitments")
-          .update({ ...payload, ...(cvUrl ? { cv_url: cvUrl } : {}) })
+          .update(updateFields)
           .eq("id", editingId);
 
         if (error) {
@@ -184,11 +232,16 @@ export default function RecruitmentPage() {
 
         // Sync pegawai jika status berubah
         if (existingRow && existingRow.status !== form.status) {
-          const updatedRec = { ...existingRow, ...payload, ...(cvUrl ? { cv_url: cvUrl } : {}) } as DbRecruitment;
+          const updatedRec = { ...existingRow, ...payload } as DbRecruitment;
+          for (const type of DOC_TYPES) {
+            const url = docUrlUpdates[type];
+            if (url) (updatedRec as unknown as Record<string, unknown>)[DOC_CONFIG[type].urlField] = url;
+          }
           const syncResult = await syncPegawaiForStatus(updatedRec, form.status);
           showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
-        } else if (cvWarning) {
-          showToast("error", "Data Tersimpan, CV Gagal", "Data pelamar berhasil diperbarui tapi CV gagal diupload.");
+        } else if (docWarnings.length > 0) {
+          const labels = docWarnings.map((t) => DOC_CONFIG[t].label).join(", ");
+          showToast("error", "Data Tersimpan, Sebagian Gagal", `Data pelamar berhasil diperbarui tapi gagal upload: ${labels}.`);
         } else {
           showToast("success", "Data Diperbarui", `Pelamar "${form.nama}" telah disimpan.`);
         }
@@ -205,23 +258,25 @@ export default function RecruitmentPage() {
           return;
         }
 
-        let cvWarning: string | null = null;
-        let finalRecord = inserted as DbRecruitment;
+        const finalRecord: DbRecruitment = { ...inserted } as DbRecruitment;
+        const docWarnings: string[] = [];
 
-        if (cvFile) {
-          const result = await uploadCv(cvFile, inserted.id);
+        for (const type of DOC_TYPES) {
+          const file = docFiles[type];
+          if (!file) continue;
+          const cfg = DOC_CONFIG[type];
+          const result = await uploadDoc(type, file, inserted.id);
           if (result.error) {
-            cvWarning = "Data tersimpan tapi CV gagal diupload. Silakan edit untuk upload ulang.";
+            docWarnings.push(`${cfg.label} gagal diupload`);
           } else if (result.url) {
             const { error: updateErr } = await supabase
               .from("recruitments")
-              .update({ cv_url: result.url })
+              .update({ [cfg.urlField]: result.url })
               .eq("id", inserted.id);
-
             if (updateErr) {
-              cvWarning = "File CV berhasil diupload tapi gagal menyimpan referensinya.";
+              docWarnings.push(`${cfg.label} berhasil diupload tapi gagal menyimpan referensi`);
             } else {
-              finalRecord = { ...finalRecord, cv_url: result.url };
+              (finalRecord as unknown as Record<string, unknown>)[cfg.urlField] = result.url;
             }
           }
         }
@@ -232,8 +287,12 @@ export default function RecruitmentPage() {
         if (needsSync) {
           const syncResult = await syncPegawaiForStatus(finalRecord, form.status);
           if (!syncResult.ok) {
-            // Rollback: hapus recruitment yang baru saja di-insert
+            // Rollback: hapus recruitment + semua file yang sudah terupload
             await supabase.from("recruitments").delete().eq("id", inserted.id);
+            for (const type of DOC_TYPES) {
+              const url = finalRecord[DOC_CONFIG[type].urlField] as string | null;
+              if (url) await deleteOldDoc(url);
+            }
             showToast(
               "error",
               "Gagal Membuat Pegawai",
@@ -241,16 +300,15 @@ export default function RecruitmentPage() {
             );
             return;
           }
-          // Sync sukses → tampilkan toast dari sync (sudah informatif: "Training Dimulai" / "Diterima")
-          if (cvWarning) {
-            showToast("error", "Pelamar Ditambahkan, CV Gagal", cvWarning);
+          if (docWarnings.length > 0) {
+            showToast("error", "Pelamar Ditambahkan, Sebagian Gagal", docWarnings.join("; ") + ".");
           } else {
             showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
           }
         } else {
           // Status awal "Lamaran Masuk" / "Terpilih" / "Ditolak" → tidak perlu pegawai
-          if (cvWarning) {
-            showToast("error", "Pelamar Ditambahkan, CV Gagal", cvWarning);
+          if (docWarnings.length > 0) {
+            showToast("error", "Pelamar Ditambahkan, Sebagian Gagal", docWarnings.join("; ") + ".");
           } else {
             showToast("success", "Pelamar Ditambahkan", `Data "${form.nama}" berhasil disimpan.`);
           }
@@ -275,9 +333,12 @@ export default function RecruitmentPage() {
     const targetId = deleteConfirm.id;
     setDeleting(true);
     try {
-      // Hapus file CV dari storage jika ada
       const row = list.find((r) => r.id === targetId);
-      if (row?.cv_url) await deleteOldCv(row.cv_url);
+      // Hapus semua file dokumen dari storage
+      for (const type of DOC_TYPES) {
+        const url = row?.[DOC_CONFIG[type].urlField] as string | null;
+        if (url) await deleteOldDoc(url);
+      }
 
       const { error } = await supabase.from("recruitments").delete().eq("id", targetId);
       if (error) {
@@ -285,9 +346,8 @@ export default function RecruitmentPage() {
         return;
       }
 
-      // Hapus dari state lokal langsung
       setList((prev) => prev.filter((r) => r.id !== targetId));
-      showToast("success", "Data Dihapus", "Data pelamar dan file CV telah dihapus.");
+      showToast("success", "Data Dihapus", "Data pelamar dan semua dokumen telah dihapus.");
     } catch (err) {
       showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menghapus data.");
     } finally {
@@ -496,6 +556,10 @@ export default function RecruitmentPage() {
 
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const detail = detailId ? list.find((r) => r.id === detailId) : null;
+  const docsModalRec = docsModalId ? list.find((r) => r.id === docsModalId) : null;
+
+  const countDocs = (r: DbRecruitment): number =>
+    DOC_TYPES.filter((t) => r[DOC_CONFIG[t].urlField]).length;
 
   const statusCounts: Record<string, number> = { Semua: list.length, "Lamaran Masuk": 0, Terpilih: 0, Training: 0, Diterima: 0, Ditolak: 0 };
   for (const r of list) { if (r.status in statusCounts) statusCounts[r.status]++; }
@@ -563,7 +627,7 @@ export default function RecruitmentPage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Posisi Dilamar</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pendidikan</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">CV</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Dokumen</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-32">Aksi</th>
               </tr>
             </thead>
@@ -586,11 +650,16 @@ export default function RecruitmentPage() {
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${sc?.color}20`, color: sc?.color }}>{r.status}</span>
                     </td>
                     <td className="px-5 py-3.5">
-                      {r.cv_url ? (
-                        <a href={r.cv_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                          <FileText className="w-3.5 h-3.5" />Lihat
-                        </a>
-                      ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                      <button
+                        onClick={() => setDocsModalId(r.id)}
+                        className={cn("inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg border transition-colors",
+                          countDocs(r) > 0
+                            ? "border-primary/30 bg-primary-light/30 text-primary hover:bg-primary-light"
+                            : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")}
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        {countDocs(r)}/{DOC_TYPES.length}
+                      </button>
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-center gap-1">
@@ -644,7 +713,7 @@ export default function RecruitmentPage() {
                   </div>
                   <div>
                     <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("posisi_dilamar") ? "text-danger" : "text-foreground")}>Posisi Dilamar <span className="text-danger">*</span></label>
-                    <input type="text" placeholder="Contoh: Driver" value={form.posisi_dilamar} onChange={(e) => { setForm({ ...form, posisi_dilamar: e.target.value }); setFormErrors((p) => { const n = new Set(p); n.delete("posisi_dilamar"); return n; }); }} className={cn(inputClass, formErrors.has("posisi_dilamar") && "border-danger")} />
+                    <input type="text" placeholder="Contoh: Driver" value={form.posisi_dilamar} onChange={(e) => { setForm({ ...form, posisi_dilamar: e.target.value }); setFormErrors((p) => { const n = new Set(p); n.delete("posisi_dilamar"); n.delete("doc_sim"); return n; }); }} className={cn(inputClass, formErrors.has("posisi_dilamar") && "border-danger")} />
                   </div>
                   <div>
                     <label className={cn("text-xs font-semibold mb-1.5 block", formErrors.has("pendidikan_terakhir") ? "text-danger" : "text-foreground")}>Pendidikan Terakhir <span className="text-danger">*</span></label>
@@ -669,35 +738,60 @@ export default function RecruitmentPage() {
                     <Select value={form.status} onChange={(val) => setForm({ ...form, status: val })}
                       options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))} />
                   </div>
-                  <div>
-                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Upload CV (PDF, maks 300KB)</label>
-                    <label className={cn("flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed text-xs transition-all",
-                      cvCompressing
-                        ? "border-warning/40 bg-warning/5 text-warning cursor-wait pointer-events-none"
-                        : cvFile
-                          ? "border-success/40 bg-success-light/20 text-success cursor-pointer"
-                          : "border-border hover:border-primary/40 text-muted-foreground cursor-pointer")}>
-                      {cvCompressing ? (
-                        <><span className="w-3.5 h-3.5 border-2 border-warning/30 border-t-warning rounded-full animate-spin" /><span>Memproses...</span></>
-                      ) : cvFile ? (
-                        <><Check className="w-3.5 h-3.5" /><span className="truncate max-w-[120px]">{cvFile.name}</span></>
-                      ) : (
-                        <><Upload className="w-3.5 h-3.5" /><span>Pilih file</span></>
-                      )}
-                      <input type="file" accept=".pdf" className="hidden" disabled={cvCompressing} onChange={async (e) => {
-                        const file = e.target.files?.[0] || null;
-                        if (!file) { setCvFile(null); return; }
-                        setCvCompressing(true);
-                        const result = await compressFile(file);
-                        setCvCompressing(false);
-                        if (!result.success) { showToast("error", "File Gagal", result.error); e.target.value = ""; return; }
-                        setCvFile(result.file);
-                      }} />
-                    </label>
-                    {editingId && list.find((r) => r.id === editingId)?.cv_url && !cvFile && !cvCompressing && (
-                      <p className="text-[10px] text-success mt-1">CV sudah ada</p>
-                    )}
-                  </div>
+                  {DOC_TYPES.map((type) => {
+                    const cfg = DOC_CONFIG[type];
+                    const Icon = cfg.icon;
+                    const file = docFiles[type];
+                    const compressing = docCompressing[type];
+                    const required = cfg.required(form.posisi_dilamar);
+                    const hasError = formErrors.has(`doc_${type}`);
+                    const existingRow = editingId !== null ? list.find((r) => r.id === editingId) : null;
+                    const existingUrl = existingRow?.[cfg.urlField] as string | null;
+                    return (
+                      <div key={type}>
+                        <label className={cn("text-xs font-semibold mb-1.5 flex items-center gap-1.5",
+                          hasError ? "text-danger" : "text-foreground")}>
+                          <Icon className="w-3.5 h-3.5" />
+                          Upload {cfg.label} (JPG/PNG, maks 300KB)
+                          {required && <span className="text-danger">*</span>}
+                          {type === "sim" && !required && (
+                            <span className="text-[10px] font-normal text-muted-foreground">(khusus Driver)</span>
+                          )}
+                        </label>
+                        <label className={cn("flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed text-xs transition-all",
+                          compressing
+                            ? "border-warning/40 bg-warning/5 text-warning cursor-wait pointer-events-none"
+                            : file
+                              ? "border-success/40 bg-success-light/20 text-success cursor-pointer"
+                              : hasError
+                                ? "border-danger/40 bg-danger/5 text-danger cursor-pointer"
+                                : "border-border hover:border-primary/40 text-muted-foreground cursor-pointer")}>
+                          {compressing ? (
+                            <><span className="w-3.5 h-3.5 border-2 border-warning/30 border-t-warning rounded-full animate-spin" /><span>Memproses...</span></>
+                          ) : file ? (
+                            <><Check className="w-3.5 h-3.5" /><span className="truncate max-w-[140px]">{file.name}</span></>
+                          ) : (
+                            <><Upload className="w-3.5 h-3.5" /><span>Pilih file</span></>
+                          )}
+                          <input type="file" accept={cfg.accept} className="hidden" disabled={compressing} onChange={async (e) => {
+                            const f = e.target.files?.[0] || null;
+                            if (!f) { setDocFiles((p) => ({ ...p, [type]: null })); return; }
+                            setDocCompressing((p) => ({ ...p, [type]: true }));
+                            const result = await compressFile(f);
+                            setDocCompressing((p) => ({ ...p, [type]: false }));
+                            if (!result.success) { showToast("error", `${cfg.label} Gagal`, result.error); e.target.value = ""; return; }
+                            setDocFiles((p) => ({ ...p, [type]: result.file }));
+                            setFormErrors((p) => { const n = new Set(p); n.delete(`doc_${type}`); return n; });
+                          }} />
+                        </label>
+                        {existingUrl && !file && !compressing && (
+                          <a href={existingUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-success hover:underline mt-1 inline-flex items-center gap-1">
+                            <Paperclip className="w-2.5 h-2.5" />{cfg.label} sudah ada — klik untuk melihat
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
                   {(form.status === "Training" || form.status === "Diterima" || form.status === "Ditolak") && (
                     <>
                       <div>
@@ -772,9 +866,27 @@ export default function RecruitmentPage() {
                           const simStr = detail.sim ? "SIM " + detail.sim : "Tidak Ada";
                           const nyupirStr = detail.bisa_nyupir ? "Ya" : "Tidak";
                           const pglmnStr = detail.pengalaman_kerja || "-";
-                          const cvStr = detail.cv_url || "Belum dilampirkan";
-                          
-                          const text = "*Data Pelamar - Jamslogistic*\n\n*Nama:* " + detail.nama + "\n*Status:* " + statusStr + "\n*Umur:* " + umurStr + "\n*Posisi:* " + posisiStr + "\n*Pendidikan:* " + didikanStr + "\n*No. HP:* " + detail.no_hp + "\n*Email:* " + emailStr + "\n*Alamat:* " + alamatStr + "\n*SIM:* " + simStr + "\n*Bisa Mengemudi:* " + nyupirStr + "\n*Pengalaman Kerja:* " + pglmnStr + "\n\n*CV:* " + cvStr;
+
+                          const docLines = DOC_TYPES.map((t) => {
+                            const cfg = DOC_CONFIG[t];
+                            const url = detail[cfg.urlField] as string | null;
+                            return `*${cfg.label}:* ${url || "Belum dilampirkan"}`;
+                          }).join("\n");
+
+                          const text =
+                            `*Data Pelamar - Jamslogistic*\n\n` +
+                            `*Nama:* ${detail.nama}\n` +
+                            `*Status:* ${statusStr}\n` +
+                            `*Umur:* ${umurStr}\n` +
+                            `*Posisi:* ${posisiStr}\n` +
+                            `*Pendidikan:* ${didikanStr}\n` +
+                            `*No. HP:* ${detail.no_hp}\n` +
+                            `*Email:* ${emailStr}\n` +
+                            `*Alamat:* ${alamatStr}\n` +
+                            `*SIM:* ${simStr}\n` +
+                            `*Bisa Mengemudi:* ${nyupirStr}\n` +
+                            `*Pengalaman Kerja:* ${pglmnStr}\n\n` +
+                            `*Dokumen:*\n${docLines}`;
                           navigator.clipboard.writeText(text);
                           showToast("success", "Tersalin", "Data pelamar berhasil disalin untuk WhatsApp.");
                         }}
@@ -890,16 +1002,29 @@ export default function RecruitmentPage() {
                   </div>
                 )}
 
-                {detail.cv_url && (
-                  <a href={detail.cv_url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-4 py-3 rounded-xl border border-border hover:border-primary/30 hover:bg-primary-light/10 transition-colors">
-                    <FileText className="w-5 h-5 text-primary" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-foreground">Curriculum Vitae</p>
-                      <p className="text-[10px] text-muted-foreground">Klik untuk membuka PDF</p>
-                    </div>
-                    <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                  </a>
+                {DOC_TYPES.some((t) => detail[DOC_CONFIG[t].urlField]) && (
+                  <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-1">Dokumen Pelamar</p>
+                    {DOC_TYPES.map((type) => {
+                      const cfg = DOC_CONFIG[type];
+                      const Icon = cfg.icon;
+                      const url = detail[cfg.urlField] as string | null;
+                      if (!url) return null;
+                      return (
+                        <a key={type} href={url} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-border bg-card hover:border-primary/30 hover:bg-primary-light/10 transition-colors">
+                          <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center flex-shrink-0">
+                            <Icon className="w-4 h-4 text-primary" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground">{cfg.label}</p>
+                            <p className="text-[10px] text-muted-foreground truncate">{url.split("/").pop()}</p>
+                          </div>
+                          <ExternalLink className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                        </a>
+                      );
+                    })}
+                  </div>
                 )}
 
                 {detail.catatan && (
@@ -998,6 +1123,57 @@ export default function RecruitmentPage() {
                   }}>
                   {statusChanging ? "Menyimpan..." : "Terima"}
                 </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ DOKUMEN MODAL ═══ */}
+      {docsModalRec && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDocsModalId(null)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">Dokumen Pelamar</h3>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{docsModalRec.nama}</p>
+                </div>
+                <button onClick={() => setDocsModalId(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="p-5 space-y-2">
+                {DOC_TYPES.map((type) => {
+                  const cfg = DOC_CONFIG[type];
+                  const Icon = cfg.icon;
+                  const url = docsModalRec[cfg.urlField] as string | null;
+                  const required = cfg.required(docsModalRec.posisi_dilamar);
+                  return (
+                    <div key={type} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-border bg-muted/20">
+                      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0",
+                        url ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                          {cfg.label}
+                          {required && <span className="text-[9px] font-bold text-danger">*</span>}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {url ? "Sudah diupload" : required ? "Wajib, belum ada" : "Tidak dilampirkan"}
+                        </p>
+                      </div>
+                      {url ? (
+                        <a href={url} target="_blank" rel="noopener noreferrer"
+                          className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary" title="Buka di tab baru">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground italic">-</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

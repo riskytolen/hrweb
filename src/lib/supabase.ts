@@ -242,6 +242,9 @@ export interface DbRecruitment {
   alamat: string | null;
   sim: string | null;
   cv_url: string | null;
+  ktp_url: string | null;
+  pas_foto_url: string | null;
+  sim_url: string | null;
   status: "Lamaran Masuk" | "Terpilih" | "Training" | "Diterima" | "Ditolak";
   catatan: string | null;
   tanggal_training_mulai: string | null;
