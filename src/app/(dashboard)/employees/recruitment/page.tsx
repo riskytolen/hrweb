@@ -738,6 +738,10 @@ export default function RecruitmentPage() {
                     <Select value={form.status} onChange={(val) => setForm({ ...form, status: val })}
                       options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))} />
                   </div>
+                  <div className="col-span-2 mt-1 pt-3 border-t border-border/60">
+                    <p className="text-[10px] font-bold text-foreground uppercase tracking-wider">Dokumen Pelamar</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Format JPG/PNG, maksimal 2MB per file</p>
+                  </div>
                   {DOC_TYPES.map((type) => {
                     const cfg = DOC_CONFIG[type];
                     const Icon = cfg.icon;
@@ -748,17 +752,19 @@ export default function RecruitmentPage() {
                     const existingRow = editingId !== null ? list.find((r) => r.id === editingId) : null;
                     const existingUrl = existingRow?.[cfg.urlField] as string | null;
                     return (
-                      <div key={type}>
-                        <label className={cn("text-xs font-semibold mb-1.5 flex items-center gap-1.5",
-                          hasError ? "text-danger" : "text-foreground")}>
-                          <Icon className="w-3.5 h-3.5" />
-                          Upload {cfg.label} (JPG/PNG, maks 300KB)
-                          {required && <span className="text-danger">*</span>}
+                      <div key={type} className="space-y-1">
+                        <div className="flex items-center justify-between min-h-[18px]">
+                          <label className={cn("text-xs font-semibold flex items-center gap-1.5",
+                            hasError ? "text-danger" : "text-foreground")}>
+                            <Icon className="w-3.5 h-3.5" />
+                            {cfg.label}
+                            {required && <span className="text-danger">*</span>}
+                          </label>
                           {type === "sim" && !required && (
-                            <span className="text-[10px] font-normal text-muted-foreground">(khusus Driver)</span>
+                            <span className="text-[10px] text-muted-foreground">Driver only</span>
                           )}
-                        </label>
-                        <label className={cn("flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border-2 border-dashed text-xs transition-all",
+                        </div>
+                        <label className={cn("flex items-center justify-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed text-xs transition-all",
                           compressing
                             ? "border-warning/40 bg-warning/5 text-warning cursor-wait pointer-events-none"
                             : file
@@ -785,8 +791,8 @@ export default function RecruitmentPage() {
                           }} />
                         </label>
                         {existingUrl && !file && !compressing && (
-                          <a href={existingUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-success hover:underline mt-1 inline-flex items-center gap-1">
-                            <Paperclip className="w-2.5 h-2.5" />{cfg.label} sudah ada — klik untuk melihat
+                          <a href={existingUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-success hover:underline inline-flex items-center gap-1">
+                            <Paperclip className="w-2.5 h-2.5" />Sudah ada — klik untuk melihat
                           </a>
                         )}
                       </div>

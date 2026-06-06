@@ -1,7 +1,7 @@
 import imageCompression from "browser-image-compression";
 
-/** Batas ukuran file maksimal (300KB) */
-export const MAX_FILE_SIZE = 300 * 1024; // 300KB
+/** Batas ukuran file maksimal (2MB) */
+export const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
 /** Cek apakah file adalah gambar */
 const isImage = (file: File): boolean =>
@@ -29,18 +29,18 @@ export type CompressionResult =
  * Kompres file sebelum upload ke Supabase Storage.
  *
  * - **Gambar**: dikompres otomatis menggunakan browser-image-compression
- *   (target max 1MB, resolusi max 1920px, kualitas JPEG/WebP disesuaikan).
- * - **PDF**: hanya divalidasi ukurannya (max 1MB). Kompresi PDF di browser
+ *   (target max 2MB, resolusi max 1600px, kualitas JPEG/PNG disesuaikan).
+ * - **PDF**: hanya divalidasi ukurannya (max 2MB). Kompresi PDF di browser
  *   tidak praktis, jadi hanya dibatasi ukurannya.
  * - **File lain**: ditolak.
  *
  * @param file - File yang akan dikompres
- * @param maxSizeMB - Ukuran maksimal dalam MB (default: 1)
+ * @param maxSizeKB - Ukuran maksimal dalam KB (default: 2048 = 2MB)
  * @returns CompressionResult
  */
 export async function compressFile(
   file: File,
-  maxSizeKB: number = 300
+  maxSizeKB: number = 2048
 ): Promise<CompressionResult> {
   const maxSizeBytes = maxSizeKB * 1024;
   const maxSizeMB = maxSizeKB / 1024;
