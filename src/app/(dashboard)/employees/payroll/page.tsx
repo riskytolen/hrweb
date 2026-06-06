@@ -28,6 +28,7 @@ import {
   FileCheck,
   RotateCcw,
   BarChart3,
+  Archive,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -1623,6 +1624,20 @@ export default function PayrollPage() {
   return (
     <RouteGuard permission="payroll">
     <div className="space-y-6 animate-fade-in">
+      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-4 py-3 flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center flex-shrink-0">
+          <Archive className="w-4 h-4 text-amber-700 dark:text-amber-300" />
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Mode Arsip (Read-Only)</p>
+          <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5">
+            Halaman ini sudah digantikan oleh{" "}
+            <a href="/employees/penggajian" className="underline font-semibold">Penggajian v2</a>{" "}
+            dengan workflow 3-status (DRAFT → REVIEWED → FINAL) dan UI/UX modern.
+            Halaman ini hanya untuk melihat data historis.
+          </p>
+        </div>
+      </div>
       <PageHeader
         title="Penggajian"
         description="Kelola slip gaji pegawai perusahaan"

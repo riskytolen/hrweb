@@ -164,18 +164,40 @@ export interface DbPayroll {
   total_potongan: number;
   // Netto
   netto: number;
-  status: "Worksheet" | "Draft" | "Final";
+  status: "DRAFT" | "REVIEWED" | "FINAL" | "Worksheet" | "Draft" | "Final";
   catatan: string | null;
   created_at: string;
   updated_at: string;
-  /** Kapan worksheet terakhir di-recompute. NULL untuk slip Draft/Final. */
+  /** Kapan worksheet terakhir di-recompute. NULL untuk slip DRAFT/REVIEWED/FINAL. */
   last_recomputed_at: string | null;
   /** Snapshot auto-computed nilai gapok saat worksheet di-compute. Untuk audit. */
   source_gaji_pokok: number | null;
   source_titik: number | null;
   source_lembur: number | null;
+  // ─── v2 workflow columns ───
+  /** Optimistic locking counter, increment setiap update. */
+  version: number;
+  /** Snapshot data lengkap saat hitung: {gaji_pokok, total_titik, total_lembur, formula, computed_at}. */
+  snapshot_data: PayrollSnapshot | null;
+  /** Kapan slip di-review (status=REVIEWED). */
+  reviewed_at: string | null;
+  /** User yang me-review slip. */
+  reviewed_by: string | null;
+  /** Kapan slip di-finalkan (status=FINAL). Locked. */
+  locked_at: string | null;
+  /** User yang memfinalkan slip. */
+  locked_by: string | null;
   // joined
   pegawai?: DbPegawai;
+}
+
+/** Snapshot data source saat hitung worksheet. */
+export interface PayrollSnapshot {
+  gaji_pokok: number;
+  total_titik: number;
+  total_lembur: number;
+  formula: string;
+  computed_at: string;
 }
 
 export interface DbDeliveryStatus {
