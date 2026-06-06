@@ -339,21 +339,74 @@ export default function RecruitmentPage() {
     const targetId = deleteConfirm.id;
     setDeleting(true);
     try {
-      const row = list.find((r) => r.id === targetId);
-      // Hapus semua file dokumen dari storage
-      for (const type of DOC_TYPES) {
-        const url = row?.[DOC_CONFIG[type].urlField] as string | null;
-        if (url) await deleteOldDoc(url);
+      // 1) Fetch row terbaru dari DB (bukan dari state lokal yang mungkin stale)
+      const { data: row, error: fetchErr } = await supabase
+        .from("recruitments")
+        .select("*")
+        .eq("id", targetId)
+        .maybeSingle();
+
+      if (fetchErr) {
+        showToast("error", "Gagal Menghapus", `Gagal mengambil data: ${fetchErr.message}`);
+        return;
+      }
+      if (!row) {
+        // Row sudah tidak ada — anggap sukses, sinkronkan state lokal
+        setList((prev) => prev.filter((r) => r.id !== targetId));
+        showToast("success", "Data Dihapus", "Data pelamar sudah tidak ada di database.");
+        return;
       }
 
+      // 2) Kumpulkan semua path file dari 4 kolom url, batch remove dari storage
+      const filePaths: string[] = [];
+      const fileErrors: string[] = [];
+      for (const type of DOC_TYPES) {
+        const url = row[DOC_CONFIG[type].urlField] as string | null;
+        if (!url) continue;
+        const path = url.split("/recruitment-docs/")[1];
+        if (path) filePaths.push(path);
+      }
+
+      if (filePaths.length > 0) {
+        const { error: storageErr } = await supabase.storage
+          .from("recruitment-docs")
+          .remove(filePaths);
+        if (storageErr) {
+          // Lanjut hapus DB row — orphaned files masih bisa di-bersihkan manual
+          fileErrors.push(storageErr.message);
+        }
+      }
+
+      // 3) Hapus row dari DB
       const { error } = await supabase.from("recruitments").delete().eq("id", targetId);
       if (error) {
         showToast("error", "Gagal Menghapus", error.message);
         return;
       }
 
+      // 4) Audit log (best-effort, jangan gagalkan delete)
+      await logAudit({
+        supabase,
+        action: "delete",
+        entityType: "recruitments",
+        entityId: targetId,
+        entityLabel: row.nama,
+        oldData: { ...row } as unknown as Record<string, unknown>,
+        metadata: {
+          files_deleted: filePaths.length,
+          files_failed: fileErrors.length,
+          file_errors: fileErrors.length > 0 ? fileErrors.join("; ") : null,
+        },
+      });
+
       setList((prev) => prev.filter((r) => r.id !== targetId));
-      showToast("success", "Data Dihapus", "Data pelamar dan semua dokumen telah dihapus.");
+      if (fileErrors.length > 0) {
+        showToast("error", "Data Dihapus, File Sebagian Gagal",
+          `${filePaths.length - fileErrors.length} file terhapus, ${fileErrors.length} gagal: ${fileErrors[0]}`);
+      } else {
+        showToast("success", "Data Dihapus",
+          `Pelamar "${row.nama}" dan ${filePaths.length} dokumen telah dihapus.`);
+      }
     } catch (err) {
       showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menghapus data.");
     } finally {
