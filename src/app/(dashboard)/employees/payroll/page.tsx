@@ -1616,19 +1616,6 @@ export default function PayrollPage() {
                 }}>
                   Export PDF
                 </Button>
-                {activeMainTab === "draft" && filtered.length > 0 && (
-                  <Button
-                    variant="primary"
-                    icon={ShieldCheck}
-                    size="sm"
-                    onClick={() => {
-                      setSelectedIds(new Set(filtered.map((r) => r.id)));
-                      setBulkFinalConfirm(true);
-                    }}
-                  >
-                    Finalkan ({filtered.length})
-                  </Button>
-                )}
                 <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing || loading}>
                   {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
                 </Button>
@@ -1930,6 +1917,30 @@ export default function PayrollPage() {
         )
       ) : (
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
+        {activeMainTab === "draft" && filtered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-border bg-card">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-success to-success/70 flex items-center justify-center shadow-sm shadow-success/20 flex-shrink-0">
+                <ShieldCheck className="w-4 h-4 text-white" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-foreground">Draft Penggajian</h2>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Review slip, lalu finalkan untuk mengunci</p>
+              </div>
+            </div>
+            <Button
+              variant="primary"
+              icon={ShieldCheck}
+              size="sm"
+              onClick={() => {
+                setSelectedIds(new Set(filtered.map((r) => r.id)));
+                setBulkFinalConfirm(true);
+              }}
+            >
+              Finalkan ({filtered.length})
+            </Button>
+          </div>
+        )}
         <BatchActionBar
           count={selectedIds.size}
           onClear={() => setSelectedIds(new Set())}
