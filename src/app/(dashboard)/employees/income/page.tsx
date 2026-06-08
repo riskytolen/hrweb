@@ -29,7 +29,7 @@ import Portal from "@/components/ui/Portal";
 import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
-import { supabase, type DbDeliveryPoint, type DbDeliveryStatus } from "@/lib/supabase";
+import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import ReportDetail from "./ReportDetail";
 import { useAuth } from "@/components/AuthProvider";
@@ -39,6 +39,12 @@ type EmployeeLite = { id: string; nama: string; status: string };
 type ZoneLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
 type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; zoneNama?: string; zoneColor?: string; statusNama?: string; statusColor?: string };
+type DeliveryQueryRow = DbDeliveryPoint & {
+  pegawai?: { nama: string | null } | null;
+  delivery_zones?: { nama: string | null; color: string | null } | null;
+  delivery_statuses?: { nama: string | null; kode?: string | null; color: string | null } | null;
+};
+type QueryError = { message: string };
 
 // Batch form row
 type BatchRow = {
@@ -56,6 +62,8 @@ type BatchRow = {
 
 const DEFAULT_BLANK_ROWS = 10;
 const ADD_ROWS_BATCH = 5;
+const DELIVERY_SELECT = "*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)";
+const DELIVERY_FETCH_CHUNK_SIZE = 1000;
 
 const blankRow = (): BatchRow => ({
   rowKey: nextRowKey(),
@@ -78,6 +86,43 @@ const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
 function parseLocalDateStr(dateStr: string): Date {
   const [year, month, day] = dateStr.split("-").map(Number);
   return new Date(year, month - 1, day);
+}
+
+function mapDeliveryRow(d: DeliveryQueryRow): DeliveryRow {
+  return {
+    ...d,
+    employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
+    zoneNama: d.delivery_zones?.nama || "-",
+    zoneColor: d.delivery_zones?.color || "#3b82f6",
+    statusNama: d.delivery_statuses?.nama || undefined,
+    statusColor: d.delivery_statuses?.color || undefined,
+  };
+}
+
+async function fetchDeliveryRowsInRange(start: string, end: string, ascending: boolean): Promise<{ data: DeliveryQueryRow[]; error: QueryError | null }> {
+  const rows: DeliveryQueryRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("delivery_points")
+      .select(DELIVERY_SELECT)
+      .gte("tanggal", start)
+      .lte("tanggal", end)
+      .order("tanggal", { ascending })
+      .order("id", { ascending: true })
+      .range(from, from + DELIVERY_FETCH_CHUNK_SIZE - 1);
+
+    if (error) return { data: rows, error };
+
+    const pageRows = (data || []) as DeliveryQueryRow[];
+    rows.push(...pageRows);
+
+    if (pageRows.length < DELIVERY_FETCH_CHUNK_SIZE) break;
+    from += DELIVERY_FETCH_CHUNK_SIZE;
+  }
+
+  return { data: rows, error: null };
 }
 
 /** Hitung periode tutup buku: tgl 8 bulan ini s/d tgl 7 bulan berikutnya */
@@ -184,23 +229,10 @@ export default function IncomePage() {
   };
 
   const fetchDeliveries = async () => {
-    const { data, error } = await supabase
-      .from("delivery_points")
-      .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
-      .gte("tanggal", period.start)
-      .lte("tanggal", period.end)
-      .order("tanggal", { ascending: false })
-      .order("id", { ascending: true });
+    const { data, error } = await fetchDeliveryRowsInRange(period.start, period.end, false);
     if (error) { showToast("error", "Gagal Memuat Data Titik", error.message); return; }
     if (data) {
-      const mapped = data.map((d) => ({
-        ...d,
-        employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
-        zoneNama: d.delivery_zones?.nama || "-",
-        zoneColor: d.delivery_zones?.color || "#3b82f6",
-        statusNama: d.delivery_statuses?.nama || null,
-        statusColor: d.delivery_statuses?.color || null,
-      })) as DeliveryRow[];
+      const mapped = data.map(mapDeliveryRow);
       mapped.sort((a, b) => {
         const dateCompare = b.tanggal.localeCompare(a.tanggal);
         if (dateCompare !== 0) return dateCompare;
@@ -518,8 +550,8 @@ export default function IncomePage() {
       employeeNama: updated.pegawai?.nama || updated.employee_nama || updated.employee_id || "?",
       zoneNama: updated.delivery_zones?.nama || "-",
       zoneColor: updated.delivery_zones?.color || "#3b82f6",
-      statusNama: updated.delivery_statuses?.nama || null,
-      statusColor: updated.delivery_statuses?.color || null,
+      statusNama: updated.delivery_statuses?.nama || undefined,
+      statusColor: updated.delivery_statuses?.color || undefined,
     };
     setDeliveries((prev) => prev.map((d) => d.id === editingId ? mappedRow : d));
 
@@ -838,23 +870,12 @@ export default function IncomePage() {
       setCalEditCell(null);
       // Re-fetch calendar data
       const cp = getPeriodRange(calMonth);
-      const { data } = await supabase
-        .from("delivery_points")
-        .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
-        .gte("tanggal", cp.start)
-        .lte("tanggal", cp.end)
-        .order("tanggal");
+      const { data, error } = await fetchDeliveryRowsInRange(cp.start, cp.end, true);
+      if (error) { showToast("error", "Gagal Memuat Data Kalender", error.message); return; }
       if (data) {
         setDeliveries((prev) => {
           const others = prev.filter((d) => d.tanggal < cp.start || d.tanggal > cp.end);
-          const calRows = data.map((d) => ({
-            ...d,
-            employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
-            zoneNama: d.delivery_zones?.nama || "-",
-            zoneColor: d.delivery_zones?.color || "#3b82f6",
-            statusNama: d.delivery_statuses?.nama || null,
-            statusColor: d.delivery_statuses?.color || null,
-          })) as DeliveryRow[];
+          const calRows = data.map(mapDeliveryRow);
           return [...others, ...calRows];
         });
       }
@@ -890,24 +911,12 @@ export default function IncomePage() {
     if (!showCalendar) return;
     const fetchCalData = async () => {
       const cp = getPeriodRange(calMonth);
-      const { data, error } = await supabase
-        .from("delivery_points")
-        .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
-        .gte("tanggal", cp.start)
-        .lte("tanggal", cp.end)
-        .order("tanggal");
+      const { data, error } = await fetchDeliveryRowsInRange(cp.start, cp.end, true);
       if (error) { showToast("error", "Gagal Memuat Data Kalender", error.message); return; }
       if (data) {
         setDeliveries((prev) => {
           const others = prev.filter((d) => d.tanggal < cp.start || d.tanggal > cp.end);
-          const calRows = data.map((d) => ({
-            ...d,
-            employeeNama: d.pegawai?.nama || d.employee_nama || d.employee_id || "?",
-            zoneNama: d.delivery_zones?.nama || "-",
-            zoneColor: d.delivery_zones?.color || "#3b82f6",
-            statusNama: d.delivery_statuses?.nama || null,
-            statusColor: d.delivery_statuses?.color || null,
-          })) as DeliveryRow[];
+          const calRows = data.map(mapDeliveryRow);
           return [...others, ...calRows];
         });
       }

@@ -23,6 +23,13 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
 
+type DeliveryQueryRow = DbDeliveryPoint & {
+  pegawai?: { nama: string | null } | null;
+  delivery_zones?: { nama: string | null; color: string | null } | null;
+  delivery_statuses?: { nama: string | null; kode?: string | null; color: string | null } | null;
+};
+type QueryError = { message: string };
+
 type ZoneLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
 
@@ -65,6 +72,34 @@ interface ReportDetailProps {
 }
 
 const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
+const DELIVERY_SELECT = "*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)";
+const DELIVERY_FETCH_CHUNK_SIZE = 1000;
+
+async function fetchDeliveryRowsInRange(start: string, end: string): Promise<{ data: DeliveryQueryRow[]; error: QueryError | null }> {
+  const rows: DeliveryQueryRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("delivery_points")
+      .select(DELIVERY_SELECT)
+      .gte("tanggal", start)
+      .lte("tanggal", end)
+      .order("tanggal", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + DELIVERY_FETCH_CHUNK_SIZE - 1);
+
+    if (error) return { data: rows, error };
+
+    const pageRows = (data || []) as DeliveryQueryRow[];
+    rows.push(...pageRows);
+
+    if (pageRows.length < DELIVERY_FETCH_CHUNK_SIZE) break;
+    from += DELIVERY_FETCH_CHUNK_SIZE;
+  }
+
+  return { data: rows, error: null };
+}
 
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
   const [year, month] = periodKey.split("-").map(Number);
@@ -148,19 +183,14 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     if (!s || !e) return;
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("delivery_points")
-      .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
-      .gte("tanggal", s)
-      .lte("tanggal", e)
-      .order("tanggal", { ascending: true });
+    const { data, error } = await fetchDeliveryRowsInRange(s, e);
 
     if (error) {
       setLoading(false);
       return;
     }
 
-    processData(data || []);
+    processData(data);
     setLoading(false);
   }, [dateMode, periodKey, customStart, customEnd]);
 
