@@ -60,6 +60,16 @@ type BatchRow = {
   status_id: number;
 };
 
+type SingleForm = {
+  tanggal: string;
+  employee_id: string;
+  zone_id: number;
+  role: "Driver" | "Helper";
+  jumlah_titik: string;
+  catatan: string;
+  status_id: number;
+};
+
 const DEFAULT_BLANK_ROWS = 10;
 const ADD_ROWS_BATCH = 5;
 const DELIVERY_SELECT = "*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)";
@@ -71,6 +81,16 @@ const blankRow = (): BatchRow => ({
   nama: "",
   zone_id: 0,
   role: "",
+  jumlah_titik: "",
+  catatan: "",
+  status_id: 0,
+});
+
+const blankSingleForm = (): SingleForm => ({
+  tanggal: localDateStr(),
+  employee_id: "",
+  zone_id: 0,
+  role: "Driver",
   jumlah_titik: "",
   catatan: "",
   status_id: 0,
@@ -196,6 +216,12 @@ export default function IncomePage() {
   const [duplicateInfo, setDuplicateInfo] = useState<{ newRows: Record<string, unknown>[]; updateRows: { id: number; data: Record<string, unknown> }[]; dupCount: number }>({ newRows: [], updateRows: [], dupCount: 0 });
   const [dbDuplicateRowKeys, setDbDuplicateRowKeys] = useState<Set<string>>(new Set());
 
+  // ─── Single Input State ───
+  const [showSingleForm, setShowSingleForm] = useState(false);
+  const [singleForm, setSingleForm] = useState<SingleForm>(() => blankSingleForm());
+  const [singleSaving, setSingleSaving] = useState(false);
+  const [singleError, setSingleError] = useState("");
+
   // ─── Edit single row ───
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -257,10 +283,106 @@ export default function IncomePage() {
   useEffect(() => { fetchDeliveries(); }, [periodKey]);
 
   useEffect(() => {
-    if (showBatch || showEditForm || showCalendar || showReport) document.body.style.overflow = "hidden";
+    if (showBatch || showSingleForm || showEditForm || showCalendar || showReport) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showBatch, showEditForm, showCalendar, showReport]);
+  }, [showBatch, showSingleForm, showEditForm, showCalendar, showReport]);
+
+  // ─── Single input handlers ───
+  const openSingle = () => {
+    setSingleForm(blankSingleForm());
+    setSingleError("");
+    setShowSingleForm(true);
+  };
+
+  const handleSingleSave = async () => {
+    if (!singleForm.tanggal || !singleForm.employee_id || !singleForm.zone_id || !singleForm.role || !hasPointInput(singleForm.jumlah_titik)) return;
+    setSingleSaving(true);
+    setSingleError("");
+
+    try {
+      const employee = employees.find((e) => e.id === singleForm.employee_id);
+      if (!employee) {
+        setSingleError("Pegawai tidak ditemukan.");
+        return;
+      }
+
+      const { data: existing, error: duplicateError } = await supabase
+        .from("delivery_points")
+        .select("id")
+        .eq("employee_id", singleForm.employee_id)
+        .eq("tanggal", singleForm.tanggal)
+        .eq("zone_id", singleForm.zone_id)
+        .eq("role", singleForm.role)
+        .limit(1);
+
+      if (duplicateError) {
+        showToast("error", "Gagal Cek Duplikat", duplicateError.message);
+        return;
+      }
+      if (existing && existing.length > 0) {
+        setSingleError("Data pegawai dengan tanggal, nama titik, dan posisi ini sudah ada.");
+        return;
+      }
+
+      const { data: rateData, error: rateError } = await supabase
+        .from("point_rates")
+        .select("rate_per_point")
+        .eq("zone_id", singleForm.zone_id)
+        .eq("role", singleForm.role)
+        .eq("status", "Aktif")
+        .maybeSingle();
+
+      if (rateError) {
+        showToast("error", "Gagal Mengambil Tarif", rateError.message);
+        return;
+      }
+      if (!rateData) {
+        setSingleError("Tarif aktif untuk nama titik dan posisi ini belum tersedia.");
+        return;
+      }
+
+      const payload = {
+        employee_id: employee.id,
+        employee_nama: employee.nama,
+        zone_id: singleForm.zone_id,
+        role: singleForm.role,
+        tanggal: singleForm.tanggal,
+        jumlah_titik: parsePointInput(singleForm.jumlah_titik),
+        rate_per_point: rateData.rate_per_point,
+        catatan: singleForm.catatan || null,
+        status_id: singleForm.status_id || null,
+      };
+
+      const { data: inserted, error: insertError } = await supabase
+        .from("delivery_points")
+        .insert(payload)
+        .select(DELIVERY_SELECT)
+        .single();
+
+      if (insertError || !inserted) {
+        showToast("error", "Gagal Menyimpan", insertError?.message || "Gagal mendapat data terbaru.");
+        return;
+      }
+
+      await logAudit({
+        supabase,
+        action: "manual_input",
+        entityType: "delivery_points",
+        entityId: inserted.id,
+        entityLabel: `Rekap titik ${employee.nama} (${singleForm.tanggal})`,
+        newData: payload as unknown as Record<string, unknown>,
+      });
+
+      setShowSingleForm(false);
+      await fetchDeliveries();
+      showToast("success", "Input Titik Berhasil", "1 data pegawai berhasil disimpan.");
+    } catch (err) {
+      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal menyimpan data.");
+    } finally {
+      setSingleSaving(false);
+    }
+  };
 
   // ─── Batch handlers ───
   const openBatch = () => {
@@ -650,6 +772,7 @@ export default function IncomePage() {
     }
   });
   const batchCanSave = batchFilled > 0 && batchIncomplete.length === 0 && batchDuplicateKeys.size === 0 && !!batchDate;
+  const singleCanSave = !!singleForm.tanggal && !!singleForm.employee_id && !!singleForm.zone_id && !!singleForm.role && hasPointInput(singleForm.jumlah_titik);
 
   // ─── Calendar data (periode tutup buku) ───
   const calPeriod = getPeriodRange(calMonth);
@@ -945,11 +1068,13 @@ export default function IncomePage() {
             <div className="hidden sm:flex items-center gap-2">
               <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowReport(true)}>Laporan Detail</Button>
               <Button variant="outline" icon={CalendarDays} size="sm" onClick={openCalendar}>Mode Kalender</Button>
-              {canInput && <Button icon={Plus} size="sm" onClick={openBatch}>Input Titik</Button>}
+              {canInput && <Button variant="outline" icon={User} size="sm" onClick={openSingle}>Input Tunggal</Button>}
+              {canInput && <Button icon={Users} size="sm" onClick={openBatch}>Input Bulk</Button>}
             </div>
             {/* Mobile: primary action + dropdown menu */}
             <div className="flex sm:hidden items-center gap-1.5">
-              {canInput && <Button icon={Plus} size="sm" onClick={openBatch}>Input</Button>}
+              {canInput && <Button variant="outline" icon={User} size="sm" onClick={openSingle}>Tunggal</Button>}
+              {canInput && <Button icon={Users} size="sm" onClick={openBatch}>Bulk</Button>}
               <_HeaderMenu
                 onShowReport={() => setShowReport(true)}
                 onOpenCalendar={openCalendar}
@@ -1477,6 +1602,119 @@ export default function IncomePage() {
                 </div>
               </div>
             )}
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ SINGLE INPUT MODAL ═══ */}
+      {showSingleForm && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !singleSaving && setShowSingleForm(false)} />
+            <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <User className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-foreground">Input Titik Tunggal</h2>
+                    <p className="text-[11px] text-muted-foreground">Simpan satu pegawai untuk satu tanggal</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowSingleForm(false)} disabled={singleSaving} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50"><X className="w-4 h-4" /></button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {singleError && (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{singleError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal</label>
+                    <DatePicker value={singleForm.tanggal} onChange={(val) => { setSingleForm({ ...singleForm, tanggal: val }); setSingleError(""); }} placeholder="Pilih tanggal" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Pegawai</label>
+                    <Select
+                      value={singleForm.employee_id}
+                      onChange={(val) => { setSingleForm({ ...singleForm, employee_id: val }); setSingleError(""); }}
+                      options={employees.map((e) => ({
+                        value: e.id,
+                        label: e.status === "Training" ? `${e.nama}  • Training` : e.nama,
+                      }))}
+                      placeholder="Pilih pegawai"
+                      searchable
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Titik</label>
+                    <Select
+                      value={singleForm.zone_id ? String(singleForm.zone_id) : ""}
+                      onChange={(val) => { setSingleForm({ ...singleForm, zone_id: parseInt(val) || 0 }); setSingleError(""); }}
+                      options={zones.map((d) => ({ value: String(d.id), label: d.nama }))}
+                      placeholder="Pilih nama titik"
+                      searchable
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Posisi</label>
+                    <Select
+                      value={singleForm.role}
+                      onChange={(val) => { setSingleForm({ ...singleForm, role: val as "Driver" | "Helper" }); setSingleError(""); }}
+                      options={[{ value: "Driver", label: "Driver" }, { value: "Helper", label: "Helper" }]}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Jumlah Titik</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={singleForm.jumlah_titik}
+                      onChange={(e) => { setSingleForm({ ...singleForm, jumlah_titik: e.target.value }); setSingleError(""); }}
+                      className={inputClass}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Status <span className="text-muted-foreground font-normal">(opsional)</span></label>
+                    <Select
+                      value={String(singleForm.status_id || "")}
+                      onChange={(val) => { setSingleForm({ ...singleForm, status_id: parseInt(val) || 0 }); setSingleError(""); }}
+                      options={[{ value: "", label: "Tidak ada" }, ...dStatuses.map((s) => ({ value: String(s.id), label: s.nama }))]}
+                      placeholder="Pilih status"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan <span className="text-muted-foreground font-normal">(opsional)</span></label>
+                  <input
+                    type="text"
+                    value={singleForm.catatan}
+                    onChange={(e) => setSingleForm({ ...singleForm, catatan: e.target.value })}
+                    className={inputClass}
+                    placeholder="Tambahkan catatan jika perlu"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+                <Button variant="outline" size="sm" onClick={() => setShowSingleForm(false)} disabled={singleSaving}>Batal</Button>
+                <Button size="sm" icon={Check} onClick={handleSingleSave} disabled={singleSaving || !singleCanSave}>
+                  {singleSaving ? "Menyimpan..." : "Simpan Data"}
+                </Button>
+              </div>
+            </div>
           </div>
         </Portal>
       )}
