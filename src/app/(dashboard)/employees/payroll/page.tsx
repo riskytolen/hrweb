@@ -1943,7 +1943,7 @@ export default function PayrollPage() {
           </div>
         )}
         {activeMainTab === "final" && filtered.length > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-border bg-emerald-50/80 dark:bg-emerald-900/20">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-border bg-emerald-50/40 dark:bg-emerald-500/[0.04]">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-sm shadow-emerald-500/20 flex-shrink-0">
                 <Lock className="w-4 h-4 text-white" />
@@ -2188,18 +2188,18 @@ export default function PayrollPage() {
               <div className={cn(
                 "flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0 bg-gradient-to-r",
                 selectedPayroll.status === "Final"
-                  ? "from-emerald-50 via-card to-card dark:from-emerald-900/20 dark:via-card"
+                  ? "from-emerald-50/80 via-card to-card dark:from-emerald-500/[0.08] dark:via-card"
                   : "from-card via-card to-primary/[0.03]"
               )}>
                 <div className="flex items-center gap-3">
                   <div className={cn(
                     "w-9 h-9 rounded-xl flex items-center justify-center",
                     selectedPayroll.status === "Final"
-                      ? "bg-emerald-100 dark:bg-emerald-900/40"
+                      ? "bg-emerald-100 dark:bg-emerald-500/15"
                       : "bg-primary-light"
                   )}>
                     {selectedPayroll.status === "Final" ? (
-                      <Lock className="w-4.5 h-4.5 text-emerald-600 dark:text-emerald-400" />
+                      <Lock className="w-4.5 h-4.5 text-emerald-700 dark:text-emerald-300" />
                     ) : (
                       <FileText className="w-4.5 h-4.5 text-primary" />
                     )}
@@ -2219,13 +2219,13 @@ export default function PayrollPage() {
 
               {/* Lock banner untuk Final */}
               {selectedPayroll.status === "Final" && (
-                <div className="mx-6 mt-5 px-3 py-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 flex items-center gap-2.5 flex-shrink-0">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center flex-shrink-0">
-                    <Lock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <div className="mx-6 mt-5 px-3 py-2.5 rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-500/[0.06] flex items-center gap-2.5 flex-shrink-0">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                    <Lock className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300 leading-tight">Slip Terkunci</p>
-                    <p className="text-[10px] text-emerald-700 dark:text-emerald-400 leading-tight mt-0.5">Difinalkan dan siap untuk pembayaran. Tidak dapat diedit.</p>
+                    <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200 leading-tight">Slip Terkunci</p>
+                    <p className="text-[10px] text-emerald-700/80 dark:text-emerald-300/80 leading-tight">Difinalkan dan siap untuk pembayaran. Tidak dapat diedit.</p>
                   </div>
                 </div>
               )}
@@ -2266,7 +2266,7 @@ export default function PayrollPage() {
                                   className={cn(
                                     inputClass,
                                     "pl-9 text-right",
-                                    (f.readonly || selectedPayroll.status === "Final") && "bg-slate-100/80 dark:bg-slate-800/80 text-muted-foreground cursor-not-allowed opacity-70"
+                                    (f.readonly || selectedPayroll.status === "Final") && "bg-muted/60 text-muted-foreground cursor-not-allowed"
                                   )}
                                 />
                               </div>
@@ -2351,7 +2351,7 @@ export default function PayrollPage() {
                                 className={cn(
                                   inputClass,
                                   "pl-9 text-right",
-                                  (f.readonly || selectedPayroll.status === "Final") && "bg-slate-100/80 dark:bg-slate-800/80 text-muted-foreground cursor-not-allowed opacity-70"
+                                  (f.readonly || selectedPayroll.status === "Final") && "bg-muted/60 text-muted-foreground cursor-not-allowed"
                                 )}
                               />
                             </div>

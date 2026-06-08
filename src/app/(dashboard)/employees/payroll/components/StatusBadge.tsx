@@ -17,16 +17,16 @@ const config: Record<
   },
   Draft: {
     label: "Draft",
-    bg: "bg-amber-500",
-    text: "text-white",
-    border: "border-amber-600",
+    bg: "bg-amber-50 dark:bg-amber-900/20",
+    text: "text-amber-700 dark:text-amber-300",
+    border: "border-amber-200 dark:border-amber-800",
     icon: FileEdit,
   },
   Final: {
     label: "Final",
-    bg: "bg-emerald-500",
-    text: "text-white",
-    border: "border-emerald-600",
+    bg: "bg-emerald-50 dark:bg-emerald-900/20",
+    text: "text-emerald-700 dark:text-emerald-300",
+    border: "border-emerald-200 dark:border-emerald-800",
     icon: ShieldCheck,
   },
 };
