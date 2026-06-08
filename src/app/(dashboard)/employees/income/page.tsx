@@ -101,8 +101,8 @@ const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
-const filterSelectClass = "w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10";
-const tableHeaderFilterClass = "mt-2 w-full min-w-[140px] rounded-lg border border-border bg-card px-2 py-1.5 text-[11px] font-medium normal-case tracking-normal text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
+const filterSelectClass = "normal-case tracking-normal";
+const tableHeaderFilterClass = "mt-2 min-w-[140px] normal-case tracking-normal";
 const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
 
 function parseLocalDateStr(dateStr: string): Date {
@@ -742,6 +742,9 @@ export default function IncomePage() {
   const zoneFilterOptions = Array.from(new Map(deliveries.map((d) => [String(d.zone_id), d.zoneNama || "-"])).entries())
     .map(([value, label]) => ({ value, label }))
     .sort((a, b) => a.label.localeCompare(b.label));
+  const employeeDropdownOptions = [{ value: "", label: "Semua pegawai" }, ...employeeFilterOptions];
+  const zoneDropdownOptions = [{ value: "", label: "Semua nama titik" }, ...zoneFilterOptions];
+  const roleDropdownOptions = [{ value: "", label: "Semua posisi" }, { value: "Driver", label: "Driver" }, { value: "Helper", label: "Helper" }];
   const searchTerm = search.trim().toLowerCase();
   const hasColumnFilters = !!employeeFilter || !!zoneFilter || !!roleFilter;
   const resetColumnFilters = () => {
@@ -1186,34 +1189,30 @@ export default function IncomePage() {
           </div>
         </div>
         <div className="grid grid-cols-1 gap-2 mt-3 pt-3 border-t border-border sm:hidden">
-          <select
+          <Select
             value={employeeFilter}
-            onChange={(e) => { setEmployeeFilter(e.target.value); setPage(1); }}
+            onChange={(val) => { setEmployeeFilter(val); setPage(1); }}
+            options={employeeDropdownOptions}
+            placeholder="Semua pegawai"
+            searchable
             className={filterSelectClass}
-            aria-label="Filter pegawai"
-          >
-            <option value="">Semua pegawai</option>
-            {employeeFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-          <select
+          />
+          <Select
             value={zoneFilter}
-            onChange={(e) => { setZoneFilter(e.target.value); setPage(1); }}
+            onChange={(val) => { setZoneFilter(val); setPage(1); }}
+            options={zoneDropdownOptions}
+            placeholder="Semua nama titik"
+            searchable
             className={filterSelectClass}
-            aria-label="Filter nama titik"
-          >
-            <option value="">Semua nama titik</option>
-            {zoneFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-          <select
+          />
+          <Select
             value={roleFilter}
-            onChange={(e) => { setRoleFilter(e.target.value as "" | "Driver" | "Helper"); setPage(1); }}
+            onChange={(val) => { setRoleFilter(val as "" | "Driver" | "Helper"); setPage(1); }}
+            options={roleDropdownOptions}
+            placeholder="Semua posisi"
+            searchable
             className={filterSelectClass}
-            aria-label="Filter posisi"
-          >
-            <option value="">Semua posisi</option>
-            <option value="Driver">Driver</option>
-            <option value="Helper">Helper</option>
-          </select>
+          />
         </div>
         {hasColumnFilters && (
           <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-border">
@@ -1235,40 +1234,36 @@ export default function IncomePage() {
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Tanggal</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 min-w-[220px]">
                   <span>Pegawai</span>
-                  <select
+                  <Select
                     value={employeeFilter}
-                    onChange={(e) => { setEmployeeFilter(e.target.value); setPage(1); }}
+                    onChange={(val) => { setEmployeeFilter(val); setPage(1); }}
+                    options={employeeDropdownOptions}
+                    placeholder="Semua pegawai"
+                    searchable
                     className={tableHeaderFilterClass}
-                    aria-label="Filter pegawai"
-                  >
-                    <option value="">Semua pegawai</option>
-                    {employeeFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
+                  />
                 </th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 min-w-[180px]">
                   <span>Nama Titik</span>
-                  <select
+                  <Select
                     value={zoneFilter}
-                    onChange={(e) => { setZoneFilter(e.target.value); setPage(1); }}
+                    onChange={(val) => { setZoneFilter(val); setPage(1); }}
+                    options={zoneDropdownOptions}
+                    placeholder="Semua nama titik"
+                    searchable
                     className={tableHeaderFilterClass}
-                    aria-label="Filter nama titik"
-                  >
-                    <option value="">Semua nama titik</option>
-                    {zoneFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
+                  />
                 </th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 min-w-[140px]">
                   <span>Posisi</span>
-                  <select
+                  <Select
                     value={roleFilter}
-                    onChange={(e) => { setRoleFilter(e.target.value as "" | "Driver" | "Helper"); setPage(1); }}
+                    onChange={(val) => { setRoleFilter(val as "" | "Driver" | "Helper"); setPage(1); }}
+                    options={roleDropdownOptions}
+                    placeholder="Semua posisi"
+                    searchable
                     className={tableHeaderFilterClass}
-                    aria-label="Filter posisi"
-                  >
-                    <option value="">Semua posisi</option>
-                    <option value="Driver">Driver</option>
-                    <option value="Helper">Helper</option>
-                  </select>
+                  />
                 </th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Titik</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
