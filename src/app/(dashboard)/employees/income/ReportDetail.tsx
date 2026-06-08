@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { Fragment, useState, useEffect, useCallback, useRef } from "react";
 import {
   FileText,
   X,
@@ -33,6 +33,15 @@ type QueryError = { message: string };
 type ZoneLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
 
+type ReportDailyDetail = {
+  tanggal: string;
+  jumlah_titik: number;
+  total_pendapatan: number;
+  status_nama?: string;
+  status_color?: string;
+  catatan?: string | null;
+};
+
 type ReportRow = {
   employee_id: string;
   employee_nama: string;
@@ -44,6 +53,7 @@ type ReportRow = {
   total_pendapatan: number;
   jumlah_hari: number;
   status_summary: { nama: string; color: string; count: number }[];
+  daily_details: ReportDailyDetail[];
 };
 
 type ZoneGroup = {
@@ -157,6 +167,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const [reportRows, setReportRows] = useState<ReportRow[]>([]);
   const [zoneGroups, setZoneGroups] = useState<ZoneGroup[]>([]);
   const [employeeGroups, setEmployeeGroups] = useState<EmployeeGroup[]>([]);
+  const [expandedDailyKey, setExpandedDailyKey] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -211,6 +222,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
       total_pendapatan: number;
       dates: Set<string>;
       statuses: Map<string, { nama: string; color: string; count: number }>;
+      daily_details: ReportDailyDetail[];
     }>();
 
     data.forEach((d) => {
@@ -234,6 +246,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
           total_pendapatan: 0,
           dates: new Set(),
           statuses: new Map(),
+          daily_details: [],
         });
       }
 
@@ -244,6 +257,14 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
       const statusNama = d.delivery_statuses?.nama;
       const statusColor = d.delivery_statuses?.color;
+      entry.daily_details.push({
+        tanggal: d.tanggal,
+        jumlah_titik: d.jumlah_titik,
+        total_pendapatan: d.total,
+        status_nama: statusNama || undefined,
+        status_color: statusColor || undefined,
+        catatan: d.catatan || null,
+      });
       if (statusNama) {
         const existing = entry.statuses.get(statusNama);
         if (existing) existing.count++;
@@ -262,6 +283,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
       total_pendapatan: v.total_pendapatan,
       jumlah_hari: v.dates.size,
       status_summary: Array.from(v.statuses.values()),
+      daily_details: v.daily_details.sort((a, b) => a.tanggal.localeCompare(b.tanggal)),
     }));
 
     setReportRows(rows);
@@ -310,6 +332,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     const eGroups = Array.from(empMap.values()).sort((a, b) => a.employee_nama.localeCompare(b.employee_nama));
     eGroups.forEach((g) => g.rows.sort((a, b) => a.zone_nama.localeCompare(b.zone_nama)));
     setEmployeeGroups(eGroups);
+    setExpandedDailyKey(null);
   };
 
   // ─── Filtered data (search) ───
@@ -916,36 +939,94 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/50">
-                        {group.rows.map((row, idx) => (
-                          <tr key={`${row.zone_id}-${row.role}`} className="hover:bg-muted/30 transition-colors">
-                            <td className="px-5 py-3 text-xs text-muted-foreground">{idx + 1}</td>
-                            <td className="px-5 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.zone_color }} />
-                                <p className="text-sm font-semibold text-foreground">{row.zone_nama}</p>
-                              </div>
-                            </td>
-                            <td className="px-5 py-3 text-center">
-                              <span className={cn("text-[10px] font-bold px-2.5 py-1 rounded-lg",
-                                row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
-                              )}>{row.role}</span>
-                            </td>
-                            <td className="px-5 py-3 text-right text-sm font-bold text-foreground">{formatNumber(row.total_titik)}</td>
-                            <td className="px-5 py-3 text-right text-sm font-semibold text-foreground">{formatCurrency(row.total_pendapatan)}</td>
-                            <td className="px-5 py-3 text-center text-sm text-foreground">{row.jumlah_hari}</td>
-                            <td className="px-5 py-3">
-                              {row.status_summary.length > 0 ? (
-                                <div className="flex items-center gap-1 flex-wrap">
-                                  {row.status_summary.map((s) => (
-                                    <span key={s.nama} className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${s.color}20`, color: s.color }}>
-                                      {s.nama} ({s.count})
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : <span className="text-xs text-muted-foreground italic">-</span>}
-                            </td>
-                          </tr>
-                        ))}
+                        {group.rows.map((row, idx) => {
+                          const dailyKey = `${group.employee_id}-${row.zone_id}-${row.role}`;
+                          const isExpanded = expandedDailyKey === dailyKey;
+
+                          return (
+                            <Fragment key={`${row.zone_id}-${row.role}`}>
+                              <tr className="hover:bg-muted/30 transition-colors">
+                                <td className="px-5 py-3 text-xs text-muted-foreground">{idx + 1}</td>
+                                <td className="px-5 py-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedDailyKey(isExpanded ? null : dailyKey)}
+                                    className="flex items-center gap-2 rounded-lg text-left text-sm font-semibold text-foreground hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    aria-expanded={isExpanded}
+                                  >
+                                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.zone_color }} />
+                                    <span>{row.zone_nama}</span>
+                                    <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", isExpanded && "rotate-180 text-primary")} />
+                                  </button>
+                                </td>
+                                <td className="px-5 py-3 text-center">
+                                  <span className={cn("text-[10px] font-bold px-2.5 py-1 rounded-lg",
+                                    row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
+                                  )}>{row.role}</span>
+                                </td>
+                                <td className="px-5 py-3 text-right text-sm font-bold text-foreground">{formatNumber(row.total_titik)}</td>
+                                <td className="px-5 py-3 text-right text-sm font-semibold text-foreground">{formatCurrency(row.total_pendapatan)}</td>
+                                <td className="px-5 py-3 text-center text-sm text-foreground">{row.jumlah_hari}</td>
+                                <td className="px-5 py-3">
+                                  {row.status_summary.length > 0 ? (
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      {row.status_summary.map((s) => (
+                                        <span key={s.nama} className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${s.color}20`, color: s.color }}>
+                                          {s.nama} ({s.count})
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                                </td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="bg-primary/[0.03]">
+                                  <td colSpan={7} className="px-5 py-3">
+                                    <div className="rounded-xl border border-border bg-card overflow-hidden animate-fade-in">
+                                      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-muted/20">
+                                        <div className="flex items-center gap-2">
+                                          <Calendar className="w-3.5 h-3.5 text-primary" />
+                                          <p className="text-xs font-bold text-foreground">Detail tanggal {row.zone_nama}</p>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">{row.daily_details.length} hari</p>
+                                      </div>
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                          <thead>
+                                            <tr className="border-b border-border/70 bg-muted/10">
+                                              <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2">Tanggal</th>
+                                              <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Titik</th>
+                                              <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-36">Pendapatan</th>
+                                              <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-32">Status</th>
+                                              <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2">Catatan</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-border/50">
+                                            {row.daily_details.map((detail, detailIdx) => (
+                                              <tr key={`${detail.tanggal}-${detailIdx}`}>
+                                                <td className="px-4 py-2 text-xs font-medium text-foreground">{formatDisplayDate(detail.tanggal)}</td>
+                                                <td className="px-4 py-2 text-right text-xs font-bold text-foreground">{formatNumber(detail.jumlah_titik)}</td>
+                                                <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">{formatCurrency(detail.total_pendapatan)}</td>
+                                                <td className="px-4 py-2">
+                                                  {detail.status_nama ? (
+                                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${detail.status_color || "#6b7280"}20`, color: detail.status_color || "#6b7280" }}>
+                                                      {detail.status_nama}
+                                                    </span>
+                                                  ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                                                </td>
+                                                <td className="px-4 py-2 text-xs text-muted-foreground">{detail.catatan || <span className="italic">-</span>}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
                         {/* Subtotal row */}
                         <tr className="bg-muted/40 font-semibold">
                           <td className="px-5 py-2.5" colSpan={3}>
