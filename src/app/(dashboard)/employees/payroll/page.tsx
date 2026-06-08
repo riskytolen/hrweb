@@ -1943,19 +1943,19 @@ export default function PayrollPage() {
           </div>
         )}
         {activeMainTab === "final" && filtered.length > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-emerald-200/70 dark:border-emerald-800/60 bg-emerald-50/80 dark:bg-emerald-950/30">
+          <div className="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-border bg-card">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-sm shadow-emerald-500/20 flex-shrink-0">
                 <Lock className="w-4 h-4 text-white" />
               </div>
               <div className="min-w-0">
                 <h2 className="text-sm font-bold text-foreground">Slip Gaji Final</h2>
-                <p className="text-[10px] text-emerald-700/90 dark:text-emerald-300/80 mt-0.5">{filtered.length} slip telah dikunci — siap untuk pembayaran</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{filtered.length} slip telah dikunci — siap untuk pembayaran</p>
               </div>
             </div>
             <StatusBadge
               status="Final"
-              className="bg-white dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-500 dark:border-emerald-500 shadow-sm"
+              className="bg-white text-emerald-700 border-emerald-300 shadow-sm"
             />
           </div>
         )}
@@ -2191,7 +2191,7 @@ export default function PayrollPage() {
               <div className={cn(
                 "flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0 bg-gradient-to-r",
                 selectedPayroll.status === "Final"
-                  ? "from-emerald-50/80 via-card to-card dark:from-emerald-500/[0.08] dark:via-card"
+                  ? "from-card via-card to-card"
                   : "from-card via-card to-primary/[0.03]"
               )}>
                 <div className="flex items-center gap-3">
@@ -2215,7 +2215,7 @@ export default function PayrollPage() {
                 <div className="flex items-center gap-2">
                   <StatusBadge
                     status={selectedPayroll.status as LegacyPayrollStatus}
-                    className={selectedPayroll.status === "Final" ? "bg-white dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-500 dark:border-emerald-500 shadow-sm" : undefined}
+                    className={selectedPayroll.status === "Final" ? "bg-white text-emerald-700 border-emerald-300 shadow-sm" : undefined}
                   />
                   <button onClick={() => setShowDetail(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
                     <X className="w-4 h-4" />
@@ -2225,13 +2225,14 @@ export default function PayrollPage() {
 
               {/* Lock banner untuk Final */}
               {selectedPayroll.status === "Final" && (
-                <div className="mx-6 mt-5 px-3 py-2.5 rounded-xl border border-emerald-300/80 dark:border-emerald-700 bg-emerald-50/90 dark:bg-emerald-950/35 flex items-center gap-2.5 flex-shrink-0 shadow-sm shadow-emerald-900/5">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center flex-shrink-0">
-                    <Lock className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-300" />
+                <div className="relative mx-6 mt-5 px-3 py-2.5 pl-4 rounded-xl border border-emerald-200 bg-card flex items-center gap-2.5 flex-shrink-0 shadow-sm overflow-hidden">
+                  <div className="absolute inset-y-0 left-0 w-1 bg-emerald-500" />
+                  <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                    <Lock className="w-3.5 h-3.5 text-emerald-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200 leading-tight">Slip Terkunci</p>
-                    <p className="text-[10px] text-emerald-800 dark:text-emerald-300 leading-tight">Difinalkan dan siap untuk pembayaran. Tidak dapat diedit.</p>
+                    <p className="text-xs font-bold text-foreground leading-tight">Slip Terkunci</p>
+                    <p className="text-[10px] text-muted-foreground leading-tight">Difinalkan dan siap untuk pembayaran. Tidak dapat diedit.</p>
                   </div>
                 </div>
               )}
