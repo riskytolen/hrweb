@@ -88,6 +88,14 @@ function parseLocalDateStr(dateStr: string): Date {
   return new Date(year, month - 1, day);
 }
 
+function hasPointInput(value: string): boolean {
+  return value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
+}
+
+function parsePointInput(value: string): number {
+  return Math.floor(Number(value));
+}
+
 function mapDeliveryRow(d: DeliveryQueryRow): DeliveryRow {
   return {
     ...d,
@@ -367,7 +375,7 @@ export default function IncomePage() {
     // Worksheet: skip baris kosong/incomplete
     const validRows = batchRows.filter((r) =>
       r.employee_id &&
-      r.jumlah_titik && parseInt(r.jumlah_titik) > 0 &&
+      hasPointInput(r.jumlah_titik) &&
       r.zone_id && r.role,
     );
     if (validRows.length === 0 || !batchDate) return null;
@@ -395,7 +403,7 @@ export default function IncomePage() {
         zone_id: r.zone_id,
         role: r.role,
         tanggal: batchDate,
-        jumlah_titik: parseInt(r.jumlah_titik),
+        jumlah_titik: parsePointInput(r.jumlah_titik),
         rate_per_point: rate,
         catatan: r.catatan || null,
         status_id: r.status_id || null,
@@ -499,7 +507,7 @@ export default function IncomePage() {
   };
 
   const handleEditSave = async () => {
-    if (!editingId || !editForm.jumlah_titik || !editForm.zone_id) return;
+    if (!editingId || !hasPointInput(editForm.jumlah_titik) || !editForm.zone_id) return;
     setEditError("");
     const row = deliveries.find((d) => d.id === editingId);
     if (!row) return;
@@ -527,7 +535,7 @@ export default function IncomePage() {
     const updatePayload = {
       zone_id: editForm.zone_id,
       role: editForm.role,
-      jumlah_titik: parseInt(editForm.jumlah_titik),
+      jumlah_titik: parsePointInput(editForm.jumlah_titik),
       rate_per_point: rateData?.rate_per_point || row.rate_per_point,
       status_id: editForm.status_id || null,
     };
@@ -617,11 +625,11 @@ export default function IncomePage() {
   const batchFiltered = batchSearch
     ? batchRows.filter((r) => r.nama.toLowerCase().includes(batchSearch.toLowerCase()))
     : batchRows;
-  const batchFilled = batchRows.filter((r) => r.employee_id && r.jumlah_titik && parseInt(r.jumlah_titik) > 0 && r.zone_id && r.role).length;
+  const batchFilled = batchRows.filter((r) => r.employee_id && hasPointInput(r.jumlah_titik) && r.zone_id && r.role).length;
   // Baris yang setengah terisi (ada salah satu field tapi tidak lengkap)
   const batchIncomplete = batchRows.filter((r) => {
     const hasEmp = !!r.employee_id;
-    const hasTitik = r.jumlah_titik && parseInt(r.jumlah_titik) > 0;
+    const hasTitik = hasPointInput(r.jumlah_titik);
     const hasDiv = !!r.zone_id;
     const hasRole = !!r.role;
     const touched = hasEmp || hasTitik || hasDiv || hasRole;
@@ -769,7 +777,7 @@ export default function IncomePage() {
     // Block insert untuk pegawai yang sudah dihapus
     if (isDeletedEmployee(calEditCell.empId)) {
       // Hanya allow update/delete existing entries, tidak bisa tambah baru
-      const hasNewEntries = calEditEntries.some((e) => !e.id && e.zone_id && e.role && e.jumlah_titik);
+      const hasNewEntries = calEditEntries.some((e) => !e.id && e.zone_id && e.role && hasPointInput(e.jumlah_titik));
       if (hasNewEntries) {
         showToast("error", "Tidak Bisa Tambah", "Pegawai ini sudah dihapus. Hanya bisa edit/hapus data yang sudah ada.");
         return;
@@ -798,13 +806,13 @@ export default function IncomePage() {
 
       for (const entry of calEditEntries) {
         // Skip empty rows
-        if (!entry.zone_id || !entry.role || !entry.jumlah_titik || parseInt(entry.jumlah_titik) <= 0) continue;
+        if (!entry.zone_id || !entry.role || !hasPointInput(entry.jumlah_titik)) continue;
 
         const rate = rateMap.get(`${entry.zone_id}-${entry.role}`) || 0;
         const payload = {
           zone_id: entry.zone_id,
           role: entry.role,
-          jumlah_titik: parseInt(entry.jumlah_titik),
+          jumlah_titik: parsePointInput(entry.jumlah_titik),
           rate_per_point: rate,
           status_id: entry.status_id || null,
           catatan: entry.catatan || null,
@@ -1553,7 +1561,7 @@ export default function IncomePage() {
                   <tbody>
                     {batchFiltered.map((row, idx) => {
                       const hasEmp = !!row.employee_id;
-                      const hasTitik = row.jumlah_titik && parseInt(row.jumlah_titik) > 0;
+                      const hasTitik = hasPointInput(row.jumlah_titik);
                       const hasDiv = !!row.zone_id;
                       const hasRole = !!row.role;
                       const touched = hasEmp || hasTitik || hasDiv || hasRole;
@@ -1816,7 +1824,7 @@ export default function IncomePage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Jumlah Titik</label>
-                  <input type="number" min={1} value={editForm.jumlah_titik} onChange={(e) => setEditForm({ ...editForm, jumlah_titik: e.target.value })} className={inputClass} />
+                  <input type="number" min={0} value={editForm.jumlah_titik} onChange={(e) => setEditForm({ ...editForm, jumlah_titik: e.target.value })} className={inputClass} />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Status <span className="text-muted-foreground font-normal">(opsional)</span></label>
@@ -1830,7 +1838,7 @@ export default function IncomePage() {
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
                 <Button variant="outline" size="sm" onClick={() => setShowEditForm(false)}>Batal</Button>
-                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!editForm.jumlah_titik || !editForm.zone_id}>Simpan</Button>
+                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!hasPointInput(editForm.jumlah_titik) || !editForm.zone_id}>Simpan</Button>
               </div>
             </div>
           </div>
