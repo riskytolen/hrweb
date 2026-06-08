@@ -1955,7 +1955,7 @@ export default function PayrollPage() {
             </div>
             <StatusBadge
               status="Final"
-              className="rounded-full px-2.5 py-1 bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold hover:bg-emerald-600 dark:bg-emerald-600 dark:text-white dark:border-emerald-600"
+              className="rounded-full px-2.5 py-1 !bg-emerald-600 !text-white !border-emerald-600 shadow-sm font-bold"
             />
           </div>
         )}
@@ -2215,7 +2215,7 @@ export default function PayrollPage() {
                 <div className="flex items-center gap-2">
                   <StatusBadge
                     status={selectedPayroll.status as LegacyPayrollStatus}
-                    className={selectedPayroll.status === "Final" ? "rounded-full px-2.5 py-1 bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold hover:bg-emerald-600 dark:bg-emerald-600 dark:text-white dark:border-emerald-600" : undefined}
+                    className={selectedPayroll.status === "Final" ? "rounded-full px-2.5 py-1 !bg-emerald-600 !text-white !border-emerald-600 shadow-sm font-bold" : undefined}
                   />
                   <button onClick={() => setShowDetail(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
                     <X className="w-4 h-4" />
