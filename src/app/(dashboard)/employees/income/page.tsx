@@ -101,6 +101,8 @@ const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
+const filterSelectClass = "w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10";
+const tableHeaderFilterClass = "mt-2 w-full min-w-[140px] rounded-lg border border-border bg-card px-2 py-1.5 text-[11px] font-medium normal-case tracking-normal text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
 const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
 
 function parseLocalDateStr(dateStr: string): Date {
@@ -184,6 +186,9 @@ export default function IncomePage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [employeeFilter, setEmployeeFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"" | "Driver" | "Helper">("");
   const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
   const period = getPeriodRange(periodKey);
 
@@ -730,12 +735,32 @@ export default function IncomePage() {
   };
 
   // ─── Filter & paginate ───
-  const filtered = deliveries.filter((d) =>
-    (d.employeeNama || "").toLowerCase().includes(search.toLowerCase()) ||
-    (d.employee_id || "").toLowerCase().includes(search.toLowerCase()) ||
-    (d.zoneNama || "").toLowerCase().includes(search.toLowerCase()) ||
-    d.role.toLowerCase().includes(search.toLowerCase())
-  );
+  const getEmployeeFilterKey = (d: DeliveryRow) => d.employee_id || `_deleted_${d.employeeNama || d.id}`;
+  const employeeFilterOptions = Array.from(new Map(deliveries.map((d) => [getEmployeeFilterKey(d), d.employeeNama || d.employee_id || "?"])).entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const zoneFilterOptions = Array.from(new Map(deliveries.map((d) => [String(d.zone_id), d.zoneNama || "-"])).entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const searchTerm = search.trim().toLowerCase();
+  const hasColumnFilters = !!employeeFilter || !!zoneFilter || !!roleFilter;
+  const resetColumnFilters = () => {
+    setEmployeeFilter("");
+    setZoneFilter("");
+    setRoleFilter("");
+    setPage(1);
+  };
+  const filtered = deliveries.filter((d) => {
+    const matchesSearch = !searchTerm ||
+      (d.employeeNama || "").toLowerCase().includes(searchTerm) ||
+      (d.employee_id || "").toLowerCase().includes(searchTerm) ||
+      (d.zoneNama || "").toLowerCase().includes(searchTerm) ||
+      d.role.toLowerCase().includes(searchTerm);
+    const matchesEmployee = !employeeFilter || getEmployeeFilterKey(d) === employeeFilter;
+    const matchesZone = !zoneFilter || String(d.zone_id) === zoneFilter;
+    const matchesRole = !roleFilter || d.role === roleFilter;
+    return matchesSearch && matchesEmployee && matchesZone && matchesRole;
+  });
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // Summary
@@ -1160,6 +1185,44 @@ export default function IncomePage() {
             </button>
           </div>
         </div>
+        <div className="grid grid-cols-1 gap-2 mt-3 pt-3 border-t border-border sm:hidden">
+          <select
+            value={employeeFilter}
+            onChange={(e) => { setEmployeeFilter(e.target.value); setPage(1); }}
+            className={filterSelectClass}
+            aria-label="Filter pegawai"
+          >
+            <option value="">Semua pegawai</option>
+            {employeeFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <select
+            value={zoneFilter}
+            onChange={(e) => { setZoneFilter(e.target.value); setPage(1); }}
+            className={filterSelectClass}
+            aria-label="Filter nama titik"
+          >
+            <option value="">Semua nama titik</option>
+            {zoneFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <select
+            value={roleFilter}
+            onChange={(e) => { setRoleFilter(e.target.value as "" | "Driver" | "Helper"); setPage(1); }}
+            className={filterSelectClass}
+            aria-label="Filter posisi"
+          >
+            <option value="">Semua posisi</option>
+            <option value="Driver">Driver</option>
+            <option value="Helper">Helper</option>
+          </select>
+        </div>
+        {hasColumnFilters && (
+          <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-border">
+            <span className="text-xs font-medium text-muted-foreground">Filter kolom aktif</span>
+            <button type="button" onClick={resetColumnFilters} className="text-xs font-semibold text-primary hover:underline">
+              Reset filter
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Table — Desktop only */}
@@ -1170,9 +1233,43 @@ export default function IncomePage() {
               <tr className="border-b border-border bg-muted/50">
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Tanggal</th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Nama Titik</th>
-                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Posisi</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 min-w-[220px]">
+                  <span>Pegawai</span>
+                  <select
+                    value={employeeFilter}
+                    onChange={(e) => { setEmployeeFilter(e.target.value); setPage(1); }}
+                    className={tableHeaderFilterClass}
+                    aria-label="Filter pegawai"
+                  >
+                    <option value="">Semua pegawai</option>
+                    {employeeFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 min-w-[180px]">
+                  <span>Nama Titik</span>
+                  <select
+                    value={zoneFilter}
+                    onChange={(e) => { setZoneFilter(e.target.value); setPage(1); }}
+                    className={tableHeaderFilterClass}
+                    aria-label="Filter nama titik"
+                  >
+                    <option value="">Semua nama titik</option>
+                    {zoneFilterOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 min-w-[140px]">
+                  <span>Posisi</span>
+                  <select
+                    value={roleFilter}
+                    onChange={(e) => { setRoleFilter(e.target.value as "" | "Driver" | "Helper"); setPage(1); }}
+                    className={tableHeaderFilterClass}
+                    aria-label="Filter posisi"
+                  >
+                    <option value="">Semua posisi</option>
+                    <option value="Driver">Driver</option>
+                    <option value="Helper">Helper</option>
+                  </select>
+                </th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Titik</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Catatan</th>
