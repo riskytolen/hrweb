@@ -75,14 +75,19 @@ const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
 
+function parseLocalDateStr(dateStr: string): Date {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 /** Hitung periode tutup buku: tgl 8 bulan ini s/d tgl 7 bulan berikutnya */
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
   const [year, month] = periodKey.split("-").map(Number);
   // Periode: tgl 8 bulan ini → tgl 7 bulan berikutnya
   const startDate = new Date(year, month - 1, CUT_OFF_DAY); // tgl 8
   const endDate = new Date(year, month, CUT_OFF_DAY - 1); // tgl 7 bulan berikutnya
-  const start = startDate.toISOString().slice(0, 10);
-  const end = endDate.toISOString().slice(0, 10);
+  const start = localDateStr(startDate);
+  const end = localDateStr(endDate);
   const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY - 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
   return { start, end, label };
 }
@@ -611,8 +616,8 @@ export default function IncomePage() {
   // Generate array of dates for the period (tgl 8 bulan ini s/d tgl 7 bulan berikutnya)
   const calDateList: Date[] = [];
   {
-    const startD = new Date(calPeriod.start);
-    const endD = new Date(calPeriod.end);
+    const startD = parseLocalDateStr(calPeriod.start);
+    const endD = parseLocalDateStr(calPeriod.end);
     for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
       calDateList.push(new Date(d));
     }
@@ -646,9 +651,9 @@ export default function IncomePage() {
     .filter((emp) => !emp.id.startsWith("_deleted_"))
     .flatMap((emp) =>
       calDateList.filter((dt) => {
-        const ds = dt.toISOString().slice(0, 10);
+        const ds = localDateStr(dt);
         return !(calDataMap.get(`${emp.id}-${ds}`)?.length);
-      }).map((dt) => ({ empId: emp.id, dateStr: dt.toISOString().slice(0, 10) }))
+      }).map((dt) => ({ empId: emp.id, dateStr: localDateStr(dt) }))
     );
 
   const navigateToEmptyCell = () => {
@@ -1173,7 +1178,7 @@ export default function IncomePage() {
                     )}
                     {(() => {
                       const totalEmpty = calEmployees.reduce((sum, emp) => {
-                        const emptyDays = calDateList.filter((dt) => !(calDataMap.get(`${emp.id}-${dt.toISOString().slice(0, 10)}`)?.length));
+                        const emptyDays = calDateList.filter((dt) => !(calDataMap.get(`${emp.id}-${localDateStr(dt)}`)?.length));
                         return sum + emptyDays.length;
                       }, 0);
                       return totalEmpty > 0 ? (
@@ -1211,7 +1216,7 @@ export default function IncomePage() {
                       <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pegawai</span>
                     </th>
                     {calDateList.map((dt) => {
-                      const dateStr = dt.toISOString().slice(0, 10);
+                      const dateStr = localDateStr(dt);
                       const day = dt.getDate();
                       const dayOfWeek = dt.getDay();
                       const isSunday = dayOfWeek === 0;
@@ -1268,7 +1273,7 @@ export default function IncomePage() {
                           </div>
                         </td>
                         {calDateList.map((dt) => {
-                          const dateStr = dt.toISOString().slice(0, 10);
+                          const dateStr = localDateStr(dt);
                           const entries = calDataMap.get(`${emp.id}-${dateStr}`) || [];
                           const dayOfWeek = dt.getDay();
                           const isSunday = dayOfWeek === 0;
@@ -1344,7 +1349,7 @@ export default function IncomePage() {
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Total / Hari</span>
                       </td>
                       {calDateList.map((dt) => {
-                        const dateStr = dt.toISOString().slice(0, 10);
+                        const dateStr = localDateStr(dt);
                         const dayTotal = calDeliveries.filter((d) => d.tanggal === dateStr).reduce((s, d) => s + d.jumlah_titik, 0);
                         const isNewMonth = dt.getDate() === 1;
                         return (

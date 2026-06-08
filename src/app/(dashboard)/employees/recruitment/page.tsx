@@ -851,7 +851,7 @@ export default function RecruitmentPage() {
                         <label className="text-xs font-semibold text-foreground mb-1.5 block">Training Mulai</label>
                         <input type="date" value={form.tanggal_training_mulai} onChange={(e) => {
                           const mulai = e.target.value;
-                          const selesai = mulai ? new Date(new Date(mulai).getTime() + 2 * 86400000).toISOString().slice(0, 10) : "";
+                          const selesai = mulai ? addDaysLocal(mulai, 2) : "";
                           setForm({ ...form, tanggal_training_mulai: mulai, tanggal_training_selesai: selesai });
                         }} className={inputClass} />
                       </div>

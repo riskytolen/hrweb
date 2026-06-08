@@ -20,7 +20,7 @@ import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
 import Portal from "@/components/ui/Portal";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { cn, formatCurrency, formatNumber } from "@/lib/utils";
+import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
 
 type ZoneLite = { id: number; nama: string; color: string };
@@ -71,8 +71,8 @@ function getPeriodRange(periodKey: string): { start: string; end: string; label:
   // Periode: tgl 8 bulan ini → tgl 7 bulan berikutnya
   const startDate = new Date(year, month - 1, CUT_OFF_DAY);
   const endDate = new Date(year, month, CUT_OFF_DAY - 1); // tgl 7 bulan berikutnya
-  const start = startDate.toISOString().slice(0, 10);
-  const end = endDate.toISOString().slice(0, 10);
+  const start = localDateStr(startDate);
+  const end = localDateStr(endDate);
   const label = `${CUT_OFF_DAY} ${startDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })} – ${CUT_OFF_DAY - 1} ${endDate.toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`;
   return { start, end, label };
 }
@@ -108,7 +108,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   });
   const [customEnd, setCustomEnd] = useState(() => {
     const now = new Date();
-    return now.toISOString().slice(0, 10);
+    return localDateStr(now);
   });
 
   // Computed effective dates
