@@ -1839,6 +1839,15 @@ export default function IncomePage() {
                           const roleSummary = Array.from(new Set(entries.map((entry) => entry.role === "Driver" ? "D" : "H"))).join("/");
                           const zoneNames = Array.from(new Set(entries.map((entry) => entry.zoneNama || "-")));
                           const zoneSummary = zoneNames.length > 1 ? `${zoneNames[0]} +${zoneNames.length - 1}` : zoneNames[0] || "Titik";
+                          const statusSummary = Array.from(entries.reduce((map, entry) => {
+                            if (!entry.statusNama) return map;
+                            const existing = map.get(entry.statusNama);
+                            if (existing) existing.count += 1;
+                            else map.set(entry.statusNama, { count: 1, color: entry.statusColor || "#6b7280" });
+                            return map;
+                          }, new Map<string, { count: number; color: string }>()));
+                          const visibleStatusSummary = statusSummary.slice(0, 2);
+                          const hiddenStatusSummaryCount = statusSummary.length - visibleStatusSummary.length;
                           return (
                             <td key={dateStr} id={`cal-${emp.id}-${dateStr}`}
                               onClick={() => !calEditCell && openCalCell(emp.id, emp.nama, dateStr)}
@@ -1869,6 +1878,16 @@ export default function IncomePage() {
                                         <span className="text-[9px] font-black" style={{ color: validation.color }}>{ATTENDANCE_STATUS_META[validation.attendance.status].short}</span>
                                       ) : null}
                                     </div>
+                                    {visibleStatusSummary.length > 0 && (
+                                      <div className="flex flex-wrap items-center justify-center gap-0.5">
+                                        {visibleStatusSummary.map(([nama, { count, color }]) => (
+                                          <span key={nama} className="max-w-[52px] truncate rounded px-1 py-0.5 text-[8px] font-bold leading-none" style={{ backgroundColor: `${color}25`, color }} title={count > 1 ? `${count} ${nama}` : nama}>
+                                            {count > 1 ? `${count} ${nama}` : nama}
+                                          </span>
+                                        ))}
+                                        {hiddenStatusSummaryCount > 0 && <span className="rounded bg-muted px-1 py-0.5 text-[8px] font-bold leading-none text-muted-foreground">+{hiddenStatusSummaryCount}</span>}
+                                      </div>
+                                    )}
                                     <div className="flex flex-1 items-center justify-center">
                                       <span className={cn("text-2xl font-black leading-none tabular-nums", validation?.isAnomaly ? "text-danger" : "text-primary")}>{totalPoints}</span>
                                     </div>
