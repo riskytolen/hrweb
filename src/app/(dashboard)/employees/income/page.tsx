@@ -1163,14 +1163,34 @@ export default function IncomePage() {
     setCalEditSaving(true);
 
     try {
-      // Lookup rates
-      const { data: allRates } = await supabase.from("point_rates").select("zone_id, role, rate_per_point").eq("status", "Aktif");
-      const rateMap = new Map<string, number>();
-      allRates?.forEach((r) => rateMap.set(`${r.zone_id}-${r.role}`, r.rate_per_point));
-
       // Existing entries in DB for this cell
       const existingEntries = calDataMap.get(`${calEditCell.empId}-${calEditCell.dateStr}`) || [];
       const existingIds = new Set(existingEntries.map((e) => e.id));
+
+      const hasAnyCalEditData = (entry: typeof calEditEntries[number]) =>
+        Boolean(entry.zone_id || entry.role || hasPointInput(entry.jumlah_titik) || entry.status_id || entry.catatan.trim());
+      const isValidCalEditEntry = (entry: typeof calEditEntries[number]) =>
+        Boolean(entry.zone_id && entry.role && hasPointInput(entry.jumlah_titik));
+
+      const incompleteRowIdx = calEditEntries.findIndex((entry) => hasAnyCalEditData(entry) && !isValidCalEditEntry(entry));
+      if (incompleteRowIdx >= 0) {
+        showToast("error", "Data Belum Lengkap", `Lengkapi nama titik, posisi, dan jumlah titik pada Entri ${incompleteRowIdx + 1}.`);
+        return;
+      }
+
+      if (existingEntries.length === 0 && !calEditEntries.some(isValidCalEditEntry)) {
+        showToast("error", "Belum Ada Data", "Isi minimal satu entri titik sebelum menyimpan.");
+        return;
+      }
+
+      // Lookup rates
+      const { data: allRates, error: rateError } = await supabase.from("point_rates").select("zone_id, role, rate_per_point").eq("status", "Aktif");
+      if (rateError) {
+        showToast("error", "Gagal Mengambil Tarif", rateError.message);
+        return;
+      }
+      const rateMap = new Map<string, number>();
+      allRates?.forEach((r) => rateMap.set(`${r.zone_id}-${r.role}`, r.rate_per_point));
 
       // Entries to keep (with id) — update them
       // Entries without id — insert them
@@ -1178,13 +1198,18 @@ export default function IncomePage() {
       const keptIds = new Set<number>();
       const inserts: Record<string, unknown>[] = [];
       const updates: { id: number; data: Record<string, unknown> }[] = [];
-      let hasError = false;
+      const mutationErrors: string[] = [];
 
       for (const entry of calEditEntries) {
         // Skip empty rows
-        if (!entry.zone_id || !entry.role || !hasPointInput(entry.jumlah_titik)) continue;
+        if (!isValidCalEditEntry(entry)) continue;
 
-        const rate = rateMap.get(`${entry.zone_id}-${entry.role}`) || 0;
+        const rate = rateMap.get(`${entry.zone_id}-${entry.role}`);
+        if (rate == null) {
+          const zoneName = zones.find((z) => z.id === entry.zone_id)?.nama || "titik terpilih";
+          showToast("error", "Tarif Belum Ada", `Tarif aktif untuk ${zoneName} (${entry.role}) belum tersedia.`);
+          return;
+        }
         const payload = {
           zone_id: entry.zone_id,
           role: entry.role,
@@ -1211,23 +1236,24 @@ export default function IncomePage() {
       const toDelete = [...existingIds].filter((id) => !keptIds.has(id));
       for (const id of toDelete) {
         const { error } = await supabase.from("delivery_points").delete().eq("id", id);
-        if (error) hasError = true;
+        if (error) mutationErrors.push(error.message);
       }
 
       // Update existing
       for (const u of updates) {
         const { error } = await supabase.from("delivery_points").update(u.data).eq("id", u.id);
-        if (error) hasError = true;
+        if (error) mutationErrors.push(error.message);
       }
 
       // Insert new
       if (inserts.length > 0) {
         const { error } = await supabase.from("delivery_points").insert(inserts);
-        if (error) { hasError = true; }
+        if (error) mutationErrors.push(error.message);
       }
 
-      if (hasError) {
-        showToast("error", "Sebagian Gagal", "Beberapa data gagal disimpan.");
+      if (mutationErrors.length > 0) {
+        showToast("error", "Gagal Menyimpan", mutationErrors[0]);
+        return;
       } else {
         const total = updates.length + inserts.length + toDelete.length;
         if (total > 0) {
