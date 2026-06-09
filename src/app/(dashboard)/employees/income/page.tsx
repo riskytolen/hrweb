@@ -29,13 +29,21 @@ import Portal from "@/components/ui/Portal";
 import DatePicker from "@/components/ui/DatePicker";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
-import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
+import { supabase, type DbAttendanceRecord, type DbDeliveryPoint, type NonActivePeriod } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import ReportDetail from "./ReportDetail";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
-type EmployeeLite = { id: string; nama: string; status: string };
+type EmployeeLite = {
+  id: string;
+  nama: string;
+  status: string;
+  tanggal_bergabung?: string | null;
+  tanggal_keluar?: string | null;
+  non_active_periods?: NonActivePeriod[] | null;
+  jabatanNama?: string | null;
+};
 type ZoneLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
 type DeliveryRow = DbDeliveryPoint & { employeeNama?: string; zoneNama?: string; zoneColor?: string; statusNama?: string; statusColor?: string };
@@ -45,6 +53,28 @@ type DeliveryQueryRow = DbDeliveryPoint & {
   delivery_statuses?: { nama: string | null; kode?: string | null; color: string | null } | null;
 };
 type QueryError = { message: string };
+type EmployeeQueryRow = Omit<EmployeeLite, "jabatanNama"> & { jabatan?: { nama: string | null } | { nama: string | null }[] | null };
+type AttendanceStatus = DbAttendanceRecord["status"];
+type CalendarAttendanceRow = Pick<DbAttendanceRecord, "id" | "employee_id" | "tanggal" | "status" | "catatan">;
+type CalendarEmployee = {
+  id: string;
+  nama: string;
+  status?: string;
+  tanggal_bergabung?: string | null;
+  tanggal_keluar?: string | null;
+  non_active_periods?: NonActivePeriod[] | null;
+  jabatanNama?: string | null;
+};
+type CalendarAnomalyType = "non_present_with_points" | "present_without_points" | "points_without_attendance";
+type CalendarAnomaly = { type: CalendarAnomalyType; empId: string; dateStr: string };
+type CalendarValidation = {
+  attendance: CalendarAttendanceRow | null;
+  color: string;
+  label: string;
+  isAnomaly: boolean;
+  anomalyType?: CalendarAnomalyType;
+  message?: string;
+};
 
 // Batch form row
 type BatchRow = {
@@ -74,6 +104,18 @@ const DEFAULT_BLANK_ROWS = 10;
 const ADD_ROWS_BATCH = 5;
 const DELIVERY_SELECT = "*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)";
 const DELIVERY_FETCH_CHUNK_SIZE = 1000;
+const ATTENDANCE_FETCH_CHUNK_SIZE = 1000;
+const PRESENT_ATTENDANCE_STATUSES: AttendanceStatus[] = ["Hadir", "Terlambat"];
+const NON_PRESENT_ATTENDANCE_STATUSES: AttendanceStatus[] = ["Izin", "Sakit", "Alpha", "Libur", "Cuti"];
+const ATTENDANCE_STATUS_META: Record<AttendanceStatus, { label: string; color: string; short: string }> = {
+  Hadir: { label: "Hadir", color: "#10b981", short: "H" },
+  Terlambat: { label: "Terlambat", color: "#f59e0b", short: "T" },
+  Izin: { label: "Izin", color: "#3b82f6", short: "I" },
+  Sakit: { label: "Sakit", color: "#ef4444", short: "S" },
+  Alpha: { label: "Alpa", color: "#6b7280", short: "A" },
+  Libur: { label: "Libur", color: "#8b5cf6", short: "L" },
+  Cuti: { label: "Cuti", color: "#8b5cf6", short: "C" },
+};
 
 const blankRow = (): BatchRow => ({
   rowKey: nextRowKey(),
@@ -129,6 +171,35 @@ function mapDeliveryRow(d: DeliveryQueryRow): DeliveryRow {
   };
 }
 
+function mapEmployeeRow(e: EmployeeQueryRow): EmployeeLite {
+  const jabatan = Array.isArray(e.jabatan) ? e.jabatan[0] : e.jabatan;
+  return {
+    id: e.id,
+    nama: e.nama,
+    status: e.status,
+    tanggal_bergabung: e.tanggal_bergabung || null,
+    tanggal_keluar: e.tanggal_keluar || null,
+    non_active_periods: e.non_active_periods || [],
+    jabatanNama: jabatan?.nama || null,
+  };
+}
+
+function isDriverHelperEmployee(emp: Pick<EmployeeLite, "jabatanNama">): boolean {
+  const jabatan = (emp.jabatanNama || "").trim().toLowerCase();
+  return jabatan === "driver" || jabatan === "helper";
+}
+
+function isInNonActivePeriod(dateStr: string, periods: NonActivePeriod[] | null | undefined): boolean {
+  if (!periods || periods.length === 0) return false;
+  return periods.some((p) => dateStr >= p.from && dateStr <= p.to);
+}
+
+function isEmployeeActiveOnDate(emp: Pick<EmployeeLite, "tanggal_bergabung" | "tanggal_keluar" | "non_active_periods">, dateStr: string): boolean {
+  if (emp.tanggal_bergabung && dateStr < emp.tanggal_bergabung) return false;
+  if (emp.tanggal_keluar && dateStr >= emp.tanggal_keluar) return false;
+  return !isInNonActivePeriod(dateStr, emp.non_active_periods);
+}
+
 async function fetchDeliveryRowsInRange(start: string, end: string, ascending: boolean): Promise<{ data: DeliveryQueryRow[]; error: QueryError | null }> {
   const rows: DeliveryQueryRow[] = [];
   let from = 0;
@@ -150,6 +221,32 @@ async function fetchDeliveryRowsInRange(start: string, end: string, ascending: b
 
     if (pageRows.length < DELIVERY_FETCH_CHUNK_SIZE) break;
     from += DELIVERY_FETCH_CHUNK_SIZE;
+  }
+
+  return { data: rows, error: null };
+}
+
+async function fetchAttendanceRowsInRange(start: string, end: string): Promise<{ data: CalendarAttendanceRow[]; error: QueryError | null }> {
+  const rows: CalendarAttendanceRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("attendance_records")
+      .select("id, employee_id, tanggal, status, catatan")
+      .gte("tanggal", start)
+      .lte("tanggal", end)
+      .order("tanggal", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + ATTENDANCE_FETCH_CHUNK_SIZE - 1);
+
+    if (error) return { data: rows, error };
+
+    const pageRows = (data || []) as CalendarAttendanceRow[];
+    rows.push(...pageRows);
+
+    if (pageRows.length < ATTENDANCE_FETCH_CHUNK_SIZE) break;
+    from += ATTENDANCE_FETCH_CHUNK_SIZE;
   }
 
   return { data: rows, error: null };
@@ -193,6 +290,7 @@ export default function IncomePage() {
   const period = getPeriodRange(periodKey);
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
+  const [employeeMeta, setEmployeeMeta] = useState<EmployeeLite[]>([]);
   const [zones, setZones] = useState<ZoneLite[]>([]);
   const [dStatuses, setDStatuses] = useState<StatusLite[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[]>([]);
@@ -200,8 +298,12 @@ export default function IncomePage() {
   // ─── Calendar Mode ───
   const [showCalendar, setShowCalendar] = useState(false);
   const [calMonth, setCalMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [calAttendance, setCalAttendance] = useState<CalendarAttendanceRow[]>([]);
+  const [calendarValidationEnabled, setCalendarValidationEnabled] = useState(true);
+  const [hideNonDriverHelper, setHideNonDriverHelper] = useState(false);
   const [emptyNavIdx, setEmptyNavIdx] = useState(-1);
   const [statusNavIdx, setStatusNavIdx] = useState<Map<string, number>>(new Map());
+  const [anomalyNavIdx, setAnomalyNavIdx] = useState<Map<string, number>>(new Map());
 
   // Calendar cell edit
   const [calEditCell, setCalEditCell] = useState<{ empId: string; empNama: string; dateStr: string } | null>(null);
@@ -250,9 +352,22 @@ export default function IncomePage() {
   }, []);
 
   const fetchEmployees = async () => {
-    const { data, error } = await supabase.from("pegawai").select("id, nama, status").in("status", ["Aktif", "Training"]).order("nama");
+    const { data, error } = await supabase
+      .from("pegawai")
+      .select("id, nama, status, tanggal_bergabung, tanggal_keluar, non_active_periods, jabatan:jabatan_id(nama)")
+      .in("status", ["Aktif", "Training"])
+      .order("nama");
     if (error) { showToast("error", "Gagal Memuat Pegawai", error.message); return; }
-    if (data) setEmployees(data);
+    if (data) setEmployees((data as unknown as EmployeeQueryRow[]).map(mapEmployeeRow));
+  };
+
+  const fetchEmployeeMeta = async () => {
+    const { data, error } = await supabase
+      .from("pegawai")
+      .select("id, nama, status, tanggal_bergabung, tanggal_keluar, non_active_periods, jabatan:jabatan_id(nama)")
+      .order("nama");
+    if (error) { showToast("error", "Gagal Memuat Metadata Pegawai", error.message); return; }
+    if (data) setEmployeeMeta((data as unknown as EmployeeQueryRow[]).map(mapEmployeeRow));
   };
 
   const fetchZones = async () => {
@@ -282,7 +397,7 @@ export default function IncomePage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchZones(), fetchDStatuses(), fetchDeliveries()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchEmployeeMeta(), fetchZones(), fetchDStatuses(), fetchDeliveries()]).then(() => setLoading(false));
   }, []);
 
   useEffect(() => { fetchDeliveries(); }, [periodKey]);
@@ -816,20 +931,27 @@ export default function IncomePage() {
 
   // Filter deliveries for calendar period
   const calDeliveries = deliveries.filter((d) => d.tanggal >= calPeriod.start && d.tanggal <= calPeriod.end);
+  const employeeMetaMap = new Map(employeeMeta.map((e) => [e.id, e]));
+  const calAttendanceMap = new Map<string, CalendarAttendanceRow>();
+  calAttendance.forEach((a) => calAttendanceMap.set(`${a.employee_id}-${a.tanggal}`, a));
 
   // Group: employee -> dateStr -> entries[]
   // Gunakan employee_id jika ada, fallback ke employee_nama untuk pegawai yang sudah dihapus
   const calEmployeeKeys = [...new Set(calDeliveries.map((d) => d.employee_id || `_deleted_${d.employee_nama || d.id}`))];
-  const calEmployees = calEmployeeKeys.map((key) => {
-    const emp = employees.find((e) => e.id === key);
-    if (emp) return { id: key, nama: emp.nama };
+  const allCalEmployees: CalendarEmployee[] = calEmployeeKeys.map((key) => {
+    const emp = employeeMetaMap.get(key) || employees.find((e) => e.id === key);
+    if (emp) return { ...emp, id: key, nama: emp.nama };
     // Pegawai sudah dihapus — ambil nama dari delivery data
     const delivery = calDeliveries.find((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === key);
     return { id: key, nama: delivery?.employeeNama || "?" };
   }).sort((a, b) => a.nama.localeCompare(b.nama));
+  const calEmployees = allCalEmployees.filter((emp) => !hideNonDriverHelper || isDriverHelperEmployee(emp));
+  const hiddenNonDriverHelperCount = hideNonDriverHelper ? allCalEmployees.length - calEmployees.length : 0;
+  const calEmployeeIdSet = new Set(calEmployees.map((emp) => emp.id));
+  const visibleCalDeliveries = calDeliveries.filter((d) => calEmployeeIdSet.has(d.employee_id || `_deleted_${d.employee_nama || d.id}`));
 
   const calDataMap = new Map<string, DeliveryRow[]>(); // key: empKey-YYYY-MM-DD
-  calDeliveries.forEach((d) => {
+  visibleCalDeliveries.forEach((d) => {
     const empKey = d.employee_id || `_deleted_${d.employee_nama || d.id}`;
     const key = `${empKey}-${d.tanggal}`;
     if (!calDataMap.has(key)) calDataMap.set(key, []);
@@ -837,13 +959,75 @@ export default function IncomePage() {
   });
   calDataMap.forEach((entries) => entries.sort((a, b) => a.id - b.id));
 
+  const getCalendarValidation = (emp: CalendarEmployee, dateStr: string, entries: DeliveryRow[]): CalendarValidation | null => {
+    if (!calendarValidationEnabled) return null;
+    if (emp.id.startsWith("_deleted_")) return null;
+    if (!isDriverHelperEmployee(emp)) return null;
+    if (!isEmployeeActiveOnDate(emp, dateStr)) return null;
+
+    const attendance = calAttendanceMap.get(`${emp.id}-${dateStr}`) || null;
+    if (!attendance) {
+      return entries.length > 0
+        ? {
+          attendance,
+          color: "#ef4444",
+          label: "Tanpa absen",
+          isAnomaly: true,
+          anomalyType: "points_without_attendance",
+          message: "Ada titik tanpa data absensi",
+        }
+        : null;
+    }
+
+    const meta = ATTENDANCE_STATUS_META[attendance.status];
+    if (entries.length > 0 && NON_PRESENT_ATTENDANCE_STATUSES.includes(attendance.status)) {
+      return {
+        attendance,
+        color: meta.color,
+        label: meta.label,
+        isAnomaly: true,
+        anomalyType: "non_present_with_points",
+        message: `${meta.label} tapi ada titik`,
+      };
+    }
+
+    if (entries.length === 0 && PRESENT_ATTENDANCE_STATUSES.includes(attendance.status)) {
+      return {
+        attendance,
+        color: meta.color,
+        label: meta.label,
+        isAnomaly: true,
+        anomalyType: "present_without_points",
+        message: `${meta.label} tanpa titik`,
+      };
+    }
+
+    return { attendance, color: meta.color, label: meta.label, isAnomaly: false };
+  };
+
+  const calAnomalies: CalendarAnomaly[] = calEmployees.flatMap((emp) =>
+    calDateList.flatMap((dt) => {
+      const dateStr = localDateStr(dt);
+      const entries = calDataMap.get(`${emp.id}-${dateStr}`) || [];
+      const validation = getCalendarValidation(emp, dateStr, entries);
+      return validation?.isAnomaly && validation.anomalyType
+        ? [{ type: validation.anomalyType, empId: emp.id, dateStr }]
+        : [];
+    })
+  );
+  const anomalyCounts = calAnomalies.reduce((acc, anomaly) => {
+    acc[anomaly.type] = (acc[anomaly.type] || 0) + 1;
+    return acc;
+  }, {} as Record<CalendarAnomalyType, number>);
+
   // List semua sel kosong (hanya pegawai aktif, bukan deleted): { empId, dateStr }
   const calEmptyCells = calEmployees
     .filter((emp) => !emp.id.startsWith("_deleted_"))
     .flatMap((emp) =>
       calDateList.filter((dt) => {
         const ds = localDateStr(dt);
-        return !(calDataMap.get(`${emp.id}-${ds}`)?.length);
+        if (!isEmployeeActiveOnDate(emp, ds)) return false;
+        return !(calDataMap.get(`${emp.id}-${ds}`)?.length) && !calAttendanceMap.get(`${emp.id}-${ds}`);
       }).map((dt) => ({ empId: emp.id, dateStr: localDateStr(dt) }))
     );
 
@@ -852,6 +1036,7 @@ export default function IncomePage() {
     const nextIdx = (emptyNavIdx + 1) % calEmptyCells.length;
     setEmptyNavIdx(nextIdx);
     setStatusNavIdx(new Map());
+    setAnomalyNavIdx(new Map());
     const cell = calEmptyCells[nextIdx];
     const el = document.getElementById(`cal-${cell.empId}-${cell.dateStr}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
@@ -859,7 +1044,7 @@ export default function IncomePage() {
 
   // Sel yang punya status tertentu
   const calStatusCells = new Map<string, { empId: string; dateStr: string; deliveryId: number }[]>();
-  calDeliveries.forEach((d) => {
+  visibleCalDeliveries.forEach((d) => {
     if (d.statusNama) {
       const empKey = d.employee_id || `_deleted_${d.employee_nama || d.id}`;
       if (!calStatusCells.has(d.statusNama)) calStatusCells.set(d.statusNama, []);
@@ -874,6 +1059,20 @@ export default function IncomePage() {
     const nextIdx = (currentIdx + 1) % cells.length;
     setStatusNavIdx(new Map(statusNavIdx).set(statusName, nextIdx));
     setEmptyNavIdx(-1);
+    setAnomalyNavIdx(new Map());
+    const cell = cells[nextIdx];
+    const el = document.getElementById(`cal-${cell.empId}-${cell.dateStr}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  };
+
+  const navigateToAnomaly = (type: CalendarAnomalyType | "all") => {
+    const cells = type === "all" ? calAnomalies : calAnomalies.filter((a) => a.type === type);
+    if (cells.length === 0) return;
+    const currentIdx = anomalyNavIdx.get(type) ?? -1;
+    const nextIdx = (currentIdx + 1) % cells.length;
+    setAnomalyNavIdx(new Map(anomalyNavIdx).set(type, nextIdx));
+    setEmptyNavIdx(-1);
+    setStatusNavIdx(new Map());
     const cell = cells[nextIdx];
     const el = document.getElementById(`cal-${cell.empId}-${cell.dateStr}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
@@ -885,6 +1084,14 @@ export default function IncomePage() {
         const cells = calStatusCells.get(nama);
         if (cells && cells[idx]) return cells[idx];
       }
+    }
+    return null;
+  })();
+
+  const activeAnomalyCell = (() => {
+    for (const [type, idx] of anomalyNavIdx.entries()) {
+      const cells = type === "all" ? calAnomalies : calAnomalies.filter((a) => a.type === type);
+      if (idx >= 0 && cells[idx]) return cells[idx];
     }
     return null;
   })();
@@ -1047,6 +1254,9 @@ export default function IncomePage() {
 
   const openCalendar = () => {
     setCalMonth(periodKey);
+    setEmptyNavIdx(-1);
+    setStatusNavIdx(new Map());
+    setAnomalyNavIdx(new Map());
     setShowCalendar(true);
   };
 
@@ -1056,6 +1266,7 @@ export default function IncomePage() {
     setCalMonth(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
     setEmptyNavIdx(-1);
     setStatusNavIdx(new Map());
+    setAnomalyNavIdx(new Map());
   };
   const calNextPeriod = () => {
     const [y, m] = calMonth.split("-").map(Number);
@@ -1063,6 +1274,7 @@ export default function IncomePage() {
     setCalMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
     setEmptyNavIdx(-1);
     setStatusNavIdx(new Map());
+    setAnomalyNavIdx(new Map());
   };
 
   // Fetch calendar data when period changes
@@ -1081,6 +1293,17 @@ export default function IncomePage() {
       }
     };
     fetchCalData();
+  }, [calMonth, showCalendar]);
+
+  useEffect(() => {
+    if (!showCalendar) return;
+    const fetchCalAttendance = async () => {
+      const cp = getPeriodRange(calMonth);
+      const { data, error } = await fetchAttendanceRowsInRange(cp.start, cp.end);
+      if (error) { showToast("error", "Gagal Memuat Data Absensi", error.message); return; }
+      setCalAttendance(data);
+    };
+    fetchCalAttendance();
   }, [calMonth, showCalendar]);
 
   return (
@@ -1383,18 +1606,24 @@ export default function IncomePage() {
                 </div>
                 <div>
                   <h2 className="text-sm font-bold text-foreground">Mode Kalender</h2>
-                  <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground">
+                  <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground flex-wrap">
                     <span><strong className="text-foreground">{calEmployees.length}</strong> pegawai</span>
                     <span className="w-1 h-1 rounded-full bg-border" />
-                    <span><strong className="text-foreground">{calDeliveries.length}</strong> entri</span>
+                    <span><strong className="text-foreground">{visibleCalDeliveries.length}</strong> entri</span>
                     <span className="w-1 h-1 rounded-full bg-border" />
-                    <span><strong className="text-primary">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</strong> total titik</span>
-                    {calDeliveries.filter((d) => d.statusNama).length > 0 && (
+                    <span><strong className="text-primary">{visibleCalDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</strong> total titik</span>
+                    {hiddenNonDriverHelperCount > 0 && (
+                      <>
+                        <span className="w-1 h-1 rounded-full bg-border" />
+                        <span><strong className="text-muted-foreground">{hiddenNonDriverHelperCount}</strong> non D/H disembunyikan</span>
+                      </>
+                    )}
+                    {visibleCalDeliveries.filter((d) => d.statusNama).length > 0 && (
                       <>
                         <span className="w-1 h-1 rounded-full bg-border" />
                         {(() => {
                           const statusCounts = new Map<string, { count: number; color: string }>();
-                          calDeliveries.forEach((d) => {
+                          visibleCalDeliveries.forEach((d) => {
                             if (d.statusNama) {
                               const existing = statusCounts.get(d.statusNama);
                               if (existing) existing.count++;
@@ -1410,11 +1639,32 @@ export default function IncomePage() {
                         })()}
                       </>
                     )}
+                    {calendarValidationEnabled && calAnomalies.length > 0 && (
+                      <>
+                        <span className="w-1 h-1 rounded-full bg-border" />
+                        <button onClick={() => navigateToAnomaly("all")} className="hover:underline cursor-pointer">
+                          <strong className="text-danger">{calAnomalies.length}</strong> anomali
+                          <span className="text-[9px] text-danger/50 ml-1">(klik)</span>
+                        </button>
+                        {anomalyCounts.non_present_with_points ? (
+                          <button onClick={() => navigateToAnomaly("non_present_with_points")} className="hover:underline cursor-pointer">
+                            <strong className="text-danger">{anomalyCounts.non_present_with_points}</strong> tidak hadir + titik
+                          </button>
+                        ) : null}
+                        {anomalyCounts.present_without_points ? (
+                          <button onClick={() => navigateToAnomaly("present_without_points")} className="hover:underline cursor-pointer">
+                            <strong className="text-warning">{anomalyCounts.present_without_points}</strong> hadir tanpa titik
+                          </button>
+                        ) : null}
+                        {anomalyCounts.points_without_attendance ? (
+                          <button onClick={() => navigateToAnomaly("points_without_attendance")} className="hover:underline cursor-pointer">
+                            <strong className="text-danger">{anomalyCounts.points_without_attendance}</strong> titik tanpa absen
+                          </button>
+                        ) : null}
+                      </>
+                    )}
                     {(() => {
-                      const totalEmpty = calEmployees.reduce((sum, emp) => {
-                        const emptyDays = calDateList.filter((dt) => !(calDataMap.get(`${emp.id}-${localDateStr(dt)}`)?.length));
-                        return sum + emptyDays.length;
-                      }, 0);
+                      const totalEmpty = calEmptyCells.length;
                       return totalEmpty > 0 ? (
                         <>
                           <span className="w-1 h-1 rounded-full bg-border" />
@@ -1429,6 +1679,26 @@ export default function IncomePage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setCalendarValidationEnabled((v) => !v); setAnomalyNavIdx(new Map()); }}
+                  className={cn(
+                    "px-3 py-2 rounded-xl text-xs font-semibold border transition-colors",
+                    calendarValidationEnabled ? "border-success/30 bg-success-light text-success" : "border-border bg-muted text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Validasi {calendarValidationEnabled ? "ON" : "OFF"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setHideNonDriverHelper((v) => !v); setEmptyNavIdx(-1); setStatusNavIdx(new Map()); setAnomalyNavIdx(new Map()); }}
+                  className={cn(
+                    "px-3 py-2 rounded-xl text-xs font-semibold border transition-colors",
+                    hideNonDriverHelper ? "border-primary/30 bg-primary-light text-primary" : "border-border bg-muted text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {hideNonDriverHelper ? "D/H saja" : "Semua jabatan"}
+                </button>
                 <div className="flex items-center bg-muted rounded-xl p-1">
                   <button onClick={calPrevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
                   <span className="text-xs font-bold text-foreground px-3 min-w-[220px] text-center">{calPeriod.label}</span>
@@ -1493,7 +1763,7 @@ export default function IncomePage() {
                       </td>
                     </tr>
                   ) : calEmployees.map((emp, empIdx) => {
-                    const empTotal = calDeliveries.filter((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === emp.id).reduce((s, d) => s + d.jumlah_titik, 0);
+                    const empTotal = visibleCalDeliveries.filter((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === emp.id).reduce((s, d) => s + d.jumlah_titik, 0);
                     const isEven = empIdx % 2 === 0;
                     return (
                       <tr key={emp.id} className={cn("group transition-colors", isEven ? "" : "bg-muted/[0.03]")}>
@@ -1503,12 +1773,17 @@ export default function IncomePage() {
                             <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
                               <User className="w-3.5 h-3.5 text-primary/70" />
                             </div>
-                            <p className="text-xs font-semibold text-foreground truncate max-w-[130px]">{emp.nama}</p>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-foreground truncate max-w-[130px]">{emp.nama}</p>
+                              {emp.jabatanNama && <p className="text-[8px] font-medium text-muted-foreground truncate max-w-[130px]">{emp.jabatanNama}</p>}
+                            </div>
                           </div>
                         </td>
                         {calDateList.map((dt) => {
                           const dateStr = localDateStr(dt);
                           const entries = calDataMap.get(`${emp.id}-${dateStr}`) || [];
+                          const validation = getCalendarValidation(emp, dateStr, entries);
+                          const isActiveForCalendar = emp.id.startsWith("_deleted_") || isEmployeeActiveOnDate(emp, dateStr);
                           const dayOfWeek = dt.getDay();
                           const isSunday = dayOfWeek === 0;
                           const isSaturday = dayOfWeek === 6;
@@ -1517,6 +1792,7 @@ export default function IncomePage() {
                           const isNewMonth = dt.getDate() === 1;
                           const isActiveEmpty = entries.length === 0 && emptyNavIdx >= 0 && calEmptyCells[emptyNavIdx]?.empId === emp.id && calEmptyCells[emptyNavIdx]?.dateStr === dateStr;
                           const isActiveStatus = activeStatusCell && activeStatusCell.empId === emp.id && activeStatusCell.dateStr === dateStr;
+                          const isActiveAnomaly = activeAnomalyCell && activeAnomalyCell.empId === emp.id && activeAnomalyCell.dateStr === dateStr;
                           const isCellEditing = calEditCell?.empId === emp.id && calEditCell?.dateStr === dateStr;
                           return (
                             <td key={dateStr} id={`cal-${emp.id}-${dateStr}`}
@@ -1524,12 +1800,20 @@ export default function IncomePage() {
                               className={cn(
                                 "border-b border-r border-border/60 px-1 py-1 align-top min-w-[120px] transition-colors cursor-pointer",
                                 isNewMonth && "border-l-2 border-l-primary/30",
-                                isCellEditing ? "ring-2 ring-primary ring-inset bg-primary/[0.06]" : isActiveEmpty ? "ring-2 ring-danger ring-inset bg-danger/[0.08]" : isActiveStatus ? "ring-2 ring-warning ring-inset bg-warning/[0.08]" : isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
+                                isCellEditing ? "ring-2 ring-primary ring-inset bg-primary/[0.06]" : isActiveAnomaly ? "ring-2 ring-danger ring-inset bg-danger/[0.10]" : isActiveEmpty ? "ring-2 ring-danger ring-inset bg-danger/[0.08]" : isActiveStatus ? "ring-2 ring-warning ring-inset bg-warning/[0.08]" : validation?.isAnomaly ? "ring-1 ring-danger/70 ring-inset bg-danger/[0.06]" : isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
                                 !calEditCell && "hover:bg-primary/[0.04]",
                                 "group-hover:bg-muted/30"
                               )}>
                               {entries.length > 0 ? (
                                 <div className="space-y-0.5">
+                                  {validation && (
+                                    <div className={cn("flex items-center justify-between gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-bold", validation.isAnomaly ? "bg-danger/10 text-danger" : "bg-muted/60 text-muted-foreground")}>
+                                      <span>{validation.isAnomaly ? validation.message : `Absen ${validation.label}`}</span>
+                                      {validation.attendance && (
+                                        <span className="px-1 rounded text-white" style={{ backgroundColor: validation.color }}>{ATTENDANCE_STATUS_META[validation.attendance.status].short}</span>
+                                      )}
+                                    </div>
+                                  )}
                                   {entries.map((e) => (
                                     <div key={e.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors" style={{ backgroundColor: `${e.zoneColor}20`, borderLeft: `3px solid ${e.zoneColor}` }}>
                                       <span className="text-[9px] font-bold truncate" style={{ color: e.zoneColor }}>{e.zoneNama}</span>
@@ -1538,6 +1822,17 @@ export default function IncomePage() {
                                       {e.statusNama && <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: `${e.statusColor}25`, color: e.statusColor }}>{e.statusNama}</span>}
                                     </div>
                                   ))}
+                                </div>
+                              ) : validation?.attendance ? (
+                                <div className={cn("min-h-7 flex flex-col items-center justify-center gap-1 rounded-md px-1 py-1", validation.isAnomaly ? "bg-danger/[0.08]" : "bg-muted/40")} title={validation.message || `Absensi ${validation.label}`}>
+                                  <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[8px] font-bold text-white" style={{ backgroundColor: validation.color }}>
+                                    {validation.label}
+                                  </span>
+                                  {validation.isAnomaly && <span className="text-[8px] font-bold text-danger text-center leading-tight">{validation.message}</span>}
+                                </div>
+                              ) : !isActiveForCalendar ? (
+                                <div className="h-7 flex items-center justify-center">
+                                  <span className="text-[10px] text-muted-foreground/20">-</span>
                                 </div>
                               ) : (
                                 <div className="h-7 flex items-center justify-center bg-danger/[0.04]">
@@ -1553,7 +1848,7 @@ export default function IncomePage() {
                             <div>
                               <span className="text-sm font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md">{empTotal}</span>
                               {(() => {
-                                const empStatuses = calDeliveries.filter((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === emp.id && d.statusNama);
+                                const empStatuses = visibleCalDeliveries.filter((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === emp.id && d.statusNama);
                                 if (empStatuses.length === 0) return null;
                                 const counts = new Map<string, { count: number; color: string }>();
                                 empStatuses.forEach((d) => {
@@ -1584,7 +1879,7 @@ export default function IncomePage() {
                       </td>
                       {calDateList.map((dt) => {
                         const dateStr = localDateStr(dt);
-                        const dayTotal = calDeliveries.filter((d) => d.tanggal === dateStr).reduce((s, d) => s + d.jumlah_titik, 0);
+                        const dayTotal = visibleCalDeliveries.filter((d) => d.tanggal === dateStr).reduce((s, d) => s + d.jumlah_titik, 0);
                         const isNewMonth = dt.getDate() === 1;
                         return (
                           <td key={dateStr} className={cn("bg-card border-t-2 border-r border-border px-1 py-2.5 text-center", isNewMonth && "border-l-2 border-l-primary/30")}>
@@ -1597,7 +1892,7 @@ export default function IncomePage() {
                         );
                       })}
                       <td className="sticky right-0 z-20 bg-card border-t-2 border-l-2 border-border px-3 py-2.5 text-center shadow-[-2px_0_8px_-2px_rgba(0,0,0,0.06)]">
-                        <span className="text-sm font-extrabold text-primary">{calDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</span>
+                        <span className="text-sm font-extrabold text-primary">{visibleCalDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</span>
                       </td>
                     </tr>
                   )}
@@ -1615,6 +1910,14 @@ export default function IncomePage() {
                     <div>
                       <h3 className="text-sm font-bold text-foreground">{calEditCell.empNama}</h3>
                       <p className="text-[10px] text-muted-foreground">{new Date(calEditCell.dateStr + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+                      {calendarValidationEnabled && !calEditCell.empId.startsWith("_deleted_") && (() => {
+                        const emp = employeeMetaMap.get(calEditCell.empId) || employees.find((e) => e.id === calEditCell.empId);
+                        if (emp && !isEmployeeActiveOnDate(emp, calEditCell.dateStr)) return null;
+                        const attendance = calAttendanceMap.get(`${calEditCell.empId}-${calEditCell.dateStr}`);
+                        if (!attendance) return <p className="text-[10px] font-medium text-danger mt-0.5">Absensi: belum ada</p>;
+                        const meta = ATTENDANCE_STATUS_META[attendance.status];
+                        return <p className="text-[10px] font-medium mt-0.5" style={{ color: meta.color }}>Absensi: {meta.label}</p>;
+                      })()}
                     </div>
                     <button onClick={() => !calEditSaving && setCalEditCell(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
                   </div>
