@@ -1680,36 +1680,50 @@ export default function IncomePage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => { setCalendarValidationEnabled((v) => !v); setAnomalyNavIdx(new Map()); }}
-                  className={cn(
-                    "px-3 py-2 rounded-xl text-xs font-semibold border transition-colors",
-                    calendarValidationEnabled ? "border-success/30 bg-success-light text-success" : "border-border bg-muted text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  Validasi {calendarValidationEnabled ? "ON" : "OFF"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCalendarCompactCells((v) => !v)}
-                  className={cn(
-                    "px-3 py-2 rounded-xl text-xs font-semibold border transition-colors",
-                    calendarCompactCells ? "border-primary/30 bg-primary-light text-primary" : "border-border bg-muted text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {calendarCompactCells ? "Ringkas" : "Detail"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setHideNonDriverHelper((v) => !v); setEmptyNavIdx(-1); setStatusNavIdx(new Map()); setAnomalyNavIdx(new Map()); }}
-                  className={cn(
-                    "px-3 py-2 rounded-xl text-xs font-semibold border transition-colors",
-                    hideNonDriverHelper ? "border-primary/30 bg-primary-light text-primary" : "border-border bg-muted text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {hideNonDriverHelper ? "D/H saja" : "Semua jabatan"}
-                </button>
+                <div className="flex items-center gap-1 rounded-2xl border border-border/70 bg-muted/45 p-1 shadow-sm shadow-black/5">
+                  <button
+                    type="button"
+                    aria-pressed={calendarValidationEnabled}
+                    onClick={() => { setCalendarValidationEnabled((v) => !v); setAnomalyNavIdx(new Map()); }}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-bold transition-all",
+                      calendarValidationEnabled
+                        ? "bg-success-light text-success shadow-sm ring-1 ring-success/20"
+                        : "text-muted-foreground hover:bg-card hover:text-foreground"
+                    )}
+                  >
+                    <span className={cn("h-1.5 w-1.5 rounded-full", calendarValidationEnabled ? "bg-success" : "bg-muted-foreground/40")} />
+                    <span>Validasi {calendarValidationEnabled ? "ON" : "OFF"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={calendarCompactCells}
+                    onClick={() => setCalendarCompactCells((v) => !v)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-bold transition-all",
+                      calendarCompactCells
+                        ? "bg-primary-light text-primary shadow-sm ring-1 ring-primary/20"
+                        : "text-muted-foreground hover:bg-card hover:text-foreground"
+                    )}
+                  >
+                    <span className={cn("h-1.5 w-1.5 rounded-full", calendarCompactCells ? "bg-primary" : "bg-muted-foreground/40")} />
+                    <span>{calendarCompactCells ? "Ringkas" : "Detail"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={hideNonDriverHelper}
+                    onClick={() => { setHideNonDriverHelper((v) => !v); setEmptyNavIdx(-1); setStatusNavIdx(new Map()); setAnomalyNavIdx(new Map()); }}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-bold transition-all",
+                      hideNonDriverHelper
+                        ? "bg-primary-light text-primary shadow-sm ring-1 ring-primary/20"
+                        : "bg-card text-foreground shadow-sm ring-1 ring-border/70 hover:ring-primary/20"
+                    )}
+                  >
+                    <span className={cn("h-1.5 w-1.5 rounded-full", hideNonDriverHelper ? "bg-primary" : "bg-muted-foreground/50")} />
+                    <span>{hideNonDriverHelper ? "D/H saja" : "Semua jabatan"}</span>
+                  </button>
+                </div>
                 <div className="flex items-center bg-muted rounded-xl p-1">
                   <button onClick={calPrevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
                   <span className="text-xs font-bold text-foreground px-3 min-w-[220px] text-center">{calPeriod.label}</span>
