@@ -58,6 +58,26 @@ type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama
 
 const PAGE_SIZE = 15;
 const CUT_OFF_DAY = 7;
+const SUPABASE_PAGE_SIZE = 1000;
+
+type SupabasePagedResult<T> = {
+  data: T[] | null;
+  error: { message?: string } | null;
+};
+
+async function fetchAllRanges<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<SupabasePagedResult<T>>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+    const to = from + SUPABASE_PAGE_SIZE - 1;
+    const { data, error } = await buildQuery(from, to);
+    if (error) throw new Error(error.message || "Gagal mengambil data payroll.");
+    rows.push(...(data || []));
+    if (!data || data.length < SUPABASE_PAGE_SIZE) break;
+  }
+  return rows;
+}
 
 // ─── Period helpers ───
 function getPeriodRange(periodKey: string): { start: string; end: string; label: string } {
@@ -285,42 +305,54 @@ export default function PayrollPage() {
       }
 
       // 4. Fetch delivery points totals for each employee in period
-      const { data: dpData } = await supabase
-        .from("delivery_points")
-        .select("employee_id, total")
-        .gte("tanggal", genPeriod.start)
-        .lte("tanggal", genPeriod.end)
-        .in("employee_id", newEmps.map((e) => e.id));
+      const dpData = await fetchAllRanges<{ employee_id: string; total: number }>((from, to) =>
+        supabase
+          .from("delivery_points")
+          .select("employee_id, total")
+          .gte("tanggal", genPeriod.start)
+          .lte("tanggal", genPeriod.end)
+          .in("employee_id", newEmps.map((e) => e.id))
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
 
       const dpTotals = new Map<string, number>();
-      (dpData || []).forEach((d: { employee_id: string; total: number }) => {
+      dpData.forEach((d) => {
         dpTotals.set(d.employee_id, (dpTotals.get(d.employee_id) || 0) + d.total);
       });
 
       // 5. Fetch attendance denda totals for each employee in period
-      const { data: attData } = await supabase
-        .from("attendance_records")
-        .select("employee_id, denda, tanggal, status")
-        .gte("tanggal", genPeriod.start)
-        .lte("tanggal", genPeriod.end)
-        .in("employee_id", newEmps.map((e) => e.id));
+      const attData = await fetchAllRanges<{ employee_id: string; denda: number; tanggal: string; status: string }>((from, to) =>
+        supabase
+          .from("attendance_records")
+          .select("employee_id, denda, tanggal, status")
+          .gte("tanggal", genPeriod.start)
+          .lte("tanggal", genPeriod.end)
+          .in("employee_id", newEmps.map((e) => e.id))
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
 
       const dendaTotals = new Map<string, number>();
-      (attData || []).forEach((d: { employee_id: string; denda: number }) => {
+      attData.forEach((d) => {
         dendaTotals.set(d.employee_id, (dendaTotals.get(d.employee_id) || 0) + d.denda);
       });
 
       // 5b. Fetch lembur Disetujui per employee dalam periode
-      const { data: lemburData } = await supabase
-        .from("overtime_requests")
-        .select("employee_id, total_lembur")
-        .eq("status", "Disetujui")
-        .gte("tanggal", genPeriod.start)
-        .lte("tanggal", genPeriod.end)
-        .in("employee_id", newEmps.map((e) => e.id));
+      const lemburData = await fetchAllRanges<{ employee_id: string; total_lembur: number | null }>((from, to) =>
+        supabase
+          .from("overtime_requests")
+          .select("employee_id, total_lembur")
+          .eq("status", "Disetujui")
+          .gte("tanggal", genPeriod.start)
+          .lte("tanggal", genPeriod.end)
+          .in("employee_id", newEmps.map((e) => e.id))
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
 
       const lemburTotals = new Map<string, number>();
-      (lemburData || []).forEach((d: { employee_id: string; total_lembur: number | null }) => {
+      lemburData.forEach((d) => {
         lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
       });
 
@@ -343,7 +375,7 @@ export default function PayrollPage() {
         if (exitDate) return true;
         // Tidak Aktif + NULL tanggal_keluar → hanya include kalau ada catatan absen
         const hariAdaCatatan = new Set(
-          (attData || []).filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
+          attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
         ).size;
         return hariAdaCatatan > 0;
       });
@@ -365,13 +397,17 @@ export default function PayrollPage() {
       });
 
       // 6b. Fetch off_days untuk pegawai-pegawai yang akan di-generate (untuk hitung prorata)
-      const { data: offDaysData } = await supabase
-        .from("employee_off_days")
-        .select("employee_id, day_of_week")
-        .in("employee_id", empsWithData.map((e) => e.id));
+      const offDaysData = await fetchAllRanges<{ employee_id: string; day_of_week: number }>((from, to) =>
+        supabase
+          .from("employee_off_days")
+          .select("employee_id, day_of_week")
+          .in("employee_id", empsWithData.map((e) => e.id))
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
 
       const offDayMap = new Map<string, Set<number>>();
-      (offDaysData || []).forEach((od: { employee_id: string; day_of_week: number }) => {
+      offDaysData.forEach((od) => {
         if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
         offDayMap.get(od.employee_id)!.add(od.day_of_week);
       });
@@ -432,7 +468,7 @@ export default function PayrollPage() {
         if (isInactiveNoExitDate) {
           const totalHariKalender = countCalendarDays(genPeriod.start, genPeriod.end);
           const hariDenganCatatan = new Set(
-            (attData || []).filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
+            attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
           ).size;
           const factor = Math.min(hariDenganCatatan / totalHariKalender, 1);
           gapokProrata = Math.round(gapokFull * factor);
@@ -1381,47 +1417,63 @@ export default function PayrollPage() {
       }
 
       // 2. Fetch delivery points, attendance, lembur dalam periode
-      const { data: dpData } = await supabase
-        .from("delivery_points")
-        .select("employee_id, total")
-        .gte("tanggal", genPeriod.start)
-        .lte("tanggal", genPeriod.end)
-        .in("employee_id", allEmps.map((e) => e.id));
+      const dpData = await fetchAllRanges<{ employee_id: string; total: number }>((from, to) =>
+        supabase
+          .from("delivery_points")
+          .select("employee_id, total")
+          .gte("tanggal", genPeriod.start)
+          .lte("tanggal", genPeriod.end)
+          .in("employee_id", allEmps.map((e) => e.id))
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       const dpTotals = new Map<string, number>();
-      (dpData || []).forEach((d: { employee_id: string; total: number }) => {
+      dpData.forEach((d) => {
         dpTotals.set(d.employee_id, (dpTotals.get(d.employee_id) || 0) + d.total);
       });
 
-      const { data: attData } = await supabase
-        .from("attendance_records")
-        .select("employee_id, denda, tanggal, status")
-        .gte("tanggal", genPeriod.start)
-        .lte("tanggal", genPeriod.end)
-        .in("employee_id", allEmps.map((e) => e.id));
+      const attData = await fetchAllRanges<{ employee_id: string; denda: number; tanggal: string; status: string }>((from, to) =>
+        supabase
+          .from("attendance_records")
+          .select("employee_id, denda, tanggal, status")
+          .gte("tanggal", genPeriod.start)
+          .lte("tanggal", genPeriod.end)
+          .in("employee_id", allEmps.map((e) => e.id))
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       const dendaTotals = new Map<string, number>();
-      (attData || []).forEach((d: { employee_id: string; denda: number }) => {
+      attData.forEach((d) => {
         dendaTotals.set(d.employee_id, (dendaTotals.get(d.employee_id) || 0) + d.denda);
       });
 
-      const { data: lemburData } = await supabase
-        .from("overtime_requests")
-        .select("employee_id, total_lembur")
-        .eq("status", "Disetujui")
-        .gte("tanggal", genPeriod.start)
-        .lte("tanggal", genPeriod.end)
-        .in("employee_id", allEmps.map((e) => e.id));
+      const lemburData = await fetchAllRanges<{ employee_id: string; total_lembur: number | null }>((from, to) =>
+        supabase
+          .from("overtime_requests")
+          .select("employee_id, total_lembur")
+          .eq("status", "Disetujui")
+          .gte("tanggal", genPeriod.start)
+          .lte("tanggal", genPeriod.end)
+          .in("employee_id", allEmps.map((e) => e.id))
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       const lemburTotals = new Map<string, number>();
-      (lemburData || []).forEach((d: { employee_id: string; total_lembur: number | null }) => {
+      lemburData.forEach((d) => {
         lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
       });
 
       // 3. Fetch off_days
-      const { data: offDaysData } = await supabase
-        .from("employee_off_days")
-        .select("employee_id, day_of_week")
-        .in("employee_id", allEmps.map((e) => e.id));
+      const offDaysData = await fetchAllRanges<{ employee_id: string; day_of_week: number }>((from, to) =>
+        supabase
+          .from("employee_off_days")
+          .select("employee_id, day_of_week")
+          .in("employee_id", allEmps.map((e) => e.id))
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
       const offDayMap = new Map<string, Set<number>>();
-      (offDaysData || []).forEach((od: { employee_id: string; day_of_week: number }) => {
+      offDaysData.forEach((od) => {
         if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
         offDayMap.get(od.employee_id)!.add(od.day_of_week);
       });
@@ -1457,7 +1509,7 @@ export default function PayrollPage() {
 
         if (isInactiveNoExitDate) {
           const hariDenganCatatan = new Set(
-            (attData || []).filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
+            attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
           ).size;
           if (hariDenganCatatan === 0) return []; // Skip: Tidak Aktif tanpa catatan absen
           const factor = Math.min(hariDenganCatatan / totalHariKalender, 1);
