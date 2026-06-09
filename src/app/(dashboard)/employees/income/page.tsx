@@ -116,6 +116,7 @@ const ATTENDANCE_STATUS_META: Record<AttendanceStatus, { label: string; color: s
   Libur: { label: "Libur", color: "#8b5cf6", short: "L" },
   Cuti: { label: "Cuti", color: "#8b5cf6", short: "C" },
 };
+const CALENDAR_VALIDATION_JABATAN = new Set(["driver", "helper", "koordinator", "wakil koordinator", "wakir koordinator"]);
 
 const blankRow = (): BatchRow => ({
   rowKey: nextRowKey(),
@@ -184,9 +185,9 @@ function mapEmployeeRow(e: EmployeeQueryRow): EmployeeLite {
   };
 }
 
-function isDriverHelperEmployee(emp: Pick<EmployeeLite, "jabatanNama">): boolean {
+function isCalendarValidationEmployee(emp: Pick<EmployeeLite, "jabatanNama">): boolean {
   const jabatan = (emp.jabatanNama || "").trim().toLowerCase();
-  return jabatan === "driver" || jabatan === "helper";
+  return CALENDAR_VALIDATION_JABATAN.has(jabatan);
 }
 
 function isInNonActivePeriod(dateStr: string, periods: NonActivePeriod[] | null | undefined): boolean {
@@ -301,7 +302,7 @@ export default function IncomePage() {
   const [calAttendance, setCalAttendance] = useState<CalendarAttendanceRow[]>([]);
   const [calendarValidationEnabled, setCalendarValidationEnabled] = useState(true);
   const [calendarCompactCells, setCalendarCompactCells] = useState(true);
-  const [hideNonDriverHelper, setHideNonDriverHelper] = useState(false);
+  const [hideNonValidationRoles, setHideNonValidationRoles] = useState(false);
   const [emptyNavIdx, setEmptyNavIdx] = useState(-1);
   const [statusNavIdx, setStatusNavIdx] = useState<Map<string, number>>(new Map());
   const [anomalyNavIdx, setAnomalyNavIdx] = useState<Map<string, number>>(new Map());
@@ -946,8 +947,8 @@ export default function IncomePage() {
     const delivery = calDeliveries.find((d) => (d.employee_id || `_deleted_${d.employee_nama || d.id}`) === key);
     return { id: key, nama: delivery?.employeeNama || "?" };
   }).sort((a, b) => a.nama.localeCompare(b.nama));
-  const calEmployees = allCalEmployees.filter((emp) => !hideNonDriverHelper || isDriverHelperEmployee(emp));
-  const hiddenNonDriverHelperCount = hideNonDriverHelper ? allCalEmployees.length - calEmployees.length : 0;
+  const calEmployees = allCalEmployees.filter((emp) => !hideNonValidationRoles || isCalendarValidationEmployee(emp));
+  const hiddenNonValidationRoleCount = hideNonValidationRoles ? allCalEmployees.length - calEmployees.length : 0;
   const calEmployeeIdSet = new Set(calEmployees.map((emp) => emp.id));
   const visibleCalDeliveries = calDeliveries.filter((d) => calEmployeeIdSet.has(d.employee_id || `_deleted_${d.employee_nama || d.id}`));
 
@@ -963,7 +964,7 @@ export default function IncomePage() {
   const getCalendarValidation = (emp: CalendarEmployee, dateStr: string, entries: DeliveryRow[]): CalendarValidation | null => {
     if (!calendarValidationEnabled) return null;
     if (emp.id.startsWith("_deleted_")) return null;
-    if (!isDriverHelperEmployee(emp)) return null;
+    if (!isCalendarValidationEmployee(emp)) return null;
     if (!isEmployeeActiveOnDate(emp, dateStr)) return null;
 
     const attendance = calAttendanceMap.get(`${emp.id}-${dateStr}`) || null;
@@ -1629,10 +1630,10 @@ export default function IncomePage() {
                     <span><strong className="text-foreground">{visibleCalDeliveries.length}</strong> entri</span>
                     <span className="w-1 h-1 rounded-full bg-border" />
                     <span><strong className="text-primary">{visibleCalDeliveries.reduce((s, d) => s + d.jumlah_titik, 0)}</strong> total titik</span>
-                    {hiddenNonDriverHelperCount > 0 && (
+                    {hiddenNonValidationRoleCount > 0 && (
                       <>
                         <span className="w-1 h-1 rounded-full bg-border" />
-                        <span><strong className="text-muted-foreground">{hiddenNonDriverHelperCount}</strong> non D/H disembunyikan</span>
+                        <span><strong className="text-muted-foreground">{hiddenNonValidationRoleCount}</strong> non D/H/K/WK disembunyikan</span>
                       </>
                     )}
                     {visibleCalDeliveries.filter((d) => d.statusNama).length > 0 && (
@@ -1727,17 +1728,17 @@ export default function IncomePage() {
                   </button>
                   <button
                     type="button"
-                    aria-pressed={hideNonDriverHelper}
-                    onClick={() => { setHideNonDriverHelper((v) => !v); setEmptyNavIdx(-1); setStatusNavIdx(new Map()); setAnomalyNavIdx(new Map()); }}
+                    aria-pressed={hideNonValidationRoles}
+                    onClick={() => { setHideNonValidationRoles((v) => !v); setEmptyNavIdx(-1); setStatusNavIdx(new Map()); setAnomalyNavIdx(new Map()); }}
                     className={cn(
                       "inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-bold transition-all",
-                      hideNonDriverHelper
+                      hideNonValidationRoles
                         ? "bg-primary-light text-primary shadow-sm ring-1 ring-primary/20"
                         : "bg-card text-foreground shadow-sm ring-1 ring-border/70 hover:ring-primary/20"
                     )}
                   >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", hideNonDriverHelper ? "bg-primary" : "bg-muted-foreground/50")} />
-                    <span>{hideNonDriverHelper ? "D/H saja" : "Semua jabatan"}</span>
+                    <span className={cn("h-1.5 w-1.5 rounded-full", hideNonValidationRoles ? "bg-primary" : "bg-muted-foreground/50")} />
+                    <span>{hideNonValidationRoles ? "D/H/K/WK" : "Semua jabatan"}</span>
                   </button>
                 </div>
                 <div className="flex items-center bg-muted rounded-xl p-1">
