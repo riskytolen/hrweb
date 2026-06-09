@@ -1943,7 +1943,7 @@ export default function IncomePage() {
                                   </div>
                                 )
                               ) : validation?.attendance ? (
-                                <div className={cn("min-h-[58px] flex flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-1", validation.isAnomaly ? "border-warning/40 bg-warning/[0.10]" : "border-border/50 bg-muted/35")} title={validation.message || `Absensi ${validation.label}`}>
+                                <div className={cn("min-h-[78px] flex flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-1", validation.isAnomaly ? "border-warning/40 bg-warning/[0.10]" : "border-border/50 bg-muted/35")} title={validation.message || `Absensi ${validation.label}`}>
                                   <span className="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[8px] font-bold text-white" style={{ backgroundColor: validation.color }}>{validation.label}</span>
                                   {validation.isAnomaly ? (
                                     <>
