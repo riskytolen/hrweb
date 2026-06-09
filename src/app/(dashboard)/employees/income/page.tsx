@@ -300,6 +300,7 @@ export default function IncomePage() {
   const [calMonth, setCalMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [calAttendance, setCalAttendance] = useState<CalendarAttendanceRow[]>([]);
   const [calendarValidationEnabled, setCalendarValidationEnabled] = useState(true);
+  const [calendarCompactCells, setCalendarCompactCells] = useState(true);
   const [hideNonDriverHelper, setHideNonDriverHelper] = useState(false);
   const [emptyNavIdx, setEmptyNavIdx] = useState(-1);
   const [statusNavIdx, setStatusNavIdx] = useState<Map<string, number>>(new Map());
@@ -1691,6 +1692,16 @@ export default function IncomePage() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setCalendarCompactCells((v) => !v)}
+                  className={cn(
+                    "px-3 py-2 rounded-xl text-xs font-semibold border transition-colors",
+                    calendarCompactCells ? "border-primary/30 bg-primary-light text-primary" : "border-border bg-muted text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {calendarCompactCells ? "Ringkas" : "Detail"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => { setHideNonDriverHelper((v) => !v); setEmptyNavIdx(-1); setStatusNavIdx(new Map()); setAnomalyNavIdx(new Map()); }}
                   className={cn(
                     "px-3 py-2 rounded-xl text-xs font-semibold border transition-colors",
@@ -1794,6 +1805,10 @@ export default function IncomePage() {
                           const isActiveStatus = activeStatusCell && activeStatusCell.empId === emp.id && activeStatusCell.dateStr === dateStr;
                           const isActiveAnomaly = activeAnomalyCell && activeAnomalyCell.empId === emp.id && activeAnomalyCell.dateStr === dateStr;
                           const isCellEditing = calEditCell?.empId === emp.id && calEditCell?.dateStr === dateStr;
+                          const totalPoints = entries.reduce((sum, entry) => sum + entry.jumlah_titik, 0);
+                          const roleSummary = Array.from(new Set(entries.map((entry) => entry.role === "Driver" ? "D" : "H"))).join("/");
+                          const zoneNames = Array.from(new Set(entries.map((entry) => entry.zoneNama || "-")));
+                          const zoneSummary = zoneNames.length > 1 ? `${zoneNames[0]} +${zoneNames.length - 1}` : zoneNames[0] || "Titik";
                           return (
                             <td key={dateStr} id={`cal-${emp.id}-${dateStr}`}
                               onClick={() => !calEditCell && openCalCell(emp.id, emp.nama, dateStr)}
@@ -1805,38 +1820,71 @@ export default function IncomePage() {
                                 "group-hover:bg-muted/30"
                               )}>
                               {entries.length > 0 ? (
-                                <div className="space-y-0.5">
-                                  {validation && (
-                                    <div className={cn("flex items-center justify-between gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-bold", validation.isAnomaly ? "bg-danger/10 text-danger" : "bg-muted/60 text-muted-foreground")}>
-                                      <span>{validation.isAnomaly ? validation.message : `Absen ${validation.label}`}</span>
-                                      {validation.attendance && (
-                                        <span className="px-1 rounded text-white" style={{ backgroundColor: validation.color }}>{ATTENDANCE_STATUS_META[validation.attendance.status].short}</span>
+                                calendarCompactCells ? (
+                                  <div className={cn(
+                                    "min-h-[78px] rounded-lg border px-2 py-1.5 flex flex-col gap-1",
+                                    validation?.isAnomaly ? "border-danger/40 bg-danger/[0.07]" : "border-border/50 bg-card/80"
+                                  )}>
+                                    <div className="flex items-center justify-between gap-1 min-h-4">
+                                      {validation ? (
+                                        <span className={cn("truncate rounded px-1.5 py-0.5 text-[8px] font-bold", validation.isAnomaly ? "bg-danger/10 text-danger" : "text-white")} style={validation.isAnomaly ? undefined : { backgroundColor: validation.color }}>
+                                          {validation.isAnomaly ? validation.message : validation.label}
+                                        </span>
+                                      ) : (
+                                        <span className="rounded bg-muted px-1.5 py-0.5 text-[8px] font-bold text-muted-foreground">Titik</span>
                                       )}
+                                      {validation?.isAnomaly ? (
+                                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[10px] font-black text-white">!</span>
+                                      ) : validation?.attendance ? (
+                                        <span className="text-[9px] font-black" style={{ color: validation.color }}>{ATTENDANCE_STATUS_META[validation.attendance.status].short}</span>
+                                      ) : null}
                                     </div>
-                                  )}
-                                  {entries.map((e) => (
-                                    <div key={e.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors" style={{ backgroundColor: `${e.zoneColor}20`, borderLeft: `3px solid ${e.zoneColor}` }}>
-                                      <span className="text-[9px] font-bold truncate" style={{ color: e.zoneColor }}>{e.zoneNama}</span>
-                                      <span className="text-[11px] font-extrabold ml-auto" style={{ color: e.zoneColor }}>{e.jumlah_titik}</span>
-                                      <span className={cn("text-[9px] font-extrabold px-1.5 py-0.5 rounded-md", e.role === "Driver" ? "bg-blue-500 text-white" : "bg-orange-500 text-white")}>{e.role === "Driver" ? "D" : "H"}</span>
-                                      {e.statusNama && <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: `${e.statusColor}25`, color: e.statusColor }}>{e.statusNama}</span>}
+                                    <div className="flex flex-1 items-center justify-center">
+                                      <span className={cn("text-2xl font-black leading-none tabular-nums", validation?.isAnomaly ? "text-danger" : "text-primary")}>{totalPoints}</span>
                                     </div>
-                                  ))}
-                                </div>
+                                    <div className="flex items-center justify-between gap-1 text-[8px] font-semibold text-muted-foreground">
+                                      <span>{entries.length} entri</span>
+                                      {roleSummary && <span>{roleSummary}</span>}
+                                    </div>
+                                    <p className="truncate text-center text-[8px] font-medium text-muted-foreground/80" title={zoneNames.join(", ")}>{zoneSummary}</p>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-0.5">
+                                    {validation && (
+                                      <div className={cn("flex items-center justify-between gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-bold", validation.isAnomaly ? "bg-danger/10 text-danger" : "bg-muted/60 text-muted-foreground")}>
+                                        <span>{validation.isAnomaly ? validation.message : `Absen ${validation.label}`}</span>
+                                        {validation.attendance && (
+                                          <span className="px-1 rounded text-white" style={{ backgroundColor: validation.color }}>{ATTENDANCE_STATUS_META[validation.attendance.status].short}</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {entries.map((e) => (
+                                      <div key={e.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors" style={{ backgroundColor: `${e.zoneColor}20`, borderLeft: `3px solid ${e.zoneColor}` }}>
+                                        <span className="text-[9px] font-bold truncate" style={{ color: e.zoneColor }}>{e.zoneNama}</span>
+                                        <span className="text-[11px] font-extrabold ml-auto" style={{ color: e.zoneColor }}>{e.jumlah_titik}</span>
+                                        <span className={cn("text-[9px] font-extrabold px-1.5 py-0.5 rounded-md", e.role === "Driver" ? "bg-blue-500 text-white" : "bg-orange-500 text-white")}>{e.role === "Driver" ? "D" : "H"}</span>
+                                        {e.statusNama && <span className="text-[8px] font-bold px-1 py-0.5 rounded" style={{ backgroundColor: `${e.statusColor}25`, color: e.statusColor }}>{e.statusNama}</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
                               ) : validation?.attendance ? (
-                                <div className={cn("min-h-7 flex flex-col items-center justify-center gap-1 rounded-md px-1 py-1", validation.isAnomaly ? "bg-danger/[0.08]" : "bg-muted/40")} title={validation.message || `Absensi ${validation.label}`}>
-                                  <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[8px] font-bold text-white" style={{ backgroundColor: validation.color }}>
-                                    {validation.label}
-                                  </span>
-                                  {validation.isAnomaly && <span className="text-[8px] font-bold text-danger text-center leading-tight">{validation.message}</span>}
+                                <div className={cn("min-h-[58px] flex flex-col items-center justify-center gap-1 rounded-lg border px-1.5 py-1", validation.isAnomaly ? "border-warning/40 bg-warning/[0.10]" : "border-border/50 bg-muted/35")} title={validation.message || `Absensi ${validation.label}`}>
+                                  <span className="inline-flex items-center justify-center rounded px-1.5 py-0.5 text-[8px] font-bold text-white" style={{ backgroundColor: validation.color }}>{validation.label}</span>
+                                  {validation.isAnomaly ? (
+                                    <>
+                                      <span className="text-lg font-black leading-none text-warning tabular-nums">0</span>
+                                      <span className="text-center text-[8px] font-bold leading-tight text-warning">{validation.message}</span>
+                                    </>
+                                  ) : null}
                                 </div>
                               ) : !isActiveForCalendar ? (
                                 <div className="h-7 flex items-center justify-center">
                                   <span className="text-[10px] text-muted-foreground/20">-</span>
                                 </div>
                               ) : (
-                                <div className="h-7 flex items-center justify-center bg-danger/[0.04]">
-                                  <span className="text-[8px] text-danger/30">kosong</span>
+                                <div className="min-h-[58px] flex items-center justify-center rounded-lg border border-dashed border-border/40 bg-muted/[0.18]">
+                                  <span className="text-[8px] font-medium text-muted-foreground/35">kosong</span>
                                 </div>
                               )}
                             </td>
