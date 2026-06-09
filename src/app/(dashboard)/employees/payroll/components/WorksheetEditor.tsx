@@ -123,11 +123,11 @@ export default function WorksheetEditor({
             <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => setSearch(e.target.value)}
               className="bg-transparent text-[11px] outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
           </div>
-          <button onClick={onOpenBatchFill}
+          {canEdit && <button onClick={onOpenBatchFill}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">
             <Zap className="w-3 h-3" />Batch Fill
-          </button>
-          {wsRowsChanged > 0 && (
+          </button>}
+          {canEdit && wsRowsChanged > 0 && (
             <div className="flex items-center gap-1.5">
               <button onClick={() => initWsData(payrolls)} disabled={wsSaving}
                 className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">
@@ -213,9 +213,9 @@ export default function WorksheetEditor({
                         <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary transition-colors" title="PDF">
                           <Download className="w-3 h-3" />
                         </button>
-                        <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors" title="Hapus">
+                        {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors" title="Hapus">
                           <Trash2 className="w-3 h-3" />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>
@@ -254,8 +254,10 @@ export default function WorksheetEditor({
                                             onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
                                             placeholder="0"
                                             onClick={(e) => e.stopPropagation()}
+                                            readOnly={!canEdit}
                                             className={cn(
                                               "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
+                                              !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
                                               isCellChanged(row.id, f.key)
                                                 ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
                                                 : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
@@ -342,8 +344,10 @@ export default function WorksheetEditor({
                                             onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
                                             placeholder="0"
                                             onClick={(e) => e.stopPropagation()}
+                                            readOnly={!canEdit}
                                             className={cn(
                                               "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
+                                              !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
                                               isCellChanged(row.id, f.key)
                                                 ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
                                                 : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"

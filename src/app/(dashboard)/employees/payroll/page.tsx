@@ -144,6 +144,7 @@ export default function PayrollPage() {
   const [editForm, setEditForm] = useState<Record<string, number>>({});
   const [editCatatan, setEditCatatan] = useState("");
   const [saving, setSaving] = useState(false);
+  const detailRequestSeq = useRef(0);
 
   // ─── History ───
   const [history, setHistory] = useState<DbPayroll[]>([]);
@@ -186,6 +187,8 @@ export default function PayrollPage() {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkFinalConfirm, setBulkFinalConfirm] = useState(false);
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [singleFinalConfirm, setSingleFinalConfirm] = useState<PayrollRow | null>(null);
+  const [computeWorksheetConfirm, setComputeWorksheetConfirm] = useState(false);
 
   // ─── Delete confirm ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -263,6 +266,10 @@ export default function PayrollPage() {
 
   // ─── Generate slip gaji ───
   const handleGenerate = async () => {
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin generate slip.");
+      return;
+    }
     setGenerating(true);
     const genPeriod = getPeriodRange(generatePeriod);
 
@@ -574,6 +581,8 @@ export default function PayrollPage() {
   const [absenBreakdownLoading, setAbsenBreakdownLoading] = useState(false);
 
   const openDetail = async (row: PayrollRow) => {
+    const requestId = detailRequestSeq.current + 1;
+    detailRequestSeq.current = requestId;
     setSelectedPayroll(row);
     // Initialize edit form with current values
     const form: Record<string, number> = {};
@@ -584,7 +593,7 @@ export default function PayrollPage() {
     setShowDetail(true);
     setAbsenBreakdown(null);
     setLemburBreakdown(null);
-    fetchHistory(row.employee_id);
+    fetchHistory(row.employee_id, requestId);
     
     // Fetch breakdown denda — pakai periode_mulai & periode_selesai yang tersimpan di slip
     setAbsenBreakdownLoading(true);
@@ -598,6 +607,7 @@ export default function PayrollPage() {
       .eq("employee_id", row.employee_id)
       .gt("denda", 0)
       .order("tanggal", { ascending: true });
+    if (detailRequestSeq.current !== requestId) return;
       
     let telat = 0;
     let alpha = 0;
@@ -620,12 +630,13 @@ export default function PayrollPage() {
       .gte("tanggal", startDate)
       .lte("tanggal", endDate)
       .order("tanggal", { ascending: true });
+    if (detailRequestSeq.current !== requestId) return;
     setLemburBreakdown((lemburData || []) as LemburBreakdownItem[]);
     setLemburBreakdownLoading(false);
   };
 
   // ─── Fetch history ───
-  const fetchHistory = async (employeeId: string) => {
+  const fetchHistory = async (employeeId: string, requestId?: number) => {
     setLoadingHistory(true);
     const { data } = await supabase
       .from("payrolls")
@@ -633,6 +644,7 @@ export default function PayrollPage() {
       .eq("employee_id", employeeId)
       .order("periode", { ascending: false })
       .limit(6);
+    if (requestId && detailRequestSeq.current !== requestId) return;
     setHistory(data || []);
     setLoadingHistory(false);
   };
@@ -642,9 +654,41 @@ export default function PayrollPage() {
   const computedTotalPotongan = POTONGAN_FIELDS.reduce((sum, f) => sum + (editForm[f.key] || 0), 0);
   const computedNetto = computedTotalPendapatan - computedTotalPotongan;
 
+  const getRowsForMainTab = useCallback((tab: "worksheet" | "draft" | "final" | "laporan" = activeMainTab) => {
+    if (tab === "laporan") return payrolls.filter((p) => p.status === "Final");
+    if (tab === "worksheet") return payrolls.filter((p) => p.status === "Worksheet");
+    if (tab === "final") return payrolls.filter((p) => p.status === "Final");
+    return payrolls.filter((p) => p.status === "Draft");
+  }, [activeMainTab, payrolls]);
+
+  const getFilteredRowsForMainTab = useCallback((tab: "worksheet" | "draft" | "final" | "laporan" = activeMainTab) => {
+    const q = search.toLowerCase();
+    return getRowsForMainTab(tab).filter((p) =>
+      (p.pegawaiNama || "").toLowerCase().includes(q) ||
+      p.employee_id.toLowerCase().includes(q)
+    );
+  }, [activeMainTab, getRowsForMainTab, search]);
+
+  const getScopedSelectedRows = useCallback(() => {
+    const visibleIds = new Set(getFilteredRowsForMainTab().map((p) => p.id));
+    return payrolls.filter((p) => selectedIds.has(p.id) && visibleIds.has(p.id));
+  }, [getFilteredRowsForMainTab, payrolls, selectedIds]);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [activeTab, activeMainTab, periodKey, search]);
+
   // ─── Save edit ───
   const handleSave = async () => {
     if (!selectedPayroll) return;
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit payroll.");
+      return;
+    }
+    if (selectedPayroll.status === "Final") {
+      showToast("error", "Slip Terkunci", "Slip Final tidak dapat diedit. Kembalikan ke Draft terlebih dahulu.");
+      return;
+    }
     setSaving(true);
 
     // Only send individual component fields, NOT generated columns
@@ -697,13 +741,30 @@ export default function PayrollPage() {
   // ─── Toggle status ───
   const handleToggleStatus = async () => {
     if (!selectedPayroll) return;
-    setSaving(true);
     const newStatus = selectedPayroll.status === "Draft" ? "Final" : "Draft";
     const oldStatus = selectedPayroll.status;
+    if (newStatus === "Final" && !canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin finalisasi payroll.");
+      return;
+    }
+    if (oldStatus === "Final" && !isSuperAdmin) {
+      showToast("error", "Tidak Diizinkan", "Hanya super admin yang dapat mengembalikan Final ke Draft.");
+      return;
+    }
+
+    setSaving(true);
+    const updatePayload: Record<string, unknown> = { status: newStatus };
+    if (newStatus === "Final") {
+      updatePayload.locked_at = new Date().toISOString();
+      updatePayload.locked_by = user?.id ?? null;
+    } else {
+      updatePayload.locked_at = null;
+      updatePayload.locked_by = null;
+    }
 
     const { data, error } = await supabase
       .from("payrolls")
-      .update({ status: newStatus })
+      .update(updatePayload)
       .eq("id", selectedPayroll.id)
       .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening)")
       .single();
@@ -736,11 +797,17 @@ export default function PayrollPage() {
 
     showToast("success", "Status Diubah", `Slip gaji diubah menjadi ${newStatus}.`);
     setSaving(false);
+    setSingleFinalConfirm(null);
   };
 
   // ─── Delete slip ───
   const handleDelete = async () => {
     if (!deleteConfirm) return;
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin hapus payroll.");
+      setDeleteConfirm(null);
+      return;
+    }
     setDeleting(true);
     const oldRecord = payrolls.find((p) => p.id === deleteConfirm.id);
     const { error } = await supabase.from("payrolls").delete().eq("id", deleteConfirm.id);
@@ -775,12 +842,18 @@ export default function PayrollPage() {
   };
 
   const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) return;
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin hapus payroll.");
+      setBulkDeleteConfirm(false);
+      return;
+    }
+    const scopedRows = getScopedSelectedRows();
+    if (scopedRows.length === 0) return;
     setDeleting(true);
     
-    const idsToDelete = Array.from(selectedIds);
+    const idsToDelete = scopedRows.map((p) => p.id);
     // Optimistically get records for audit
-    const oldRecords = payrolls.filter((p) => idsToDelete.includes(p.id));
+    const oldRecords = scopedRows;
     
     const { error } = await supabase.from("payrolls").delete().in("id", idsToDelete);
     if (error) {
@@ -812,12 +885,22 @@ export default function PayrollPage() {
   };
 
   const handleBulkFinal = async () => {
-    if (selectedIds.size === 0) return;
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin finalisasi payroll.");
+      setBulkFinalConfirm(false);
+      return;
+    }
+    if (activeMainTab !== "draft") {
+      showToast("error", "Tab Tidak Sesuai", "Finalisasi massal hanya bisa dilakukan dari tab Draft.");
+      setBulkFinalConfirm(false);
+      return;
+    }
+    const scopedRows = getScopedSelectedRows();
+    if (scopedRows.length === 0) return;
     setBulkUpdating(true);
     
-    const idsToUpdate = Array.from(selectedIds);
     // Hanya proses slip yang statusnya masih "Draft"
-    const draftsToUpdate = payrolls.filter((p) => idsToUpdate.includes(p.id) && p.status === "Draft");
+    const draftsToUpdate = scopedRows.filter((p) => p.status === "Draft");
     
     if (draftsToUpdate.length === 0) {
       showToast("error", "Info", "Semua slip yang dipilih sudah Final.");
@@ -827,10 +910,11 @@ export default function PayrollPage() {
     }
 
     const draftIds = draftsToUpdate.map(p => p.id);
+    const lockedAt = new Date().toISOString();
     
     const { error } = await supabase
       .from("payrolls")
-      .update({ status: "Final" })
+      .update({ status: "Final", locked_at: lockedAt, locked_by: user?.id ?? null })
       .in("id", draftIds);
       
     if (error) {
@@ -842,19 +926,19 @@ export default function PayrollPage() {
     
     await logAudit({
       supabase,
-      action: "update",
+      action: "finalisasi",
       entityType: "payrolls",
       entityId: `bulk-final-${draftIds.length}`,
       entityLabel: `Bulk update ${draftIds.length} slip gaji ke Final`,
       metadata: { ids: draftIds, records: draftsToUpdate.map(r => ({ id: r.id, nama: r.pegawaiNama })) }
     });
     
-    setPayrolls((prev) => prev.map((p) => draftIds.includes(p.id) ? { ...p, status: "Final" } : p));
+    setPayrolls((prev) => prev.map((p) => draftIds.includes(p.id) ? { ...p, status: "Final", locked_at: lockedAt, locked_by: user?.id ?? null } : p));
     showToast("success", "Slip Difinalkan", `${draftIds.length} slip gaji berhasil diubah menjadi Final.`);
     
     // Update selected payroll if it's currently open
     if (selectedPayroll && draftIds.includes(selectedPayroll.id)) {
-      setSelectedPayroll((prev) => prev ? { ...prev, status: "Final" } : null);
+      setSelectedPayroll((prev) => prev ? { ...prev, status: "Final", locked_at: lockedAt, locked_by: user?.id ?? null } : null);
     }
     
     setBulkUpdating(false);
@@ -862,16 +946,17 @@ export default function PayrollPage() {
     setSelectedIds(new Set()); // Reset selection setelah aksi berhasil
   };
 
-  // ─── Export Excel (xlsx) untuk semua slip dalam periode ───
-  const exportExcel = async () => {
-    if (payrolls.length === 0) {
+  // ─── Export Excel (xlsx) ───
+  const exportExcel = async (rowsToExport: PayrollRow[] = payrolls, scopeLabel?: string) => {
+    if (rowsToExport.length === 0) {
       showToast("error", "Tidak Ada Data", "Tidak ada slip untuk di-export.");
       return;
     }
     try {
       const XLSX = await import("xlsx");
       const periodLabel = formatPeriodLabel(periodKey);
-      const filename = `Slip_Gaji_${periodLabel.replace(/\s/g, "_")}.xlsx`;
+      const filenameScope = scopeLabel ? `${scopeLabel}_` : "Slip_Gaji_";
+      const filename = `${filenameScope}${periodLabel.replace(/\s/g, "_")}.xlsx`;
 
       // Build rows
       const headers = [
@@ -883,7 +968,7 @@ export default function PayrollPage() {
         "Netto", "Status", "Catatan",
       ];
 
-      const rows = payrolls.map((p, idx) => [
+      const rows = rowsToExport.map((p, idx) => [
         idx + 1,
         p.employee_id,
         p.pegawaiNama || "-",
@@ -901,14 +986,14 @@ export default function PayrollPage() {
       const totalRow = [
         "", "", "TOTAL", "",
         ...PENDAPATAN_FIELDS.map((f) =>
-          payrolls.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)
+          rowsToExport.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)
         ),
-        payrolls.reduce((s, p) => s + p.total_pendapatan, 0),
+        rowsToExport.reduce((s, p) => s + p.total_pendapatan, 0),
         ...POTONGAN_FIELDS.map((f) =>
-          payrolls.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)
+          rowsToExport.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)
         ),
-        payrolls.reduce((s, p) => s + p.total_potongan, 0),
-        payrolls.reduce((s, p) => s + p.netto, 0),
+        rowsToExport.reduce((s, p) => s + p.total_potongan, 0),
+        rowsToExport.reduce((s, p) => s + p.netto, 0),
         "", "",
       ];
 
@@ -948,14 +1033,14 @@ export default function PayrollPage() {
       XLSX.utils.book_append_sheet(wb, ws, "Slip Gaji");
       XLSX.writeFile(wb, filename);
 
-      showToast("success", "Export Excel", `${payrolls.length} slip diekspor ke ${filename}.`);
+      showToast("success", "Export Excel", `${rowsToExport.length} slip diekspor ke ${filename}.`);
 
       await logAudit({
         supabase,
         action: "export",
         entityType: "payrolls",
         entityLabel: `Export Excel ${periodLabel}`,
-        metadata: { periode: periodKey, jumlah_slip: payrolls.length, filename },
+        metadata: { periode: periodKey, jumlah_slip: rowsToExport.length, filename, scope: scopeLabel || "semua" },
       });
     } catch (err) {
       console.error("[Payroll] Export Excel failed:", err);
@@ -1224,6 +1309,7 @@ export default function PayrollPage() {
   }, [wsChangedCells]);
 
   const handleWsChange = (id: number, field: string, rawValue: string) => {
+    if (!canEdit) return;
     const value = parseCurrencyInput(rawValue);
     setWsData((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
     setWsChangedCells((prev) => {
@@ -1245,6 +1331,10 @@ export default function PayrollPage() {
 
   const handleWsSaveAll = async () => {
     if (wsChangedCells.size === 0) return;
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit worksheet.");
+      return;
+    }
     setWsSaving(true);
     let errorCount = 0;
     const changedIds = Array.from(wsChangedCells.keys());
@@ -1298,6 +1388,10 @@ export default function PayrollPage() {
   }, [batchField, batchFilter, wsData]);
 
   const handleBatchFill = () => {
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit worksheet.");
+      return;
+    }
     if (!batchField) return;
     const value = parseCurrencyInput(batchValue);
     const targets = computeBatchFillTargets(filtered);
@@ -1333,6 +1427,10 @@ export default function PayrollPage() {
   };
 
   const handleGapokSave = async (empId: string) => {
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit gaji pokok.");
+      return;
+    }
     const value = parseCurrencyInput(gapokEditValue);
     setGapokSaving(true);
     const { error } = await supabase.from("pegawai").update({ gaji_pokok: value }).eq("id", empId);
@@ -1358,17 +1456,13 @@ export default function PayrollPage() {
   const gapokBelumDiisi = employees.filter((e) => !e.gaji_pokok).length;
 
   // ─── Filter & paginate (by tab + search) ───
-  const tabFiltered = (() => {
-    if (activeMainTab === "laporan") return payrolls.filter((p) => p.status === "Final");
-    if (activeMainTab === "worksheet") return payrolls.filter((p) => p.status === "Worksheet");
-    if (activeMainTab === "final") return payrolls.filter((p) => p.status === "Final");
-    return payrolls.filter((p) => p.status === "Draft");
-  })();
-  const filtered = tabFiltered.filter((p) =>
-    (p.pegawaiNama || "").toLowerCase().includes(search.toLowerCase()) ||
-    p.employee_id.toLowerCase().includes(search.toLowerCase())
-  );
+  const tabFiltered = getRowsForMainTab(activeMainTab);
+  const filtered = getFilteredRowsForMainTab(activeMainTab);
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const scopedSelectedRows = filtered.filter((p) => selectedIds.has(p.id));
+  const scopedSelectedIds = scopedSelectedRows.map((p) => p.id);
+  const scopedDraftSelectedCount = scopedSelectedRows.filter((p) => p.status === "Draft").length;
+  const hasUnsavedBuatSlipSelection = buatSlipConfirm?.ids.some((id) => wsChangedCells.has(id)) ?? false;
 
   // ─── Summary ───
   const totalNetto = payrolls.reduce((s, p) => s + p.netto, 0);
@@ -1394,6 +1488,10 @@ export default function PayrollPage() {
 
   // ─── Compute Worksheet (auto-recompute) ───
   const handleComputeWorksheet = async (specificPeriod?: string) => {
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin menghitung worksheet.");
+      return;
+    }
     const targetPeriod = specificPeriod || periodKey;
     setWsComputing(true);
     const genPeriod = getPeriodRange(targetPeriod);
@@ -1607,6 +1705,15 @@ export default function PayrollPage() {
   // ─── Buat Slip dari Worksheet (Worksheet → Draft) ───
   const handleBuatSlip = async (ids: number[]) => {
     if (ids.length === 0) return;
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin membuat slip.");
+      setBuatSlipConfirm(null);
+      return;
+    }
+    if (ids.some((id) => wsChangedCells.has(id))) {
+      showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan pada slip yang dipilih.");
+      return;
+    }
     const { error } = await supabase
       .from("payrolls")
       .update({ status: "Draft", last_recomputed_at: null })
@@ -1631,6 +1738,10 @@ export default function PayrollPage() {
   // ─── Batalkan Draft (Draft → Worksheet) ───
   const handleBatalkanDraft = async (ids: number[]) => {
     if (ids.length === 0) return;
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin membatalkan draft.");
+      return;
+    }
     const { error } = await supabase
       .from("payrolls")
       .update({ status: "Worksheet" })
@@ -1655,7 +1766,13 @@ export default function PayrollPage() {
           <div className="flex items-center gap-2">
             {activeTab === "slip" && (
               <>
-                <Button variant="outline" icon={FileSpreadsheet} size="sm" onClick={exportExcel} disabled={payrolls.length === 0}>
+                <Button
+                  variant="outline"
+                  icon={FileSpreadsheet}
+                  size="sm"
+                  onClick={() => activeMainTab === "laporan" ? exportExcel(filtered, "Laporan_Final") : exportExcel()}
+                  disabled={activeMainTab === "laporan" ? filtered.length === 0 : payrolls.length === 0}
+                >
                   Export Excel
                 </Button>
                 <Button variant="outline" icon={Download} size="sm" onClick={() => {
@@ -1669,7 +1786,10 @@ export default function PayrollPage() {
                 }}>
                   Export PDF
                 </Button>
-                <Button variant="outline" icon={FileText} size="sm" onClick={() => handleComputeWorksheet()} disabled={wsComputing || loading}>
+                <Button variant="outline" icon={FileText} size="sm" onClick={() => {
+                  if (worksheetCount > 0 || wsChangedCells.size > 0) setComputeWorksheetConfirm(true);
+                  else handleComputeWorksheet();
+                }} disabled={wsComputing || loading || !canEdit}>
                   {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
                 </Button>
               </>
@@ -1921,6 +2041,7 @@ export default function PayrollPage() {
           worksheet: worksheetCount,
           draft: draftCount,
           final: finalCount,
+          laporan: finalCount,
         }}
         onChange={(s) => {
           setActiveMainTab(s);
@@ -1968,6 +2089,98 @@ export default function PayrollPage() {
             description={"Klik \u201cHitung Worksheet\u201d untuk membuat draft slip gaji."}
           />
         )
+      ) : activeMainTab === "laporan" ? (
+        <div className="bg-card rounded-2xl border border-border overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border bg-card">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20 flex-shrink-0">
+                <BarChart3 className="w-4.5 h-4.5 text-white" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-foreground">Laporan Payroll Final</h2>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Rekap read-only untuk slip yang sudah difinalkan</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" icon={FileSpreadsheet} size="sm" onClick={() => exportExcel(filtered, "Laporan_Final")} disabled={filtered.length === 0}>
+                Excel Final
+              </Button>
+              <Button variant="outline" icon={Download} size="sm" onClick={() => {
+                if (filtered.length === 0) {
+                  showToast("error", "Tidak Ada Slip Final", "Belum ada slip Final untuk di-export.");
+                  return;
+                }
+                filtered.forEach((p) => exportSlipPDF(p));
+                showToast("success", "Export PDF", `${filtered.length} slip final sedang di-download.`);
+              }} disabled={filtered.length === 0}>
+                PDF Final
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-5 border-b border-border bg-muted/20">
+            <_HeroMetric icon={ShieldCheck} label="Slip Final" value={String(filtered.length)} unit="slip" iconBg="bg-emerald-100" iconColor="text-emerald-700" />
+            <_HeroMetric icon={TrendingDown} label="Pendapatan" value={formatCurrency(filtered.reduce((s, p) => s + p.total_pendapatan, 0))} iconBg="bg-success/15" iconColor="text-success" />
+            <_HeroMetric icon={AlertTriangle} label="Potongan" value={formatCurrency(filtered.reduce((s, p) => s + p.total_potongan, 0))} iconBg="bg-danger/10" iconColor="text-danger" />
+            <_HeroMetric icon={DollarSign} label="Netto" value={formatCurrency(filtered.reduce((s, p) => s + p.netto, 0))} iconBg="bg-primary/15" iconColor="text-primary" />
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px]">
+              <thead>
+                <tr className="border-b border-border bg-muted/50">
+                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
+                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
+                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Rekening</th>
+                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pendapatan</th>
+                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Potongan</th>
+                  <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Netto Transfer</th>
+                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
+                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">PDF</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {loading ? (
+                  <SkeletonTable rows={6} cols={8} />
+                ) : paged.length === 0 ? (
+                  <tr><td colSpan={8} className="text-center py-16 text-sm text-muted-foreground">
+                    <div className="flex flex-col items-center gap-2">
+                      <BarChart3 className="w-10 h-10 text-muted-foreground/20" />
+                      <p>Belum ada laporan Final</p>
+                      <p className="text-xs text-muted-foreground/60">Finalkan slip dari tab Draft untuk menampilkan laporan.</p>
+                    </div>
+                  </td></tr>
+                ) : paged.map((row, idx) => {
+                  const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null } | undefined;
+                  return (
+                    <tr key={row.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                      <td className="px-5 py-3.5 cursor-pointer" onClick={() => openDetail(row)}>
+                        <p className="text-sm font-semibold text-foreground">{row.pegawaiNama}</p>
+                        <p className="text-xs text-muted-foreground">{row.pegawaiJabatan}</p>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">
+                        <p className="font-semibold text-foreground">{peg?.bank || "-"}</p>
+                        <p>{peg?.no_rekening || "-"}</p>
+                        <p className="text-[10px]">{peg?.nama_rekening || "-"}</p>
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-sm font-semibold text-success tabular-nums">{formatCurrency(row.total_pendapatan)}</td>
+                      <td className="px-5 py-3.5 text-right text-sm font-semibold text-danger tabular-nums">{formatCurrency(row.total_potongan)}</td>
+                      <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground tabular-nums">{formatCurrency(row.netto)}</td>
+                      <td className="px-5 py-3.5 text-center"><FinalPillBadge /></td>
+                      <td className="px-5 py-3.5 text-center">
+                        <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary" title="Download PDF">
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+        </div>
       ) : (
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         {activeMainTab === "draft" && filtered.length > 0 && (
@@ -1981,7 +2194,7 @@ export default function PayrollPage() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">Review slip, lalu finalkan untuk mengunci</p>
               </div>
             </div>
-            <Button
+            {canEdit && <Button
               variant="primary"
               icon={ShieldCheck}
               size="sm"
@@ -1991,7 +2204,7 @@ export default function PayrollPage() {
               }}
             >
               Finalkan ({filtered.length})
-            </Button>
+            </Button>}
           </div>
         )}
         {activeMainTab === "final" && filtered.length > 0 && (
@@ -2005,21 +2218,18 @@ export default function PayrollPage() {
                 <p className="text-[10px] text-muted-foreground mt-0.5">{filtered.length} slip telah dikunci — siap untuk pembayaran</p>
               </div>
             </div>
-            <StatusBadge
-              status="Final"
-              className="rounded-full px-2.5 py-1 !bg-emerald-600 !text-white !border-emerald-600 shadow-sm font-bold"
-            />
+            <FinalPillBadge />
           </div>
         )}
-        <BatchActionBar
-          count={selectedIds.size}
+        {canEdit && <BatchActionBar
+          count={scopedSelectedRows.length}
           onClear={() => setSelectedIds(new Set())}
           actions={(() => {
             const acts: { type: "buat" | "finalkan" | "batalkan" | "hapus"; onClick: () => void }[] = [];
             if (activeMainTab === "draft") {
               acts.push({
                 type: "batalkan",
-                onClick: () => handleBatalkanDraft(Array.from(selectedIds)),
+                onClick: () => handleBatalkanDraft(scopedSelectedIds),
               });
               acts.push({
                 type: "finalkan",
@@ -2032,15 +2242,17 @@ export default function PayrollPage() {
             });
             return acts;
           })()}
-        />
+        />}
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-muted/50">
                 <th className="px-5 py-3.5 w-12 text-center">
-                  <input type="checkbox" className="rounded border-muted-foreground/30 text-primary cursor-pointer w-4 h-4"
+                  <input type="checkbox" className="rounded border-muted-foreground/30 text-primary cursor-pointer w-4 h-4 disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={!canEdit}
                     checked={paged.length > 0 && paged.every(r => selectedIds.has(r.id))}
                     onChange={(e) => {
+                      if (!canEdit) return;
                       if (e.target.checked) {
                         setSelectedIds(new Set([...selectedIds, ...paged.map(r => r.id)]));
                       } else {
@@ -2088,9 +2300,11 @@ export default function PayrollPage() {
               ) : paged.map((row, idx) => (
                 <tr key={row.id} className={cn("hover:bg-muted/30 transition-colors", selectedIds.has(row.id) && "bg-primary/5")}>
                   <td className="px-5 py-3.5 text-center">
-                    <input type="checkbox" className="rounded border-muted-foreground/30 text-primary cursor-pointer w-4 h-4"
+                    <input type="checkbox" className="rounded border-muted-foreground/30 text-primary cursor-pointer w-4 h-4 disabled:opacity-40 disabled:cursor-not-allowed"
+                      disabled={!canEdit}
                       checked={selectedIds.has(row.id)}
                       onChange={(e) => {
+                        if (!canEdit) return;
                         const next = new Set(selectedIds);
                         if (e.target.checked) next.add(row.id);
                         else next.delete(row.id);
@@ -2107,7 +2321,7 @@ export default function PayrollPage() {
                   <td className="px-5 py-3.5 text-right text-sm font-semibold text-danger cursor-pointer" onClick={() => openDetail(row)}>{formatCurrency(row.total_potongan)}</td>
                   <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground cursor-pointer" onClick={() => openDetail(row)}>{formatCurrency(row.netto)}</td>
                   <td className="px-5 py-3.5 text-center cursor-pointer" onClick={() => openDetail(row)}>
-                    <Badge variant={row.status === "Final" ? "success" : "muted"}>{row.status}</Badge>
+                    {row.status === "Final" ? <FinalPillBadge /> : <Badge variant="muted">{row.status}</Badge>}
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-center gap-1">
@@ -2265,10 +2479,7 @@ export default function PayrollPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <StatusBadge
-                    status={selectedPayroll.status as LegacyPayrollStatus}
-                    className={selectedPayroll.status === "Final" ? "rounded-full px-2.5 py-1 !bg-emerald-600 !text-white !border-emerald-600 shadow-sm font-bold" : undefined}
-                  />
+                  {selectedPayroll.status === "Final" ? <FinalPillBadge /> : <StatusBadge status={selectedPayroll.status as LegacyPayrollStatus} />}
                   <button onClick={() => setShowDetail(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
                     <X className="w-4 h-4" />
                   </button>
@@ -2317,15 +2528,15 @@ export default function PayrollPage() {
                                   type="text"
                                   value={formatInputCurrency(editForm[f.key] || 0)}
                                   onChange={(e) => {
-                                    if (f.readonly) return;
+                                    if (f.readonly || selectedPayroll.status === "Final" || !canEdit) return;
                                     const val = parseCurrencyInput(e.target.value);
                                     setEditForm((prev) => ({ ...prev, [f.key]: val }));
                                   }}
-                                  readOnly={f.readonly || selectedPayroll.status === "Final"}
+                                  readOnly={f.readonly || selectedPayroll.status === "Final" || !canEdit}
                                   className={cn(
                                     inputClass,
                                     "pl-9 text-right",
-                                    (f.readonly || selectedPayroll.status === "Final") && "bg-muted/60 text-muted-foreground cursor-not-allowed"
+                                    (f.readonly || selectedPayroll.status === "Final" || !canEdit) && "bg-muted/60 text-muted-foreground cursor-not-allowed"
                                   )}
                                 />
                               </div>
@@ -2402,15 +2613,15 @@ export default function PayrollPage() {
                                 type="text"
                                 value={formatInputCurrency(editForm[f.key] || 0)}
                                 onChange={(e) => {
-                                  if (f.readonly) return;
+                                  if (f.readonly || selectedPayroll.status === "Final" || !canEdit) return;
                                   const val = parseCurrencyInput(e.target.value);
                                   setEditForm((prev) => ({ ...prev, [f.key]: val }));
                                 }}
-                                readOnly={f.readonly || selectedPayroll.status === "Final"}
+                                readOnly={f.readonly || selectedPayroll.status === "Final" || !canEdit}
                                 className={cn(
                                   inputClass,
                                   "pl-9 text-right",
-                                  (f.readonly || selectedPayroll.status === "Final") && "bg-muted/60 text-muted-foreground cursor-not-allowed"
+                                  (f.readonly || selectedPayroll.status === "Final" || !canEdit) && "bg-muted/60 text-muted-foreground cursor-not-allowed"
                                 )}
                               />
                             </div>
@@ -2496,10 +2707,14 @@ export default function PayrollPage() {
                     <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan</label>
                     <textarea
                       value={editCatatan}
-                      onChange={(e) => setEditCatatan(e.target.value)}
+                      onChange={(e) => {
+                        if (selectedPayroll.status === "Final" || !canEdit) return;
+                        setEditCatatan(e.target.value);
+                      }}
                       placeholder="Catatan tambahan (opsional)..."
                       rows={2}
-                      className={cn(inputClass, "resize-none")}
+                      readOnly={selectedPayroll.status === "Final" || !canEdit}
+                      className={cn(inputClass, "resize-none", (selectedPayroll.status === "Final" || !canEdit) && "bg-muted/60 text-muted-foreground cursor-not-allowed")}
                     />
                   </div>
 
@@ -2544,7 +2759,7 @@ export default function PayrollPage() {
                             </div>
                             <div className="text-right">
                               <p className="text-sm font-bold text-foreground">{formatCurrency(h.netto)}</p>
-                              <Badge variant={h.status === "Final" ? "success" : "muted"} size="sm">{h.status}</Badge>
+                              {h.status === "Final" ? <FinalPillBadge /> : <Badge variant="muted" size="sm">{h.status}</Badge>}
                             </div>
                           </div>
                         ))}
@@ -2557,14 +2772,14 @@ export default function PayrollPage() {
               {/* Footer actions */}
               <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-card flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  <Button
+                  {canEdit && <Button
                     variant="danger"
                     size="sm"
                     icon={Trash2}
                     onClick={() => setDeleteConfirm({ id: selectedPayroll.id, nama: selectedPayroll.pegawaiNama || selectedPayroll.employee_id })}
                   >
                     Hapus
-                  </Button>
+                  </Button>}
                   <Button
                     variant="outline"
                     size="sm"
@@ -2588,12 +2803,12 @@ export default function PayrollPage() {
                         Kembalikan ke Draft
                       </Button>
                     )
-                  ) : (
+                  ) : canEdit ? (
                     <>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={handleToggleStatus}
+                        onClick={() => setSingleFinalConfirm(selectedPayroll)}
                         disabled={saving}
                       >
                         Finalkan
@@ -2607,13 +2822,49 @@ export default function PayrollPage() {
                         {saving ? "Menyimpan..." : "Simpan"}
                       </Button>
                     </>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
           </div>
         </Portal>
       )}
+
+      <ConfirmDialog
+        open={computeWorksheetConfirm}
+        title="Hitung Ulang Worksheet?"
+        variant="warning"
+        confirmLabel="Hitung Ulang"
+        loading={wsComputing}
+        onCancel={() => setComputeWorksheetConfirm(false)}
+        onConfirm={() => {
+          setComputeWorksheetConfirm(false);
+          handleComputeWorksheet();
+        }}
+        description={
+          <div className="space-y-1.5">
+            <p>Worksheet periode ini akan dihapus lalu dibuat ulang dari data absensi, titik, lembur, dan gaji pokok terbaru.</p>
+            {wsChangedCells.size > 0 && (
+              <p className="font-semibold text-warning">Ada {wsRowsChanged} baris perubahan yang belum disimpan. Simpan dulu jika ingin mempertahankan edit manual.</p>
+            )}
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={!!singleFinalConfirm}
+        title="Finalkan Slip Gaji?"
+        variant="success"
+        confirmLabel="Ya, Finalkan"
+        loading={saving}
+        onCancel={() => setSingleFinalConfirm(null)}
+        onConfirm={handleToggleStatus}
+        description={
+          <span>
+            Slip gaji <strong>{singleFinalConfirm?.pegawaiNama}</strong> akan dikunci sebagai <strong>Final</strong>. Setelah final, data tidak dapat diedit kecuali dikembalikan ke Draft oleh super admin.
+          </span>
+        }
+      />
 
       {/* ═══ Bulk Final Confirmation Modal ═══ */}
       {bulkFinalConfirm && (
@@ -2625,7 +2876,7 @@ export default function PayrollPage() {
                 <div className="w-12 h-12 rounded-2xl bg-success/10 flex items-center justify-center mx-auto mb-4">
                   <CircleCheckBig className="w-6 h-6 text-success" />
                 </div>
-                <h3 className="text-sm font-bold text-foreground mb-1">Finalkan {selectedIds.size} Slip Gaji?</h3>
+                <h3 className="text-sm font-bold text-foreground mb-1">Finalkan {scopedDraftSelectedCount} Slip Gaji?</h3>
                 <p className="text-xs text-muted-foreground">
                   Semua slip gaji yang dipilih akan diubah statusnya menjadi <strong>Final</strong> dan tidak dapat diedit lagi oleh admin biasa.
                 </p>
@@ -2634,7 +2885,7 @@ export default function PayrollPage() {
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => setBulkFinalConfirm(false)} disabled={bulkUpdating}>
                   Batal
                 </Button>
-                <Button size="sm" className="flex-1 bg-success hover:bg-success/90 text-white border-success" icon={bulkUpdating ? Loader2 : CircleCheckBig} onClick={handleBulkFinal} disabled={bulkUpdating}>
+                <Button size="sm" className="flex-1 bg-success hover:bg-success/90 text-white border-success" icon={bulkUpdating ? Loader2 : CircleCheckBig} onClick={handleBulkFinal} disabled={bulkUpdating || scopedDraftSelectedCount === 0}>
                   {bulkUpdating ? "Memproses..." : "Ya, Finalkan"}
                 </Button>
               </div>
@@ -2653,7 +2904,7 @@ export default function PayrollPage() {
                 <div className="w-12 h-12 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
                   <AlertTriangle className="w-6 h-6 text-danger" />
                 </div>
-                <h3 className="text-sm font-bold text-foreground mb-1">Hapus {selectedIds.size} Slip Gaji?</h3>
+                <h3 className="text-sm font-bold text-foreground mb-1">Hapus {scopedSelectedRows.length} Slip Gaji?</h3>
                 <p className="text-xs text-muted-foreground">
                   Semua slip gaji yang dipilih akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
                 </p>
@@ -2662,7 +2913,7 @@ export default function PayrollPage() {
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => setBulkDeleteConfirm(false)} disabled={deleting}>
                   Batal
                 </Button>
-                <Button variant="danger" size="sm" className="flex-1" icon={deleting ? Loader2 : Trash2} onClick={handleBulkDelete} disabled={deleting}>
+                <Button variant="danger" size="sm" className="flex-1" icon={deleting ? Loader2 : Trash2} onClick={handleBulkDelete} disabled={deleting || scopedSelectedRows.length === 0}>
                   {deleting ? "Menghapus..." : "Hapus Semua"}
                 </Button>
               </div>
@@ -2727,13 +2978,18 @@ export default function PayrollPage() {
                 <p className="text-xs text-muted-foreground">
                   <strong>{buatSlipConfirm.ids.length} slip</strong> akan dipindahkan ke tab <strong>Draft</strong>. Data akan ter-freeze dan siap untuk diedit sebelum difinalkan. Anda masih bisa membatalkan dari tab Draft.
                 </p>
+                {hasUnsavedBuatSlipSelection && (
+                  <div className="mt-3 px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-left">
+                    <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Ada perubahan worksheet yang belum disimpan pada slip terpilih. Simpan worksheet dulu sebelum membuat slip.</p>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2 px-6 py-4 border-t border-border">
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => setBuatSlipConfirm(null)}>
                   Batal
                 </Button>
-                <Button variant="primary" size="sm" className="flex-1" icon={FileCheck} onClick={() => handleBuatSlip(buatSlipConfirm.ids)}>
-                  Buat Slip
+                <Button variant="primary" size="sm" className="flex-1" icon={FileCheck} onClick={() => handleBuatSlip(buatSlipConfirm.ids)} disabled={hasUnsavedBuatSlipSelection}>
+                  {hasUnsavedBuatSlipSelection ? "Simpan Dulu" : "Buat Slip"}
                 </Button>
               </div>
             </div>
@@ -2773,5 +3029,17 @@ function _HeroMetric({
         </div>
       </div>
     </div>
+  );
+}
+
+function FinalPillBadge({ className }: { className?: string }) {
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-1 rounded-full border border-emerald-600 bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm",
+      className
+    )}>
+      <ShieldCheck className="w-3 h-3 text-white" />
+      Final
+    </span>
   );
 }
