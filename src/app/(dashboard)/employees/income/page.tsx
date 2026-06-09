@@ -1873,7 +1873,7 @@ export default function IncomePage() {
                             else map.set(entry.statusNama, { count: 1, color: entry.statusColor || "#6b7280" });
                             return map;
                           }, new Map<string, { count: number; color: string }>()));
-                          const visibleStatusSummary = statusSummary.slice(0, 2);
+                          const visibleStatusSummary = statusSummary.slice(0, 1);
                           const hiddenStatusSummaryCount = statusSummary.length - visibleStatusSummary.length;
                           return (
                             <td key={dateStr} id={`cal-${emp.id}-${dateStr}`}
@@ -1892,29 +1892,27 @@ export default function IncomePage() {
                                     validation?.isAnomaly ? "border-danger/40 bg-danger/[0.07]" : "border-border/50 bg-card/80"
                                   )}>
                                     <div className="flex items-center justify-between gap-1 min-h-4">
-                                      {validation ? (
-                                        <span className={cn("truncate rounded px-1.5 py-0.5 text-[8px] font-bold", validation.isAnomaly ? "bg-danger/10 text-danger" : "text-white")} style={validation.isAnomaly ? undefined : { backgroundColor: validation.color }}>
-                                          {validation.isAnomaly ? validation.message : validation.label}
-                                        </span>
-                                      ) : (
-                                        <span className="rounded bg-muted px-1.5 py-0.5 text-[8px] font-bold text-muted-foreground">Titik</span>
-                                      )}
+                                      <div className="flex min-w-0 flex-1 items-center gap-0.5">
+                                        {validation ? (
+                                          <span className={cn("max-w-[52px] shrink-0 truncate rounded px-1.5 py-0.5 text-[8px] font-bold", validation.isAnomaly ? "bg-danger/10 text-danger" : "text-white")} style={validation.isAnomaly ? undefined : { backgroundColor: validation.color }}>
+                                            {validation.isAnomaly ? validation.message : validation.label}
+                                          </span>
+                                        ) : (
+                                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[8px] font-bold text-muted-foreground">Titik</span>
+                                        )}
+                                        {visibleStatusSummary.map(([nama, { count, color }]) => (
+                                          <span key={nama} className="max-w-[48px] truncate rounded px-1 py-0.5 text-[8px] font-bold leading-none" style={{ backgroundColor: `${color}25`, color }} title={count > 1 ? `${count} ${nama}` : nama}>
+                                            {count > 1 ? `${count} ${nama}` : nama}
+                                          </span>
+                                        ))}
+                                        {hiddenStatusSummaryCount > 0 && <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[8px] font-bold leading-none text-muted-foreground">+{hiddenStatusSummaryCount}</span>}
+                                      </div>
                                       {validation?.isAnomaly ? (
                                         <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[10px] font-black text-white">!</span>
                                       ) : validation?.attendance ? (
                                         <span className="text-[9px] font-black" style={{ color: validation.color }}>{ATTENDANCE_STATUS_META[validation.attendance.status].short}</span>
                                       ) : null}
                                     </div>
-                                    {visibleStatusSummary.length > 0 && (
-                                      <div className="flex flex-wrap items-center justify-center gap-0.5">
-                                        {visibleStatusSummary.map(([nama, { count, color }]) => (
-                                          <span key={nama} className="max-w-[52px] truncate rounded px-1 py-0.5 text-[8px] font-bold leading-none" style={{ backgroundColor: `${color}25`, color }} title={count > 1 ? `${count} ${nama}` : nama}>
-                                            {count > 1 ? `${count} ${nama}` : nama}
-                                          </span>
-                                        ))}
-                                        {hiddenStatusSummaryCount > 0 && <span className="rounded bg-muted px-1 py-0.5 text-[8px] font-bold leading-none text-muted-foreground">+{hiddenStatusSummaryCount}</span>}
-                                      </div>
-                                    )}
                                     <div className="flex flex-1 items-center justify-center">
                                       <span className={cn("text-2xl font-black leading-none tabular-nums", validation?.isAnomaly ? "text-danger" : "text-primary")}>{totalPoints}</span>
                                     </div>
