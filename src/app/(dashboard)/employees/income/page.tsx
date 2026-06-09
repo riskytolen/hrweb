@@ -1773,7 +1773,7 @@ export default function IncomePage() {
                         <th key={dateStr} className={cn(
                           "border-b-2 border-r border-border px-1 py-2 text-center min-w-[120px]",
                           isNewMonth && "border-l-2 border-l-primary/30",
-                          isToday ? "bg-primary text-white" : isSunday ? "bg-red-100 dark:bg-red-950" : isSaturday ? "bg-amber-100 dark:bg-amber-950" : "bg-card"
+                          isToday ? "bg-primary text-white" : isSunday ? "bg-red-100" : isSaturday ? "bg-amber-100" : "bg-card"
                         )}>
                           {isNewMonth && (
                             <div className={cn("text-[8px] font-bold uppercase tracking-wider mb-0.5", isToday ? "text-white/70" : "text-primary/60")}>
