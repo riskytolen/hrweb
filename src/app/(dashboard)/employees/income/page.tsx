@@ -1891,28 +1891,35 @@ export default function IncomePage() {
                                     "min-h-[78px] rounded-lg border px-2 py-1.5 flex flex-col gap-1",
                                     validation?.isAnomaly ? "border-danger/40 bg-danger/[0.07]" : "border-border/50 bg-card/80"
                                   )}>
-                                    <div className="flex items-center justify-between gap-1 min-h-4">
-                                      <div className="flex min-w-0 flex-1 items-center gap-0.5">
-                                        {validation ? (
-                                          <span className={cn("max-w-[52px] shrink-0 truncate rounded px-1.5 py-0.5 text-[8px] font-bold", validation.isAnomaly ? "bg-danger/10 text-danger" : "text-white")} style={validation.isAnomaly ? undefined : { backgroundColor: validation.color }}>
-                                            {validation.isAnomaly ? validation.message : validation.label}
-                                          </span>
-                                        ) : (
-                                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[8px] font-bold text-muted-foreground">Titik</span>
-                                        )}
-                                        {visibleStatusSummary.map(([nama, { count, color }]) => (
-                                          <span key={nama} className="max-w-[48px] truncate rounded px-1 py-0.5 text-[8px] font-bold leading-none" style={{ backgroundColor: `${color}25`, color }} title={count > 1 ? `${count} ${nama}` : nama}>
-                                            {count > 1 ? `${count} ${nama}` : nama}
-                                          </span>
-                                        ))}
-                                        {hiddenStatusSummaryCount > 0 && <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[8px] font-bold leading-none text-muted-foreground">+{hiddenStatusSummaryCount}</span>}
+                                    {validation?.isAnomaly ? (
+                                      <div className="flex items-start justify-between gap-1 min-h-4">
+                                        <span className="min-w-0 flex-1 whitespace-normal break-words rounded bg-danger/10 px-1.5 py-0.5 text-[8px] font-bold leading-tight text-danger" title={validation.message}>
+                                          {validation.message}
+                                        </span>
+                                        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-danger text-[10px] font-black text-white">!</span>
                                       </div>
-                                      {validation?.isAnomaly ? (
-                                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[10px] font-black text-white">!</span>
-                                      ) : validation?.attendance ? (
-                                        <span className="text-[9px] font-black" style={{ color: validation.color }}>{ATTENDANCE_STATUS_META[validation.attendance.status].short}</span>
-                                      ) : null}
-                                    </div>
+                                    ) : (
+                                      <div className="flex items-center justify-between gap-1 min-h-4">
+                                        <div className="flex min-w-0 flex-1 items-center gap-0.5">
+                                          {validation ? (
+                                            <span className="max-w-[52px] shrink-0 truncate rounded px-1.5 py-0.5 text-[8px] font-bold text-white" style={{ backgroundColor: validation.color }}>
+                                              {validation.label}
+                                            </span>
+                                          ) : (
+                                            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[8px] font-bold text-muted-foreground">Titik</span>
+                                          )}
+                                          {visibleStatusSummary.map(([nama, { count, color }]) => (
+                                            <span key={nama} className="max-w-[48px] truncate rounded px-1 py-0.5 text-[8px] font-bold leading-none" style={{ backgroundColor: `${color}25`, color }} title={count > 1 ? `${count} ${nama}` : nama}>
+                                              {count > 1 ? `${count} ${nama}` : nama}
+                                            </span>
+                                          ))}
+                                          {hiddenStatusSummaryCount > 0 && <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[8px] font-bold leading-none text-muted-foreground">+{hiddenStatusSummaryCount}</span>}
+                                        </div>
+                                        {validation?.attendance ? (
+                                          <span className="text-[9px] font-black" style={{ color: validation.color }}>{ATTENDANCE_STATUS_META[validation.attendance.status].short}</span>
+                                        ) : null}
+                                      </div>
+                                    )}
                                     <div className="flex flex-1 items-center justify-center">
                                       <span className={cn("text-2xl font-black leading-none tabular-nums", validation?.isAnomaly ? "text-danger" : "text-primary")}>{totalPoints}</span>
                                     </div>
