@@ -1128,6 +1128,22 @@ export default function IncomePage() {
     setCalEditEntries((prev) => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
   };
 
+  const calEditReadableEntries = calEditEntries
+    .map((entry, idx) => ({
+      entry,
+      idx,
+      zone: zones.find((z) => z.id === entry.zone_id),
+      status: dStatuses.find((s) => s.id === entry.status_id),
+    }))
+    .filter(({ entry }) => entry.zone_id && entry.role && hasPointInput(entry.jumlah_titik));
+  const calEditTotalTitik = calEditReadableEntries.reduce((sum, { entry }) => sum + parsePointInput(entry.jumlah_titik), 0);
+  const calEditDriverTotal = calEditReadableEntries
+    .filter(({ entry }) => entry.role === "Driver")
+    .reduce((sum, { entry }) => sum + parsePointInput(entry.jumlah_titik), 0);
+  const calEditHelperTotal = calEditReadableEntries
+    .filter(({ entry }) => entry.role === "Helper")
+    .reduce((sum, { entry }) => sum + parsePointInput(entry.jumlah_titik), 0);
+
   const isDeletedEmployee = (empId: string) => empId.startsWith("_deleted_");
 
   const handleCalCellSave = async () => {
@@ -1966,7 +1982,7 @@ export default function IncomePage() {
             {calEditCell && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget && !calEditSaving) setCalEditCell(null); }}>
                 <div className="absolute inset-0 bg-black/30" />
-                <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+                <div className="relative w-full max-w-2xl bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
                   {/* Header */}
                   <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/30 rounded-t-2xl">
                     <div>
@@ -1984,8 +2000,80 @@ export default function IncomePage() {
                     <button onClick={() => !calEditSaving && setCalEditCell(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
                   </div>
 
+                  {calEditReadableEntries.length > 0 && (
+                    <div className="px-5 py-4 border-b border-border bg-gradient-to-b from-muted/20 to-card space-y-3">
+                      <div className="grid grid-cols-4 gap-2">
+                        <div className="rounded-xl border border-primary/20 bg-primary-light/60 px-3 py-2 text-center">
+                          <p className="text-[9px] font-bold uppercase tracking-wider text-primary/70">Total Titik</p>
+                          <p className="text-xl font-black text-primary leading-none mt-1">{calEditTotalTitik}</p>
+                        </div>
+                        <div className="rounded-xl border border-border bg-card px-3 py-2 text-center">
+                          <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Entri</p>
+                          <p className="text-xl font-black text-foreground leading-none mt-1">{calEditReadableEntries.length}</p>
+                        </div>
+                        <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-center">
+                          <p className="text-[9px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Driver</p>
+                          <p className="text-xl font-black text-blue-600 dark:text-blue-400 leading-none mt-1">{calEditDriverTotal}</p>
+                        </div>
+                        <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-center">
+                          <p className="text-[9px] font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">Helper</p>
+                          <p className="text-xl font-black text-orange-600 dark:text-orange-400 leading-none mt-1">{calEditHelperTotal}</p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-border bg-card overflow-hidden">
+                        <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border bg-muted/20">
+                          <p className="text-xs font-bold text-foreground">Detail Titik</p>
+                          <p className="text-[10px] font-medium text-muted-foreground">Klik Simpan jika ada perubahan di form bawah</p>
+                        </div>
+                        <div className="max-h-56 overflow-y-auto">
+                          <table className="w-full">
+                            <thead className="sticky top-0 bg-card z-10">
+                              <tr className="border-b border-border/70">
+                                <th className="text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-8">#</th>
+                                <th className="text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Nama Titik</th>
+                                <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Posisi</th>
+                                <th className="text-right text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Titik</th>
+                                <th className="text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-24">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/50">
+                              {calEditReadableEntries.map(({ entry, idx, zone, status }) => (
+                                <tr key={`${entry.id || "new"}-${idx}`}>
+                                  <td className="px-3 py-2 text-xs text-muted-foreground">{idx + 1}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: zone?.color || "#3b82f6" }} />
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-bold text-foreground truncate">{zone?.nama || "Nama titik tidak ditemukan"}</p>
+                                        {entry.catatan && <p className="text-[10px] text-muted-foreground truncate">{entry.catatan}</p>}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-md", entry.role === "Driver" ? "bg-blue-500 text-white" : "bg-orange-500 text-white")}>{entry.role}</span>
+                                  </td>
+                                  <td className="px-3 py-2 text-right text-sm font-black text-foreground">{parsePointInput(entry.jumlah_titik)}</td>
+                                  <td className="px-3 py-2">
+                                    {status ? (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${status.color}20`, color: status.color }}>{status.nama}</span>
+                                    ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Entries */}
                   <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-bold text-foreground">Edit Entri Titik</p>
+                      <p className="text-[10px] text-muted-foreground">Ubah data di bawah ini jika perlu koreksi.</p>
+                    </div>
                     {calEditEntries.map((entry, idx) => (
                       <div key={idx} className="rounded-xl border border-border p-3 space-y-2.5 bg-muted/10">
                         <div className="flex items-center justify-between">
