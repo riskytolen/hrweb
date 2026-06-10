@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutList, CalendarDays, BarChart3 } from "lucide-react";
+import { LayoutList, CalendarDays, BarChart3, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AttendanceViewMode } from "../lib/hooks/use-attendance-filters";
 
@@ -13,6 +13,7 @@ const OPTIONS: { value: AttendanceViewMode; label: string; icon: React.Component
   { value: "tabel", label: "Tabel", icon: LayoutList },
   { value: "kalender", label: "Kalender", icon: CalendarDays },
   { value: "ringkasan", label: "Ringkasan", icon: BarChart3 },
+  { value: "denda", label: "Report Denda", icon: AlertTriangle },
 ];
 
 export function ViewToggle({ viewMode, onChange }: ViewToggleProps) {

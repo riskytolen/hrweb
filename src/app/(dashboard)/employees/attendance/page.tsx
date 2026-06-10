@@ -15,6 +15,7 @@ import { AttendancePageHeader } from "./components/attendance-page-header";
 import { AttendanceModals } from "./components/attendance-modals";
 import { CalendarView } from "./components/calendar-view";
 import { SummaryView } from "./components/summary-view";
+import { FineReportView } from "./components/fine-report-view";
 import { AttendanceTable } from "./components/attendance-table";
 import type { AttendanceFormModalHandle } from "./components/attendance-form-modal";
 import type { OffDayModalHandle } from "./components/off-day-modal";
@@ -107,6 +108,8 @@ export default function AttendancePage() {
         )}
 
         {viewMode === "ringkasan" && <SummaryView employees={employees} />}
+
+        {viewMode === "denda" && <FineReportView employees={employees} />}
 
         <AttendanceModals
           formModalRef={formModalRef}
