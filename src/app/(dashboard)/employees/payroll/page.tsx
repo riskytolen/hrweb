@@ -59,6 +59,7 @@ type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama
 const PAGE_SIZE = 15;
 const CUT_OFF_DAY = 7;
 const SUPABASE_PAGE_SIZE = 1000;
+const PAYROLL_PERIOD_STORAGE_KEY = "hrweb.payroll.periodKey";
 
 type SupabasePagedResult<T> = {
   data: T[] | null;
@@ -107,6 +108,22 @@ function getCurrentPeriodKey(): string {
   return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function isValidPeriodKey(value: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}$/.test(value)) return false;
+  const month = Number(value.split("-")[1]);
+  return month >= 1 && month <= 12;
+}
+
+function getInitialPayrollPeriodKey(): string {
+  if (typeof window === "undefined") return getCurrentPeriodKey();
+  try {
+    const stored = window.localStorage.getItem(PAYROLL_PERIOD_STORAGE_KEY);
+    return isValidPeriodKey(stored) ? stored : getCurrentPeriodKey();
+  } catch {
+    return getCurrentPeriodKey();
+  }
+}
+
 function formatPeriodLabel(periodKey: string): string {
   const [y, m] = periodKey.split("-").map(Number);
   const d = new Date(y, m - 1, 1);
@@ -127,7 +144,7 @@ export default function PayrollPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
+  const [periodKey, setPeriodKey] = useState(getInitialPayrollPeriodKey);
   const period = getPeriodRange(periodKey);
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
@@ -207,6 +224,14 @@ export default function PayrollPage() {
   useEffect(() => {
     return () => { if (toastTimer.current) clearTimeout(toastTimer.current); };
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PAYROLL_PERIOD_STORAGE_KEY, periodKey);
+    } catch {
+      // Ignore storage errors (private mode/quota). Period fallback still works.
+    }
+  }, [periodKey]);
 
   // ─── Lock body scroll ───
   useEffect(() => {
