@@ -1336,21 +1336,27 @@ export default function PayrollPage() {
       return;
     }
     setWsSaving(true);
-    let errorCount = 0;
+    const failedIds = new Set<number>();
     const changedIds = Array.from(wsChangedCells.keys());
     for (const id of changedIds) {
       const vals = wsData[id];
       if (!vals) continue;
-      // Only send editable fields, not generated columns
+      // Only send editable component fields. Auto/source fields stay owned by recompute.
       const payload: Record<string, number> = {};
-      PENDAPATAN_FIELDS.forEach((f) => { payload[f.key] = vals[f.key] || 0; });
-      POTONGAN_FIELDS.forEach((f) => { payload[f.key] = vals[f.key] || 0; });
+      PENDAPATAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
+      POTONGAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
       const { error } = await supabase.from("payrolls").update(payload).eq("id", id);
-      if (error) errorCount++;
+      if (error) failedIds.add(id);
     }
     setWsSaving(false);
-    if (errorCount > 0) {
-      showToast("error", "Sebagian Gagal", `${errorCount} dari ${changedIds.length} slip gagal disimpan.`);
+    if (failedIds.size > 0) {
+      const failedChanges = new Map<number, Set<string>>();
+      failedIds.forEach((id) => {
+        const cells = wsChangedCells.get(id);
+        if (cells) failedChanges.set(id, new Set(cells));
+      });
+      setWsChangedCells(failedChanges);
+      showToast("error", "Sebagian Gagal", `${failedIds.size} dari ${changedIds.length} slip gagal disimpan. Cell yang gagal tetap ditandai.`);
     } else {
       showToast("success", "Worksheet Disimpan", `${changedIds.length} slip gaji berhasil diperbarui.`);
       await logAudit({
@@ -1364,9 +1370,9 @@ export default function PayrollPage() {
           jumlah_cell: wsTotalChanged,
         },
       });
+      setWsChangedCells(new Map());
+      await fetchPayrolls();
     }
-    setWsChangedCells(new Map());
-    await fetchPayrolls();
   };
 
   // ─── Batch Fill handler ───
@@ -1395,6 +1401,10 @@ export default function PayrollPage() {
     if (!batchField) return;
     const value = parseCurrencyInput(batchValue);
     const targets = computeBatchFillTargets(filtered);
+    if (targets.length === 0) {
+      showToast("error", "Tidak Ada Target", "Tidak ada pegawai yang cocok dengan target Batch Fill.");
+      return;
+    }
     const newData = { ...wsData };
     const newChangedCells = new Map(wsChangedCells);
     targets.forEach((row) => {
@@ -2420,15 +2430,19 @@ export default function PayrollPage() {
                       type="text"
                       value={batchValue}
                       onChange={(e) => {
+                        if (e.target.value.trim() === "") {
+                          setBatchValue("");
+                          return;
+                        }
                         const raw = parseCurrencyInput(e.target.value);
-                        setBatchValue(formatInputCurrency(raw));
+                        setBatchValue(raw === 0 ? "0" : formatInputCurrency(raw));
                       }}
                       placeholder="0"
                       className={cn(inputClass, "pl-9 text-right")}
                     />
                   </div>
                 </div>
-                {batchField && batchValue && (() => {
+                {batchField && batchValue !== "" && (() => {
                   const targets = computeBatchFillTargets(filtered);
                   return (
                     <div className="bg-muted/50 rounded-xl px-3 py-2.5 text-xs text-muted-foreground">
@@ -2440,7 +2454,7 @@ export default function PayrollPage() {
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
                 <Button variant="outline" size="sm" onClick={() => setShowBatchFill(false)}>Batal</Button>
-                <Button icon={Zap} size="sm" onClick={handleBatchFill} disabled={!batchField || !batchValue}>Terapkan</Button>
+                <Button icon={Zap} size="sm" onClick={handleBatchFill} disabled={!batchField || batchValue === ""}>Terapkan</Button>
               </div>
             </div>
           </div>
