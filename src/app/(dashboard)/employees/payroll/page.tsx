@@ -47,7 +47,6 @@ import BatchActionBar from "./components/BatchActionBar";
 import ConfirmDialog from "./components/ConfirmDialog";
 import EmptyState from "./components/EmptyState";
 import StatusBadge, { type LegacyPayrollStatus } from "./components/StatusBadge";
-import ProrataBadge from "./components/ProrataBadge";
 import BreakdownAbsen, { type AbsenItem } from "./components/BreakdownAbsen";
 import BreakdownLembur, { type LemburItem } from "./components/BreakdownLembur";
 import WorksheetEditor from "./components/WorksheetEditor";
@@ -305,7 +304,7 @@ export default function PayrollPage() {
       //      periode (penghasilan yang belum dibayarkan), atau tanggal_keluar di dalam periode.
       const { data: allEmps, error: empErr } = await supabase
         .from("pegawai")
-        .select("id, nama, gaji_pokok, tanggal_bergabung, tanggal_keluar, status")
+        .select("id, nama, gaji_pokok, tanggal_keluar, status")
         .order("nama");
       if (empErr || !allEmps) {
         showToast("error", "Gagal Memuat Pegawai", (empErr as { message?: string } | null)?.message || "Unknown error");
@@ -314,7 +313,7 @@ export default function PayrollPage() {
       }
       // Filter di-JS: skip pegawai Tidak Aktif yang sudah keluar sebelum periode
       // dan tidak punya data aktual di periode (tidak ada yg perlu dibayar)
-      const activeEmps = (allEmps as { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_bergabung: string | null; tanggal_keluar: string | null }[]).filter((e) => {
+      const activeEmps = (allEmps as { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null }[]).filter((e) => {
         if (e.status === "Aktif") return true;
         // Tidak Aktif: tetap include untuk dicek data aktualnya di langkah 4-5
         return true;
@@ -329,7 +328,7 @@ export default function PayrollPage() {
       const existingSet = new Set((existing || []).map((e: { employee_id: string }) => e.employee_id));
 
       // 3. Filter employees that don't have a slip yet
-      const newEmps = (activeEmps as { id: string; nama: string; gaji_pokok?: number; tanggal_bergabung: string | null; tanggal_keluar: string | null }[]).filter((e) => !existingSet.has(e.id));
+      const newEmps = (activeEmps as { id: string; nama: string; gaji_pokok?: number; tanggal_keluar: string | null }[]).filter((e) => !existingSet.has(e.id));
       if (newEmps.length === 0) {
         showToast("error", "Tidak Ada Slip Baru", "Semua pegawai aktif sudah memiliki slip gaji untuk periode ini.");
         setGenerating(false);
@@ -388,10 +387,8 @@ export default function PayrollPage() {
         lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
       });
 
-      // 5c. Filter pegawai Tidak Aktif yang TIDAK punya data aktual di periode
-      // (tidak ada absen, titik, lembur). Pegawai ini tidak perlu slip karena
-      // tidak ada penghasilan yang harus dibayarkan.
-      // Untuk pegawai Aktif: tetap di-generate (gaji pokok prorata sesuai tgl gabung/keluar)
+      // 5c. Filter pegawai Tidak Aktif yang TIDAK punya data aktual di periode.
+      // Gaji pokok selalu diambil apa adanya dari master pegawai, tanpa prorata.
       const exitDateLookup = new Map<string, string | null>();
       const statusLookup = new Map<string, string>();
       (activeEmps as { id: string; status: string; tanggal_keluar: string | null }[]).forEach((e) => {
@@ -400,10 +397,10 @@ export default function PayrollPage() {
       });
       const empsWithData = newEmps.filter((e) => {
         if (statusLookup.get(e.id) === "Aktif") return true;
-        // Tidak Aktif: skip kalau tidak punya catatan absen di periode
-        // (tidak ada kehadiran = tidak ada gapok; titik/lembur tanpa absen = anomali)
+        // Tidak Aktif: skip kalau tidak punya catatan absen di periode.
+        // Titik/lembur tanpa absen tetap dianggap anomali data.
         const exitDate = exitDateLookup.get(e.id);
-        // Tidak Aktif + tanggal_keluar valid → tetap include, prorata via isProratedExit
+        // Tidak Aktif + tanggal_keluar valid tetap include untuk dibayarkan jika ada slip baru.
         if (exitDate) return true;
         // Tidak Aktif + NULL tanggal_keluar → hanya include kalau ada catatan absen
         const hariAdaCatatan = new Set(
@@ -418,125 +415,22 @@ export default function PayrollPage() {
         return;
       }
 
-      // 6. Build gaji_pokok, tanggal_bergabung & tanggal_keluar lookup
+      // 6. Build gaji_pokok lookup dari master pegawai.
       const gapokMap = new Map<string, number>();
-      const joinDateMap = new Map<string, string | null>();
-      const exitDateMap = new Map<string, string | null>();
-      (activeEmps as { id: string; gaji_pokok?: number; tanggal_bergabung: string | null; tanggal_keluar: string | null }[]).forEach((e) => {
+      (activeEmps as { id: string; gaji_pokok?: number }[]).forEach((e) => {
         gapokMap.set(e.id, e.gaji_pokok || 0);
-        joinDateMap.set(e.id, e.tanggal_bergabung);
-        exitDateMap.set(e.id, e.tanggal_keluar);
       });
-
-      // 6b. Fetch off_days untuk pegawai-pegawai yang akan di-generate (untuk hitung prorata)
-      const offDaysData = await fetchAllRanges<{ employee_id: string; day_of_week: number }>((from, to) =>
-        supabase
-          .from("employee_off_days")
-          .select("employee_id, day_of_week")
-          .in("employee_id", empsWithData.map((e) => e.id))
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
-
-      const offDayMap = new Map<string, Set<number>>();
-      offDaysData.forEach((od) => {
-        if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
-        offDayMap.get(od.employee_id)!.add(od.day_of_week);
-      });
-
-      // Helper: hitung hari kerja (non off-day) di range tanggal inklusif
-      const countWorkingDays = (startStr: string, endStr: string, empOff: Set<number>): number => {
-        if (startStr > endStr) return 0;
-        const [sy, sm, sd] = startStr.split("-").map(Number);
-        const [ey, em, ed] = endStr.split("-").map(Number);
-        const startMs = Date.UTC(sy, sm - 1, sd);
-        const endMs = Date.UTC(ey, em - 1, ed);
-        let count = 0;
-        for (let ms = startMs; ms <= endMs; ms += 86400000) {
-          const dow = new Date(ms).getUTCDay();
-          if (!empOff.has(dow)) count++;
-        }
-        return count;
-      };
-
-      // Helper: hitung hari kalender inklusif di range tanggal (untuk prorata Tidak Aktif)
-      const countCalendarDays = (startStr: string, endStr: string): number => {
-        if (startStr > endStr) return 0;
-        const [sy, sm, sd] = startStr.split("-").map(Number);
-        const [ey, em, ed] = endStr.split("-").map(Number);
-        const startMs = Date.UTC(sy, sm - 1, sd);
-        const endMs = Date.UTC(ey, em - 1, ed);
-        return Math.floor((endMs - startMs) / 86400000) + 1;
-      };
 
       // 7. Build insert rows (exclude generated columns)
       const inserts = empsWithData.map((e) => {
-        const empOff = offDayMap.get(e.id) || new Set<number>();
-        const tglBergabung = joinDateMap.get(e.id);
-        const tglKeluar = exitDateMap.get(e.id);
-        const totalHariKerja = countWorkingDays(genPeriod.start, genPeriod.end, empOff);
-        const gapokFull = gapokMap.get(e.id) || 0;
-
-        // Range efektif untuk prorata:
-        //   start = max(periode.start, tanggal_bergabung || periode.start)
-        //   end   = min(periode.end, tanggal_keluar || periode.end)
-        const effectiveStart = tglBergabung && tglBergabung > genPeriod.start ? tglBergabung : genPeriod.start;
-        const effectiveEnd = tglKeluar && tglKeluar < genPeriod.end ? tglKeluar : genPeriod.end;
-
-        let gapokProrata = gapokFull;
-        let catatanProrata: string | null = null;
-        const isProratedJoin = tglBergabung && tglBergabung > genPeriod.start && tglBergabung <= genPeriod.end;
-        const isProratedExit = tglKeluar && tglKeluar >= genPeriod.start && tglKeluar < genPeriod.end;
-        const isOutsidePeriod = (tglBergabung && tglBergabung > genPeriod.end) || (tglKeluar && tglKeluar < genPeriod.start);
-        const isInactiveNoExitDate = statusLookup.get(e.id) === "Tidak Aktif" && !tglKeluar;
-
-        // Pegawai Tidak Aktif tanpa tanggal_keluar: masih di-generate karena ada
-        // penghasilan yang harus dibayar. Gapok di-prorata per **hari kalender**:
-        //   numerator   = unique hari dengan catatan absen (semua status, termasuk
-        //                 Alpha/Cuti/Libur/Sakit — dihitung sebagai hari masuk)
-        //   denominator = total hari kalender dalam periode (mis. 8 Mei–7 Juni = 31)
-        // Pegawai Tidak Aktif + NULL exit date + 0 catatan absen sudah di-skip
-        // di filter empsWithData, jadi di sini selalu ada >= 1 catatan.
-        if (isInactiveNoExitDate) {
-          const totalHariKalender = countCalendarDays(genPeriod.start, genPeriod.end);
-          const hariDenganCatatan = new Set(
-            attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
-          ).size;
-          const factor = Math.min(hariDenganCatatan / totalHariKalender, 1);
-          gapokProrata = Math.round(gapokFull * factor);
-          const pct = Math.round(factor * 100);
-          catatanProrata = `Tidak aktif — prorata per hari kalender: ${hariDenganCatatan}/${totalHariKalender} hari (${pct}%)`;
-        }
-
-        if (isOutsidePeriod) {
-          gapokProrata = 0;
-          if (tglBergabung && tglBergabung > genPeriod.end) {
-            catatanProrata = `Belum bergabung di periode ini (bergabung ${tglBergabung})`;
-          } else if (tglKeluar && tglKeluar < genPeriod.start) {
-            catatanProrata = `Sudah tidak aktif sebelum periode ini (keluar ${tglKeluar})`;
-          }
-        } else if (isProratedJoin || isProratedExit) {
-          const hariKerjaEfektif = countWorkingDays(effectiveStart, effectiveEnd, empOff);
-          const factor = totalHariKerja > 0 ? hariKerjaEfektif / totalHariKerja : 0;
-          gapokProrata = Math.round(gapokFull * factor);
-          const parts: string[] = [];
-          if (isProratedJoin) {
-            const tglLabel = new Date(tglBergabung + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" });
-            parts.push(`bergabung ${tglLabel}`);
-          }
-          if (isProratedExit) {
-            const tglLabel = new Date(tglKeluar + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" });
-            parts.push(`keluar ${tglLabel}`);
-          }
-          catatanProrata = `Prorata: ${parts.join(", ")} (${hariKerjaEfektif}/${totalHariKerja} hari kerja)`;
-        }
+        const gapok = gapokMap.get(e.id) || 0;
 
         return {
           employee_id: e.id,
           periode: generatePeriod,
           periode_mulai: genPeriod.start,
           periode_selesai: genPeriod.end,
-          gaji_pokok: gapokProrata,
+          gaji_pokok: gapok,
           pendapatan_titik: dpTotals.get(e.id) || 0,
           extra_job: 0,
           uang_makan: 0,
@@ -553,7 +447,7 @@ export default function PayrollPage() {
           jht: 0,
           bpjs_kesehatan: 0,
           status: "Draft",
-          catatan: catatanProrata,
+          catatan: null,
         };
       });
 
@@ -1538,10 +1432,10 @@ export default function PayrollPage() {
         .eq("periode", targetPeriod)
         .eq("status", "Worksheet");
 
-      // 1. Fetch semua pegawai
+      // 1. Fetch semua pegawai. Gaji pokok selalu mengikuti master pegawai.
       const { data: allEmps, error: empErr } = await supabase
         .from("pegawai")
-        .select("id, nama, gaji_pokok, tanggal_bergabung, tanggal_keluar, status")
+        .select("id, nama, gaji_pokok, tanggal_keluar, status")
         .order("nama");
       if (empErr || !allEmps) {
         showToast("error", "Gagal Memuat Pegawai", (empErr as { message?: string } | null)?.message || "Unknown error");
@@ -1596,89 +1490,31 @@ export default function PayrollPage() {
         lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
       });
 
-      // 3. Fetch off_days
-      const offDaysData = await fetchAllRanges<{ employee_id: string; day_of_week: number }>((from, to) =>
-        supabase
-          .from("employee_off_days")
-          .select("employee_id, day_of_week")
-          .in("employee_id", allEmps.map((e) => e.id))
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
-      const offDayMap = new Map<string, Set<number>>();
-      offDaysData.forEach((od) => {
-        if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
-        offDayMap.get(od.employee_id)!.add(od.day_of_week);
-      });
-
-      const countCalendarDays = (startStr: string, endStr: string): number => {
-        if (startStr > endStr) return 0;
-        const [sy, sm, sd] = startStr.split("-").map(Number);
-        const [ey, em, ed] = endStr.split("-").map(Number);
-        const startMs = Date.UTC(sy, sm - 1, sd);
-        const endMs = Date.UTC(ey, em - 1, ed);
-        return Math.floor((endMs - startMs) / 86400000) + 1;
-      };
-
-      // 4. Bangun insert rows untuk pegawai yang eligible
-      type Emp = { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_bergabung: string | null; tanggal_keluar: string | null };
-      const statusLookup = new Map<string, string>();
-      (allEmps as Emp[]).forEach((e) => statusLookup.set(e.id, e.status));
+      // 3. Bangun insert rows untuk pegawai yang eligible.
+      type Emp = { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null };
 
       const inserts = (allEmps as Emp[]).flatMap((e) => {
-        const empOff = offDayMap.get(e.id) || new Set<number>();
-        const tglBergabung = e.tanggal_bergabung;
-        const tglKeluar = e.tanggal_keluar;
-        const totalHariKalender = countCalendarDays(genPeriod.start, genPeriod.end);
         const gapokFull = e.gaji_pokok || 0;
-
-        const isProratedJoin = tglBergabung && tglBergabung > genPeriod.start && tglBergabung <= genPeriod.end;
-        const isProratedExit = tglKeluar && tglKeluar >= genPeriod.start && tglKeluar < genPeriod.end;
-        const isOutsidePeriod = (tglBergabung && tglBergabung > genPeriod.end) || (tglKeluar && tglKeluar < genPeriod.start);
-        const isInactiveNoExitDate = statusLookup.get(e.id) === "Tidak Aktif" && !tglKeluar;
-
-        let gapokProrata = gapokFull;
-        let catatanProrata: string | null = null;
+        const isInactiveNoExitDate = e.status === "Tidak Aktif" && !e.tanggal_keluar;
 
         if (isInactiveNoExitDate) {
           const hariDenganCatatan = new Set(
             attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
           ).size;
           if (hariDenganCatatan === 0) return []; // Skip: Tidak Aktif tanpa catatan absen
-          const factor = Math.min(hariDenganCatatan / totalHariKalender, 1);
-          gapokProrata = Math.round(gapokFull * factor);
-          const pct = Math.round(factor * 100);
-          catatanProrata = `Tidak aktif — prorata per hari kalender: ${hariDenganCatatan}/${totalHariKalender} hari (${pct}%)`;
-        } else if (isOutsidePeriod) {
-          gapokProrata = 0;
-          if (tglBergabung && tglBergabung > genPeriod.end) {
-            catatanProrata = `Belum bergabung di periode ini (bergabung ${tglBergabung})`;
-          } else if (tglKeluar && tglKeluar < genPeriod.start) {
-            catatanProrata = `Sudah tidak aktif sebelum periode ini (keluar ${tglKeluar})`;
-          }
-        } else if (isProratedJoin || isProratedExit) {
-          // Simplified: tidak ada perhitungan hari kerja di sini karena V1 single admin
-          if (isProratedJoin) {
-            catatanProrata = `Prorata: bergabung ${tglBergabung}`;
-          }
-          if (isProratedExit) {
-            catatanProrata = (catatanProrata || "") + `Prorata: keluar ${tglKeluar}`;
-          }
         }
 
         const sourceTitik = dpTotals.get(e.id) || 0;
         const sourceLembur = lemburTotals.get(e.id) || 0;
-        const sourceGapok = gapokProrata;
-        const totalPendapatan = gapokProrata + sourceTitik + sourceLembur;
+        const sourceGapok = gapokFull;
         const totalPotongan = dendaTotals.get(e.id) || 0;
-        const netto = totalPendapatan - totalPotongan;
 
         return [{
           employee_id: e.id,
           periode: targetPeriod,
           periode_mulai: genPeriod.start,
           periode_selesai: genPeriod.end,
-          gaji_pokok: gapokProrata,
+          gaji_pokok: sourceGapok,
           pendapatan_titik: sourceTitik,
           extra_job: 0,
           uang_makan: 0,
@@ -1695,7 +1531,7 @@ export default function PayrollPage() {
           jht: 0,
           bpjs_kesehatan: 0,
           status: "Worksheet",
-          catatan: catatanProrata,
+          catatan: null,
           last_recomputed_at: new Date().toISOString(),
           source_gaji_pokok: sourceGapok,
           source_titik: sourceTitik,
