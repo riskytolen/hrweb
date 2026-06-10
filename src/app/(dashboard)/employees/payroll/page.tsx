@@ -179,6 +179,7 @@ export default function PayrollPage() {
   /** Map<payrollId, Set<fieldKey>> — track cell-level changes untuk highlight */
   const [wsChangedCells, setWsChangedCells] = useState<Map<number, Set<string>>>(new Map());
   const [wsSaving, setWsSaving] = useState(false);
+  const [wsRefreshing, setWsRefreshing] = useState(false);
   const [wsExpandedId, setWsExpandedId] = useState<number | null>(null);
   /** Loading state untuk computeWorksheet (auto-recompute) */
   const [wsComputing, setWsComputing] = useState(false);
@@ -1294,6 +1295,148 @@ export default function PayrollPage() {
     }
   };
 
+  const handleWsRefreshSources = async () => {
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin refresh worksheet.");
+      return;
+    }
+    if (wsChangedCells.size > 0) {
+      showToast("error", "Simpan Worksheet Dulu", "Ada perubahan manual yang belum disimpan. Simpan atau reset sebelum refresh data sumber.");
+      return;
+    }
+
+    const worksheetRows = payrolls.filter((p) => p.status === "Worksheet");
+    if (worksheetRows.length === 0) {
+      showToast("error", "Tidak Ada Worksheet", "Tidak ada baris Worksheet untuk di-refresh pada periode ini.");
+      return;
+    }
+
+    setWsRefreshing(true);
+    try {
+      const employeeIds = worksheetRows.map((p) => p.employee_id);
+      const refreshedAt = new Date().toISOString();
+
+      const [empData, dpData, attData, lemburData] = await Promise.all([
+        fetchAllRanges<{ id: string; gaji_pokok: number | null }>((from, to) =>
+          supabase
+            .from("pegawai")
+            .select("id, gaji_pokok")
+            .in("id", employeeIds)
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+        fetchAllRanges<{ employee_id: string; total: number | null }>((from, to) =>
+          supabase
+            .from("delivery_points")
+            .select("employee_id, total")
+            .gte("tanggal", period.start)
+            .lte("tanggal", period.end)
+            .in("employee_id", employeeIds)
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+        fetchAllRanges<{ employee_id: string; denda: number | null }>((from, to) =>
+          supabase
+            .from("attendance_records")
+            .select("employee_id, denda")
+            .gte("tanggal", period.start)
+            .lte("tanggal", period.end)
+            .in("employee_id", employeeIds)
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+        fetchAllRanges<{ employee_id: string; total_lembur: number | null }>((from, to) =>
+          supabase
+            .from("overtime_requests")
+            .select("employee_id, total_lembur")
+            .eq("status", "Disetujui")
+            .gte("tanggal", period.start)
+            .lte("tanggal", period.end)
+            .in("employee_id", employeeIds)
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+      ]);
+
+      const gapokMap = new Map(empData.map((e) => [e.id, e.gaji_pokok || 0]));
+      const titikTotals = new Map<string, number>();
+      dpData.forEach((d) => {
+        titikTotals.set(d.employee_id, (titikTotals.get(d.employee_id) || 0) + (d.total || 0));
+      });
+      const absenTotals = new Map<string, number>();
+      attData.forEach((d) => {
+        absenTotals.set(d.employee_id, (absenTotals.get(d.employee_id) || 0) + (d.denda || 0));
+      });
+      const lemburTotals = new Map<string, number>();
+      lemburData.forEach((d) => {
+        lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
+      });
+
+      let updated = 0;
+      let failed = 0;
+      for (const row of worksheetRows) {
+        const sourceGapok = gapokMap.get(row.employee_id) || 0;
+        const sourceTitik = titikTotals.get(row.employee_id) || 0;
+        const sourceLembur = lemburTotals.get(row.employee_id) || 0;
+        const sourcePotonganAbsen = absenTotals.get(row.employee_id) || 0;
+        const payload: Record<string, number | string | null> = {
+          gaji_pokok: sourceGapok,
+          pendapatan_titik: sourceTitik,
+          lembur: sourceLembur,
+          potongan_absen: sourcePotonganAbsen,
+          source_gaji_pokok: sourceGapok,
+          source_titik: sourceTitik,
+          source_lembur: sourceLembur,
+          last_recomputed_at: refreshedAt,
+        };
+        if (
+          row.catatan?.startsWith("Prorata:") ||
+          row.catatan?.startsWith("Tidak aktif") ||
+          row.catatan?.startsWith("Belum bergabung") ||
+          row.catatan?.startsWith("Sudah tidak aktif")
+        ) {
+          payload.catatan = null;
+        }
+
+        const { error } = await supabase
+          .from("payrolls")
+          .update(payload)
+          .eq("id", row.id)
+          .eq("status", "Worksheet");
+        if (error) failed += 1;
+        else updated += 1;
+      }
+
+      if (updated > 0) {
+        await logAudit({
+          supabase,
+          action: "update",
+          entityType: "payrolls",
+          entityLabel: `Refresh sumber Worksheet ${formatPeriodLabel(periodKey)}`,
+          metadata: {
+            periode: periodKey,
+            jumlah_slip: updated,
+            sumber: ["gaji_pokok", "pendapatan_titik", "lembur", "potongan_absen"],
+          },
+        });
+      }
+
+      setWsAbsenBreakdown({});
+      setWsLemburBreakdown({});
+      await Promise.all([fetchEmployees(), fetchPayrolls()]);
+
+      if (failed > 0) {
+        showToast("error", "Sebagian Gagal", `${updated} slip berhasil di-refresh, ${failed} slip gagal.`);
+      } else {
+        showToast("success", "Data Worksheet Di-refresh", `${updated} slip diperbarui dari master gapok, titik, lembur, dan absensi.`);
+      }
+    } catch (e) {
+      showToast("error", "Gagal Refresh", e instanceof Error ? e.message : "Gagal refresh data worksheet.");
+    } finally {
+      setWsRefreshing(false);
+    }
+  };
+
   // ─── Batch Fill handler ───
   const BATCH_FILL_OPTIONS = [
     ...PENDAPATAN_FIELDS.filter((f) => !f.readonly),
@@ -1933,6 +2076,7 @@ export default function PayrollPage() {
             wsLemburBreakdown={wsLemburBreakdown}
             wsLemburLoading={wsLemburLoading}
             wsSaving={wsSaving}
+            wsRefreshing={wsRefreshing}
             wsExpandedId={wsExpandedId}
             wsRowsChanged={wsRowsChanged}
             wsTotalChanged={wsTotalChanged}
@@ -1943,6 +2087,7 @@ export default function PayrollPage() {
             nextPeriod={nextPeriod}
             handleWsChange={handleWsChange}
             handleWsSaveAll={handleWsSaveAll}
+            handleWsRefreshSources={handleWsRefreshSources}
             initWsData={initWsData}
             isCellChanged={isCellChanged}
             wsComputeTotals={wsComputeTotals}

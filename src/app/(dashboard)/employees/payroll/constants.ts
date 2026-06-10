@@ -6,7 +6,7 @@ export type AbsenBreakdownItem = { tanggal: string; status: string; denda: numbe
 export type LemburBreakdownItem = { tanggal: string; jam_mulai: string; jam_selesai: string; durasi_menit: number; rate_per_jam: number; total_lembur: number; alasan: string | null };
 
 export const PENDAPATAN_FIELDS: { key: string; label: string; readonly?: boolean }[] = [
-  { key: "gaji_pokok", label: "Gaji Pokok" },
+  { key: "gaji_pokok", label: "Gaji Pokok", readonly: true },
   { key: "pendapatan_titik", label: "Pendapatan Titik", readonly: true },
   { key: "lembur", label: "Lembur", readonly: true },
   { key: "extra_job", label: "Extra Job" },
