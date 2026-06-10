@@ -45,7 +45,7 @@ interface WorksheetEditorProps {
   nextPeriod: () => void;
 
   handleWsChange: (id: number, field: string, rawValue: string) => void;
-  handleWsSaveAll: () => Promise<void>;
+  handleWsSaveRow: (id: number) => Promise<void>;
   handleWsRefreshSources: () => Promise<void>;
   initWsData: (rows: PayrollRow[]) => void;
   isCellChanged: (id: number, field: string) => boolean;
@@ -79,7 +79,7 @@ export default function WorksheetEditor({
   prevPeriod,
   nextPeriod,
   handleWsChange,
-  handleWsSaveAll,
+  handleWsSaveRow,
   handleWsRefreshSources,
   initWsData,
   isCellChanged,
@@ -141,11 +141,8 @@ export default function WorksheetEditor({
             <div className="flex items-center gap-1.5">
               <button onClick={() => initWsData(payrolls)} disabled={wsSaving}
                 className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">
-                Reset
+                Reset Semua
               </button>
-              <Button icon={wsSaving ? Loader2 : Save} size="sm" onClick={handleWsSaveAll} disabled={wsSaving}>
-                {wsSaving ? "Menyimpan..." : `Simpan (${wsRowsChanged})`}
-              </Button>
             </div>
           )}
           {canEdit && (
@@ -187,6 +184,7 @@ export default function WorksheetEditor({
               const vals = wsData[row.id] || {};
               const computed = wsComputeTotals(row.id);
               const isChanged = wsChangedCells.has(row.id);
+              const changedCellCount = wsChangedCells.get(row.id)?.size || 0;
               const isEven = idx % 2 === 0;
               return (
                 <React.Fragment key={row.id}>
@@ -432,6 +430,24 @@ export default function WorksheetEditor({
                           <span className="text-xs font-bold text-foreground">Gaji Bersih (Netto)</span>
                           <span className={cn("text-lg font-bold tabular-nums", computed.netto >= 0 ? "text-primary" : "text-danger")}>{formatCurrency(computed.netto)}</span>
                         </div>
+                        {canEdit && (
+                          <div className="mt-3 flex items-center justify-between gap-3 max-w-4xl rounded-xl border border-border bg-card px-4 py-3">
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-foreground">Simpan perubahan pegawai ini</p>
+                              <p className={cn("text-[10px] mt-0.5", isChanged ? "text-warning" : "text-muted-foreground")}>
+                                {isChanged ? `${changedCellCount} cell belum disimpan untuk ${row.pegawaiNama}` : "Belum ada perubahan pada pegawai ini."}
+                              </p>
+                            </div>
+                            <Button
+                              icon={wsSaving ? Loader2 : Save}
+                              size="sm"
+                              onClick={() => handleWsSaveRow(row.id)}
+                              disabled={wsSaving || !isChanged}
+                            >
+                              {wsSaving ? "Menyimpan..." : "Simpan Pegawai"}
+                            </Button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   )}

@@ -1249,48 +1249,58 @@ export default function PayrollPage() {
     return { totalPendapatan, totalPotongan, netto: totalPendapatan - totalPotongan };
   };
 
-  const handleWsSaveAll = async () => {
-    if (wsChangedCells.size === 0) return;
+  const buildWsUpdatePayload = (vals: Record<string, number>) => {
+    const payload: Record<string, number> = {};
+    PENDAPATAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
+    POTONGAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
+    return payload;
+  };
+
+  const handleWsSaveRow = async (id: number) => {
+    if (!wsChangedCells.has(id)) return;
     if (!canEdit) {
       showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit worksheet.");
       return;
     }
+    const vals = wsData[id];
+    if (!vals) return;
+
+    const changedCellCount = wsChangedCells.get(id)?.size || 0;
     setWsSaving(true);
-    const failedIds = new Set<number>();
-    const changedIds = Array.from(wsChangedCells.keys());
-    for (const id of changedIds) {
-      const vals = wsData[id];
-      if (!vals) continue;
-      // Only send editable component fields. Auto/source fields stay owned by recompute.
-      const payload: Record<string, number> = {};
-      PENDAPATAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
-      POTONGAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
-      const { error } = await supabase.from("payrolls").update(payload).eq("id", id);
-      if (error) failedIds.add(id);
-    }
+    const { error } = await supabase
+      .from("payrolls")
+      .update(buildWsUpdatePayload(vals))
+      .eq("id", id)
+      .eq("status", "Worksheet");
     setWsSaving(false);
-    if (failedIds.size > 0) {
-      const failedChanges = new Map<number, Set<string>>();
-      failedIds.forEach((id) => {
-        const cells = wsChangedCells.get(id);
-        if (cells) failedChanges.set(id, new Set(cells));
-      });
-      setWsChangedCells(failedChanges);
-      showToast("error", "Sebagian Gagal", `${failedIds.size} dari ${changedIds.length} slip gagal disimpan. Cell yang gagal tetap ditandai.`);
-    } else {
-      showToast("success", "Worksheet Disimpan", `${changedIds.length} slip gaji berhasil diperbarui.`);
-      await logAudit({
-        supabase,
-        action: "update",
-        entityType: "payrolls",
-        entityLabel: `Worksheet ${formatPeriodLabel(periodKey)}`,
-        metadata: {
-          periode: periodKey,
-          jumlah_slip: changedIds.length,
-          jumlah_cell: wsTotalChanged,
-        },
-      });
-      setWsChangedCells(new Map());
+
+    if (error) {
+      showToast("error", "Gagal Menyimpan", error.message);
+      return;
+    }
+
+    const row = payrolls.find((p) => p.id === id);
+    await logAudit({
+      supabase,
+      action: "update",
+      entityType: "payrolls",
+      entityLabel: `Worksheet ${row?.pegawaiNama || row?.employee_id || id}`,
+      metadata: {
+        periode: periodKey,
+        payroll_id: id,
+        employee_id: row?.employee_id,
+        jumlah_cell: changedCellCount,
+      },
+    });
+
+    setWsChangedCells((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    showToast("success", "Worksheet Disimpan", `${row?.pegawaiNama || "Pegawai"} berhasil diperbarui.`);
+
+    if (wsChangedCells.size === 1) {
       await fetchPayrolls();
     }
   };
@@ -2086,7 +2096,7 @@ export default function PayrollPage() {
             prevPeriod={prevPeriod}
             nextPeriod={nextPeriod}
             handleWsChange={handleWsChange}
-            handleWsSaveAll={handleWsSaveAll}
+            handleWsSaveRow={handleWsSaveRow}
             handleWsRefreshSources={handleWsRefreshSources}
             initWsData={initWsData}
             isCellChanged={isCellChanged}
