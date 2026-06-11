@@ -13,6 +13,13 @@ export type LatenessResult = { status: "Hadir" | "Terlambat"; durasi: number };
 
 export type SummaryPeriod = { start: string; end: string; label: string };
 
+export type EmployeeActivityLite = {
+  status: string;
+  tanggal_bergabung: string | null;
+  tanggal_keluar: string | null;
+  non_active_periods?: NonActivePeriod[] | null;
+};
+
 /**
  * Get local date string YYYY-MM-DD (timezone safe — pakai local time, bukan UTC).
  * Penting untuk konsistensi antara client timezone dan server-side date filter.
@@ -198,4 +205,17 @@ export function isInNonActivePeriod(
     if (date >= p.from && date <= p.to) return true;
   }
   return false;
+}
+
+export function isEmployeeActiveOnDate(date: string, employee: EmployeeActivityLite): boolean {
+  if (employee.status === "Tidak Aktif" && !employee.tanggal_keluar) return false;
+  if (employee.tanggal_bergabung && date < employee.tanggal_bergabung) return false;
+  if (employee.tanggal_keluar && date >= employee.tanggal_keluar) return false;
+  if (isInNonActivePeriod(date, employee.non_active_periods)) return false;
+  return true;
+}
+
+export function isEmployeeActiveInPeriod(period: { start: string; end: string }, employee: EmployeeActivityLite): boolean {
+  if (!period.start || !period.end) return false;
+  return getDateRange(period.start, period.end).some((date) => isEmployeeActiveOnDate(date, employee));
 }

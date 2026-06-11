@@ -14,6 +14,8 @@ import {
   getDateRange,
   getAffectedEmployeeIds,
   isInNonActivePeriod,
+  isEmployeeActiveOnDate,
+  isEmployeeActiveInPeriod,
 } from "../lib/attendance-helpers";
 import { MIN_DATE, SUMMARY_CUT_OFF_DAY } from "../lib/attendance-constants";
 
@@ -300,6 +302,83 @@ describe("attendance-helpers", () => {
       expect(isInNonActivePeriod("2026-05-30", periods)).toBe(true);
       expect(isInNonActivePeriod("2024-04-01", periods)).toBe(false);
       expect(isInNonActivePeriod("2025-09-01", periods)).toBe(false);
+    });
+  });
+
+  describe("isEmployeeActiveOnDate", () => {
+    const baseEmployee = {
+      status: "Aktif",
+      tanggal_bergabung: "2026-05-14",
+      tanggal_keluar: null,
+      non_active_periods: [],
+    };
+
+    it("false sebelum tanggal bergabung, true tepat tanggal bergabung", () => {
+      expect(isEmployeeActiveOnDate("2026-05-13", baseEmployee)).toBe(false);
+      expect(isEmployeeActiveOnDate("2026-05-14", baseEmployee)).toBe(true);
+    });
+
+    it("tanggal_keluar inclusive: false tepat tanggal keluar dan setelahnya", () => {
+      const employee = { ...baseEmployee, tanggal_keluar: "2026-05-21" };
+      expect(isEmployeeActiveOnDate("2026-05-20", employee)).toBe(true);
+      expect(isEmployeeActiveOnDate("2026-05-21", employee)).toBe(false);
+      expect(isEmployeeActiveOnDate("2026-05-22", employee)).toBe(false);
+    });
+
+    it("false untuk status Tidak Aktif tanpa tanggal_keluar", () => {
+      const employee = { ...baseEmployee, status: "Tidak Aktif", tanggal_keluar: null };
+      expect(isEmployeeActiveOnDate("2026-05-20", employee)).toBe(false);
+    });
+
+    it("false untuk tanggal di dalam historical non_active_periods", () => {
+      const employee = {
+        ...baseEmployee,
+        non_active_periods: [{ from: "2026-05-22", to: "2026-06-03" }],
+      };
+      expect(isEmployeeActiveOnDate("2026-05-21", employee)).toBe(true);
+      expect(isEmployeeActiveOnDate("2026-05-22", employee)).toBe(false);
+      expect(isEmployeeActiveOnDate("2026-06-03", employee)).toBe(false);
+      expect(isEmployeeActiveOnDate("2026-06-04", employee)).toBe(true);
+    });
+  });
+
+  describe("isEmployeeActiveInPeriod", () => {
+    const baseEmployee = {
+      status: "Aktif",
+      tanggal_bergabung: "2026-05-14",
+      tanggal_keluar: null,
+      non_active_periods: [],
+    };
+
+    it("true jika employee punya minimal 1 hari aktif di periode", () => {
+      const employee = { ...baseEmployee, tanggal_keluar: "2026-05-21" };
+      expect(isEmployeeActiveInPeriod({ start: "2026-05-08", end: "2026-06-07" }, employee)).toBe(true);
+    });
+
+    it("false jika tanggal_keluar sudah di periode sebelumnya", () => {
+      const employee = { ...baseEmployee, tanggal_keluar: "2026-05-21" };
+      expect(isEmployeeActiveInPeriod({ start: "2026-06-08", end: "2026-07-07" }, employee)).toBe(false);
+    });
+
+    it("false jika belum bergabung sampai periode selesai", () => {
+      const employee = { ...baseEmployee, tanggal_bergabung: "2026-07-08" };
+      expect(isEmployeeActiveInPeriod({ start: "2026-06-08", end: "2026-07-07" }, employee)).toBe(false);
+    });
+
+    it("false jika seluruh periode berada dalam non_active_periods", () => {
+      const employee = {
+        ...baseEmployee,
+        non_active_periods: [{ from: "2026-06-08", to: "2026-07-07" }],
+      };
+      expect(isEmployeeActiveInPeriod({ start: "2026-06-08", end: "2026-07-07" }, employee)).toBe(false);
+    });
+
+    it("true jika periode setelah non_active_periods selesai (rehire)", () => {
+      const employee = {
+        ...baseEmployee,
+        non_active_periods: [{ from: "2026-05-22", to: "2026-06-03" }],
+      };
+      expect(isEmployeeActiveInPeriod({ start: "2026-06-08", end: "2026-07-07" }, employee)).toBe(true);
     });
   });
 

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Search, X, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import Portal from "@/components/ui/Portal";
 import { cn } from "@/lib/utils";
-import { getCalPeriod, getSummaryCurrentPeriodKey, localDateStr } from "../lib/attendance-helpers";
+import { getCalPeriod, getSummaryCurrentPeriodKey, isEmployeeActiveInPeriod, localDateStr } from "../lib/attendance-helpers";
 import { STATUS_OPTIONS } from "../lib/attendance-status";
 import { useCalendarData } from "../lib/hooks/use-calendar-data";
 import type { EmployeeLite } from "../lib/attendance-types";
@@ -55,32 +55,40 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
 
   const emps = useMemo(
     () => employees
+      .filter((e) => isEmployeeActiveInPeriod(period, e))
       .map((e) => ({ id: e.id, nama: e.nama }))
       .filter((e) => !search || e.nama.toLowerCase().includes(search.toLowerCase())),
-    [employees, search],
+    [employees, period, search],
+  );
+
+  const visibleEmployeeIds = useMemo(() => new Set(emps.map((e) => e.id)), [emps]);
+
+  const visibleRecords = useMemo(
+    () => records.filter((r) => visibleEmployeeIds.has(r.employee_id)),
+    [records, visibleEmployeeIds],
   );
 
   const statusByEmp = useMemo(() => {
     const m = new Map<string, Map<string, { status: string; color: string }>>();
-    records.forEach((r) => {
+    visibleRecords.forEach((r) => {
       if (!m.has(r.employee_id)) m.set(r.employee_id, new Map());
       const sc = STATUS_OPTIONS.find((s) => s.value === r.status);
       m.get(r.employee_id)!.set(r.tanggal, { status: r.status, color: sc?.color || "#6b7280" });
     });
     return m;
-  }, [records]);
+  }, [visibleRecords]);
 
   const todayStr = localDateStr();
   const statusBreakdown = useMemo(() => {
     const m = new Map<string, { count: number; color: string }>();
-    records.forEach((r) => {
+    visibleRecords.forEach((r) => {
       const sc = STATUS_OPTIONS.find((s) => s.value === r.status);
       const existing = m.get(r.status);
       if (existing) existing.count++;
       else m.set(r.status, { count: 1, color: sc?.color || "#6b7280" });
     });
     return m;
-  }, [records]);
+  }, [visibleRecords]);
 
   return (
     <Portal>
@@ -95,7 +103,7 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
               <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground flex-wrap">
                 <span><strong className="text-foreground">{emps.length}</strong> pegawai</span>
                 <span className="w-1 h-1 rounded-full bg-border" />
-                <span><strong className="text-foreground">{records.length}</strong> entri</span>
+                <span><strong className="text-foreground">{visibleRecords.length}</strong> entri</span>
                 {Array.from(statusBreakdown.entries()).map(([nama, { count, color }]) => (
                   <span key={nama} className="inline-flex items-center gap-1">
                     <span className="w-1 h-1 rounded-full bg-border" />
