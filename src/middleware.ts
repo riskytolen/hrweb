@@ -44,14 +44,14 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // Jika user belum login dan bukan di halaman login → redirect ke login
+  // Jika user belum login dan bukan di halaman login -> redirect ke login
   if (!user && pathname !== "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // Jika user sudah login dan di halaman login → redirect ke dashboard
+  // Jika user sudah login dan di halaman login -> redirect ke dashboard
   if (user && pathname === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/employees";

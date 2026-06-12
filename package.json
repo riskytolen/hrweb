@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:cloudflare": "opennextjs-cloudflare build",
+    "deploy:cloudflare": "opennextjs-cloudflare build && wrangler deploy",
+    "preview:cloudflare": "opennextjs-cloudflare build && wrangler dev .open-next/worker.js",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
@@ -20,7 +23,7 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^1.8.0",
-    "next": "16.2.4",
+    "next": "16.2.7",
     "qrcode.react": "^4.2.0",
     "react": "19.2.4",
     "react-datepicker": "^9.1.0",
@@ -29,16 +32,19 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.19.11",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-datepicker": "^6.2.0",
     "@types/react-dom": "^19",
+    "esbuild": "^0.28.1",
     "eslint": "^9",
-    "eslint-config-next": "16.2.4",
+    "eslint-config-next": "16.2.7",
     "fast-check": "4.8.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "4.1.8"
+    "vitest": "4.1.8",
+    "wrangler": "^4.100.0"
   }
 }
