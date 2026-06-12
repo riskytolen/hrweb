@@ -1,12 +1,7 @@
 name = "hrweb"
-main = ".open-next/worker.js"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = ".open-next/assets"
-
-[assets]
-directory = ".open-next/assets"
-binding = "NEXT_ASSETS"
 
 [observability]
 enabled = true
