@@ -50,5 +50,10 @@ next-env.d.ts
 # opencode config (contains secrets)
 opencode.jsonc
 
+# scratch files (may contain secrets)
+scratch*.js
+build_error.txt
+build_output.txt
+
 # kiro MCP config (contains access token)
 .kiro/settings/mcp.json
