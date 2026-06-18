@@ -1336,11 +1336,24 @@ export default function PettyCashPage() {
                           className={inputClass} />
                       </div>
                       <div>
-                        <label className="text-[10px] font-semibold text-danger mb-1.5 block">Nominal *</label>
-                        <CurrencyInput value={form.cash_out}
-                          onChange={(v) => setForm({ ...form, cash_out: v, cash_in: 0 })}
-                          className="text-danger font-semibold" />
-                        <p className="text-[10px] text-muted-foreground mt-1.5">Nominal pengeluaran. Untuk top-up saldo, gunakan tombol Top-up.</p>
+                        <label className={cn("text-[10px] font-semibold mb-1.5 block", form.cash_in > 0 ? "text-success" : "text-danger")}>
+                          Nominal {form.cash_in > 0 ? "(Pemasukan)" : "(Pengeluaran)"} *
+                        </label>
+                        <CurrencyInput 
+                          value={form.cash_in > 0 ? form.cash_in : form.cash_out}
+                          onChange={(v) => {
+                            if (form.cash_in > 0) {
+                              setForm({ ...form, cash_in: v, cash_out: 0 });
+                            } else {
+                              setForm({ ...form, cash_out: v, cash_in: 0 });
+                            }
+                          }}
+                          className={cn("font-semibold", form.cash_in > 0 ? "text-success" : "text-danger")} />
+                        <p className="text-[10px] text-muted-foreground mt-1.5">
+                          {form.cash_in > 0 
+                            ? "Edit nominal pemasukan/top-up." 
+                            : "Nominal pengeluaran. Untuk top-up saldo, gunakan tombol Top-up."}
+                        </p>
                       </div>
                     </>
                   ) : (
