@@ -282,12 +282,41 @@ export default function PettyCashPage() {
     const countIn = filtered.filter((t) => t.cash_in > 0).length;
     const countOut = filtered.filter((t) => t.cash_out > 0).length;
     const txCount = filtered.length;
-    const lastBalance = filtered.length > 0 ? filtered[filtered.length - 1].runningBalance ?? 0 : 0;
     const currentBalance = settings?.initial_balance != null
-      ? settings.initial_balance + transactions.reduce((s, t) => s + t.cash_in - t.cash_out, 0)
+      ? settings.initial_balance + filtered.reduce((s, t) => s + t.cash_in - t.cash_out, 0)
       : 0;
-    return { totalIn, totalOut, countIn, countOut, txCount, lastBalance, currentBalance };
-  }, [filtered, settings, transactions]);
+    return { totalIn, totalOut, countIn, countOut, txCount, currentBalance };
+  }, [filtered, settings]);
+
+  const getMatchingTransactions = useCallback(
+    (categoryId: number, rowFilter: { bagian: string; unit: string }) => {
+      return filtered.filter((t) => {
+        if (t.category_id !== categoryId) return false;
+        if (rowFilter.bagian) {
+          if (rowFilter.bagian === "0") {
+            if (t.bagian_id !== null) return false;
+          } else if (t.bagian_id !== Number(rowFilter.bagian)) return false;
+        }
+        if (rowFilter.unit) {
+          if (rowFilter.unit === "0") {
+            if (t.unit) return false;
+          } else if ((t.unit || "").toUpperCase() !== rowFilter.unit.toUpperCase()) return false;
+        }
+        return true;
+      });
+    },
+    [filtered]
+  );
+
+  const reportData = useMemo(() => {
+    return categories.map((cat) => {
+      const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
+      const matchingTrx = getMatchingTransactions(cat.id, rf);
+      const trxCount = matchingTrx.length;
+      const totalCost = matchingTrx.reduce((s, t) => s + t.cash_out, 0);
+      return { cat, trxCount, totalCost };
+    });
+  }, [categories, rowFilters, getMatchingTransactions]);
 
   // ─── Form handlers ───
   const makeEmptyBulkRow = (): BulkRow => ({
@@ -1018,22 +1047,8 @@ export default function PettyCashPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/40">
-                      {categories.map((cat, idx) => {
+                      {reportData.map(({ cat, trxCount, totalCost }, idx) => {
                         const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
-                        const matchingTrx = filtered.filter((t) => {
-                          if (t.category_id !== cat.id) return false;
-                          if (rf.bagian) {
-                            if (rf.bagian === "0") { if (t.bagian_id !== null) return false; }
-                            else if (t.bagian_id !== Number(rf.bagian)) return false;
-                          }
-                          if (rf.unit) {
-                            if (rf.unit === "0") { if (t.unit) return false; }
-                            else if ((t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
-                          }
-                          return true;
-                        });
-                        const totalCost = matchingTrx.reduce((s, t) => s + t.cash_out, 0);
-                        const trxCount = matchingTrx.length;
                         return (
                           <tr key={cat.id} className="hover:bg-muted/20 transition-colors">
                             <td className="px-3 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
@@ -1081,46 +1096,10 @@ export default function PettyCashPage() {
                       <tr>
                         <td colSpan={4} className="px-3 py-2.5 text-xs font-bold text-foreground">GRAND TOTAL</td>
                         <td className="px-3 py-2.5 text-center text-xs font-bold text-foreground">
-                          {(() => {
-                            let total = 0;
-                            categories.forEach((cat) => {
-                              const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
-                              total += filtered.filter((t) => {
-                                if (t.category_id !== cat.id) return false;
-                                if (rf.bagian) {
-                                  if (rf.bagian === "0") { if (t.bagian_id !== null) return false; }
-                                  else if (t.bagian_id !== Number(rf.bagian)) return false;
-                                }
-                                if (rf.unit) {
-                                  if (rf.unit === "0") { if (t.unit) return false; }
-                                  else if ((t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
-                                }
-                                return true;
-                              }).length;
-                            });
-                            return `${total}x`;
-                          })()}
+                          {reportData.reduce((sum, { trxCount }) => sum + trxCount, 0)}x
                         </td>
                         <td className="px-3 py-2.5 text-right text-sm font-bold text-danger tabular-nums">
-                          {(() => {
-                            let total = 0;
-                            categories.forEach((cat) => {
-                              const rf = rowFilters[cat.id] || { bagian: "", unit: "" };
-                              total += filtered.filter((t) => {
-                                if (t.category_id !== cat.id) return false;
-                                if (rf.bagian) {
-                                  if (rf.bagian === "0") { if (t.bagian_id !== null) return false; }
-                                  else if (t.bagian_id !== Number(rf.bagian)) return false;
-                                }
-                                if (rf.unit) {
-                                  if (rf.unit === "0") { if (t.unit) return false; }
-                                  else if ((t.unit || "").toUpperCase() !== rf.unit.toUpperCase()) return false;
-                                }
-                                return true;
-                              }).reduce((s, t) => s + t.cash_out, 0);
-                            });
-                            return formatCurrency(total);
-                          })()}
+                          {formatCurrency(reportData.reduce((sum, { totalCost }) => sum + totalCost, 0))}
                         </td>
                       </tr>
                     </tfoot>
