@@ -1290,43 +1290,34 @@ export default function PettyCashPage() {
                       </div>
                       <div>
                         <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Kategori *</label>
-                        <select
+                        <Select
+                          searchable
                           value={String(form.category_id)}
-                          onChange={(e) => setForm({ ...form, category_id: Number(e.target.value) })}
-                          className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
-                        >
-                          <option value="0">Pilih kategori...</option>
-                          {categories.map((c) => (
-                            <option key={c.id} value={String(c.id)}>{c.nama}</option>
-                          ))}
-                        </select>
+                          onChange={(v) => setForm({ ...form, category_id: Number(v) })}
+                          options={[{ value: "0", label: "Pilih kategori..." }, ...categories.map((c) => ({ value: String(c.id), label: c.nama }))]}
+                          placeholder="Pilih kategori..."
+                        />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Bagian <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
-                          <select
+                          <Select
+                            searchable
                             value={String(form.bagian_id)}
-                            onChange={(e) => setForm({ ...form, bagian_id: Number(e.target.value) })}
-                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
-                          >
-                            <option value="0">— (Tanpa Bagian)</option>
-                            {bagians.map((b) => (
-                              <option key={b.id} value={String(b.id)}>{b.nama}</option>
-                            ))}
-                          </select>
+                            onChange={(v) => setForm({ ...form, bagian_id: Number(v) })}
+                            options={[{ value: "0", label: "— (Tanpa Bagian)" }, ...bagians.map((b) => ({ value: String(b.id), label: b.nama }))]}
+                            placeholder="Pilih bagian..."
+                          />
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">Unit <span className="text-muted-foreground/50 font-normal">(opsional)</span></label>
-                          <select
+                          <Select
+                            searchable
                             value={form.unit}
-                            onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                            className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer uppercase"
-                          >
-                            <option value="">— (Tanpa Unit)</option>
-                            {units.map((u) => (
-                              <option key={u.id} value={u.nama}>{u.nama}</option>
-                            ))}
-                          </select>
+                            onChange={(v) => setForm({ ...form, unit: v })}
+                            options={[{ value: "", label: "— (Tanpa Unit)" }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
+                            placeholder="Pilih unit..."
+                          />
                         </div>
                       </div>
                       <div>
@@ -1388,40 +1379,31 @@ export default function PettyCashPage() {
                                     <DatePicker value={row.tanggal} onChange={(v) => updateBulkRow(row.key, { tanggal: v })} placeholder="Tgl" />
                                   </td>
                                   <td className="px-2 py-1.5">
-                                    <select
+                                    <Select
+                                      searchable
                                       value={String(row.category_id)}
-                                      onChange={(e) => updateBulkRow(row.key, { category_id: Number(e.target.value) })}
-                                      className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
-                                    >
-                                      <option value="0">Kategori...</option>
-                                      {categories.map((c) => (
-                                        <option key={c.id} value={String(c.id)}>{c.nama}</option>
-                                      ))}
-                                    </select>
+                                      onChange={(v) => updateBulkRow(row.key, { category_id: Number(v) })}
+                                      options={[{ value: "0", label: "Kategori..." }, ...categories.map((c) => ({ value: String(c.id), label: c.nama }))]}
+                                      placeholder="Kategori..."
+                                    />
                                   </td>
                                   <td className="px-2 py-1.5">
-                                    <select
+                                    <Select
+                                      searchable
                                       value={String(row.bagian_id)}
-                                      onChange={(e) => updateBulkRow(row.key, { bagian_id: Number(e.target.value) })}
-                                      className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer"
-                                    >
-                                      <option value="0">Bagian...</option>
-                                      {bagians.map((b) => (
-                                        <option key={b.id} value={String(b.id)}>{b.nama}</option>
-                                      ))}
-                                    </select>
+                                      onChange={(v) => updateBulkRow(row.key, { bagian_id: Number(v) })}
+                                      options={[{ value: "0", label: "Bagian..." }, ...bagians.map((b) => ({ value: String(b.id), label: b.nama }))]}
+                                      placeholder="Bagian..."
+                                    />
                                   </td>
                                   <td className="px-2 py-1.5">
-                                    <select
+                                    <Select
+                                      searchable
                                       value={row.unit}
-                                      onChange={(e) => updateBulkRow(row.key, { unit: e.target.value })}
-                                      className="w-full px-2 py-2 rounded-lg border border-border bg-muted/30 text-xs outline-none focus:border-primary text-foreground cursor-pointer uppercase"
-                                    >
-                                      <option value="">Unit...</option>
-                                      {units.map((u) => (
-                                        <option key={u.id} value={u.nama}>{u.nama}</option>
-                                      ))}
-                                    </select>
+                                      onChange={(v) => updateBulkRow(row.key, { unit: v })}
+                                      options={[{ value: "", label: "Unit..." }, ...units.map((u) => ({ value: u.nama, label: u.nama }))]}
+                                      placeholder="Unit..."
+                                    />
                                   </td>
                                   <td className="px-2 py-1.5">
                                     <input type="text" placeholder="Keterangan" value={row.keterangan}
