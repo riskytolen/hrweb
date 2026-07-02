@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   LayoutDashboard,
   Briefcase,
+  Truck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -109,7 +110,8 @@ const allSections: MenuSection[] = [
         icon: Briefcase,
         basePath: "/general-affair",
         items: [
-          { name: "Patty Cash", href: "/general-affair/petty-cash", icon: Wallet, permission: "petty-cash" },
+          { name: "Petty Cash", href: "/general-affair/petty-cash", icon: Wallet, permission: "petty-cash" },
+          { name: "Data Mobil", href: "/general-affair/data-mobil", icon: Truck, permission: "data-mobil" },
         ],
       },
     ],

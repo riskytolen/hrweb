@@ -75,6 +75,8 @@ const PERMISSION_OPTIONS = [
   { key: "recruitment", label: "Rekrutmen" },
   { key: "performance", label: "Kinerja" },
   { key: "legal", label: "Legal & Administrasi" },
+  { key: "petty-cash", label: "Petty Cash" },
+  { key: "data-mobil", label: "Data Mobil" },
   { key: "settings", label: "Pengaturan" },
 ];
 

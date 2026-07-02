@@ -56,7 +56,8 @@ export type AuditEntityType =
   | "petty_cash_settings"
   | "petty_cash_categories"
   | "petty_cash_bagians"
-  | "petty_cash_units";
+  | "petty_cash_units"
+  | "ga_vehicles";
 
 export interface AuditLogParams {
   supabase: SupabaseClient;
@@ -220,6 +221,7 @@ export function entityLabel(entityType: string): string {
     petty_cash_categories: "Kategori Petty Cash",
     petty_cash_bagians: "Bagian Petty Cash",
     petty_cash_units: "Unit Petty Cash",
+    ga_vehicles: "Data Mobil",
   };
   return labels[entityType] ?? entityType;
 }

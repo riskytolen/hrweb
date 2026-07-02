@@ -760,7 +760,7 @@ export default function PettyCashPage() {
     <RouteGuard permission="petty-cash">
       <div className="space-y-4 animate-fade-in">
         <PageHeader
-          title="Patty Cash"
+          title="Petty Cash"
           description="Catat transaksi kas kecil harian (metode Imprest)"
           icon={Wallet}
           actions={
