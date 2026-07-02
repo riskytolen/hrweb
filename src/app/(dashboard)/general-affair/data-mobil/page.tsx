@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Truck, Plus, Search, Pencil, Trash2, X, Check,
+  Truck, Plus, Search, Pencil, Trash2, X, Check, Eye,
   CircleCheckBig, AlertTriangle,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
@@ -21,6 +21,13 @@ const PAGE_SIZE = 15;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
 const COLUMNS = [
+  { key: "unit", label: "UNIT" },
+  { key: "jenis", label: "JENIS" },
+  { key: "divisi", label: "DEVISI" },
+  { key: "milik", label: "MILIK" },
+] as const;
+
+const DETAIL_FIELDS = [
   { key: "unit", label: "UNIT" },
   { key: "jenis", label: "JENIS" },
   { key: "divisi", label: "DEVISI" },
@@ -69,6 +76,7 @@ export default function DataMobilPage() {
   const [formError, setFormError] = useState("");
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; unit: string } | null>(null);
+  const [detailVehicle, setDetailVehicle] = useState<DbGaVehicle | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
@@ -83,10 +91,10 @@ export default function DataMobilPage() {
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   useEffect(() => {
-    if (showForm) document.body.style.overflow = "hidden";
+    if (showForm || detailVehicle || deleteConfirm) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showForm]);
+  }, [showForm, detailVehicle, deleteConfirm]);
 
   const fetchVehicles = useCallback(async () => {
     const { data, error } = await supabase
@@ -305,12 +313,12 @@ export default function DataMobilPage() {
                     <th key={col.key} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">{col.label}</th>
                   ))}
                   <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Status</th>
-                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Aksi</th>
+                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-32">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
-                {loading ? <SkeletonTable rows={8} cols={12} /> : paged.length === 0 ? (
-                  <tr><td colSpan={12} className="text-center py-12 text-sm text-muted-foreground">
+                {loading ? <SkeletonTable rows={8} cols={7} /> : paged.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-12 text-sm text-muted-foreground">
                     {vehicles.length === 0 ? "Belum ada data mobil. Klik tombol Tambah Mobil untuk mulai." : "Tidak ada data yang cocok dengan filter."}
                   </td></tr>
                 ) : paged.map((row, idx) => (
@@ -335,6 +343,7 @@ export default function DataMobilPage() {
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex items-center justify-center gap-1">
+                        <button onClick={() => setDetailVehicle(row)} title="Detail" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Eye className="w-3.5 h-3.5" /></button>
                         {canEdit && <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
                         {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, unit: row.unit })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
                       </div>
@@ -429,6 +438,48 @@ export default function DataMobilPage() {
                 <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => setShowForm(false)} disabled={formSaving}>Batal</Button>
                   <Button size="sm" icon={Check} onClick={handleSave} disabled={formSaving}>{formSaving ? "Menyimpan..." : editingId ? "Simpan" : "Tambah"}</Button>
+                </div>
+              </div>
+            </div>
+          </Portal>
+        )}
+
+        {detailVehicle && (
+          <Portal>
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDetailVehicle(null)} />
+              <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]">
+                <div className="flex items-center justify-between p-5 border-b border-border">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center"><Truck className="w-5 h-5 text-primary" /></div>
+                    <div>
+                      <h3 className="text-base font-bold text-foreground">Detail Data Mobil</h3>
+                      <p className="text-xs text-muted-foreground">{detailVehicle.unit}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setDetailVehicle(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {DETAIL_FIELDS.map((f) => {
+                      const value = detailVehicle[f.key] || "-";
+                      return (
+                        <div key={f.key}>
+                          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{f.label}</label>
+                          <p className="text-sm text-foreground mt-1">{value}</p>
+                        </div>
+                      );
+                    })}
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">STATUS</label>
+                      <span className={cn("inline-flex items-center text-xs font-bold px-2 py-1 rounded-full mt-1", detailVehicle.status === "Aktif" ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>
+                        {detailVehicle.status}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="px-5 py-3 border-t border-border flex items-center justify-end">
+                  <Button variant="outline" size="sm" onClick={() => setDetailVehicle(null)}>Tutup</Button>
                 </div>
               </div>
             </div>
