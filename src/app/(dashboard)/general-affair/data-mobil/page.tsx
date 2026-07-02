@@ -316,15 +316,18 @@ export default function DataMobilPage() {
                 ) : paged.map((row, idx) => (
                   <tr key={row.id} className="hover:bg-muted/30">
                     <td className="px-5 py-3 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                    {COLUMNS.map((col) => (
-                      <td key={col.key} className="px-5 py-3 text-xs text-foreground max-w-[180px] truncate">
-                        {col.key === "unit" ? (
-                          <span className="font-semibold">{(row as Record<string, unknown>)[col.key] as string || "-"}</span>
-                        ) : (
-                          <span className="text-muted-foreground">{(row as Record<string, unknown>)[col.key] as string || "-"}</span>
-                        )}
-                      </td>
-                    ))}
+                    {COLUMNS.map((col) => {
+                      const value = row[col.key] || "-";
+                      return (
+                        <td key={col.key} className="px-5 py-3 text-xs text-foreground max-w-[180px] truncate">
+                          {col.key === "unit" ? (
+                            <span className="font-semibold">{value}</span>
+                          ) : (
+                            <span className="text-muted-foreground">{value}</span>
+                          )}
+                        </td>
+                      );
+                    })}
                     <td className="px-5 py-3 text-center">
                       <span className={cn("inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full", row.status === "Aktif" ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>
                         {row.status}
