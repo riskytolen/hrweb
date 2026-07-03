@@ -609,7 +609,6 @@ export default function DataMobilPage() {
             <p className="text-sm font-bold text-foreground">{type}</p>
             <DocumentStatusBadge info={status} />
           </div>
-          {canInput && <Button variant="outline" size="sm" icon={Upload} onClick={() => setDocumentForm({ ...emptyDocumentForm, document_type: type })}>Upload</Button>}
         </div>
         {doc ? (
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
