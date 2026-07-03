@@ -554,12 +554,32 @@ export interface DbPettyCashTransaction {
 
 // ─── GA Vehicles (Data Mobil) ───
 
+export interface DbGaVehicleVendor {
+  id: number;
+  nama: string;
+  deskripsi: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbGaVehicleDivision {
+  id: number;
+  nama: string;
+  deskripsi: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DbGaVehicle {
   id: number;
   unit: string;
   jenis: string;
   divisi: string | null;
   vendor: string | null;
+  vendor_id: number | null;
+  vehicle_division_id: number | null;
   lokasi_administrasi: string | null;
   no_rangka: string | null;
   nomer_mesin: string | null;

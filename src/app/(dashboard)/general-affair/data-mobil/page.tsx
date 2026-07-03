@@ -18,6 +18,8 @@ import {
   type DbGaVehicleDocument,
   type DbGaVehicleDocumentFile,
   type DbGaVehicleDocumentSetting,
+  type DbGaVehicleVendor,
+  type DbGaVehicleDivision,
 } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
@@ -51,6 +53,8 @@ type FormState = {
   jenis: string;
   divisi: string;
   vendor: string;
+  vendor_id: number | null;
+  vehicle_division_id: number | null;
   lokasi_administrasi: string;
   no_rangka: string;
   nomer_mesin: string;
@@ -85,7 +89,7 @@ type OverallStatusInfo = {
 };
 
 const emptyForm: FormState = {
-  unit: "", jenis: "", divisi: "", vendor: "",
+  unit: "", jenis: "", divisi: "", vendor: "", vendor_id: null, vehicle_division_id: null,
   lokasi_administrasi: "", no_rangka: "", nomer_mesin: "", volume: "", tonase: "", suhu: "",
   kir_required: true, stnk_required: true, pajak_required: true,
 };
@@ -245,6 +249,8 @@ export default function DataMobilPage() {
   const [detailVehicle, setDetailVehicle] = useState<DbGaVehicle | null>(null);
   const [docModalVehicle, setDocModalVehicle] = useState<DbGaVehicle | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [vehicleVendors, setVehicleVendors] = useState<DbGaVehicleVendor[]>([]);
+  const [vehicleDivisions, setVehicleDivisions] = useState<DbGaVehicleDivision[]>([]);
 
   const [documentForm, setDocumentForm] = useState<DocumentFormState>(emptyDocumentForm);
   const [documentFiles, setDocumentFiles] = useState<File[]>([]);
@@ -305,13 +311,23 @@ export default function DataMobilPage() {
     if (data) setDocSettings(data as DbGaVehicleDocumentSetting);
   }, [showToast]);
 
+  const fetchVehicleVendors = useCallback(async () => {
+    const { data } = await supabase.from("ga_vehicle_vendors").select("*").order("nama");
+    if (data) setVehicleVendors(data);
+  }, []);
+
+  const fetchVehicleDivisions = useCallback(async () => {
+    const { data } = await supabase.from("ga_vehicle_divisions").select("*").order("nama");
+    if (data) setVehicleDivisions(data);
+  }, []);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([fetchVehicles(), fetchVehicleDocuments(), fetchDocumentSettings()]);
+      await Promise.all([fetchVehicles(), fetchVehicleDocuments(), fetchDocumentSettings(), fetchVehicleVendors(), fetchVehicleDivisions()]);
       setLoading(false);
     })();
-  }, [fetchVehicles, fetchVehicleDocuments, fetchDocumentSettings]);
+  }, [fetchVehicles, fetchVehicleDocuments, fetchDocumentSettings, fetchVehicleVendors, fetchVehicleDivisions]);
 
   const getCurrentDocument = (vehicleId: number, type: DocumentType) =>
     documents.find((d) => d.vehicle_id === vehicleId && d.document_type === type && d.is_current) || null;
@@ -372,6 +388,8 @@ export default function DataMobilPage() {
       jenis: v.jenis,
       divisi: v.divisi || "",
       vendor: v.vendor || "",
+      vendor_id: v.vendor_id,
+      vehicle_division_id: v.vehicle_division_id,
       lokasi_administrasi: v.lokasi_administrasi || "",
       no_rangka: v.no_rangka || "",
       nomer_mesin: v.nomer_mesin || "",
@@ -406,6 +424,8 @@ export default function DataMobilPage() {
       jenis: form.jenis.trim(),
       divisi: form.divisi.trim() || null,
       vendor: form.vendor.trim() || null,
+      vendor_id: form.vendor_id,
+      vehicle_division_id: form.vehicle_division_id,
       lokasi_administrasi: form.lokasi_administrasi.trim() || null,
       no_rangka: form.no_rangka.trim() || null,
       nomer_mesin: form.nomer_mesin.trim() || null,
@@ -863,11 +883,31 @@ export default function DataMobilPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">DEVISI</label>
-                      <input type="text" placeholder="Divisi/lokasi" value={form.divisi} onChange={(e) => setForm({ ...form, divisi: e.target.value })} className={inputClass} />
+                      <Select
+                        value={String(form.vehicle_division_id || "")}
+                        onChange={(val) => {
+                          const found = vehicleDivisions.find((d) => String(d.id) === val);
+                          setForm({ ...form, vehicle_division_id: found ? found.id : null, divisi: found ? found.nama : val });
+                        }}
+                        options={[
+                          { value: "", label: "Pilih divisi..." },
+                          ...vehicleDivisions.filter((d) => d.status === "Aktif").map((d) => ({ value: String(d.id), label: d.nama })),
+                        ]}
+                      />
                     </div>
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">VENDOR</label>
-                      <input type="text" placeholder="Nama vendor / perusahaan penyedia" value={form.vendor} onChange={(e) => setForm({ ...form, vendor: e.target.value })} className={inputClass} />
+                      <Select
+                        value={String(form.vendor_id || "")}
+                        onChange={(val) => {
+                          const found = vehicleVendors.find((v) => String(v.id) === val);
+                          setForm({ ...form, vendor_id: found ? found.id : null, vendor: found ? found.nama : val });
+                        }}
+                        options={[
+                          { value: "", label: "Pilih vendor..." },
+                          ...vehicleVendors.filter((v) => v.status === "Aktif").map((v) => ({ value: String(v.id), label: v.nama })),
+                        ]}
+                      />
                     </div>
                   </div>
                   <div>

@@ -39,7 +39,7 @@ import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { logAudit } from "@/lib/audit";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting, type DbGaVehicleDocumentSetting } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting, type DbGaVehicleDocumentSetting, type DbGaVehicleVendor, type DbGaVehicleDivision } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -52,6 +52,8 @@ type DeliveryZone = DbDeliveryZone;
 type PointRate = DbPointRate & { zoneNama?: string };
 type DeliveryStatus = DbDeliveryStatus;
 type PenaltyRate = DbAttendancePenaltyRate & { divisionNama?: string };
+type VehicleVendor = DbGaVehicleVendor;
+type VehicleDivision = DbGaVehicleDivision;
 
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const selectClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 appearance-none text-foreground";
@@ -85,6 +87,8 @@ const tabs = [
   { key: "bank", label: "Bank", icon: Landmark },
   { key: "kendaraan", label: "Dokumen Kendaraan", icon: Truck },
   { key: "legal", label: "Legal", icon: Scale },
+  { key: "vendor-kendaraan", label: "Vendor Kendaraan", icon: Truck },
+  { key: "divisi-kendaraan", label: "Divisi Kendaraan", icon: Building2 },
 ] as const;
 
 type TabKey = (typeof tabs)[number]["key"];
@@ -118,6 +122,20 @@ export default function MasterDataPage() {
   const [showBankForm, setShowBankForm] = useState(false);
   const [editingBankId, setEditingBankId] = useState<number | null>(null);
   const [bankForm, setBankForm] = useState({ nama: "", kode: "", status: "Aktif" });
+
+  // ─── Vendor Kendaraan State ───
+  const [vendorKendaraanList, setVendorKendaraanList] = useState<VehicleVendor[]>([]);
+  const [vendorKendaraanSearch, setVendorKendaraanSearch] = useState("");
+  const [showVendorKendaraanForm, setShowVendorKendaraanForm] = useState(false);
+  const [editingVendorKendaraanId, setEditingVendorKendaraanId] = useState<number | null>(null);
+  const [vendorKendaraanForm, setVendorKendaraanForm] = useState({ nama: "", deskripsi: "", status: "Aktif" });
+
+  // ─── Divisi Kendaraan State ───
+  const [divisiKendaraanList, setDivisiKendaraanList] = useState<VehicleDivision[]>([]);
+  const [divisiKendaraanSearch, setDivisiKendaraanSearch] = useState("");
+  const [showDivisiKendaraanForm, setShowDivisiKendaraanForm] = useState(false);
+  const [editingDivisiKendaraanId, setEditingDivisiKendaraanId] = useState<number | null>(null);
+  const [divisiKendaraanForm, setDivisiKendaraanForm] = useState({ nama: "", deskripsi: "", status: "Aktif" });
 
   // ─── Divisi State ───
   const [divisionList, setDivisionList] = useState<Division[]>([]);
@@ -209,7 +227,7 @@ export default function MasterDataPage() {
   });
 
   // ─── Delete Confirm Dialog ───
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "nama-titik" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "nama-titik" | "harga-titik" | "status-titik" | "bank" | "vendor-kendaraan" | "divisi-kendaraan"; id: number; nama: string } | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string }>({ show: false, title: "", message: "" });
   const [loading, setLoading] = useState(true);
@@ -231,6 +249,16 @@ export default function MasterDataPage() {
   const fetchBanks = async () => {
     const { data } = await supabase.from("banks").select("*").order("nama");
     if (data) setBankList(data);
+  };
+
+  const fetchVendorKendaraan = async () => {
+    const { data } = await supabase.from("ga_vehicle_vendors").select("*").order("nama");
+    if (data) setVendorKendaraanList(data);
+  };
+
+  const fetchDivisiKendaraan = async () => {
+    const { data } = await supabase.from("ga_vehicle_divisions").select("*").order("nama");
+    if (data) setDivisiKendaraanList(data);
   };
 
   const fetchDivisions = async () => {
@@ -287,12 +315,12 @@ export default function MasterDataPage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings(), fetchVehicleDocSettings()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchVendorKendaraan(), fetchDivisiKendaraan(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings(), fetchVehicleDocSettings()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm || showVehicleDocSettingForm || syncRow !== null) {
+    if (showLevelForm || showJabatanForm || showBankForm || showVendorKendaraanForm || showDivisiKendaraanForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm || showVehicleDocSettingForm || syncRow !== null) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -300,7 +328,7 @@ export default function MasterDataPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, showPenaltyForm, showLegalSettingForm, showCompanyForm, showLeaveSettingForm, showVehicleDocSettingForm, syncRow]);
+  }, [showLevelForm, showJabatanForm, showBankForm, showVendorKendaraanForm, showDivisiKendaraanForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, showPenaltyForm, showLegalSettingForm, showCompanyForm, showLeaveSettingForm, showVehicleDocSettingForm, syncRow]);
 
   const showSuccess = (title: string, message?: string) => {
     setToast({ show: true, title, message: message || "" });
@@ -951,6 +979,86 @@ export default function MasterDataPage() {
     fetchBanks();
   };
 
+  // ─── Vendor Kendaraan Handlers ───
+  const filteredVendorKendaraan = vendorKendaraanList.filter((v) =>
+    v.nama.toLowerCase().includes(vendorKendaraanSearch.toLowerCase()) || (v.deskripsi || "").toLowerCase().includes(vendorKendaraanSearch.toLowerCase())
+  );
+  const handleOpenAddVendorKendaraan = () => {
+    setVendorKendaraanForm({ nama: "", deskripsi: "", status: "Aktif" });
+    setEditingVendorKendaraanId(null);
+    setShowVendorKendaraanForm(true);
+  };
+  const handleOpenEditVendorKendaraan = (v: VehicleVendor) => {
+    setVendorKendaraanForm({ nama: v.nama, deskripsi: v.deskripsi || "", status: v.status });
+    setEditingVendorKendaraanId(v.id);
+    setShowVendorKendaraanForm(true);
+  };
+  const handleSaveVendorKendaraan = async () => {
+    if (!vendorKendaraanForm.nama.trim()) return;
+    const cleanNama = toUpperTrim(vendorKendaraanForm.nama.trim());
+    if (editingVendorKendaraanId !== null) {
+      await supabase.from("ga_vehicle_vendors").update({ nama: cleanNama, deskripsi: vendorKendaraanForm.deskripsi.trim() || null, status: vendorKendaraanForm.status }).eq("id", editingVendorKendaraanId);
+      showSuccess("Vendor Diperbarui", `Data vendor "${cleanNama}" telah disimpan.`);
+    } else {
+      await supabase.from("ga_vehicle_vendors").insert({ nama: cleanNama, deskripsi: vendorKendaraanForm.deskripsi.trim() || null, status: vendorKendaraanForm.status });
+      showSuccess("Vendor Ditambahkan", `Vendor "${cleanNama}" berhasil ditambahkan.`);
+    }
+    setShowVendorKendaraanForm(false);
+    fetchVendorKendaraan();
+  };
+  const handleDeleteVendorKendaraan = async (id: number) => {
+    await supabase.from("ga_vehicle_vendors").delete().eq("id", id);
+    setDeleteConfirm(null);
+    showSuccess("Vendor Dihapus", "Data vendor telah dihapus.");
+    fetchVendorKendaraan();
+  };
+  const handleToggleVendorKendaraanStatus = async (id: number) => {
+    const v = vendorKendaraanList.find((x) => x.id === id);
+    if (!v) return;
+    await supabase.from("ga_vehicle_vendors").update({ status: v.status === "Aktif" ? "Tidak Aktif" : "Aktif" }).eq("id", id);
+    fetchVendorKendaraan();
+  };
+
+  // ─── Divisi Kendaraan Handlers ───
+  const filteredDivisiKendaraan = divisiKendaraanList.filter((d) =>
+    d.nama.toLowerCase().includes(divisiKendaraanSearch.toLowerCase()) || (d.deskripsi || "").toLowerCase().includes(divisiKendaraanSearch.toLowerCase())
+  );
+  const handleOpenAddDivisiKendaraan = () => {
+    setDivisiKendaraanForm({ nama: "", deskripsi: "", status: "Aktif" });
+    setEditingDivisiKendaraanId(null);
+    setShowDivisiKendaraanForm(true);
+  };
+  const handleOpenEditDivisiKendaraan = (d: VehicleDivision) => {
+    setDivisiKendaraanForm({ nama: d.nama, deskripsi: d.deskripsi || "", status: d.status });
+    setEditingDivisiKendaraanId(d.id);
+    setShowDivisiKendaraanForm(true);
+  };
+  const handleSaveDivisiKendaraan = async () => {
+    if (!divisiKendaraanForm.nama.trim()) return;
+    const cleanNama = toUpperTrim(divisiKendaraanForm.nama.trim());
+    if (editingDivisiKendaraanId !== null) {
+      await supabase.from("ga_vehicle_divisions").update({ nama: cleanNama, deskripsi: divisiKendaraanForm.deskripsi.trim() || null, status: divisiKendaraanForm.status }).eq("id", editingDivisiKendaraanId);
+      showSuccess("Divisi Diperbarui", `Data divisi "${cleanNama}" telah disimpan.`);
+    } else {
+      await supabase.from("ga_vehicle_divisions").insert({ nama: cleanNama, deskripsi: divisiKendaraanForm.deskripsi.trim() || null, status: divisiKendaraanForm.status });
+      showSuccess("Divisi Ditambahkan", `Divisi "${cleanNama}" berhasil ditambahkan.`);
+    }
+    setShowDivisiKendaraanForm(false);
+    fetchDivisiKendaraan();
+  };
+  const handleDeleteDivisiKendaraan = async (id: number) => {
+    await supabase.from("ga_vehicle_divisions").delete().eq("id", id);
+    setDeleteConfirm(null);
+    showSuccess("Divisi Dihapus", "Data divisi telah dihapus.");
+    fetchDivisiKendaraan();
+  };
+  const handleToggleDivisiKendaraanStatus = async (id: number) => {
+    const d = divisiKendaraanList.find((x) => x.id === id);
+    if (!d) return;
+    await supabase.from("ga_vehicle_divisions").update({ status: d.status === "Aktif" ? "Tidak Aktif" : "Aktif" }).eq("id", id);
+    fetchDivisiKendaraan();
+  };
+
   // ─── Masa Berlaku Legal Handlers ───
   const fetchLegalSettings = async () => {
     const { data } = await supabase.from("legal_settings").select("*").order("id");
@@ -1116,7 +1224,7 @@ export default function MasterDataPage() {
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.key;
                 const Icon = tab.icon;
-                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "kendaraan" ? 1 : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
+                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "kendaraan" ? 1 : tab.key === "legal" ? (legalSettings.length + companySettings.length) : tab.key === "vendor-kendaraan" ? vendorKendaraanList.length : tab.key === "divisi-kendaraan" ? divisiKendaraanList.length : bankList.length;
                 return (
                   <button
                     key={tab.key}
@@ -1756,6 +1864,116 @@ export default function MasterDataPage() {
               </table>
             </div>
             <Pagination currentPage={masterPage} totalItems={filteredBanks.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
+          </>
+        )}
+
+        {/* ═══ TAB: VENDOR KENDARAAN ═══ */}
+        {activeTab === "vendor-kendaraan" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input type="text" placeholder="Cari vendor..." value={vendorKendaraanSearch} onChange={(e) => { setVendorKendaraanSearch(e.target.value); setMasterPage(1); }}
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+              </div>
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddVendorKendaraan}>Tambah Vendor</Button>}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Vendor</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Deskripsi</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <SkeletonTable rows={5} cols={5} />
+                  ) : filteredVendorKendaraan.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada vendor ditemukan</td></tr>
+                  ) : filteredVendorKendaraan.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((v, idx) => (
+                    <tr key={v.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{v.nama}</p></td>
+                      <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{v.deskripsi || <span className="italic">-</span>}</td>
+                      <td className="px-5 py-3.5">
+                        <button onClick={() => handleToggleVendorKendaraanStatus(v.id)}
+                          className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
+                            v.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                          <div className={cn("w-1.5 h-1.5 rounded-full", v.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
+                          {v.status}
+                        </button>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-center gap-1">
+                          {canEdit && <button onClick={() => handleOpenEditVendorKendaraan(v)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "vendor-kendaraan", id: v.id, nama: v.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredVendorKendaraan.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
+          </>
+        )}
+
+        {/* ═══ TAB: DIVISI KENDARAAN ═══ */}
+        {activeTab === "divisi-kendaraan" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
+                <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                <input type="text" placeholder="Cari divisi kendaraan..." value={divisiKendaraanSearch} onChange={(e) => { setDivisiKendaraanSearch(e.target.value); setMasterPage(1); }}
+                  className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+              </div>
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddDivisiKendaraan}>Tambah Divisi</Button>}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/30 border-b border-border">
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Divisi</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Deskripsi</th>
+                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
+                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {loading ? (
+                    <SkeletonTable rows={5} cols={5} />
+                  ) : filteredDivisiKendaraan.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada divisi ditemukan</td></tr>
+                  ) : filteredDivisiKendaraan.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((d, idx) => (
+                    <tr key={d.id} className="hover:bg-muted/30">
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{d.nama}</p></td>
+                      <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{d.deskripsi || <span className="italic">-</span>}</td>
+                      <td className="px-5 py-3.5">
+                        <button onClick={() => handleToggleDivisiKendaraanStatus(d.id)}
+                          className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
+                            d.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                          <div className={cn("w-1.5 h-1.5 rounded-full", d.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
+                          {d.status}
+                        </button>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-center gap-1">
+                          {canEdit && <button onClick={() => handleOpenEditDivisiKendaraan(d)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "divisi-kendaraan", id: d.id, nama: d.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination currentPage={masterPage} totalItems={filteredDivisiKendaraan.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
           </>
         )}
 
@@ -2852,6 +3070,94 @@ export default function MasterDataPage() {
         </Portal>
       )}
 
+      {/* ═══ VENDOR KENDARAAN FORM MODAL ═══ */}
+      {showVendorKendaraanForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowVendorKendaraanForm(false)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                  {editingVendorKendaraanId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
+                </div>
+                <h2 className="text-sm font-bold text-foreground">{editingVendorKendaraanId ? "Edit Vendor" : "Tambah Vendor Baru"}</h2>
+              </div>
+              <button onClick={() => setShowVendorKendaraanForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Vendor <span className="text-danger">*</span></label>
+                <input type="text" placeholder="Contoh: CV. Maju Jaya" value={vendorKendaraanForm.nama} onChange={(e) => setVendorKendaraanForm({ ...vendorKendaraanForm, nama: e.target.value })} className={inputClass} autoFocus />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Deskripsi</label>
+                <input type="text" placeholder="Deskripsi singkat vendor" value={vendorKendaraanForm.deskripsi} onChange={(e) => setVendorKendaraanForm({ ...vendorKendaraanForm, deskripsi: e.target.value })} className={inputClass} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
+                <Select
+                  value={vendorKendaraanForm.status}
+                  onChange={(val) => setVendorKendaraanForm({ ...vendorKendaraanForm, status: val })}
+                  options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <Button variant="outline" size="sm" onClick={() => setShowVendorKendaraanForm(false)}>Batal</Button>
+              <Button size="sm" icon={editingVendorKendaraanId ? Check : Plus} onClick={handleSaveVendorKendaraan} disabled={!vendorKendaraanForm.nama.trim()}>
+                {editingVendorKendaraanId ? "Simpan" : "Tambah Vendor"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {/* ═══ DIVISI KENDARAAN FORM MODAL ═══ */}
+      {showDivisiKendaraanForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowDivisiKendaraanForm(false)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                  {editingDivisiKendaraanId ? <Pencil className="w-4 h-4 text-primary" /> : <Plus className="w-4 h-4 text-primary" />}
+                </div>
+                <h2 className="text-sm font-bold text-foreground">{editingDivisiKendaraanId ? "Edit Divisi" : "Tambah Divisi Baru"}</h2>
+              </div>
+              <button onClick={() => setShowDivisiKendaraanForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Divisi <span className="text-danger">*</span></label>
+                <input type="text" placeholder="Contoh: Distribusi" value={divisiKendaraanForm.nama} onChange={(e) => setDivisiKendaraanForm({ ...divisiKendaraanForm, nama: e.target.value })} className={inputClass} autoFocus />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Deskripsi</label>
+                <input type="text" placeholder="Deskripsi singkat divisi" value={divisiKendaraanForm.deskripsi} onChange={(e) => setDivisiKendaraanForm({ ...divisiKendaraanForm, deskripsi: e.target.value })} className={inputClass} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
+                <Select
+                  value={divisiKendaraanForm.status}
+                  onChange={(val) => setDivisiKendaraanForm({ ...divisiKendaraanForm, status: val })}
+                  options={[{ value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              <Button variant="outline" size="sm" onClick={() => setShowDivisiKendaraanForm(false)}>Batal</Button>
+              <Button size="sm" icon={editingDivisiKendaraanId ? Check : Plus} onClick={handleSaveDivisiKendaraan} disabled={!divisiKendaraanForm.nama.trim()}>
+                {editingDivisiKendaraanId ? "Simpan" : "Tambah Divisi"}
+              </Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
       {/* ═══ DENDA TELAT FORM MODAL ═══ */}
       {showPenaltyForm && (
         <Portal>
@@ -2988,7 +3294,7 @@ export default function MasterDataPage() {
               <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
                 <Trash2 className="w-7 h-7 text-danger" />
               </div>
-              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "denda-telat": "Denda Telat", "nama-titik": "Nama Titik", "harga-titik": "Harga Titik", "status-titik": "Status Titik", bank: "Bank" }[deleteConfirm.type]}?</h3>
+              <h3 className="text-base font-bold text-foreground">Hapus {{ level: "Level", jabatan: "Jabatan", divisi: "Divisi", "titik-absen": "Titik Absen", "waktu-kerja": "Waktu Kerja", "denda-telat": "Denda Telat", "nama-titik": "Nama Titik", "harga-titik": "Harga Titik", "status-titik": "Status Titik", bank: "Bank", "vendor-kendaraan": "Vendor Kendaraan", "divisi-kendaraan": "Divisi Kendaraan" }[deleteConfirm.type]}?</h3>
               <p className="text-sm text-muted-foreground mt-2">
                 <span className="font-semibold text-foreground">&ldquo;{deleteConfirm.nama}&rdquo;</span> akan dihapus permanen dan tidak dapat dikembalikan.
               </p>
@@ -3005,6 +3311,8 @@ export default function MasterDataPage() {
                 else if (deleteConfirm.type === "nama-titik") handleDeleteZone(deleteConfirm.id);
                 else if (deleteConfirm.type === "harga-titik") handleDeleteRate(deleteConfirm.id);
                 else if (deleteConfirm.type === "status-titik") handleDeleteDStatus(deleteConfirm.id);
+                else if (deleteConfirm.type === "vendor-kendaraan") handleDeleteVendorKendaraan(deleteConfirm.id);
+                else if (deleteConfirm.type === "divisi-kendaraan") handleDeleteDivisiKendaraan(deleteConfirm.id);
                 else handleDeleteBank(deleteConfirm.id);
               }}>Hapus</Button>
             </div>
