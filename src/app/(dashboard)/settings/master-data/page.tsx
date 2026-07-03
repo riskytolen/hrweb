@@ -85,10 +85,8 @@ const tabs = [
   { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
   { key: "status-titik", label: "Status Titik", icon: Tag },
   { key: "bank", label: "Bank", icon: Landmark },
-  { key: "kendaraan", label: "Dokumen Kendaraan", icon: Truck },
+  { key: "kendaraan", label: "Kendaraan", icon: Truck },
   { key: "legal", label: "Legal", icon: Scale },
-  { key: "vendor-kendaraan", label: "Vendor Kendaraan", icon: Truck },
-  { key: "divisi-kendaraan", label: "Divisi Kendaraan", icon: Building2 },
 ] as const;
 
 type TabKey = (typeof tabs)[number]["key"];
@@ -1224,7 +1222,7 @@ export default function MasterDataPage() {
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.key;
                 const Icon = tab.icon;
-                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "kendaraan" ? 1 : tab.key === "legal" ? (legalSettings.length + companySettings.length) : tab.key === "vendor-kendaraan" ? vendorKendaraanList.length : tab.key === "divisi-kendaraan" ? divisiKendaraanList.length : bankList.length;
+                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "kendaraan" ? (vendorKendaraanList.length + divisiKendaraanList.length + 1) : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
                 return (
                   <button
                     key={tab.key}
@@ -1867,123 +1865,128 @@ export default function MasterDataPage() {
           </>
         )}
 
-        {/* ═══ TAB: VENDOR KENDARAAN ═══ */}
-        {activeTab === "vendor-kendaraan" && (
+        {/* ═══ TAB: KENDARAAN ═══ */}
+        {activeTab === "kendaraan" && (
           <>
+            {/* ─── Section: Vendor Kendaraan ─── */}
             <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
+              <div>
+                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Vendor Kendaraan</h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Daftar vendor / perusahaan penyedia kendaraan.</p>
+              </div>
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddVendorKendaraan}>Tambah Vendor</Button>}
+            </div>
+            <div className="px-5 py-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56 mb-3">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
                 <input type="text" placeholder="Cari vendor..." value={vendorKendaraanSearch} onChange={(e) => { setVendorKendaraanSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddVendorKendaraan}>Tambah Vendor</Button>}
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-muted/30 border-b border-border">
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Vendor</th>
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Deskripsi</th>
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
-                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {loading ? (
-                    <SkeletonTable rows={5} cols={5} />
-                  ) : filteredVendorKendaraan.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada vendor ditemukan</td></tr>
-                  ) : filteredVendorKendaraan.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((v, idx) => (
-                    <tr key={v.id} className="hover:bg-muted/30">
-                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
-                      <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{v.nama}</p></td>
-                      <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{v.deskripsi || <span className="italic">-</span>}</td>
-                      <td className="px-5 py-3.5">
-                        <button onClick={() => handleToggleVendorKendaraanStatus(v.id)}
-                          className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
-                            v.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
-                          <div className={cn("w-1.5 h-1.5 rounded-full", v.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
-                          {v.status}
-                        </button>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center justify-center gap-1">
-                          {canEdit && <button onClick={() => handleOpenEditVendorKendaraan(v)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
-                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "vendor-kendaraan", id: v.id, nama: v.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
-                        </div>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-muted/30 border-b border-border">
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Vendor</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Deskripsi</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
+                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {loading ? (
+                      <SkeletonTable rows={5} cols={5} />
+                    ) : filteredVendorKendaraan.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada vendor ditemukan</td></tr>
+                    ) : filteredVendorKendaraan.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((v, idx) => (
+                      <tr key={v.id} className="hover:bg-muted/30">
+                        <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                        <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{v.nama}</p></td>
+                        <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{v.deskripsi || <span className="italic">-</span>}</td>
+                        <td className="px-5 py-3.5">
+                          <button onClick={() => handleToggleVendorKendaraanStatus(v.id)}
+                            className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
+                              v.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                            <div className={cn("w-1.5 h-1.5 rounded-full", v.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
+                            {v.status}
+                          </button>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center justify-center gap-1">
+                            {canEdit && <button onClick={() => handleOpenEditVendorKendaraan(v)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                            {canEdit && <button onClick={() => setDeleteConfirm({ type: "vendor-kendaraan", id: v.id, nama: v.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination currentPage={masterPage} totalItems={filteredVendorKendaraan.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
             </div>
-            <Pagination currentPage={masterPage} totalItems={filteredVendorKendaraan.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
-          </>
-        )}
 
-        {/* ═══ TAB: DIVISI KENDARAAN ═══ */}
-        {activeTab === "divisi-kendaraan" && (
-          <>
-            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56">
+            {/* ─── Section: Divisi Kendaraan ─── */}
+            <div className="px-5 py-3 border-b border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Divisi Kendaraan</h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Daftar divisi operasional untuk kendaraan.</p>
+              </div>
+              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddDivisiKendaraan}>Tambah Divisi</Button>}
+            </div>
+            <div className="px-5 py-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 w-full sm:w-56 mb-3">
                 <Search className="w-3.5 h-3.5 text-muted-foreground" />
                 <input type="text" placeholder="Cari divisi kendaraan..." value={divisiKendaraanSearch} onChange={(e) => { setDivisiKendaraanSearch(e.target.value); setMasterPage(1); }}
                   className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
               </div>
-              {canInput && <Button icon={Plus} size="sm" onClick={handleOpenAddDivisiKendaraan}>Tambah Divisi</Button>}
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-muted/30 border-b border-border">
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Divisi</th>
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Deskripsi</th>
-                    <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
-                    <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {loading ? (
-                    <SkeletonTable rows={5} cols={5} />
-                  ) : filteredDivisiKendaraan.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada divisi ditemukan</td></tr>
-                  ) : filteredDivisiKendaraan.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((d, idx) => (
-                    <tr key={d.id} className="hover:bg-muted/30">
-                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
-                      <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{d.nama}</p></td>
-                      <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{d.deskripsi || <span className="italic">-</span>}</td>
-                      <td className="px-5 py-3.5">
-                        <button onClick={() => handleToggleDivisiKendaraanStatus(d.id)}
-                          className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
-                            d.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
-                          <div className={cn("w-1.5 h-1.5 rounded-full", d.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
-                          {d.status}
-                        </button>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center justify-center gap-1">
-                          {canEdit && <button onClick={() => handleOpenEditDivisiKendaraan(d)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
-                          {canEdit && <button onClick={() => setDeleteConfirm({ type: "divisi-kendaraan", id: d.id, nama: d.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
-                        </div>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-muted/30 border-b border-border">
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-12">#</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Nama Divisi</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Deskripsi</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Status</th>
+                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Aksi</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {loading ? (
+                      <SkeletonTable rows={5} cols={5} />
+                    ) : filteredDivisiKendaraan.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-10 text-sm text-muted-foreground">Tidak ada divisi ditemukan</td></tr>
+                    ) : filteredDivisiKendaraan.slice((masterPage - 1) * MASTER_PAGE_SIZE, masterPage * MASTER_PAGE_SIZE).map((d, idx) => (
+                      <tr key={d.id} className="hover:bg-muted/30">
+                        <td className="px-5 py-3.5 text-xs text-muted-foreground">{idx + 1}</td>
+                        <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{d.nama}</p></td>
+                        <td className="px-5 py-3.5 text-sm text-muted-foreground max-w-[250px] truncate">{d.deskripsi || <span className="italic">-</span>}</td>
+                        <td className="px-5 py-3.5">
+                          <button onClick={() => handleToggleDivisiKendaraanStatus(d.id)}
+                            className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg",
+                              d.status === "Aktif" ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+                            <div className={cn("w-1.5 h-1.5 rounded-full", d.status === "Aktif" ? "bg-success" : "bg-muted-foreground")} />
+                            {d.status}
+                          </button>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center justify-center gap-1">
+                            {canEdit && <button onClick={() => handleOpenEditDivisiKendaraan(d)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                            {canEdit && <button onClick={() => setDeleteConfirm({ type: "divisi-kendaraan", id: d.id, nama: d.nama })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination currentPage={masterPage} totalItems={filteredDivisiKendaraan.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
             </div>
-            <Pagination currentPage={masterPage} totalItems={filteredDivisiKendaraan.length} pageSize={MASTER_PAGE_SIZE} onPageChange={setMasterPage} />
-          </>
-        )}
 
-        {/* ═══ TAB: DOKUMEN KENDARAAN ═══ */}
-        {activeTab === "kendaraan" && (
-          <>
-            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            {/* ─── Section: Pengaturan Dokumen ─── */}
+            <div className="px-5 py-3 border-b border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Pengaturan Dokumen Kendaraan</h3>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Reminder KIR, STNK, dan pajak kendaraan untuk modul Data Mobil.</p>
+                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Pengaturan Dokumen</h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Reminder KIR, STNK, dan pajak untuk modul Data Mobil.</p>
               </div>
               {canEdit && <Button variant="outline" size="sm" icon={Pencil} onClick={handleOpenEditVehicleDocSettings}>Edit Pengaturan</Button>}
             </div>
