@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Truck, Plus, Search, Pencil, Trash2, X, Check, Eye,
-  CircleCheckBig, AlertTriangle,
+  CircleCheckBig, AlertTriangle, FileText, Upload, Download,
+  ExternalLink, Image as ImageIcon, Settings2,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -12,12 +13,19 @@ import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
-import { supabase, type DbGaVehicle } from "@/lib/supabase";
+import {
+  supabase,
+  type DbGaVehicle,
+  type DbGaVehicleDocument,
+  type DbGaVehicleDocumentFile,
+  type DbGaVehicleDocumentSetting,
+} from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
 const PAGE_SIZE = 15;
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
 const COLUMNS = [
@@ -39,6 +47,11 @@ const DETAIL_FIELDS = [
   { key: "suhu", label: "SUHU" },
 ] as const;
 
+const DOCUMENT_TYPES = ["KIR", "STNK"] as const;
+type DocumentType = (typeof DOCUMENT_TYPES)[number];
+type StatusTarget = "KIR" | "STNK" | "PAJAK";
+type DocumentStatus = "Aktif" | "Akan Habis" | "Expired" | "Belum Ada" | "Tidak Wajib";
+
 type FormState = {
   unit: string;
   jenis: string;
@@ -49,12 +62,96 @@ type FormState = {
   volume: string;
   tonase: string;
   suhu: string;
+  kir_required: boolean;
+  stnk_required: boolean;
+  pajak_required: boolean;
+};
+
+type DocumentFormState = {
+  document_type: DocumentType;
+  document_number: string;
+  issued_date: string;
+  expired_date: string;
+  pajak_expired_date: string;
+  notes: string;
+};
+
+type StatusInfo = {
+  key: DocumentStatus;
+  label: string;
+  detail: string;
+  date: string | null;
 };
 
 const emptyForm: FormState = {
   unit: "", jenis: "", divisi: "", milik: "",
   no_rangka: "", nomer_mesin: "", volume: "", tonase: "", suhu: "",
+  kir_required: true, stnk_required: true, pajak_required: true,
 };
+
+const emptyDocumentForm: DocumentFormState = {
+  document_type: "KIR",
+  document_number: "",
+  issued_date: "",
+  expired_date: "",
+  pajak_expired_date: "",
+  notes: "",
+};
+
+const statusStyle: Record<DocumentStatus, string> = {
+  Aktif: "bg-success/10 text-success",
+  "Akan Habis": "bg-warning/10 text-warning",
+  Expired: "bg-danger/10 text-danger",
+  "Belum Ada": "bg-muted text-muted-foreground",
+  "Tidak Wajib": "bg-muted/60 text-muted-foreground",
+};
+
+function formatTanggal(date?: string | null): string {
+  if (!date) return "-";
+  return new Date(`${date}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function daysUntil(date: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${date}T00:00:00`);
+  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
+}
+
+function getStatus(expiredDate: string | null | undefined, required: boolean, reminderDays: number): StatusInfo {
+  if (!required) return { key: "Tidak Wajib", label: "Tidak Wajib", detail: "Dokumen tidak diwajibkan", date: expiredDate || null };
+  if (!expiredDate) return { key: "Belum Ada", label: "Belum Ada", detail: "Tanggal belum diisi", date: null };
+  const remaining = daysUntil(expiredDate);
+  if (remaining < 0) return { key: "Expired", label: "Expired", detail: `${Math.abs(remaining)} hari lalu`, date: expiredDate };
+  if (remaining <= reminderDays) return { key: "Akan Habis", label: "Akan Habis", detail: remaining === 0 ? "Hari ini" : `${remaining} hari lagi`, date: expiredDate };
+  return { key: "Aktif", label: "Aktif", detail: `${remaining} hari lagi`, date: expiredDate };
+}
+
+function sanitizeFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function formatFileSize(size?: number | null): string {
+  if (!size) return "-";
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function DocumentStatusBadge({ info, onClick }: { info: StatusInfo; onClick?: () => void }) {
+  const content = (
+    <>
+      <span className={cn("inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full", statusStyle[info.key])}>{info.label}</span>
+      <span className="text-[10px] text-muted-foreground mt-1 block">{info.date ? `${formatTanggal(info.date)} - ${info.detail}` : info.detail}</span>
+    </>
+  );
+
+  if (!onClick) return <div>{content}</div>;
+  return (
+    <button type="button" onClick={onClick} className="text-left hover:opacity-80 transition-opacity">
+      {content}
+    </button>
+  );
+}
 
 export default function DataMobilPage() {
   const { getPermissionLevel } = useAuth();
@@ -62,12 +159,19 @@ export default function DataMobilPage() {
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
 
+  const [activeTab, setActiveTab] = useState<"unit" | "documents">("unit");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [docPage, setDocPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [docSearch, setDocSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Semua");
+  const [docStatusFilter, setDocStatusFilter] = useState<DocumentStatus | "Semua">("Semua");
+  const [docTypeFilter, setDocTypeFilter] = useState<StatusTarget | "Semua">("Semua");
 
   const [vehicles, setVehicles] = useState<DbGaVehicle[]>([]);
+  const [documents, setDocuments] = useState<DbGaVehicleDocument[]>([]);
+  const [docSettings, setDocSettings] = useState<DbGaVehicleDocumentSetting | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -77,7 +181,15 @@ export default function DataMobilPage() {
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; unit: string } | null>(null);
   const [detailVehicle, setDetailVehicle] = useState<DbGaVehicle | null>(null);
+  const [docModalVehicle, setDocModalVehicle] = useState<DbGaVehicle | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [documentForm, setDocumentForm] = useState<DocumentFormState>(emptyDocumentForm);
+  const [documentFiles, setDocumentFiles] = useState<File[]>([]);
+  const [documentSaving, setDocumentSaving] = useState(false);
+  const [documentError, setDocumentError] = useState("");
+  const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<{ url: string; label: string; mimeType?: string | null } | null>(null);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,10 +203,10 @@ export default function DataMobilPage() {
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   useEffect(() => {
-    if (showForm || detailVehicle || deleteConfirm) document.body.style.overflow = "hidden";
+    if (showForm || detailVehicle || deleteConfirm || docModalVehicle || previewMedia) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showForm, detailVehicle, deleteConfirm]);
+  }, [showForm, detailVehicle, deleteConfirm, docModalVehicle, previewMedia]);
 
   const fetchVehicles = useCallback(async () => {
     const { data, error } = await supabase
@@ -105,13 +217,39 @@ export default function DataMobilPage() {
     if (data) setVehicles(data as DbGaVehicle[]);
   }, [showToast]);
 
+  const fetchVehicleDocuments = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("ga_vehicle_documents")
+      .select("*, files:ga_vehicle_document_files(*)")
+      .order("created_at", { ascending: false });
+    if (error) { showToast("error", "Gagal Memuat Dokumen", error.message); return; }
+    if (data) {
+      const rows = data.map((d) => ({
+        ...d,
+        files: (((d as { files?: DbGaVehicleDocumentFile[] }).files || []) as DbGaVehicleDocumentFile[])
+          .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id),
+      })) as DbGaVehicleDocument[];
+      setDocuments(rows);
+    }
+  }, [showToast]);
+
+  const fetchDocumentSettings = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("ga_vehicle_document_settings")
+      .select("*")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) { showToast("error", "Gagal Memuat Setting Dokumen", error.message); return; }
+    if (data) setDocSettings(data as DbGaVehicleDocumentSetting);
+  }, [showToast]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await fetchVehicles();
+      await Promise.all([fetchVehicles(), fetchVehicleDocuments(), fetchDocumentSettings()]);
       setLoading(false);
     })();
-  }, [fetchVehicles]);
+  }, [fetchVehicles, fetchVehicleDocuments, fetchDocumentSettings]);
 
   const filtered = vehicles.filter((v) => {
     const q = search.toLowerCase();
@@ -134,8 +272,51 @@ export default function DataMobilPage() {
   const aktifCount = vehicles.filter((v) => v.status === "Aktif").length;
   const tidakAktifCount = vehicles.filter((v) => v.status === "Tidak Aktif").length;
 
+  const getCurrentDocument = (vehicleId: number, type: DocumentType) =>
+    documents.find((d) => d.vehicle_id === vehicleId && d.document_type === type && d.is_current) || null;
+
+  const getVehicleStatuses = (vehicle: DbGaVehicle) => {
+    const kirDoc = getCurrentDocument(vehicle.id, "KIR");
+    const stnkDoc = getCurrentDocument(vehicle.id, "STNK");
+    return {
+      KIR: getStatus(kirDoc?.expired_date, vehicle.kir_required ?? true, docSettings?.kir_reminder_days ?? 30),
+      STNK: getStatus(stnkDoc?.expired_date, vehicle.stnk_required ?? true, docSettings?.stnk_reminder_days ?? 30),
+      PAJAK: getStatus(stnkDoc?.pajak_expired_date, vehicle.pajak_required ?? true, docSettings?.pajak_reminder_days ?? 30),
+    };
+  };
+
+  const vehicleStatusRows = vehicles.map((vehicle) => ({ vehicle, statuses: getVehicleStatuses(vehicle) }));
+  const kirSoonCount = vehicleStatusRows.filter((r) => r.statuses.KIR.key === "Akan Habis").length;
+  const stnkSoonCount = vehicleStatusRows.filter((r) => r.statuses.STNK.key === "Akan Habis").length;
+  const pajakSoonCount = vehicleStatusRows.filter((r) => r.statuses.PAJAK.key === "Akan Habis").length;
+  const expiredCount = vehicleStatusRows.filter((r) => Object.values(r.statuses).some((s) => s.key === "Expired")).length;
+  const incompleteCount = vehicleStatusRows.filter((r) => Object.values(r.statuses).some((s) => s.key === "Belum Ada")).length;
+
+  const filteredDocVehicles = vehicleStatusRows.filter(({ vehicle, statuses }) => {
+    const q = docSearch.toLowerCase();
+    const matchSearch = !q
+      || vehicle.unit.toLowerCase().includes(q)
+      || vehicle.jenis.toLowerCase().includes(q)
+      || (vehicle.divisi || "").toLowerCase().includes(q)
+      || (vehicle.milik || "").toLowerCase().includes(q);
+    const selectedStatuses = docTypeFilter === "Semua"
+      ? Object.values(statuses)
+      : [statuses[docTypeFilter]];
+    const matchStatus = docStatusFilter === "Semua" || selectedStatuses.some((s) => s.key === docStatusFilter);
+    return matchSearch && matchStatus;
+  });
+
+  const pagedDocVehicles = filteredDocVehicles.slice((docPage - 1) * PAGE_SIZE, docPage * PAGE_SIZE);
+
+  const makeEmptyForm = (): FormState => ({
+    ...emptyForm,
+    kir_required: docSettings?.kir_required_default ?? true,
+    stnk_required: docSettings?.stnk_required_default ?? true,
+    pajak_required: docSettings?.pajak_required_default ?? true,
+  });
+
   const openAdd = () => {
-    setForm(emptyForm);
+    setForm(makeEmptyForm());
     setEditingId(null);
     setFormError("");
     setShowForm(true);
@@ -152,10 +333,21 @@ export default function DataMobilPage() {
       volume: v.volume || "",
       tonase: v.tonase || "",
       suhu: v.suhu || "",
+      kir_required: v.kir_required ?? true,
+      stnk_required: v.stnk_required ?? true,
+      pajak_required: v.pajak_required ?? true,
     });
     setEditingId(v.id);
     setFormError("");
     setShowForm(true);
+  };
+
+  const openDocumentModal = (vehicle: DbGaVehicle, type: DocumentType = "KIR") => {
+    setDocModalVehicle(vehicle);
+    setDetailVehicle(null);
+    setDocumentForm({ ...emptyDocumentForm, document_type: type });
+    setDocumentFiles([]);
+    setDocumentError("");
   };
 
   const handleSave = async () => {
@@ -174,6 +366,9 @@ export default function DataMobilPage() {
       volume: form.volume.trim() || null,
       tonase: form.tonase.trim() || null,
       suhu: form.suhu.trim() || null,
+      kir_required: form.kir_required,
+      stnk_required: form.stnk_required,
+      pajak_required: form.pajak_required,
     };
 
     try {
@@ -181,11 +376,8 @@ export default function DataMobilPage() {
         const { data: oldRow } = await supabase.from("ga_vehicles").select("*").eq("id", editingId).maybeSingle();
         const { error } = await supabase.from("ga_vehicles").update(payload).eq("id", editingId);
         if (error) {
-          if (error.message.includes("unique") || error.message.includes("duplicate")) {
-            setFormError(`Unit "${payload.unit}" sudah digunakan.`);
-          } else {
-            setFormError(error.message);
-          }
+          if (error.message.includes("unique") || error.message.includes("duplicate")) setFormError(`Unit "${payload.unit}" sudah digunakan.`);
+          else setFormError(error.message);
           setFormSaving(false);
           return;
         }
@@ -197,11 +389,8 @@ export default function DataMobilPage() {
       } else {
         const { data: inserted, error } = await supabase.from("ga_vehicles").insert(payload).select("id").single();
         if (error) {
-          if (error.message.includes("unique") || error.message.includes("duplicate")) {
-            setFormError(`Unit "${payload.unit}" sudah digunakan.`);
-          } else {
-            setFormError(error.message);
-          }
+          if (error.message.includes("unique") || error.message.includes("duplicate")) setFormError(`Unit "${payload.unit}" sudah digunakan.`);
+          else setFormError(error.message);
           setFormSaving(false);
           return;
         }
@@ -234,6 +423,195 @@ export default function DataMobilPage() {
     setDeleting(false);
     setDeleteConfirm(null);
     await fetchVehicles();
+    await fetchVehicleDocuments();
+  };
+
+  const handleDocumentFileSelect = (files: FileList | null) => {
+    const selected = Array.from(files || []);
+    if (selected.length === 0) { setDocumentFiles([]); return; }
+    const invalidType = selected.find((file) => file.type !== "application/pdf" && !file.type.startsWith("image/"));
+    if (invalidType) {
+      setDocumentError(`Format file ${invalidType.name} tidak didukung. Gunakan PDF atau file gambar.`);
+      return;
+    }
+    const invalidSize = selected.find((file) => file.size > MAX_FILE_SIZE);
+    if (invalidSize) {
+      setDocumentError(`File ${invalidSize.name} melebihi batas 5 MB.`);
+      return;
+    }
+    setDocumentError("");
+    setDocumentFiles(selected);
+  };
+
+  const handleSaveDocument = async () => {
+    if (!docModalVehicle) return;
+    setDocumentError("");
+    if (!documentForm.expired_date) { setDocumentError("Tanggal masa berlaku wajib diisi."); return; }
+    if (documentForm.document_type === "STNK" && docModalVehicle.pajak_required && !documentForm.pajak_expired_date) {
+      setDocumentError("Tanggal jatuh tempo pajak wajib diisi untuk STNK.");
+      return;
+    }
+    if (documentFiles.length === 0) { setDocumentError("Pilih minimal 1 file dokumen."); return; }
+
+    setDocumentSaving(true);
+    const payload = {
+      vehicle_id: docModalVehicle.id,
+      document_type: documentForm.document_type,
+      document_number: documentForm.document_number.trim() || null,
+      issued_date: documentForm.issued_date || null,
+      expired_date: documentForm.expired_date || null,
+      pajak_expired_date: documentForm.document_type === "STNK" ? (documentForm.pajak_expired_date || null) : null,
+      notes: documentForm.notes.trim() || null,
+      is_current: true,
+    };
+
+    try {
+      const { data: inserted, error } = await supabase
+        .from("ga_vehicle_documents")
+        .insert(payload)
+        .select("id")
+        .single();
+      if (error || !inserted?.id) {
+        setDocumentError(error?.message || "Gagal menyimpan dokumen.");
+        setDocumentSaving(false);
+        return;
+      }
+
+      const fileRows = [];
+      const timestamp = Date.now();
+      for (let i = 0; i < documentFiles.length; i++) {
+        const file = documentFiles[i];
+        const path = `${docModalVehicle.id}/${documentForm.document_type.toLowerCase()}/${inserted.id}/${timestamp}-${i + 1}-${sanitizeFileName(file.name)}`;
+        const { error: uploadError } = await supabase.storage.from("ga-vehicle-docs").upload(path, file, { upsert: false });
+        if (uploadError) {
+          setDocumentError(uploadError.message);
+          setDocumentSaving(false);
+          return;
+        }
+        const { data: urlData } = supabase.storage.from("ga-vehicle-docs").getPublicUrl(path);
+        fileRows.push({
+          document_id: inserted.id,
+          file_url: `${urlData.publicUrl}?t=${timestamp}`,
+          file_path: path,
+          file_name: file.name,
+          mime_type: file.type || null,
+          file_size_bytes: file.size,
+          sort_order: i,
+        });
+      }
+
+      const { error: fileError } = await supabase.from("ga_vehicle_document_files").insert(fileRows);
+      if (fileError) {
+        setDocumentError(fileError.message);
+        setDocumentSaving(false);
+        return;
+      }
+
+      await logAudit({
+        supabase,
+        action: "create",
+        entityType: "ga_vehicle_documents",
+        entityId: String(inserted.id),
+        entityLabel: `${documentForm.document_type} ${docModalVehicle.unit}`,
+        newData: { ...payload, files: fileRows } as Record<string, unknown>,
+      });
+
+      showToast("success", "Dokumen Disimpan", `${documentForm.document_type} unit ${docModalVehicle.unit} berhasil disimpan.`);
+      setDocumentForm({ ...emptyDocumentForm, document_type: documentForm.document_type });
+      setDocumentFiles([]);
+      await fetchVehicleDocuments();
+    } catch (err) {
+      setDocumentError(err instanceof Error ? err.message : "Terjadi kesalahan.");
+    } finally {
+      setDocumentSaving(false);
+    }
+  };
+
+  const handleDeleteFile = async (file: DbGaVehicleDocumentFile) => {
+    if (!canEdit) return;
+    setDeletingFileId(file.id);
+    await supabase.storage.from("ga-vehicle-docs").remove([file.file_path]);
+    const { error } = await supabase.from("ga_vehicle_document_files").delete().eq("id", file.id);
+    if (error) showToast("error", "Gagal Menghapus File", error.message);
+    else {
+      await logAudit({
+        supabase,
+        action: "delete",
+        entityType: "ga_vehicle_documents",
+        entityId: String(file.document_id),
+        entityLabel: file.file_name,
+        oldData: file as unknown as Record<string, unknown>,
+      });
+      showToast("success", "File Dihapus", file.file_name);
+      await fetchVehicleDocuments();
+    }
+    setDeletingFileId(null);
+  };
+
+  const handleDownloadFile = async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const ext = url.split(".").pop()?.split("?")[0] || "file";
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `${filename}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
+
+  const renderDocumentFiles = (doc: DbGaVehicleDocument) => (
+    <div className="space-y-2 mt-3">
+      {(doc.files || []).length === 0 ? (
+        <p className="text-xs text-muted-foreground italic">Belum ada file.</p>
+      ) : (doc.files || []).map((file) => (
+        <div key={file.id} className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-3 py-2">
+          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+            {file.mime_type === "application/pdf" ? <FileText className="w-4 h-4 text-primary" /> : <ImageIcon className="w-4 h-4 text-primary" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-foreground truncate">{file.file_name}</p>
+            <p className="text-[10px] text-muted-foreground">{formatFileSize(file.file_size_bytes)}</p>
+          </div>
+          <button onClick={() => setPreviewMedia({ url: file.file_url, label: file.file_name, mimeType: file.mime_type })} title="Lihat" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Eye className="w-3.5 h-3.5" /></button>
+          <button onClick={() => handleDownloadFile(file.file_url, file.file_name)} title="Download" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Download className="w-3.5 h-3.5" /></button>
+          {canEdit && <button onClick={() => handleDeleteFile(file)} disabled={deletingFileId === file.id} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderDocumentPanel = (vehicle: DbGaVehicle, type: DocumentType) => {
+    const doc = getCurrentDocument(vehicle.id, type);
+    const status = type === "KIR" ? getVehicleStatuses(vehicle).KIR : getVehicleStatuses(vehicle).STNK;
+    return (
+      <div className="rounded-2xl border border-border p-4 bg-muted/20">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-foreground">{type}</p>
+            <DocumentStatusBadge info={status} />
+          </div>
+          {canInput && <Button variant="outline" size="sm" icon={Upload} onClick={() => setDocumentForm({ ...emptyDocumentForm, document_type: type })}>Upload</Button>}
+        </div>
+        {doc ? (
+          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+            <p>No: <span className="text-foreground font-medium">{doc.document_number || "-"}</span></p>
+            <p>Terbit: <span className="text-foreground font-medium">{formatTanggal(doc.issued_date)}</span></p>
+            {type === "STNK" && <p>Pajak: <span className="text-foreground font-medium">{formatTanggal(doc.pajak_expired_date)}</span></p>}
+            {doc.notes && <p>Catatan: <span className="text-foreground font-medium">{doc.notes}</span></p>}
+            {renderDocumentFiles(doc)}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground mt-3">Belum ada dokumen aktif.</p>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -241,13 +619,9 @@ export default function DataMobilPage() {
       <div className="space-y-4 animate-fade-in">
         <PageHeader
           title="Data Mobil"
-          description="Kelola data kendaraan/mobil operasional General Affair"
+          description="Kelola data kendaraan, dokumen KIR/STNK, dan reminder pajak"
           icon={Truck}
-          actions={
-            canInput && (
-              <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Mobil</Button>
-            )
-          }
+          actions={activeTab === "unit" && canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Mobil</Button> : undefined}
         />
 
         {toast.show && (
@@ -267,94 +641,174 @@ export default function DataMobilPage() {
           </Portal>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-card rounded-2xl border border-border p-4">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Kendaraan</p>
-            <p className="text-xl font-bold text-foreground mt-1">{vehicles.length}</p>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-4">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Aktif</p>
-            <p className="text-xl font-bold text-success mt-1">{aktifCount}</p>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-4">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Tidak Aktif</p>
-            <p className="text-xl font-bold text-danger mt-1">{tidakAktifCount}</p>
-          </div>
+        <div className="bg-card rounded-2xl border border-border p-1.5 flex items-center gap-1 w-fit">
+          <button onClick={() => setActiveTab("unit")} className={cn("px-4 py-2 rounded-xl text-xs font-bold transition-all", activeTab === "unit" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:bg-muted")}>Data Unit</button>
+          <button onClick={() => setActiveTab("documents")} className={cn("px-4 py-2 rounded-xl text-xs font-bold transition-all", activeTab === "documents" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:bg-muted")}>Dokumen Kendaraan</button>
         </div>
 
-        <div className="bg-card rounded-2xl border border-border p-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[200px]">
-              <Search className="w-3.5 h-3.5 text-muted-foreground" />
-              <input type="text" placeholder="Cari unit, jenis, devisi, milik..." value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+        {activeTab === "unit" && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Kendaraan</p>
+                <p className="text-xl font-bold text-foreground mt-1">{vehicles.length}</p>
+              </div>
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Aktif</p>
+                <p className="text-xl font-bold text-success mt-1">{aktifCount}</p>
+              </div>
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Tidak Aktif</p>
+                <p className="text-xl font-bold text-danger mt-1">{tidakAktifCount}</p>
+              </div>
             </div>
-            <Select
-              value={filterStatus}
-              onChange={(v) => { setFilterStatus(v); setPage(1); }}
-              options={[
-                { value: "Semua", label: "Semua Status" },
-                { value: "Aktif", label: "Aktif" },
-                { value: "Tidak Aktif", label: "Tidak Aktif" },
-              ]}
-              className="w-40"
-            />
-          </div>
-        </div>
 
-        <div className="bg-card rounded-2xl border border-border overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
-                  {COLUMNS.map((col) => (
-                    <th key={col.key} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">{col.label}</th>
-                  ))}
-                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Status</th>
-                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-32">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50">
-                {loading ? <SkeletonTable rows={8} cols={7} /> : paged.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-12 text-sm text-muted-foreground">
-                    {vehicles.length === 0 ? "Belum ada data mobil. Klik tombol Tambah Mobil untuk mulai." : "Tidak ada data yang cocok dengan filter."}
-                  </td></tr>
-                ) : paged.map((row, idx) => (
-                  <tr key={row.id} className="hover:bg-muted/30">
-                    <td className="px-5 py-3 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                    {COLUMNS.map((col) => {
-                      const value = row[col.key] || "-";
-                      return (
-                        <td key={col.key} className="px-5 py-3 text-xs text-foreground max-w-[180px] truncate">
-                          {col.key === "unit" ? (
-                            <span className="font-semibold">{value}</span>
-                          ) : (
-                            <span className="text-muted-foreground">{value}</span>
-                          )}
+            <div className="bg-card rounded-2xl border border-border p-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[200px]">
+                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                  <input type="text" placeholder="Cari unit, jenis, devisi, milik..." value={search}
+                    onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+                </div>
+                <Select
+                  value={filterStatus}
+                  onChange={(v) => { setFilterStatus(v); setPage(1); }}
+                  options={[{ value: "Semua", label: "Semua Status" }, { value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
+                  className="w-40"
+                />
+              </div>
+            </div>
+
+            <div className="bg-card rounded-2xl border border-border overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
+                      {COLUMNS.map((col) => (
+                        <th key={col.key} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">{col.label}</th>
+                      ))}
+                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Status</th>
+                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-32">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {loading ? <SkeletonTable rows={8} cols={7} /> : paged.length === 0 ? (
+                      <tr><td colSpan={7} className="text-center py-12 text-sm text-muted-foreground">
+                        {vehicles.length === 0 ? "Belum ada data mobil. Klik tombol Tambah Mobil untuk mulai." : "Tidak ada data yang cocok dengan filter."}
+                      </td></tr>
+                    ) : paged.map((row, idx) => (
+                      <tr key={row.id} className="hover:bg-muted/30">
+                        <td className="px-5 py-3 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                        {COLUMNS.map((col) => {
+                          const value = row[col.key] || "-";
+                          return (
+                            <td key={col.key} className="px-5 py-3 text-xs text-foreground max-w-[180px] truncate">
+                              {col.key === "unit" ? <span className="font-semibold">{value}</span> : <span className="text-muted-foreground">{value}</span>}
+                            </td>
+                          );
+                        })}
+                        <td className="px-5 py-3 text-center">
+                          <span className={cn("inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full", row.status === "Aktif" ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>{row.status}</span>
                         </td>
-                      );
-                    })}
-                    <td className="px-5 py-3 text-center">
-                      <span className={cn("inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full", row.status === "Aktif" ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => setDetailVehicle(row)} title="Detail" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Eye className="w-3.5 h-3.5" /></button>
-                        {canEdit && <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
-                        {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, unit: row.unit })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
-        </div>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => setDetailVehicle(row)} title="Detail" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Eye className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => openDocumentModal(row)} title="Dokumen" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><FileText className="w-3.5 h-3.5" /></button>
+                            {canEdit && <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+                            {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, unit: row.unit })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+            </div>
+          </>
+        )}
+
+        {activeTab === "documents" && (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              {[
+                { label: "KIR Akan Habis", value: kirSoonCount, color: "text-warning" },
+                { label: "STNK Akan Habis", value: stnkSoonCount, color: "text-warning" },
+                { label: "Pajak Akan Habis", value: pajakSoonCount, color: "text-warning" },
+                { label: "Expired", value: expiredCount, color: "text-danger" },
+                { label: "Belum Lengkap", value: incompleteCount, color: "text-muted-foreground" },
+              ].map((item) => (
+                <div key={item.label} className="bg-card rounded-2xl border border-border p-4">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{item.label}</p>
+                  <p className={cn("text-xl font-bold mt-1", item.color)}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-card rounded-2xl border border-border p-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[220px]">
+                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                  <input type="text" placeholder="Cari unit, jenis, divisi, milik..." value={docSearch}
+                    onChange={(e) => { setDocSearch(e.target.value); setDocPage(1); }}
+                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+                </div>
+                <Select
+                  value={docTypeFilter}
+                  onChange={(v) => { setDocTypeFilter(v as StatusTarget | "Semua"); setDocPage(1); }}
+                  options={["Semua", "KIR", "STNK", "PAJAK"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Dokumen" : v }))}
+                  className="w-44"
+                />
+                <Select
+                  value={docStatusFilter}
+                  onChange={(v) => { setDocStatusFilter(v as DocumentStatus | "Semua"); setDocPage(1); }}
+                  options={["Semua", "Aktif", "Akan Habis", "Expired", "Belum Ada", "Tidak Wajib"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Status" : v }))}
+                  className="w-44"
+                />
+              </div>
+            </div>
+
+            <div className="bg-card rounded-2xl border border-border overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Unit</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Jenis</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">KIR</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">STNK</th>
+                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pajak</th>
+                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {loading ? <SkeletonTable rows={8} cols={7} /> : pagedDocVehicles.length === 0 ? (
+                      <tr><td colSpan={7} className="text-center py-12 text-sm text-muted-foreground">Tidak ada data dokumen yang cocok.</td></tr>
+                    ) : pagedDocVehicles.map(({ vehicle, statuses }, idx) => (
+                      <tr key={vehicle.id} className="hover:bg-muted/30">
+                        <td className="px-5 py-3 text-xs text-muted-foreground">{(docPage - 1) * PAGE_SIZE + idx + 1}</td>
+                        <td className="px-5 py-3 text-xs font-semibold text-foreground whitespace-nowrap">{vehicle.unit}</td>
+                        <td className="px-5 py-3 text-xs text-muted-foreground max-w-[220px] truncate">{vehicle.jenis}</td>
+                        <td className="px-5 py-3"><DocumentStatusBadge info={statuses.KIR} onClick={() => openDocumentModal(vehicle, "KIR")} /></td>
+                        <td className="px-5 py-3"><DocumentStatusBadge info={statuses.STNK} onClick={() => openDocumentModal(vehicle, "STNK")} /></td>
+                        <td className="px-5 py-3"><DocumentStatusBadge info={statuses.PAJAK} onClick={() => openDocumentModal(vehicle, "STNK")} /></td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => openDocumentModal(vehicle)} title="Kelola Dokumen" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Settings2 className="w-3.5 h-3.5" /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination currentPage={docPage} totalItems={filteredDocVehicles.length} pageSize={PAGE_SIZE} onPageChange={setDocPage} />
+            </div>
+          </>
+        )}
 
         {showForm && (
           <Portal>
@@ -369,69 +823,64 @@ export default function DataMobilPage() {
                   <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-5 space-y-3">
-                  {formError && (
-                    <div className="bg-danger/10 border border-danger/30 rounded-xl px-3 py-2.5 text-xs text-danger">{formError}</div>
-                  )}
+                  {formError && <div className="bg-danger/10 border border-danger/30 rounded-xl px-3 py-2.5 text-xs text-danger">{formError}</div>}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">UNIT *</label>
-                      <input type="text" placeholder="B 1234 ABC" value={form.unit}
-                        onChange={(e) => setForm({ ...form, unit: e.target.value.toUpperCase() })}
-                        className={cn(inputClass, "uppercase")} />
+                      <input type="text" placeholder="B 1234 ABC" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value.toUpperCase() })} className={cn(inputClass, "uppercase")} />
                     </div>
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">JENIS *</label>
-                      <input type="text" placeholder="Box, Wingbox, Tronton, dll" value={form.jenis}
-                        onChange={(e) => setForm({ ...form, jenis: e.target.value })}
-                        className={inputClass} />
+                      <input type="text" placeholder="Box, Wingbox, Tronton, dll" value={form.jenis} onChange={(e) => setForm({ ...form, jenis: e.target.value })} className={inputClass} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">DEVISI</label>
-                      <input type="text" placeholder="Divisi/lokasi" value={form.divisi}
-                        onChange={(e) => setForm({ ...form, divisi: e.target.value })}
-                        className={inputClass} />
+                      <input type="text" placeholder="Divisi/lokasi" value={form.divisi} onChange={(e) => setForm({ ...form, divisi: e.target.value })} className={inputClass} />
                     </div>
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">MILIK</label>
-                      <input type="text" placeholder="Perusahaan / Rental / Pribadi" value={form.milik}
-                        onChange={(e) => setForm({ ...form, milik: e.target.value })}
-                        className={inputClass} />
+                      <input type="text" placeholder="Perusahaan / Rental / Pribadi" value={form.milik} onChange={(e) => setForm({ ...form, milik: e.target.value })} className={inputClass} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">NO RANGKA</label>
-                      <input type="text" placeholder="Nomor rangka kendaraan" value={form.no_rangka}
-                        onChange={(e) => setForm({ ...form, no_rangka: e.target.value })}
-                        className={inputClass} />
+                      <input type="text" placeholder="Nomor rangka kendaraan" value={form.no_rangka} onChange={(e) => setForm({ ...form, no_rangka: e.target.value })} className={inputClass} />
                     </div>
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">NOMER MESIN</label>
-                      <input type="text" placeholder="Nomor mesin kendaraan" value={form.nomer_mesin}
-                        onChange={(e) => setForm({ ...form, nomer_mesin: e.target.value })}
-                        className={inputClass} />
+                      <input type="text" placeholder="Nomor mesin kendaraan" value={form.nomer_mesin} onChange={(e) => setForm({ ...form, nomer_mesin: e.target.value })} className={inputClass} />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">VOLUME</label>
-                      <input type="text" placeholder="CBM / liter" value={form.volume}
-                        onChange={(e) => setForm({ ...form, volume: e.target.value })}
-                        className={inputClass} />
+                      <input type="text" placeholder="CBM / liter" value={form.volume} onChange={(e) => setForm({ ...form, volume: e.target.value })} className={inputClass} />
                     </div>
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">TONASE</label>
-                      <input type="text" placeholder="Ton / kg" value={form.tonase}
-                        onChange={(e) => setForm({ ...form, tonase: e.target.value })}
-                        className={inputClass} />
+                      <input type="text" placeholder="Ton / kg" value={form.tonase} onChange={(e) => setForm({ ...form, tonase: e.target.value })} className={inputClass} />
                     </div>
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">SUHU</label>
-                      <input type="text" placeholder="-18C / Normal" value={form.suhu}
-                        onChange={(e) => setForm({ ...form, suhu: e.target.value })}
-                        className={inputClass} />
+                      <input type="text" placeholder="-18C / Normal" value={form.suhu} onChange={(e) => setForm({ ...form, suhu: e.target.value })} className={inputClass} />
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-border p-3 bg-muted/20">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Kewajiban Dokumen</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {[
+                        { key: "kir_required", label: "Wajib KIR" },
+                        { key: "stnk_required", label: "Wajib STNK" },
+                        { key: "pajak_required", label: "Wajib Pajak" },
+                      ].map((item) => (
+                        <label key={item.key} className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground cursor-pointer">
+                          <input type="checkbox" checked={Boolean(form[item.key as keyof FormState])} onChange={(e) => setForm({ ...form, [item.key]: e.target.checked })} className="rounded border-border text-primary focus:ring-primary" />
+                          {item.label}
+                        </label>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -448,7 +897,7 @@ export default function DataMobilPage() {
           <Portal>
             <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDetailVehicle(null)} />
-              <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]">
+              <div className="relative w-full max-w-2xl bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[90vh]">
                 <div className="flex items-center justify-between p-5 border-b border-border">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center"><Truck className="w-5 h-5 text-primary" /></div>
@@ -459,7 +908,7 @@ export default function DataMobilPage() {
                   </div>
                   <button onClick={() => setDetailVehicle(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-5">
+                <div className="flex-1 overflow-y-auto p-5 space-y-5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {DETAIL_FIELDS.map((f) => {
                       const value = detailVehicle[f.key] || "-";
@@ -472,14 +921,177 @@ export default function DataMobilPage() {
                     })}
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">STATUS</label>
-                      <span className={cn("inline-flex items-center text-xs font-bold px-2 py-1 rounded-full mt-1", detailVehicle.status === "Aktif" ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>
-                        {detailVehicle.status}
-                      </span>
+                      <span className={cn("inline-flex items-center text-xs font-bold px-2 py-1 rounded-full mt-1", detailVehicle.status === "Aktif" ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>{detailVehicle.status}</span>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-border p-4 bg-muted/20">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <p className="text-sm font-bold text-foreground">Status Dokumen</p>
+                        <p className="text-[10px] text-muted-foreground">KIR, STNK, dan pajak dari data STNK</p>
+                      </div>
+                      <Button variant="outline" size="sm" icon={FileText} onClick={() => openDocumentModal(detailVehicle)}>Kelola Dokumen</Button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {Object.entries(getVehicleStatuses(detailVehicle)).map(([key, info]) => (
+                        <div key={key} className="rounded-xl border border-border bg-card px-3 py-2">
+                          <p className="text-[10px] font-bold text-muted-foreground mb-1">{key}</p>
+                          <DocumentStatusBadge info={info} />
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
                 <div className="px-5 py-3 border-t border-border flex items-center justify-end">
                   <Button variant="outline" size="sm" onClick={() => setDetailVehicle(null)}>Tutup</Button>
+                </div>
+              </div>
+            </div>
+          </Portal>
+        )}
+
+        {docModalVehicle && (
+          <Portal>
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !documentSaving && setDocModalVehicle(null)} />
+              <div className="relative w-full max-w-5xl bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col max-h-[92vh]">
+                <div className="flex items-center justify-between p-5 border-b border-border">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center"><FileText className="w-5 h-5 text-primary" /></div>
+                    <div>
+                      <h3 className="text-base font-bold text-foreground">Kelola Dokumen Kendaraan</h3>
+                      <p className="text-xs text-muted-foreground">{docModalVehicle.unit} - {docModalVehicle.jenis}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => !documentSaving && setDocModalVehicle(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {renderDocumentPanel(docModalVehicle, "KIR")}
+                    {renderDocumentPanel(docModalVehicle, "STNK")}
+                  </div>
+
+                  {canInput && (
+                    <div className="rounded-2xl border border-border p-4">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Upload className="w-4 h-4 text-primary" />
+                        <p className="text-sm font-bold text-foreground">Upload / Perpanjang Dokumen</p>
+                      </div>
+                      {documentError && <div className="bg-danger/10 border border-danger/30 rounded-xl px-3 py-2.5 text-xs text-danger mb-3">{documentError}</div>}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">JENIS DOKUMEN *</label>
+                          <Select
+                            value={documentForm.document_type}
+                            onChange={(v) => setDocumentForm({ ...documentForm, document_type: v as DocumentType, pajak_expired_date: v === "STNK" ? documentForm.pajak_expired_date : "" })}
+                            options={DOCUMENT_TYPES.map((v) => ({ value: v, label: v }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">NOMOR DOKUMEN</label>
+                          <input type="text" value={documentForm.document_number} onChange={(e) => setDocumentForm({ ...documentForm, document_number: e.target.value })} className={inputClass} placeholder="Nomor KIR/STNK" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">TANGGAL TERBIT/BAYAR</label>
+                          <input type="date" value={documentForm.issued_date} onChange={(e) => setDocumentForm({ ...documentForm, issued_date: e.target.value })} className={inputClass} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">MASA BERLAKU *</label>
+                          <input type="date" value={documentForm.expired_date} onChange={(e) => setDocumentForm({ ...documentForm, expired_date: e.target.value })} className={inputClass} />
+                        </div>
+                        {documentForm.document_type === "STNK" && (
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">JATUH TEMPO PAJAK</label>
+                            <input type="date" value={documentForm.pajak_expired_date} onChange={(e) => setDocumentForm({ ...documentForm, pajak_expired_date: e.target.value })} className={inputClass} />
+                          </div>
+                        )}
+                        <div className={cn(documentForm.document_type === "STNK" ? "" : "md:col-span-2")}>
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">CATATAN</label>
+                          <input type="text" value={documentForm.notes} onChange={(e) => setDocumentForm({ ...documentForm, notes: e.target.value })} className={inputClass} placeholder="Catatan opsional" />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">MEDIA DOKUMEN * <span className="font-normal">(PDF / foto, maks 5 MB per file)</span></label>
+                          <label className="flex items-center justify-center gap-2 px-3 py-4 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary-light/20 text-xs text-muted-foreground hover:text-primary cursor-pointer transition-all">
+                            <Upload className="w-4 h-4" />
+                            <span>{documentFiles.length > 0 ? `${documentFiles.length} file dipilih` : "Pilih satu atau beberapa file"}</span>
+                            <input type="file" accept="application/pdf,image/*" multiple className="hidden" onChange={(e) => { handleDocumentFileSelect(e.target.files); e.target.value = ""; }} />
+                          </label>
+                          {documentFiles.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {documentFiles.map((file) => (
+                                <span key={`${file.name}-${file.size}`} className="text-[10px] font-semibold bg-success/10 text-success px-2 py-1 rounded-lg">{file.name}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 mt-4">
+                        <Button variant="outline" size="sm" onClick={() => { setDocumentForm({ ...emptyDocumentForm, document_type: documentForm.document_type }); setDocumentFiles([]); setDocumentError(""); }} disabled={documentSaving}>Reset</Button>
+                        <Button size="sm" icon={Upload} onClick={handleSaveDocument} disabled={documentSaving}>{documentSaving ? "Menyimpan..." : "Simpan Dokumen"}</Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-border p-4">
+                    <p className="text-sm font-bold text-foreground mb-3">History Dokumen</p>
+                    <div className="space-y-3">
+                      {documents.filter((d) => d.vehicle_id === docModalVehicle.id).length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">Belum ada history dokumen.</p>
+                      ) : documents.filter((d) => d.vehicle_id === docModalVehicle.id).map((doc) => (
+                        <div key={doc.id} className="rounded-xl border border-border bg-muted/20 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-bold text-foreground">{doc.document_type}</p>
+                                {doc.is_current && <span className="text-[10px] font-bold bg-success/10 text-success px-2 py-0.5 rounded-full">Aktif</span>}
+                              </div>
+                              <p className="text-[10px] text-muted-foreground">Berlaku sampai {formatTanggal(doc.expired_date)}{doc.document_type === "STNK" ? `, pajak ${formatTanggal(doc.pajak_expired_date)}` : ""}</p>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground">{formatTanggal(doc.created_at?.slice(0, 10))}</p>
+                          </div>
+                          {renderDocumentFiles(doc)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="px-5 py-3 border-t border-border flex items-center justify-end">
+                  <Button variant="outline" size="sm" onClick={() => setDocModalVehicle(null)} disabled={documentSaving}>Tutup</Button>
+                </div>
+              </div>
+            </div>
+          </Portal>
+        )}
+
+        {previewMedia && (
+          <Portal>
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setPreviewMedia(null)} />
+              <div className="relative bg-card rounded-2xl shadow-2xl overflow-hidden max-w-3xl w-full max-h-[85vh] flex flex-col animate-scale-in">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/30">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center"><FileText className="w-4 h-4 text-primary" /></div>
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">{previewMedia.label}</h3>
+                      <p className="text-[10px] text-muted-foreground">Dokumen Kendaraan</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <a href={previewMedia.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted"><ExternalLink className="w-3.5 h-3.5" />Buka</a>
+                    <button onClick={() => handleDownloadFile(previewMedia.url, previewMedia.label)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-primary bg-primary-light hover:bg-primary hover:text-white"><Download className="w-3.5 h-3.5" />Download</button>
+                    <button onClick={() => setPreviewMedia(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20 min-h-[300px]">
+                  {previewMedia.mimeType === "application/pdf" || previewMedia.url.split("?")[0].toLowerCase().endsWith(".pdf") ? (
+                    <div className="text-center space-y-3">
+                      <FileText className="w-16 h-16 text-muted-foreground/30 mx-auto" />
+                      <p className="text-sm text-muted-foreground">File PDF tidak bisa di-preview langsung</p>
+                      <Button size="sm" icon={Download} onClick={() => handleDownloadFile(previewMedia.url, previewMedia.label)}>Download PDF</Button>
+                    </div>
+                  ) : (
+                    <img src={previewMedia.url} alt={previewMedia.label} className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-lg" />
+                  )}
                 </div>
               </div>
             </div>

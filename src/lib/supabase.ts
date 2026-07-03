@@ -565,7 +565,50 @@ export interface DbGaVehicle {
   volume: string | null;
   tonase: string | null;
   suhu: string | null;
+  kir_required: boolean;
+  stnk_required: boolean;
+  pajak_required: boolean;
   status: "Aktif" | "Tidak Aktif";
   created_at: string;
   updated_at: string;
+}
+
+export interface DbGaVehicleDocumentSetting {
+  id: number;
+  kir_reminder_days: number;
+  stnk_reminder_days: number;
+  pajak_reminder_days: number;
+  kir_required_default: boolean;
+  stnk_required_default: boolean;
+  pajak_required_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbGaVehicleDocumentFile {
+  id: number;
+  document_id: number;
+  file_url: string;
+  file_path: string;
+  file_name: string;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface DbGaVehicleDocument {
+  id: number;
+  vehicle_id: number;
+  document_type: "KIR" | "STNK";
+  document_number: string | null;
+  issued_date: string | null;
+  expired_date: string | null;
+  pajak_expired_date: string | null;
+  notes: string | null;
+  is_current: boolean;
+  created_at: string;
+  updated_at: string;
+  // joined
+  files?: DbGaVehicleDocumentFile[];
 }

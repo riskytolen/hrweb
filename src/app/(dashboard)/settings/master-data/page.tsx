@@ -27,6 +27,7 @@ import {
   Scale,
   CalendarDays,
   RefreshCw,
+  Truck,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -38,7 +39,7 @@ import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { logAudit } from "@/lib/audit";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting, type DbGaVehicleDocumentSetting } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -82,6 +83,7 @@ const tabs = [
   { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
   { key: "status-titik", label: "Status Titik", icon: Tag },
   { key: "bank", label: "Bank", icon: Landmark },
+  { key: "kendaraan", label: "Dokumen Kendaraan", icon: Truck },
   { key: "legal", label: "Legal", icon: Scale },
 ] as const;
 
@@ -194,6 +196,17 @@ export default function MasterDataPage() {
   const [leaveSetting, setLeaveSetting] = useState<LeaveSetting | null>(null);
   const [showLeaveSettingForm, setShowLeaveSettingForm] = useState(false);
   const [leaveSettingForm, setLeaveSettingForm] = useState({ kuota_cuti_tahunan: "12", maks_hari_per_pengajuan: "3", prorata: true });
+  // Vehicle document settings
+  const [vehicleDocSetting, setVehicleDocSetting] = useState<DbGaVehicleDocumentSetting | null>(null);
+  const [showVehicleDocSettingForm, setShowVehicleDocSettingForm] = useState(false);
+  const [vehicleDocSettingForm, setVehicleDocSettingForm] = useState({
+    kir_reminder_days: "30",
+    stnk_reminder_days: "30",
+    pajak_reminder_days: "30",
+    kir_required_default: true,
+    stnk_required_default: true,
+    pajak_required_default: true,
+  });
 
   // ─── Delete Confirm Dialog ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "level" | "jabatan" | "divisi" | "titik-absen" | "waktu-kerja" | "denda-telat" | "nama-titik" | "harga-titik" | "status-titik" | "bank"; id: number; nama: string } | null>(null);
@@ -274,12 +287,12 @@ export default function MasterDataPage() {
   };
 
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings(), fetchVehicleDocSettings()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm || syncRow !== null) {
+    if (showLevelForm || showJabatanForm || showBankForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm || showVehicleDocSettingForm || syncRow !== null) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -287,7 +300,7 @@ export default function MasterDataPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, syncRow]);
+  }, [showLevelForm, showJabatanForm, showBankForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, showPenaltyForm, showLegalSettingForm, showCompanyForm, showLeaveSettingForm, showVehicleDocSettingForm, syncRow]);
 
   const showSuccess = (title: string, message?: string) => {
     setToast({ show: true, title, message: message || "" });
@@ -1013,6 +1026,53 @@ export default function MasterDataPage() {
     fetchLeaveSettings();
   };
 
+  // ─── Vehicle Document Settings Handlers ───
+  const fetchVehicleDocSettings = async () => {
+    const { data } = await supabase.from("ga_vehicle_document_settings").select("*").eq("id", 1).maybeSingle();
+    if (data) setVehicleDocSetting(data as DbGaVehicleDocumentSetting);
+  };
+
+  const handleOpenEditVehicleDocSettings = () => {
+    if (!vehicleDocSetting) return;
+    setVehicleDocSettingForm({
+      kir_reminder_days: String(vehicleDocSetting.kir_reminder_days),
+      stnk_reminder_days: String(vehicleDocSetting.stnk_reminder_days),
+      pajak_reminder_days: String(vehicleDocSetting.pajak_reminder_days),
+      kir_required_default: vehicleDocSetting.kir_required_default,
+      stnk_required_default: vehicleDocSetting.stnk_required_default,
+      pajak_required_default: vehicleDocSetting.pajak_required_default,
+    });
+    setShowVehicleDocSettingForm(true);
+  };
+
+  const handleSaveVehicleDocSettings = async () => {
+    if (!vehicleDocSetting) return;
+    const toDays = (value: string) => Math.max(1, Math.min(365, parseInt(value) || 30));
+    const payload = {
+      kir_reminder_days: toDays(vehicleDocSettingForm.kir_reminder_days),
+      stnk_reminder_days: toDays(vehicleDocSettingForm.stnk_reminder_days),
+      pajak_reminder_days: toDays(vehicleDocSettingForm.pajak_reminder_days),
+      kir_required_default: vehicleDocSettingForm.kir_required_default,
+      stnk_required_default: vehicleDocSettingForm.stnk_required_default,
+      pajak_required_default: vehicleDocSettingForm.pajak_required_default,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("ga_vehicle_document_settings").update(payload).eq("id", vehicleDocSetting.id);
+    if (error) return;
+    await logAudit({
+      supabase,
+      action: "update",
+      entityType: "ga_vehicle_document_settings",
+      entityId: vehicleDocSetting.id,
+      entityLabel: "Reminder Dokumen Kendaraan",
+      oldData: vehicleDocSetting as unknown as Record<string, unknown>,
+      newData: payload,
+    });
+    showSuccess("Pengaturan Dokumen Kendaraan Diperbarui", `Reminder KIR ${payload.kir_reminder_days} hari, STNK ${payload.stnk_reminder_days} hari, Pajak ${payload.pajak_reminder_days} hari.`);
+    setShowVehicleDocSettingForm(false);
+    fetchVehicleDocSettings();
+  };
+
   return (
     <RouteGuard permission="settings">
     <div className="space-y-6 animate-fade-in">
@@ -1056,7 +1116,7 @@ export default function MasterDataPage() {
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.key;
                 const Icon = tab.icon;
-                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
+                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "kendaraan" ? 1 : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
                 return (
                   <button
                     key={tab.key}
@@ -1699,6 +1759,49 @@ export default function MasterDataPage() {
           </>
         )}
 
+        {/* ═══ TAB: DOKUMEN KENDARAAN ═══ */}
+        {activeTab === "kendaraan" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Pengaturan Dokumen Kendaraan</h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Reminder KIR, STNK, dan pajak kendaraan untuk modul Data Mobil.</p>
+              </div>
+              {canEdit && <Button variant="outline" size="sm" icon={Pencil} onClick={handleOpenEditVehicleDocSettings}>Edit Pengaturan</Button>}
+            </div>
+            <div className="p-5">
+              {vehicleDocSetting ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {[
+                    { label: "KIR", reminder: vehicleDocSetting.kir_reminder_days, required: vehicleDocSetting.kir_required_default, desc: "Reminder masa berlaku KIR" },
+                    { label: "STNK", reminder: vehicleDocSetting.stnk_reminder_days, required: vehicleDocSetting.stnk_required_default, desc: "Reminder masa berlaku STNK" },
+                    { label: "Pajak", reminder: vehicleDocSetting.pajak_reminder_days, required: vehicleDocSetting.pajak_required_default, desc: "Reminder jatuh tempo pajak dari STNK" },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-2xl border border-border p-4 bg-muted/20">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-foreground">{item.label}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{item.desc}</p>
+                        </div>
+                        <Truck className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="mt-4 flex items-center gap-3 flex-wrap">
+                        <div className="bg-primary/10 text-primary rounded-xl px-3 py-2">
+                          <p className="text-lg font-bold">{item.reminder} hari</p>
+                          <p className="text-[10px]">sebelum expired</p>
+                        </div>
+                        <span className={cn("text-[10px] font-bold px-2 py-1 rounded-full", item.required ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{item.required ? "Default Wajib" : "Default Tidak Wajib"}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Memuat pengaturan dokumen kendaraan...</p>
+              )}
+            </div>
+          </>
+        )}
+
         {/* ═══ TAB: LEGAL ═══ */}
         {activeTab === "legal" && (
           <>
@@ -1900,6 +2003,62 @@ export default function MasterDataPage() {
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
               <Button variant="outline" size="sm" onClick={() => setShowLeaveSettingForm(false)}>Batal</Button>
               <Button size="sm" icon={Check} onClick={handleSaveLeave}>Simpan</Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {/* ═══ VEHICLE DOCUMENT SETTINGS FORM MODAL ═══ */}
+      {showVehicleDocSettingForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowVehicleDocSettingForm(false)} />
+          <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Truck className="w-4 h-4 text-primary" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">Edit Dokumen Kendaraan</h2>
+              </div>
+              <button onClick={() => setShowVehicleDocSettingForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {[
+                { key: "kir_reminder_days", label: "Reminder KIR" },
+                { key: "stnk_reminder_days", label: "Reminder STNK" },
+                { key: "pajak_reminder_days", label: "Reminder Pajak" },
+              ].map((item) => (
+                <div key={item.key}>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">{item.label} (hari) <span className="text-danger">*</span></label>
+                  <input type="number" min={1} max={365} value={vehicleDocSettingForm[item.key as keyof typeof vehicleDocSettingForm] as string}
+                    onChange={(e) => setVehicleDocSettingForm({ ...vehicleDocSettingForm, [item.key]: e.target.value })}
+                    className={inputClass} placeholder="30" />
+                </div>
+              ))}
+              <div className="rounded-xl border border-border p-3 bg-muted/20">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Default Dokumen Wajib untuk Unit Baru</p>
+                <div className="space-y-2">
+                  {[
+                    { key: "kir_required_default", label: "KIR wajib secara default" },
+                    { key: "stnk_required_default", label: "STNK wajib secara default" },
+                    { key: "pajak_required_default", label: "Pajak wajib secara default" },
+                  ].map((item) => (
+                    <label key={item.key} className="flex items-center gap-2.5 cursor-pointer">
+                      <input type="checkbox" checked={vehicleDocSettingForm[item.key as keyof typeof vehicleDocSettingForm] as boolean}
+                        onChange={(e) => setVehicleDocSettingForm({ ...vehicleDocSettingForm, [item.key]: e.target.checked })}
+                        className="rounded border-border text-primary focus:ring-primary" />
+                      <span className="text-xs font-semibold text-foreground">{item.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground">Pajak tidak memiliki upload file terpisah. Tanggal pajak diambil dari data STNK kendaraan.</p>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
+              <Button variant="outline" size="sm" onClick={() => setShowVehicleDocSettingForm(false)}>Batal</Button>
+              <Button size="sm" icon={Check} onClick={handleSaveVehicleDocSettings}>Simpan</Button>
             </div>
           </div>
         </div>
