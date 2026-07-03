@@ -153,6 +153,18 @@ function DocumentStatusBadge({ info, onClick }: { info: StatusInfo; onClick?: ()
   );
 }
 
+function DocumentTableStatus({ info, onClick }: { info: StatusInfo; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="text-left hover:opacity-80 transition-opacity">
+      <span className={cn("inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full", statusStyle[info.key])}>
+        {info.key === "Akan Habis" ? "AKAN HABIS" : info.key.toUpperCase()}
+      </span>
+      <span className="text-[10px] font-semibold text-foreground mt-1.5 block">{info.date ? formatTanggal(info.date) : "-"}</span>
+      <span className="text-[10px] text-muted-foreground block">{info.detail}</span>
+    </button>
+  );
+}
+
 export default function DataMobilPage() {
   const { getPermissionLevel } = useAuth();
   const permLevel = getPermissionLevel("data-mobil");
@@ -792,9 +804,9 @@ export default function DataMobilPage() {
                         <td className="px-5 py-3 text-xs text-muted-foreground">{(docPage - 1) * PAGE_SIZE + idx + 1}</td>
                         <td className="px-5 py-3 text-xs font-semibold text-foreground whitespace-nowrap">{vehicle.unit}</td>
                         <td className="px-5 py-3 text-xs text-muted-foreground max-w-[220px] truncate">{vehicle.jenis}</td>
-                        <td className="px-5 py-3"><DocumentStatusBadge info={statuses.KIR} onClick={() => openDocumentModal(vehicle, "KIR")} /></td>
-                        <td className="px-5 py-3"><DocumentStatusBadge info={statuses.STNK} onClick={() => openDocumentModal(vehicle, "STNK")} /></td>
-                        <td className="px-5 py-3"><DocumentStatusBadge info={statuses.PAJAK} onClick={() => openDocumentModal(vehicle, "STNK")} /></td>
+                        <td className="px-5 py-3"><DocumentTableStatus info={statuses.KIR} onClick={() => openDocumentModal(vehicle, "KIR")} /></td>
+                        <td className="px-5 py-3"><DocumentTableStatus info={statuses.STNK} onClick={() => openDocumentModal(vehicle, "STNK")} /></td>
+                        <td className="px-5 py-3"><DocumentTableStatus info={statuses.PAJAK} onClick={() => openDocumentModal(vehicle, "STNK")} /></td>
                         <td className="px-5 py-3">
                           <div className="flex items-center justify-center gap-1">
                             <button onClick={() => openDocumentModal(vehicle)} title="Kelola Dokumen" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Settings2 className="w-3.5 h-3.5" /></button>
