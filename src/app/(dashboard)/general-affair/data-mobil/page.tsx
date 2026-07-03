@@ -31,7 +31,7 @@ const DETAIL_FIELDS = [
   { key: "unit", label: "UNIT" },
   { key: "jenis", label: "JENIS" },
   { key: "divisi", label: "DEVISI" },
-  { key: "milik", label: "MILIK" },
+  { key: "vendor", label: "VENDOR" },
   { key: "lokasi_administrasi", label: "LOKASI ADMINISTRASI" },
   { key: "no_rangka", label: "NO RANGKA" },
   { key: "nomer_mesin", label: "NOMER MESIN" },
@@ -50,7 +50,7 @@ type FormState = {
   unit: string;
   jenis: string;
   divisi: string;
-  milik: string;
+  vendor: string;
   lokasi_administrasi: string;
   no_rangka: string;
   nomer_mesin: string;
@@ -85,7 +85,7 @@ type OverallStatusInfo = {
 };
 
 const emptyForm: FormState = {
-  unit: "", jenis: "", divisi: "", milik: "",
+  unit: "", jenis: "", divisi: "", vendor: "",
   lokasi_administrasi: "", no_rangka: "", nomer_mesin: "", volume: "", tonase: "", suhu: "",
   kir_required: true, stnk_required: true, pajak_required: true,
 };
@@ -340,7 +340,7 @@ export default function DataMobilPage() {
       || vehicle.unit.toLowerCase().includes(q)
       || vehicle.jenis.toLowerCase().includes(q)
       || (vehicle.divisi || "").toLowerCase().includes(q)
-      || (vehicle.milik || "").toLowerCase().includes(q)
+      || (vehicle.vendor || "").toLowerCase().includes(q)
       || (vehicle.lokasi_administrasi || "").toLowerCase().includes(q);
     const selectedStatuses = docTypeFilter === "Semua"
       ? Object.values(statuses)
@@ -371,7 +371,7 @@ export default function DataMobilPage() {
       unit: v.unit,
       jenis: v.jenis,
       divisi: v.divisi || "",
-      milik: v.milik || "",
+      vendor: v.vendor || "",
       lokasi_administrasi: v.lokasi_administrasi || "",
       no_rangka: v.no_rangka || "",
       nomer_mesin: v.nomer_mesin || "",
@@ -405,7 +405,7 @@ export default function DataMobilPage() {
       unit: form.unit.trim(),
       jenis: form.jenis.trim(),
       divisi: form.divisi.trim() || null,
-      milik: form.milik.trim() || null,
+      vendor: form.vendor.trim() || null,
       lokasi_administrasi: form.lokasi_administrasi.trim() || null,
       no_rangka: form.no_rangka.trim() || null,
       nomer_mesin: form.nomer_mesin.trim() || null,
@@ -700,7 +700,7 @@ export default function DataMobilPage() {
           <div className="min-w-0">
             <h3 className="text-sm font-black text-foreground truncate">{vehicle.unit}</h3>
             <p className="text-xs font-semibold text-muted-foreground truncate mt-0.5">{vehicle.jenis}</p>
-            <p className="text-[10px] text-muted-foreground truncate mt-0.5">{vehicle.lokasi_administrasi || vehicle.divisi || vehicle.milik || "Lokasi belum diisi"}</p>
+            <p className="text-[10px] text-muted-foreground truncate mt-0.5">{vehicle.lokasi_administrasi || vehicle.divisi || vehicle.vendor || "Lokasi belum diisi"}</p>
           </div>
           <span className={cn("shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide", styles.badge)}>{overall.label}</span>
         </div>
@@ -866,8 +866,8 @@ export default function DataMobilPage() {
                       <input type="text" placeholder="Divisi/lokasi" value={form.divisi} onChange={(e) => setForm({ ...form, divisi: e.target.value })} className={inputClass} />
                     </div>
                     <div>
-                      <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">MILIK</label>
-                      <input type="text" placeholder="Perusahaan / Rental / Pribadi" value={form.milik} onChange={(e) => setForm({ ...form, milik: e.target.value })} className={inputClass} />
+                      <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">VENDOR</label>
+                      <input type="text" placeholder="Nama vendor / perusahaan penyedia" value={form.vendor} onChange={(e) => setForm({ ...form, vendor: e.target.value })} className={inputClass} />
                     </div>
                   </div>
                   <div>
