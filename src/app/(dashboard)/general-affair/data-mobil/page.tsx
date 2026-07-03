@@ -11,7 +11,6 @@ import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
-import { SkeletonTable } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import {
   supabase,
@@ -27,14 +26,6 @@ import RouteGuard from "@/components/RouteGuard";
 const PAGE_SIZE = 15;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
-
-const COLUMNS = [
-  { key: "unit", label: "UNIT" },
-  { key: "jenis", label: "JENIS" },
-  { key: "divisi", label: "DEVISI" },
-  { key: "milik", label: "MILIK" },
-  { key: "lokasi_administrasi", label: "LOKASI ADMINISTRASI" },
-] as const;
 
 const DETAIL_FIELDS = [
   { key: "unit", label: "UNIT" },
@@ -53,6 +44,7 @@ const DOCUMENT_TYPES = ["KIR", "STNK"] as const;
 type DocumentType = (typeof DOCUMENT_TYPES)[number];
 type StatusTarget = "KIR" | "STNK" | "PAJAK";
 type DocumentStatus = "Aktif" | "Akan Habis" | "Expired" | "Belum Ada" | "Tidak Wajib";
+type OverallDocumentStatus = "Aman" | "Perlu Diperhatikan" | "Akan Habis" | "Expired" | "Belum Lengkap" | "Tidak Wajib";
 
 type FormState = {
   unit: string;
@@ -86,6 +78,12 @@ type StatusInfo = {
   date: string | null;
 };
 
+type OverallStatusInfo = {
+  key: OverallDocumentStatus;
+  label: string;
+  detail: string;
+};
+
 const emptyForm: FormState = {
   unit: "", jenis: "", divisi: "", milik: "",
   lokasi_administrasi: "", no_rangka: "", nomer_mesin: "", volume: "", tonase: "", suhu: "",
@@ -109,6 +107,47 @@ const statusStyle: Record<DocumentStatus, string> = {
   "Tidak Wajib": "bg-muted/60 text-muted-foreground",
 };
 
+const documentCardStyle: Record<DocumentStatus, string> = {
+  Aktif: "border-success/40 bg-success/5 text-success",
+  "Akan Habis": "border-warning/50 bg-warning/5 text-warning",
+  Expired: "border-danger/60 bg-danger/5 text-danger",
+  "Belum Ada": "border-muted-foreground/30 bg-muted/60 text-muted-foreground",
+  "Tidak Wajib": "border-border bg-muted/40 text-muted-foreground",
+};
+
+const overallStyle: Record<OverallDocumentStatus, { card: string; badge: string; footer: string }> = {
+  Aman: {
+    card: "border-success/30 hover:border-success/60",
+    badge: "bg-success/10 text-success",
+    footer: "bg-success/10 text-success border-success/20",
+  },
+  "Perlu Diperhatikan": {
+    card: "border-warning/30 hover:border-warning/60",
+    badge: "bg-warning/10 text-warning",
+    footer: "bg-warning/10 text-warning border-warning/20",
+  },
+  "Akan Habis": {
+    card: "border-danger/30 hover:border-danger/60",
+    badge: "bg-danger/10 text-danger",
+    footer: "bg-danger/10 text-danger border-danger/20",
+  },
+  Expired: {
+    card: "border-danger/50 hover:border-danger/80",
+    badge: "bg-danger text-white",
+    footer: "bg-danger/10 text-danger border-danger/20",
+  },
+  "Belum Lengkap": {
+    card: "border-warning/30 hover:border-warning/60",
+    badge: "bg-warning/10 text-warning",
+    footer: "bg-warning/10 text-warning border-warning/20",
+  },
+  "Tidak Wajib": {
+    card: "border-border hover:border-primary/40",
+    badge: "bg-muted text-muted-foreground",
+    footer: "bg-muted/60 text-muted-foreground border-border",
+  },
+};
+
 function formatTanggal(date?: string | null): string {
   if (!date) return "-";
   return new Date(`${date}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
@@ -128,6 +167,29 @@ function getStatus(expiredDate: string | null | undefined, required: boolean, re
   if (remaining < 0) return { key: "Expired", label: "Expired", detail: `${Math.abs(remaining)} hari lalu`, date: expiredDate };
   if (remaining <= reminderDays) return { key: "Akan Habis", label: "Akan Habis", detail: remaining === 0 ? "Hari ini" : `${remaining} hari lagi`, date: expiredDate };
   return { key: "Aktif", label: "Aktif", detail: `${remaining} hari lagi`, date: expiredDate };
+}
+
+function getOverallDocumentStatus(statuses: Record<StatusTarget, StatusInfo>): OverallStatusInfo {
+  const statusList = [statuses.KIR, statuses.STNK, statuses.PAJAK];
+  if (statusList.some((s) => s.key === "Expired")) return { key: "Expired", label: "Expired", detail: "Ada dokumen yang sudah lewat jatuh tempo" };
+  if (statusList.some((s) => s.key === "Akan Habis")) return { key: "Akan Habis", label: "Segera Habis", detail: "Segera lakukan perpanjangan" };
+  if (statusList.some((s) => s.key === "Belum Ada")) return { key: "Belum Lengkap", label: "Belum Lengkap", detail: "Lengkapi data dokumen wajib" };
+
+  const activeDates = statusList
+    .filter((s) => s.key === "Aktif" && s.date)
+    .map((s) => daysUntil(s.date as string));
+  if (activeDates.some((remaining) => remaining <= 60)) return { key: "Perlu Diperhatikan", label: "Perlu Diperhatikan", detail: "Siapkan dokumen untuk perpanjangan" };
+  if (statusList.every((s) => s.key === "Tidak Wajib")) return { key: "Tidak Wajib", label: "Tidak Wajib", detail: "Tidak ada dokumen wajib" };
+  return { key: "Aman", label: "Aman", detail: "Semua dokumen masih berlaku" };
+}
+
+function getDocumentDayText(info: StatusInfo): { value: string; label: string } {
+  if (info.key === "Tidak Wajib") return { value: "-", label: "Opsional" };
+  if (!info.date) return { value: "!", label: "Belum ada" };
+  const remaining = daysUntil(info.date);
+  if (remaining < 0) return { value: String(Math.abs(remaining)), label: "hari lalu" };
+  if (remaining === 0) return { value: "0", label: "hari ini" };
+  return { value: String(remaining), label: "hari lagi" };
 }
 
 function sanitizeFileName(name: string): string {
@@ -156,33 +218,18 @@ function DocumentStatusBadge({ info, onClick }: { info: StatusInfo; onClick?: ()
   );
 }
 
-function DocumentTableStatus({ info, onClick }: { info: StatusInfo; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="text-left hover:opacity-80 transition-opacity">
-      <span className={cn("inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full", statusStyle[info.key])}>
-        {info.key === "Akan Habis" ? "AKAN HABIS" : info.key.toUpperCase()}
-      </span>
-      <span className="text-[10px] font-semibold text-foreground mt-1.5 block">{info.date ? formatTanggal(info.date) : "-"}</span>
-      <span className="text-[10px] text-muted-foreground block">{info.detail}</span>
-    </button>
-  );
-}
-
 export default function DataMobilPage() {
   const { getPermissionLevel } = useAuth();
   const permLevel = getPermissionLevel("data-mobil");
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
 
-  const [activeTab, setActiveTab] = useState<"unit" | "documents">("unit");
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
   const [docPage, setDocPage] = useState(1);
-  const [search, setSearch] = useState("");
   const [docSearch, setDocSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("Semua");
   const [docStatusFilter, setDocStatusFilter] = useState<DocumentStatus | "Semua">("Semua");
   const [docTypeFilter, setDocTypeFilter] = useState<StatusTarget | "Semua">("Semua");
+  const [overallFilter, setOverallFilter] = useState<OverallDocumentStatus | "Semua">("Semua");
 
   const [vehicles, setVehicles] = useState<DbGaVehicle[]>([]);
   const [documents, setDocuments] = useState<DbGaVehicleDocument[]>([]);
@@ -266,28 +313,6 @@ export default function DataMobilPage() {
     })();
   }, [fetchVehicles, fetchVehicleDocuments, fetchDocumentSettings]);
 
-  const filtered = vehicles.filter((v) => {
-    const q = search.toLowerCase();
-    const matchSearch = !q
-      || v.unit.toLowerCase().includes(q)
-      || v.jenis.toLowerCase().includes(q)
-      || (v.divisi || "").toLowerCase().includes(q)
-      || (v.milik || "").toLowerCase().includes(q)
-      || (v.lokasi_administrasi || "").toLowerCase().includes(q)
-      || (v.no_rangka || "").toLowerCase().includes(q)
-      || (v.nomer_mesin || "").toLowerCase().includes(q)
-      || (v.volume || "").toLowerCase().includes(q)
-      || (v.tonase || "").toLowerCase().includes(q)
-      || (v.suhu || "").toLowerCase().includes(q);
-    const matchStatus = filterStatus === "Semua" || v.status === filterStatus;
-    return matchSearch && matchStatus;
-  });
-
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  const aktifCount = vehicles.filter((v) => v.status === "Aktif").length;
-  const tidakAktifCount = vehicles.filter((v) => v.status === "Tidak Aktif").length;
-
   const getCurrentDocument = (vehicleId: number, type: DocumentType) =>
     documents.find((d) => d.vehicle_id === vehicleId && d.document_type === type && d.is_current) || null;
 
@@ -301,14 +326,15 @@ export default function DataMobilPage() {
     };
   };
 
-  const vehicleStatusRows = vehicles.map((vehicle) => ({ vehicle, statuses: getVehicleStatuses(vehicle) }));
-  const kirSoonCount = vehicleStatusRows.filter((r) => r.statuses.KIR.key === "Akan Habis").length;
-  const stnkSoonCount = vehicleStatusRows.filter((r) => r.statuses.STNK.key === "Akan Habis").length;
-  const pajakSoonCount = vehicleStatusRows.filter((r) => r.statuses.PAJAK.key === "Akan Habis").length;
-  const expiredCount = vehicleStatusRows.filter((r) => Object.values(r.statuses).some((s) => s.key === "Expired")).length;
-  const incompleteCount = vehicleStatusRows.filter((r) => Object.values(r.statuses).some((s) => s.key === "Belum Ada")).length;
+  const vehicleStatusRows = vehicles.map((vehicle) => {
+    const statuses = getVehicleStatuses(vehicle);
+    return { vehicle, statuses, overall: getOverallDocumentStatus(statuses) };
+  });
+  const soonCount = vehicleStatusRows.filter((r) => r.overall.key === "Expired" || r.overall.key === "Akan Habis").length;
+  const attentionCount = vehicleStatusRows.filter((r) => r.overall.key === "Perlu Diperhatikan" || r.overall.key === "Belum Lengkap").length;
+  const safeCount = vehicleStatusRows.filter((r) => r.overall.key === "Aman").length;
 
-  const filteredDocVehicles = vehicleStatusRows.filter(({ vehicle, statuses }) => {
+  const filteredDocVehicles = vehicleStatusRows.filter(({ vehicle, statuses, overall }) => {
     const q = docSearch.toLowerCase();
     const matchSearch = !q
       || vehicle.unit.toLowerCase().includes(q)
@@ -320,7 +346,8 @@ export default function DataMobilPage() {
       ? Object.values(statuses)
       : [statuses[docTypeFilter]];
     const matchStatus = docStatusFilter === "Semua" || selectedStatuses.some((s) => s.key === docStatusFilter);
-    return matchSearch && matchStatus;
+    const matchOverall = overallFilter === "Semua" || overall.key === overallFilter;
+    return matchSearch && matchStatus && matchOverall;
   });
 
   const pagedDocVehicles = filteredDocVehicles.slice((docPage - 1) * PAGE_SIZE, docPage * PAGE_SIZE);
@@ -632,14 +659,89 @@ export default function DataMobilPage() {
     );
   };
 
+  const renderVehicleDocumentMetric = (vehicle: DbGaVehicle, target: StatusTarget, info: StatusInfo) => {
+    const dayText = getDocumentDayText(info);
+    const documentType: DocumentType = target === "KIR" ? "KIR" : "STNK";
+    return (
+      <button
+        key={target}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); openDocumentModal(vehicle, documentType); }}
+        className="group text-center rounded-2xl p-2 hover:bg-muted/70 transition-colors"
+      >
+        <p className="text-[10px] font-bold text-foreground mb-1">{target}</p>
+        <div className={cn("mx-auto w-14 h-14 rounded-full border-2 flex flex-col items-center justify-center leading-none", documentCardStyle[info.key])}>
+          <span className="text-base font-black">{dayText.value}</span>
+          <span className="text-[9px] font-bold mt-0.5">{dayText.value === "!" ? "" : "hari"}</span>
+        </div>
+        <p className="text-[10px] font-semibold text-foreground mt-1.5 truncate">{dayText.label}</p>
+        <p className="text-[9px] text-muted-foreground truncate">{info.date ? formatTanggal(info.date) : info.label}</p>
+      </button>
+    );
+  };
+
+  const renderVehicleCard = ({ vehicle, statuses, overall }: (typeof vehicleStatusRows)[number]) => {
+    const styles = overallStyle[overall.key];
+    return (
+      <div
+        key={vehicle.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => openDocumentModal(vehicle)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openDocumentModal(vehicle);
+          }
+        }}
+        className={cn("bg-card rounded-3xl border p-4 shadow-sm hover:shadow-lg transition-all cursor-pointer outline-none focus:ring-2 focus:ring-primary/20", styles.card)}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-black text-foreground truncate">{vehicle.unit}</h3>
+            <p className="text-xs font-semibold text-muted-foreground truncate mt-0.5">{vehicle.jenis}</p>
+            <p className="text-[10px] text-muted-foreground truncate mt-0.5">{vehicle.lokasi_administrasi || vehicle.divisi || vehicle.milik || "Lokasi belum diisi"}</p>
+          </div>
+          <span className={cn("shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide", styles.badge)}>{overall.label}</span>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-[92px_1fr] gap-3 items-center">
+          <div className="h-24 rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center border border-primary/10">
+            <Truck className="w-12 h-12 text-primary/70" />
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {renderVehicleDocumentMetric(vehicle, "KIR", statuses.KIR)}
+            {renderVehicleDocumentMetric(vehicle, "PAJAK", statuses.PAJAK)}
+            {renderVehicleDocumentMetric(vehicle, "STNK", statuses.STNK)}
+          </div>
+        </div>
+
+        <div className={cn("mt-4 flex items-center gap-2 rounded-2xl border px-3 py-2", styles.footer)}>
+          {overall.key === "Aman" ? <CircleCheckBig className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+          <p className="text-[10px] font-bold flex-1 min-w-0 truncate">{overall.detail}</p>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <span className={cn("inline-flex items-center rounded-full px-2 py-1 text-[9px] font-bold", vehicle.status === "Aktif" ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>{vehicle.status}</span>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={(e) => { e.stopPropagation(); setDetailVehicle(vehicle); }} title="Detail Unit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Eye className="w-3.5 h-3.5" /></button>
+            <button type="button" onClick={(e) => { e.stopPropagation(); openDocumentModal(vehicle); }} title="Kelola Dokumen" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Settings2 className="w-3.5 h-3.5" /></button>
+            {canEdit && <button type="button" onClick={(e) => { e.stopPropagation(); openEdit(vehicle); }} title="Edit Unit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
+            {canEdit && <button type="button" onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ id: vehicle.id, unit: vehicle.unit }); }} title="Hapus Unit" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <RouteGuard permission="data-mobil">
       <div className="space-y-4 animate-fade-in">
         <PageHeader
-          title="Data Mobil"
-          description="Kelola data kendaraan, dokumen KIR/STNK, dan reminder pajak"
+          title="Kendaraan Aktif"
+          description="Pantau masa berlaku KIR, STNK, dan Pajak setiap kendaraan"
           icon={Truck}
-          actions={activeTab === "unit" && canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Mobil</Button> : undefined}
+          actions={canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Mobil</Button> : undefined}
         />
 
         {toast.show && (
@@ -659,172 +761,78 @@ export default function DataMobilPage() {
           </Portal>
         )}
 
-        <div className="bg-card rounded-2xl border border-border p-1.5 flex items-center gap-1 w-fit">
-          <button onClick={() => setActiveTab("unit")} className={cn("px-4 py-2 rounded-xl text-xs font-bold transition-all", activeTab === "unit" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:bg-muted")}>Data Unit</button>
-          <button onClick={() => setActiveTab("documents")} className={cn("px-4 py-2 rounded-xl text-xs font-bold transition-all", activeTab === "documents" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:bg-muted")}>Dokumen Kendaraan</button>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="bg-card rounded-2xl border border-border p-4">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Segera Habis / Expired</p>
+            <p className="text-xl font-bold text-danger mt-1">{soonCount}</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Perlu Diperhatikan</p>
+            <p className="text-xl font-bold text-warning mt-1">{attentionCount}</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Aman</p>
+            <p className="text-xl font-bold text-success mt-1">{safeCount}</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Kendaraan</p>
+            <p className="text-xl font-bold text-foreground mt-1">{vehicles.length}</p>
+          </div>
         </div>
 
-        {activeTab === "unit" && (
+        <div className="bg-card rounded-2xl border border-border p-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[220px]">
+              <Search className="w-3.5 h-3.5 text-muted-foreground" />
+              <input type="text" placeholder="Cari unit, jenis, lokasi administrasi..." value={docSearch}
+                onChange={(e) => { setDocSearch(e.target.value); setDocPage(1); }}
+                className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+            </div>
+            <Select
+              value={docTypeFilter}
+              onChange={(v) => { setDocTypeFilter(v as StatusTarget | "Semua"); setDocPage(1); }}
+              options={["Semua", "KIR", "STNK", "PAJAK"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Dokumen" : v }))}
+              className="w-44"
+            />
+            <Select
+              value={docStatusFilter}
+              onChange={(v) => { setDocStatusFilter(v as DocumentStatus | "Semua"); setDocPage(1); }}
+              options={["Semua", "Aktif", "Akan Habis", "Expired", "Belum Ada", "Tidak Wajib"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Status" : v }))}
+              className="w-44"
+            />
+            <Select
+              value={overallFilter}
+              onChange={(v) => { setOverallFilter(v as OverallDocumentStatus | "Semua"); setDocPage(1); }}
+              options={["Semua", "Aman", "Perlu Diperhatikan", "Akan Habis", "Expired", "Belum Lengkap", "Tidak Wajib"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Kendaraan" : v }))}
+              className="w-44"
+            />
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="bg-card rounded-3xl border border-border p-4 animate-pulse space-y-3">
+                <div className="h-4 bg-muted rounded w-24" />
+                <div className="h-3 bg-muted rounded w-40" />
+                <div className="h-24 bg-muted rounded-2xl" />
+                <div className="h-10 bg-muted rounded-2xl" />
+                <div className="flex justify-between"><div className="h-4 bg-muted rounded w-16" /><div className="flex gap-1"><div className="w-7 h-7 bg-muted rounded-lg" /><div className="w-7 h-7 bg-muted rounded-lg" /></div></div>
+              </div>
+            ))}
+          </div>
+        ) : pagedDocVehicles.length === 0 ? (
+          <div className="bg-card rounded-3xl border border-border p-12 text-center">
+            <Truck className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
+            <p className="text-sm font-bold text-foreground">{vehicles.length === 0 ? "Belum ada kendaraan" : "Tidak ada kendaraan yang cocok"}</p>
+            <p className="text-xs text-muted-foreground mt-1">{vehicles.length === 0 ? "Klik tombol Tambah Mobil untuk mulai." : "Coba ubah filter atau kata kunci pencarian."}</p>
+          </div>
+        ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Kendaraan</p>
-                <p className="text-xl font-bold text-foreground mt-1">{vehicles.length}</p>
-              </div>
-              <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Aktif</p>
-                <p className="text-xl font-bold text-success mt-1">{aktifCount}</p>
-              </div>
-              <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Tidak Aktif</p>
-                <p className="text-xl font-bold text-danger mt-1">{tidakAktifCount}</p>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {pagedDocVehicles.map(({ vehicle, statuses, overall }) => renderVehicleCard({ vehicle, statuses, overall }))}
             </div>
-
-            <div className="bg-card rounded-2xl border border-border p-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[200px]">
-                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                  <input type="text" placeholder="Cari unit, jenis, devisi, milik, lokasi administrasi..." value={search}
-                    onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
-                </div>
-                <Select
-                  value={filterStatus}
-                  onChange={(v) => { setFilterStatus(v); setPage(1); }}
-                  options={[{ value: "Semua", label: "Semua Status" }, { value: "Aktif", label: "Aktif" }, { value: "Tidak Aktif", label: "Tidak Aktif" }]}
-                  className="w-40"
-                />
-              </div>
-            </div>
-
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/50">
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
-                      {COLUMNS.map((col) => (
-                        <th key={col.key} className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">{col.label}</th>
-                      ))}
-                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Status</th>
-                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-32">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/50">
-                    {loading ? <SkeletonTable rows={8} cols={8} /> : paged.length === 0 ? (
-                      <tr><td colSpan={8} className="text-center py-12 text-sm text-muted-foreground">
-                        {vehicles.length === 0 ? "Belum ada data mobil. Klik tombol Tambah Mobil untuk mulai." : "Tidak ada data yang cocok dengan filter."}
-                      </td></tr>
-                    ) : paged.map((row, idx) => (
-                      <tr key={row.id} className="hover:bg-muted/30">
-                        <td className="px-5 py-3 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                        {COLUMNS.map((col) => {
-                          const value = row[col.key] || "-";
-                          return (
-                            <td key={col.key} className="px-5 py-3 text-xs text-foreground max-w-[180px] truncate">
-                              {col.key === "unit" ? <span className="font-semibold">{value}</span> : <span className="text-muted-foreground">{value}</span>}
-                            </td>
-                          );
-                        })}
-                        <td className="px-5 py-3 text-center">
-                          <span className={cn("inline-flex items-center text-[10px] font-bold px-2 py-1 rounded-full", row.status === "Aktif" ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>{row.status}</span>
-                        </td>
-                        <td className="px-5 py-3">
-                          <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => setDetailVehicle(row)} title="Detail" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Eye className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => openDocumentModal(row)} title="Dokumen" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><FileText className="w-3.5 h-3.5" /></button>
-                            {canEdit && <button onClick={() => openEdit(row)} title="Edit" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>}
-                            {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, unit: row.unit })} title="Hapus" className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
-            </div>
-          </>
-        )}
-
-        {activeTab === "documents" && (
-          <>
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              {[
-                { label: "KIR Akan Habis", value: kirSoonCount, color: "text-warning" },
-                { label: "STNK Akan Habis", value: stnkSoonCount, color: "text-warning" },
-                { label: "Pajak Akan Habis", value: pajakSoonCount, color: "text-warning" },
-                { label: "Expired", value: expiredCount, color: "text-danger" },
-                { label: "Belum Lengkap", value: incompleteCount, color: "text-muted-foreground" },
-              ].map((item) => (
-                <div key={item.label} className="bg-card rounded-2xl border border-border p-4">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{item.label}</p>
-                  <p className={cn("text-xl font-bold mt-1", item.color)}>{item.value}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-card rounded-2xl border border-border p-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[220px]">
-                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                  <input type="text" placeholder="Cari unit, jenis, divisi, milik, lokasi administrasi..." value={docSearch}
-                    onChange={(e) => { setDocSearch(e.target.value); setDocPage(1); }}
-                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
-                </div>
-                <Select
-                  value={docTypeFilter}
-                  onChange={(v) => { setDocTypeFilter(v as StatusTarget | "Semua"); setDocPage(1); }}
-                  options={["Semua", "KIR", "STNK", "PAJAK"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Dokumen" : v }))}
-                  className="w-44"
-                />
-                <Select
-                  value={docStatusFilter}
-                  onChange={(v) => { setDocStatusFilter(v as DocumentStatus | "Semua"); setDocPage(1); }}
-                  options={["Semua", "Aktif", "Akan Habis", "Expired", "Belum Ada", "Tidak Wajib"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Status" : v }))}
-                  className="w-44"
-                />
-              </div>
-            </div>
-
-            <div className="bg-card rounded-2xl border border-border overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/50">
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Unit</th>
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Jenis</th>
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">KIR</th>
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">STNK</th>
-                      <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pajak</th>
-                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/50">
-                    {loading ? <SkeletonTable rows={8} cols={7} /> : pagedDocVehicles.length === 0 ? (
-                      <tr><td colSpan={7} className="text-center py-12 text-sm text-muted-foreground">Tidak ada data dokumen yang cocok.</td></tr>
-                    ) : pagedDocVehicles.map(({ vehicle, statuses }, idx) => (
-                      <tr key={vehicle.id} className="hover:bg-muted/30">
-                        <td className="px-5 py-3 text-xs text-muted-foreground">{(docPage - 1) * PAGE_SIZE + idx + 1}</td>
-                        <td className="px-5 py-3 text-xs font-semibold text-foreground whitespace-nowrap">{vehicle.unit}</td>
-                        <td className="px-5 py-3 text-xs text-muted-foreground max-w-[220px] truncate">{vehicle.jenis}</td>
-                        <td className="px-5 py-3"><DocumentTableStatus info={statuses.KIR} onClick={() => openDocumentModal(vehicle, "KIR")} /></td>
-                        <td className="px-5 py-3"><DocumentTableStatus info={statuses.STNK} onClick={() => openDocumentModal(vehicle, "STNK")} /></td>
-                        <td className="px-5 py-3"><DocumentTableStatus info={statuses.PAJAK} onClick={() => openDocumentModal(vehicle, "STNK")} /></td>
-                        <td className="px-5 py-3">
-                          <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => openDocumentModal(vehicle)} title="Kelola Dokumen" className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Settings2 className="w-3.5 h-3.5" /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Pagination currentPage={docPage} totalItems={filteredDocVehicles.length} pageSize={PAGE_SIZE} onPageChange={setDocPage} />
-            </div>
+            <Pagination currentPage={docPage} totalItems={filteredDocVehicles.length} pageSize={PAGE_SIZE} onPageChange={setDocPage} />
           </>
         )}
 
