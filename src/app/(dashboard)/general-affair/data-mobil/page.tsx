@@ -25,7 +25,7 @@ import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 50;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
