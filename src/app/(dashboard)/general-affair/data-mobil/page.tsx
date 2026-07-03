@@ -33,6 +33,7 @@ const COLUMNS = [
   { key: "jenis", label: "JENIS" },
   { key: "divisi", label: "DEVISI" },
   { key: "milik", label: "MILIK" },
+  { key: "lokasi_administrasi", label: "LOKASI ADMINISTRASI" },
 ] as const;
 
 const DETAIL_FIELDS = [
@@ -40,6 +41,7 @@ const DETAIL_FIELDS = [
   { key: "jenis", label: "JENIS" },
   { key: "divisi", label: "DEVISI" },
   { key: "milik", label: "MILIK" },
+  { key: "lokasi_administrasi", label: "LOKASI ADMINISTRASI" },
   { key: "no_rangka", label: "NO RANGKA" },
   { key: "nomer_mesin", label: "NOMER MESIN" },
   { key: "volume", label: "VOLUME" },
@@ -57,6 +59,7 @@ type FormState = {
   jenis: string;
   divisi: string;
   milik: string;
+  lokasi_administrasi: string;
   no_rangka: string;
   nomer_mesin: string;
   volume: string;
@@ -85,7 +88,7 @@ type StatusInfo = {
 
 const emptyForm: FormState = {
   unit: "", jenis: "", divisi: "", milik: "",
-  no_rangka: "", nomer_mesin: "", volume: "", tonase: "", suhu: "",
+  lokasi_administrasi: "", no_rangka: "", nomer_mesin: "", volume: "", tonase: "", suhu: "",
   kir_required: true, stnk_required: true, pajak_required: true,
 };
 
@@ -270,6 +273,7 @@ export default function DataMobilPage() {
       || v.jenis.toLowerCase().includes(q)
       || (v.divisi || "").toLowerCase().includes(q)
       || (v.milik || "").toLowerCase().includes(q)
+      || (v.lokasi_administrasi || "").toLowerCase().includes(q)
       || (v.no_rangka || "").toLowerCase().includes(q)
       || (v.nomer_mesin || "").toLowerCase().includes(q)
       || (v.volume || "").toLowerCase().includes(q)
@@ -310,7 +314,8 @@ export default function DataMobilPage() {
       || vehicle.unit.toLowerCase().includes(q)
       || vehicle.jenis.toLowerCase().includes(q)
       || (vehicle.divisi || "").toLowerCase().includes(q)
-      || (vehicle.milik || "").toLowerCase().includes(q);
+      || (vehicle.milik || "").toLowerCase().includes(q)
+      || (vehicle.lokasi_administrasi || "").toLowerCase().includes(q);
     const selectedStatuses = docTypeFilter === "Semua"
       ? Object.values(statuses)
       : [statuses[docTypeFilter]];
@@ -340,6 +345,7 @@ export default function DataMobilPage() {
       jenis: v.jenis,
       divisi: v.divisi || "",
       milik: v.milik || "",
+      lokasi_administrasi: v.lokasi_administrasi || "",
       no_rangka: v.no_rangka || "",
       nomer_mesin: v.nomer_mesin || "",
       volume: v.volume || "",
@@ -373,6 +379,7 @@ export default function DataMobilPage() {
       jenis: form.jenis.trim(),
       divisi: form.divisi.trim() || null,
       milik: form.milik.trim() || null,
+      lokasi_administrasi: form.lokasi_administrasi.trim() || null,
       no_rangka: form.no_rangka.trim() || null,
       nomer_mesin: form.nomer_mesin.trim() || null,
       volume: form.volume.trim() || null,
@@ -678,7 +685,7 @@ export default function DataMobilPage() {
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[200px]">
                   <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                  <input type="text" placeholder="Cari unit, jenis, devisi, milik..." value={search}
+                  <input type="text" placeholder="Cari unit, jenis, devisi, milik, lokasi administrasi..." value={search}
                     onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                     className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
                 </div>
@@ -705,8 +712,8 @@ export default function DataMobilPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/50">
-                    {loading ? <SkeletonTable rows={8} cols={7} /> : paged.length === 0 ? (
-                      <tr><td colSpan={7} className="text-center py-12 text-sm text-muted-foreground">
+                    {loading ? <SkeletonTable rows={8} cols={8} /> : paged.length === 0 ? (
+                      <tr><td colSpan={8} className="text-center py-12 text-sm text-muted-foreground">
                         {vehicles.length === 0 ? "Belum ada data mobil. Klik tombol Tambah Mobil untuk mulai." : "Tidak ada data yang cocok dengan filter."}
                       </td></tr>
                     ) : paged.map((row, idx) => (
@@ -762,7 +769,7 @@ export default function DataMobilPage() {
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[220px]">
                   <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                  <input type="text" placeholder="Cari unit, jenis, divisi, milik..." value={docSearch}
+                  <input type="text" placeholder="Cari unit, jenis, divisi, milik, lokasi administrasi..." value={docSearch}
                     onChange={(e) => { setDocSearch(e.target.value); setDocPage(1); }}
                     className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
                 </div>
@@ -854,6 +861,10 @@ export default function DataMobilPage() {
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">MILIK</label>
                       <input type="text" placeholder="Perusahaan / Rental / Pribadi" value={form.milik} onChange={(e) => setForm({ ...form, milik: e.target.value })} className={inputClass} />
                     </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">LOKASI ADMINISTRASI</label>
+                    <input type="text" placeholder="Lokasi penyimpanan/administrasi dokumen" value={form.lokasi_administrasi} onChange={(e) => setForm({ ...form, lokasi_administrasi: e.target.value })} className={inputClass} />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>

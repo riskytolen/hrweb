@@ -560,6 +560,7 @@ export interface DbGaVehicle {
   jenis: string;
   divisi: string | null;
   milik: string | null;
+  lokasi_administrasi: string | null;
   no_rangka: string | null;
   nomer_mesin: string | null;
   volume: string | null;
