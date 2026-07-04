@@ -28,6 +28,7 @@ import {
   LayoutDashboard,
   Briefcase,
   Truck,
+  HardDrive,
   type LucideIcon,
 } from "lucide-react";
 
@@ -126,6 +127,7 @@ const allSections: MenuSection[] = [
         basePath: "/settings",
         items: [
           { name: "Data Master", href: "/settings/master-data", icon: Database, permission: "settings" },
+          { name: "Penyimpanan", href: "/settings/storage-usage", icon: HardDrive },
           { name: "Keamanan", href: "/settings/security", icon: Shield, permission: "settings" },
           { name: "Riwayat Aksi", href: "/settings/audit-logs", icon: ShieldCheck },
           { name: "Manajemen Akun", href: "/settings/accounts", icon: UserCog },
@@ -157,6 +159,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             if (isLoading || !profile) return true;
             if (item.href === "/settings/accounts") return isSuperAdmin;
             if (item.href === "/settings/audit-logs") return isSuperAdmin;
+            if (item.href === "/settings/storage-usage") return isSuperAdmin;
             if (!item.permission) return true;
             return hasPermission(item.permission) || hasPermission(item.permission + ".view");
           });
