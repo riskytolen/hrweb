@@ -374,11 +374,11 @@ export default function DataMobilPage() {
     return matchSearch && matchStatus && matchOverall && matchVendor;
   });
 
-  const getVendorKey = (v: DbGaVehicle): string => v.vendor || "Tanpa Vendor";
+  const getVendorKey = (v: DbGaVehicle): string => (v.vendor || "Tanpa Vendor").trim();
 
   const vendorCounts = new Map<string, number>();
   for (const v of filteredDocVehicles) {
-    const key = getVendorKey(v.vehicle);
+    const key = getVendorKey(v.vehicle).toLowerCase();
     vendorCounts.set(key, (vendorCounts.get(key) || 0) + 1);
   }
 
