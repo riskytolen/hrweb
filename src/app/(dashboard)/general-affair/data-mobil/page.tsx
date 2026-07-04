@@ -237,7 +237,6 @@ export default function DataMobilPage() {
   const [docPage, setDocPage] = useState(1);
   const [docSearch, setDocSearch] = useState("");
   const [docStatusFilter, setDocStatusFilter] = useState<DocumentStatus | "Semua">("Semua");
-  const [docTypeFilter, setDocTypeFilter] = useState<StatusTarget | "Semua">("Semua");
   const [overallFilter, setOverallFilter] = useState<OverallDocumentStatus | "Semua">("Semua");
   const [vendorFilter, setVendorFilter] = useState("Semua");
   const [expandedVendors, setExpandedVendors] = useState<Set<string>>(new Set());
@@ -365,10 +364,7 @@ export default function DataMobilPage() {
       || (vehicle.divisi || "").toLowerCase().includes(q)
       || (vehicle.vendor || "").toLowerCase().includes(q)
       || (vehicle.lokasi_administrasi || "").toLowerCase().includes(q);
-    const selectedStatuses = docTypeFilter === "Semua"
-      ? Object.values(statuses)
-      : [statuses[docTypeFilter]];
-    const matchStatus = docStatusFilter === "Semua" || selectedStatuses.some((s) => s.key === docStatusFilter);
+    const matchStatus = docStatusFilter === "Semua" || Object.values(statuses).some((s) => s.key === docStatusFilter);
     const matchOverall = overallFilter === "Semua" || overall.key === overallFilter;
     const matchVendor = vendorFilter === "Semua" || (vehicle.vendor || "Tanpa Vendor") === vendorFilter;
     return matchSearch && matchStatus && matchOverall && matchVendor;
@@ -868,12 +864,6 @@ export default function DataMobilPage() {
                 onChange={(e) => { setDocSearch(e.target.value); setDocPage(1); }}
                 className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
             </div>
-            <Select
-              value={docTypeFilter}
-              onChange={(v) => { setDocTypeFilter(v as StatusTarget | "Semua"); setDocPage(1); }}
-              options={["Semua", "KIR", "STNK", "PAJAK"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Dokumen" : v }))}
-              className="w-44"
-            />
             <Select
               value={docStatusFilter}
               onChange={(v) => { setDocStatusFilter(v as DocumentStatus | "Semua"); setDocPage(1); }}
