@@ -46,23 +46,26 @@ export default function FaceRegisterPage() {
     errorTimerRef.current = setTimeout(() => setError(""), 5000);
   };
 
-  // ─── Validate token ───
+  // ─── Validate token via edge function ───
   useEffect(() => {
     if (!token) { setState("invalid"); return; }
     const validate = async () => {
-      const { data, error: fetchErr } = await supabase
-        .from("face_register_tokens")
-        .select("*, pegawai(nama)")
-        .eq("id", token)
-        .single();
-      if (fetchErr || !data) { setState("invalid"); return; }
-      if (new Date(data.expires_at) < new Date()) {
-        await supabase.from("face_register_tokens").update({ status: "expired" }).eq("id", token);
-        setState("expired"); return;
+      const { data, error: invokeErr } = await supabase.functions.invoke("register-face", {
+        body: { token },
+      });
+      if (invokeErr || !data) { setState("invalid"); return; }
+      if (!data.valid) {
+        if (data.reason === "expired") { setState("expired"); return; }
+        if (data.reason === "completed") { setState("completed"); return; }
+        setState("invalid"); return;
       }
-      if (data.status === "completed") { setState("completed"); return; }
-      if (data.status === "expired") { setState("expired"); return; }
-      setTokenData(data as TokenData);
+      setTokenData({
+        id: token,
+        employee_id: data.employee_id,
+        status: "active",
+        expires_at: "",
+        pegawai: data.employee_name ? { nama: data.employee_name } : null,
+      });
       setState("ready");
     };
     validate();
@@ -218,23 +221,16 @@ export default function FaceRegisterPage() {
       }
 
       const descriptor = Array.from(detection.descriptor);
-      const { error: dbErr } = await supabase
-        .from("employee_face_profiles")
-        .upsert({
-          employee_id: tokenData!.employee_id,
-          face_data_ref: JSON.stringify(descriptor),
-          status: "Aktif",
-          enrolled_at: new Date().toISOString(),
-        }, { onConflict: "employee_id" });
+      const { data: result, error: invokeErr } = await supabase.functions.invoke("register-face", {
+        body: { token, face_descriptor: descriptor },
+      });
 
-      if (dbErr) {
+      if (invokeErr || !result?.success) {
         showError("Gagal menyimpan data wajah. Silakan coba lagi.");
         setState("capturing");
         setTimeout(() => startWebcam(), 200);
         return;
       }
-
-      await supabase.from("face_register_tokens").update({ status: "completed" }).eq("id", token);
       setState("success");
     } catch (err) {
       showError("Terjadi kesalahan. Silakan coba lagi.");
