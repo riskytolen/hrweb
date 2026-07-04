@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Shield } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 
@@ -47,14 +48,20 @@ function LoadingSkeleton() {
  */
 export default function RouteGuard({ permission, children }: RouteGuardProps) {
   const { hasPermission, isLoading, user } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push("/login");
+    }
+  }, [isLoading, user, router]);
 
   // Saat auth masih loading, tampilkan skeleton
   if (isLoading) {
     return <LoadingSkeleton />;
   }
 
-  // Jika user sudah null (sedang logout / belum login),
-  // tampilkan skeleton saja — middleware akan redirect ke /login
+  // Jika user null (belum login), redirect ke /login
   if (!user) {
     return <LoadingSkeleton />;
   }
