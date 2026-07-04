@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { Shield } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 
@@ -48,13 +47,12 @@ function LoadingSkeleton() {
  */
 export default function RouteGuard({ permission, children }: RouteGuardProps) {
   const { hasPermission, isLoading, user } = useAuth();
-  const router = useRouter();
 
   useEffect(() => {
     if (!isLoading && !user) {
-      router.push("/login");
+      window.location.assign("/login");
     }
-  }, [isLoading, user, router]);
+  }, [isLoading, user]);
 
   // Saat auth masih loading, tampilkan skeleton
   if (isLoading) {

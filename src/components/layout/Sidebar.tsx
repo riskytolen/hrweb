@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -243,7 +242,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             collapsed ? "justify-center px-2" : "px-3 gap-2",
           )}
         >
-          <Link
+          <a
             href="/employees"
             className={cn(
               "flex items-center gap-2.5 min-w-0",
@@ -260,7 +259,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 <p className="text-[9px] font-medium text-blue-300/60 uppercase tracking-[0.18em]">HRM System</p>
               </div>
             )}
-          </Link>
+          </a>
 
           {!collapsed && (
             <button
@@ -298,7 +297,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     const LinkIcon = entry.icon;
                     return (
                       <div key={entry.key} className="relative group/trigger">
-                        <Link
+                        <a
                           href={entry.href}
                           className={cn(
                             "w-full flex items-center rounded-lg transition-colors",
@@ -336,7 +335,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                           {!collapsed && isActive && (
                             <span className="w-1 h-1 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex-shrink-0" />
                           )}
-                        </Link>
+                        </a>
 
                         {collapsed && (
                           <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-md shadow-xl ring-1 ring-white/10 opacity-0 invisible group-hover/trigger:opacity-100 group-hover/trigger:visible whitespace-nowrap z-50 transition-opacity">
@@ -447,7 +446,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                                   {isActive && (
                                     <span className="absolute -left-[15px] top-1/2 -translate-y-1/2 h-[18px] w-[2px] rounded-r-full bg-gradient-to-b from-blue-400 to-cyan-400" />
                                   )}
-                                  <Link
+                                  <a
                                     href={item.href}
                                     className={cn(
                                       "flex items-center gap-2 px-2 py-[7px] rounded-md text-[12px] transition-colors",
@@ -464,7 +463,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                                       strokeWidth={2}
                                     />
                                     <span className="truncate">{item.name}</span>
-                                  </Link>
+                                  </a>
                                 </li>
                               );
                             })}

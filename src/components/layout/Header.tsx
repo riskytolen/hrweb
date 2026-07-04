@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+
 import {
   Bell,
   Search,
@@ -44,7 +44,6 @@ const notifications = [
 ];
 
 export default function Header({ onMenuToggle }: HeaderProps) {
-  const router = useRouter();
   const [showNotif, setShowNotif] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -78,8 +77,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
     setIsLoggingOut(true);
     setShowProfile(false);
     await signOut();
-    router.push("/login");
-    router.refresh();
+    window.location.assign("/login");
   };
 
   return (

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
   Eye,
@@ -16,7 +15,6 @@ import {
 import { createClient } from "@/lib/supabase-browser";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [supabase] = useState(() => createClient());
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -71,8 +69,7 @@ export default function LoginPage() {
       }
 
       // 3. Success → redirect
-      router.push("/dashboard");
-      router.refresh();
+      window.location.assign("/dashboard");
     } catch {
       setError("Terjadi kesalahan. Silakan coba lagi.");
       setIsLoading(false);
