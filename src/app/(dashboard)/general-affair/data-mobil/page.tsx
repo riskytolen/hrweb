@@ -376,9 +376,18 @@ export default function DataMobilPage() {
 
   const getVendorKey = (v: DbGaVehicle): string => v.vendor || "Tanpa Vendor";
 
+  const vendorCounts = new Map<string, number>();
+  for (const v of filteredDocVehicles) {
+    const key = getVendorKey(v.vehicle);
+    vendorCounts.set(key, (vendorCounts.get(key) || 0) + 1);
+  }
+
   const sortedDocVehicles = [...filteredDocVehicles].sort((a, b) => {
     const va = getVendorKey(a.vehicle).toLowerCase();
     const vb = getVendorKey(b.vehicle).toLowerCase();
+    const ca = -(vendorCounts.get(va) || 0);
+    const cb = -(vendorCounts.get(vb) || 0);
+    if (ca !== cb) return ca - cb;
     if (va !== vb) return va.localeCompare(vb);
     return overallPriority[a.overall.key] - overallPriority[b.overall.key];
   });
