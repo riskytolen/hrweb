@@ -5,7 +5,7 @@ import {
   Truck, Plus, Search, Pencil, Trash2, X, Check, Eye,
   CircleCheckBig, AlertTriangle, FileText, Upload, Download,
   ExternalLink, Image as ImageIcon, Settings2,
-  Building2, ChevronDown,
+  Building2, ChevronDown, FileDown,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -211,6 +211,11 @@ function formatFileSize(size?: number | null): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function localDateStr(date?: Date): string {
+  const d = date || new Date();
+  return d.toISOString().slice(0, 10);
+}
+
 function DocumentStatusBadge({ info, onClick }: { info: StatusInfo; onClick?: () => void }) {
   const content = (
     <>
@@ -264,6 +269,7 @@ export default function DataMobilPage() {
   const [documentError, setDocumentError] = useState("");
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [previewMedia, setPreviewMedia] = useState<{ url: string; label: string; mimeType?: string | null } | null>(null);
+  const [pdfExporting, setPdfExporting] = useState(false);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -423,6 +429,133 @@ export default function DataMobilPage() {
   useEffect(() => {
     setExpandedVendors(new Set(vendorGroups.map((g) => g.vendorKey)));
   }, [vendorGroups]);
+
+  const handleExportPdf = async () => {
+    if (filteredDocVehicles.length === 0) {
+      showToast("error", "Tidak Ada Data", "Tidak ada kendaraan yang cocok dengan filter saat ini.");
+      return;
+    }
+    setPdfExporting(true);
+    try {
+      const { default: jsPDF } = await import("jspdf");
+      const { default: autoTable } = await import("jspdf-autotable");
+
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      doc.setFontSize(18);
+      doc.text("Laporan Data Kendaraan", 14, 15);
+      doc.setFontSize(9);
+      doc.setTextColor(100);
+      doc.text(
+        `General Affair - ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}`,
+        14, 22
+      );
+      doc.text(`${filteredDocVehicles.length} kendaraan`, pageWidth - 14, 22, { align: "right" });
+
+      const expiredSoon = filteredDocVehicles.filter((r) => r.overall.key === "Expired" || r.overall.key === "Akan Habis").length;
+      const attn = filteredDocVehicles.filter((r) => r.overall.key === "Perlu Diperhatikan" || r.overall.key === "Belum Lengkap").length;
+      const safe = filteredDocVehicles.filter((r) => r.overall.key === "Aman").length;
+      const vendorCount = new Set(filteredDocVehicles.map((r) => getVendorKey(r.vehicle))).size;
+
+      doc.setDrawColor(200);
+      doc.setFillColor(245, 247, 250);
+      doc.roundedRect(14, 27, pageWidth - 28, 10, 2, 2, "FD");
+      doc.setFontSize(8);
+      doc.setTextColor(60);
+      let sx = 19;
+      doc.text(`Total: ${filteredDocVehicles.length}`, sx, 34);
+      sx += 38;
+      if (expiredSoon > 0) { doc.setTextColor(220, 38, 38); doc.text(`Kritis: ${expiredSoon}`, sx, 34); sx += 42; }
+      if (attn > 0) { doc.setTextColor(245, 158, 11); doc.text(`Perhatian: ${attn}`, sx, 34); sx += 50; }
+      if (safe > 0) { doc.setTextColor(34, 197, 94); doc.text(`Aman: ${safe}`, sx, 34); sx += 42; }
+      doc.setTextColor(100); doc.text(`Vendor: ${vendorCount}`, sx, 34);
+
+      let filterParts: string[] = [];
+      if (docSearch) filterParts.push(`Cari: "${docSearch}"`);
+      if (divisionFilter !== "Semua") filterParts.push(`Divisi: ${divisionFilter}`);
+      if (overallFilter !== "Semua") filterParts.push(`Status: ${overallFilter}`);
+      if (vendorFilter !== "Semua") filterParts.push(`Vendor: ${vendorFilter}`);
+      if (filterParts.length > 0) {
+        doc.setTextColor(120);
+        doc.setFontSize(7);
+        doc.text(`Filter: ${filterParts.join(" | ")}`, 14, 41);
+      }
+
+      const exportGroups = new Map<string, typeof filteredDocVehicles>();
+      for (const row of filteredDocVehicles) {
+        const key = getVendorKey(row.vehicle);
+        if (!exportGroups.has(key)) exportGroups.set(key, []);
+        exportGroups.get(key)!.push(row);
+      }
+      const sortedExportGroups = [...exportGroups.entries()].sort((a, b) => {
+        if (a[1].length !== b[1].length) return b[1].length - a[1].length;
+        return a[0].toLowerCase().localeCompare(b[0].toLowerCase());
+      });
+
+      const pdfHeaders = ["No", "Unit", "Jenis", "Divisi", "Lokasi Administrasi", "Status Unit", "Status Kendaraan", "KIR", "Pajak", "STNK"];
+      let startY = 46;
+
+      for (const [vendorKey, rows] of sortedExportGroups) {
+        const stats = getVendorStats(rows);
+        doc.setFontSize(9);
+        doc.setTextColor(59, 130, 246);
+        doc.setFont("helvetica", "bold");
+        doc.text(`${vendorKey === "Tanpa Vendor" ? "Tanpa Vendor" : vendorKey} — ${stats.total} kendaraan`, 14, startY + 4);
+        doc.setFontSize(7);
+        doc.setTextColor(100);
+        doc.setFont("helvetica", "normal");
+        const extras: string[] = [];
+        if (stats.expiredSoon > 0) extras.push(`Kritis: ${stats.expiredSoon}`);
+        if (stats.attention > 0) extras.push(`Perhatian: ${stats.attention}`);
+        if (stats.safe > 0) extras.push(`Aman: ${stats.safe}`);
+        if (extras.length > 0) doc.text(extras.join(" | "), 90, startY + 4);
+
+        const sortedRows = [...rows].sort((a, b) => overallPriority[a.overall.key] - overallPriority[b.overall.key]);
+
+        const pdfRows = sortedRows.map((row, i) => [
+          String(i + 1),
+          row.vehicle.unit,
+          row.vehicle.jenis,
+          row.vehicle.divisi || "-",
+          row.vehicle.lokasi_administrasi || "-",
+          row.vehicle.status || "Aktif",
+          row.overall.label,
+          row.statuses.KIR.label,
+          row.statuses.PAJAK.label,
+          row.statuses.STNK.label,
+        ]);
+
+        startY += 6;
+        autoTable(doc, {
+          head: [pdfHeaders],
+          body: pdfRows,
+          startY,
+          styles: { fontSize: 7, cellPadding: 2 },
+          headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold", fontSize: 7 },
+          alternateRowStyles: { fillColor: [245, 247, 250] },
+          margin: { left: 14, right: 14 },
+        });
+        startY = (doc as any).lastAutoTable.finalY + 8;
+      }
+
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7);
+        doc.setTextColor(150);
+        doc.text(`Halaman ${i} dari ${pageCount}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 8, { align: "right" });
+        doc.text("HRM System - General Affair", 14, doc.internal.pageSize.getHeight() - 8);
+      }
+
+      doc.save(`data_mobil_${localDateStr()}.pdf`);
+      showToast("success", "Export Berhasil", `${filteredDocVehicles.length} kendaraan berhasil diexport ke PDF.`);
+    } catch (err) {
+      showToast("error", "Gagal Export PDF", err instanceof Error ? err.message : "Terjadi kesalahan.");
+    } finally {
+      setPdfExporting(false);
+    }
+  };
 
   const makeEmptyForm = (): FormState => ({
     ...emptyForm,
@@ -817,7 +950,10 @@ export default function DataMobilPage() {
           title="Kendaraan Aktif"
           description="Pantau masa berlaku KIR, STNK, dan Pajak setiap kendaraan"
           icon={Truck}
-          actions={canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Mobil</Button> : undefined}
+          actions={<div className="flex items-center gap-2">
+            <Button icon={FileDown} variant="outline" size="sm" onClick={handleExportPdf} disabled={pdfExporting}>{pdfExporting ? "Mengexport..." : "Export PDF"}</Button>
+            {canInput && <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Mobil</Button>}
+          </div>}
         />
 
         {toast.show && (
