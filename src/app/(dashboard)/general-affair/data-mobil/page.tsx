@@ -5,6 +5,7 @@ import {
   Truck, Plus, Search, Pencil, Trash2, X, Check, Eye,
   CircleCheckBig, AlertTriangle, FileText, Upload, Download,
   ExternalLink, Image as ImageIcon, Settings2,
+  Building2, ChevronDown,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -187,6 +188,10 @@ function getOverallDocumentStatus(statuses: Record<StatusTarget, StatusInfo>): O
   return { key: "Aman", label: "Aman", detail: "Semua dokumen masih berlaku" };
 }
 
+const overallPriority: Record<OverallDocumentStatus, number> = {
+  Expired: 0, "Akan Habis": 1, "Belum Lengkap": 2, "Perlu Diperhatikan": 3, Aman: 4, "Tidak Wajib": 5,
+};
+
 function getDocumentDayText(info: StatusInfo): { value: string; label: string } {
   if (info.key === "Tidak Wajib") return { value: "-", label: "Opsional" };
   if (!info.date) return { value: "!", label: "Belum ada" };
@@ -234,6 +239,8 @@ export default function DataMobilPage() {
   const [docStatusFilter, setDocStatusFilter] = useState<DocumentStatus | "Semua">("Semua");
   const [docTypeFilter, setDocTypeFilter] = useState<StatusTarget | "Semua">("Semua");
   const [overallFilter, setOverallFilter] = useState<OverallDocumentStatus | "Semua">("Semua");
+  const [vendorFilter, setVendorFilter] = useState("Semua");
+  const [expandedVendors, setExpandedVendors] = useState<Set<string>>(new Set());
 
   const [vehicles, setVehicles] = useState<DbGaVehicle[]>([]);
   const [documents, setDocuments] = useState<DbGaVehicleDocument[]>([]);
@@ -363,10 +370,54 @@ export default function DataMobilPage() {
       : [statuses[docTypeFilter]];
     const matchStatus = docStatusFilter === "Semua" || selectedStatuses.some((s) => s.key === docStatusFilter);
     const matchOverall = overallFilter === "Semua" || overall.key === overallFilter;
-    return matchSearch && matchStatus && matchOverall;
+    const matchVendor = vendorFilter === "Semua" || (vehicle.vendor || "Tanpa Vendor") === vendorFilter;
+    return matchSearch && matchStatus && matchOverall && matchVendor;
   });
 
-  const pagedDocVehicles = filteredDocVehicles.slice((docPage - 1) * PAGE_SIZE, docPage * PAGE_SIZE);
+  const getVendorKey = (v: DbGaVehicle): string => v.vendor || "Tanpa Vendor";
+
+  const sortedDocVehicles = [...filteredDocVehicles].sort((a, b) => {
+    const va = getVendorKey(a.vehicle).toLowerCase();
+    const vb = getVendorKey(b.vehicle).toLowerCase();
+    if (va !== vb) return va.localeCompare(vb);
+    return overallPriority[a.overall.key] - overallPriority[b.overall.key];
+  });
+
+  const pagedDocVehicles = sortedDocVehicles.slice((docPage - 1) * PAGE_SIZE, docPage * PAGE_SIZE);
+
+  const vendorGroups: { vendorKey: string; rows: typeof pagedDocVehicles }[] = [];
+  const vendorGroupMap = new Map<string, typeof pagedDocVehicles>();
+  for (const row of pagedDocVehicles) {
+    const key = getVendorKey(row.vehicle);
+    if (!vendorGroupMap.has(key)) vendorGroupMap.set(key, []);
+    vendorGroupMap.get(key)!.push(row);
+  }
+  for (const [vendorKey, rows] of vendorGroupMap) {
+    vendorGroups.push({ vendorKey, rows });
+  }
+
+  const toggleVendorGroup = (key: string) => {
+    setExpandedVendors((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const getVendorStats = (rows: typeof pagedDocVehicles) => {
+    let expiredSoon = 0, attention = 0, safe = 0;
+    for (const r of rows) {
+      if (r.overall.key === "Expired" || r.overall.key === "Akan Habis") expiredSoon++;
+      else if (r.overall.key === "Perlu Diperhatikan" || r.overall.key === "Belum Lengkap") attention++;
+      else safe++;
+    }
+    return { total: rows.length, expiredSoon, attention, safe };
+  };
+
+  useEffect(() => {
+    setExpandedVendors(new Set(vendorGroups.map((g) => g.vendorKey)));
+  }, [vendorGroups]);
 
   const makeEmptyForm = (): FormState => ({
     ...emptyForm,
@@ -826,6 +877,12 @@ export default function DataMobilPage() {
               options={["Semua", "Aman", "Perlu Diperhatikan", "Akan Habis", "Expired", "Belum Lengkap", "Tidak Wajib"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Kendaraan" : v }))}
               className="w-44"
             />
+            <Select
+              value={vendorFilter}
+              onChange={(v) => { setVendorFilter(v); setDocPage(1); setExpandedVendors(new Set()); }}
+              options={["Semua", ...new Set(vehicleStatusRows.map((r) => r.vehicle.vendor || "Tanpa Vendor"))].map((v) => ({ value: v, label: v === "Semua" ? "Semua Vendor" : v }))}
+              className="w-44"
+            />
           </div>
         </div>
 
@@ -848,12 +905,45 @@ export default function DataMobilPage() {
             <p className="text-xs text-muted-foreground mt-1">{vehicles.length === 0 ? "Klik tombol Tambah Mobil untuk mulai." : "Coba ubah filter atau kata kunci pencarian."}</p>
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {pagedDocVehicles.map(({ vehicle, statuses, overall }) => renderVehicleCard({ vehicle, statuses, overall }))}
-            </div>
+          <div className="space-y-4">
+            {vendorGroups.map(({ vendorKey, rows }) => {
+              const stats = getVendorStats(rows);
+              const isExpanded = expandedVendors.has(vendorKey);
+              return (
+                <div key={vendorKey} className="bg-card rounded-3xl border border-border overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => toggleVendorGroup(vendorKey)}
+                    className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-muted/30 transition-colors text-left"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                      <Building2 className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-black text-foreground truncate">{vendorKey === "Tanpa Vendor" ? "Tanpa Vendor" : vendorKey}</p>
+                      <p className="text-[10px] text-muted-foreground">{stats.total} kendaraan</p>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-2.5">
+                      {stats.expiredSoon > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 px-2.5 py-1 text-[10px] font-bold text-danger"><AlertTriangle className="w-3 h-3" />{stats.expiredSoon} {stats.expiredSoon > 1 ? "Kritis" : "Kritis"}</span>}
+                      {stats.attention > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2.5 py-1 text-[10px] font-bold text-warning"><AlertTriangle className="w-3 h-3" />{stats.attention} Perhatian</span>}
+                      {stats.safe > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-1 text-[10px] font-bold text-success"><CircleCheckBig className="w-3 h-3" />{stats.safe} Aman</span>}
+                    </div>
+                    <div className="shrink-0 text-muted-foreground">
+                      <ChevronDown className={cn("w-4 h-4 transition-transform", isExpanded && "rotate-180")} />
+                    </div>
+                  </button>
+                  {isExpanded && (
+                    <div className="border-t border-border p-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {rows.map(({ vehicle, statuses, overall }) => renderVehicleCard({ vehicle, statuses, overall }))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             <Pagination currentPage={docPage} totalItems={filteredDocVehicles.length} pageSize={PAGE_SIZE} onPageChange={setDocPage} />
-          </>
+          </div>
         )}
 
         {showForm && (
