@@ -463,47 +463,77 @@ export default function DataMobilPage() {
       const { default: autoTable } = await import("jspdf-autotable");
 
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-      const pageWidth = doc.internal.pageSize.getWidth();
+      const pw = doc.internal.pageSize.getWidth();
+      const ph = doc.internal.pageSize.getHeight();
 
-      doc.setFontSize(18);
-      doc.text("Laporan Data Kendaraan", 14, 15);
-      doc.setFontSize(9);
+      // ═══════════════ HEADER ═══════════════
+      doc.setFillColor(59, 130, 246);
+      doc.rect(14, 10, pw - 28, 1.5, "F");
+
+      doc.setFontSize(22);
+      doc.setTextColor(30);
+      doc.setFont("helvetica", "bold");
+      doc.text("Laporan Data Kendaraan", 14, 22);
+
+      doc.setFontSize(10);
       doc.setTextColor(100);
+      doc.setFont("helvetica", "normal");
       doc.text(
-        `General Affair - ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}`,
-        14, 22
+        `General Affair — ${new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`,
+        14, 30
       );
-      doc.text(`${filteredDocVehicles.length} kendaraan`, pageWidth - 14, 22, { align: "right" });
+      doc.text(`${filteredDocVehicles.length} kendaraan`, pw - 14, 22, { align: "right" });
 
-      const expiredSoon = filteredDocVehicles.filter((r) => r.overall.key === "Expired" || r.overall.key === "Akan Habis").length;
-      const attn = filteredDocVehicles.filter((r) => r.overall.key === "Perlu Diperhatikan" || r.overall.key === "Belum Lengkap").length;
-      const safe = filteredDocVehicles.filter((r) => r.overall.key === "Aman").length;
-      const vendorCount = new Set(filteredDocVehicles.map((r) => getVendorKey(r.vehicle))).size;
+      // ═══════════════ SUMMARY CARDS ═══════════════
+      const expCount = filteredDocVehicles.filter((r) => r.overall.key === "Expired" || r.overall.key === "Akan Habis").length;
+      const attnCount = filteredDocVehicles.filter((r) => r.overall.key === "Perlu Diperhatikan" || r.overall.key === "Belum Lengkap").length;
+      const safeCountPdf = filteredDocVehicles.filter((r) => r.overall.key === "Aman").length;
+      const vendorCountPdf = new Set(filteredDocVehicles.map((r) => getVendorKey(r.vehicle))).size;
 
-      doc.setDrawColor(200);
-      doc.setFillColor(245, 247, 250);
-      doc.roundedRect(14, 27, pageWidth - 28, 10, 2, 2, "FD");
-      doc.setFontSize(8);
-      doc.setTextColor(60);
-      let sx = 19;
-      doc.text(`Total: ${filteredDocVehicles.length}`, sx, 34);
-      sx += 38;
-      if (expiredSoon > 0) { doc.setTextColor(220, 38, 38); doc.text(`Kritis: ${expiredSoon}`, sx, 34); sx += 42; }
-      if (attn > 0) { doc.setTextColor(245, 158, 11); doc.text(`Perhatian: ${attn}`, sx, 34); sx += 50; }
-      if (safe > 0) { doc.setTextColor(34, 197, 94); doc.text(`Aman: ${safe}`, sx, 34); sx += 42; }
-      doc.setTextColor(100); doc.text(`Vendor: ${vendorCount}`, sx, 34);
+      const cardItems = [
+        { label: "Total Kendaraan", value: String(filteredDocVehicles.length), tc: [59, 130, 246], bg: [235, 245, 255] },
+        { label: "Vendor", value: String(vendorCountPdf), tc: [80, 80, 80], bg: [245, 247, 250] },
+        { label: "Kritis", value: String(expCount), tc: [220, 38, 38], bg: [255, 240, 240] },
+        { label: "Perhatian", value: String(attnCount), tc: [245, 158, 11], bg: [255, 250, 235] },
+        { label: "Aman", value: String(safeCountPdf), tc: [34, 197, 94], bg: [235, 255, 240] },
+      ];
 
-      let filterParts: string[] = [];
-      if (docSearch) filterParts.push(`Cari: "${docSearch}"`);
-      if (divisionFilter !== "Semua") filterParts.push(`Divisi: ${divisionFilter}`);
-      if (overallFilter !== "Semua") filterParts.push(`Status: ${overallFilter}`);
-      if (vendorFilter !== "Semua") filterParts.push(`Vendor: ${vendorFilter}`);
-      if (filterParts.length > 0) {
-        doc.setTextColor(120);
+      const cardW = (pw - 28 - 12) / 5;
+      const cardY = 36;
+      cardItems.forEach((c, i) => {
+        const x = 14 + i * (cardW + 3);
+        doc.setFillColor(c.bg[0], c.bg[1], c.bg[2]);
+        doc.setDrawColor(210);
+        doc.roundedRect(x, cardY, cardW, 14, 2, 2, "FD");
         doc.setFontSize(7);
-        doc.text(`Filter: ${filterParts.join(" | ")}`, 14, 41);
+        doc.setTextColor(100);
+        doc.setFont("helvetica", "normal");
+        doc.text(c.label, x + 3, cardY + 5);
+        doc.setFontSize(13);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(c.tc[0], c.tc[1], c.tc[2]);
+        doc.text(c.value, x + 3, cardY + 12);
+      });
+
+      // ═══════════════ FILTER CHIPS ═══════════════
+      let cursorY = cardY + 20;
+      const filterChips: string[] = [];
+      if (docSearch) filterChips.push(`Search: "${docSearch}"`);
+      if (divisionFilter !== "Semua") filterChips.push(`Divisi: ${divisionFilter}`);
+      if (overallFilter !== "Semua") filterChips.push(`Status: ${overallFilter}`);
+      if (vendorFilter !== "Semua") filterChips.push(`Vendor: ${vendorFilter}`);
+      if (filterChips.length > 0) {
+        doc.setFillColor(245, 247, 250);
+        doc.setDrawColor(210);
+        doc.roundedRect(14, cursorY, pw - 28, 7, 2, 2, "FD");
+        doc.setFontSize(7);
+        doc.setTextColor(90);
+        doc.setFont("helvetica", "normal");
+        doc.text(filterChips.join("    "), 18, cursorY + 4.5);
+        cursorY += 11;
       }
 
+      // ═══════════════ PER-VENDOR TABLE ═══════════════
       const exportGroups = new Map<string, typeof filteredDocVehicles>();
       for (const row of filteredDocVehicles) {
         const key = getVendorKey(row.vehicle);
@@ -516,25 +546,38 @@ export default function DataMobilPage() {
       });
 
       const pdfHeaders = ["No", "Unit", "Jenis", "Divisi", "Lokasi Administrasi", "Status Unit", "Status Kendaraan", "KIR", "STNK", "Pajak"];
-      const pdfColWidths = [7, 28, 22, 18, 22, 14, 20, 38, 38, 38];
-      let startY = 46;
+      const pdfColWidths = [7, 30, 22, 20, 25, 14, 20, 42, 42, 42];
 
       for (const [vendorKey, rows] of sortedExportGroups) {
         const stats = getVendorStats(rows);
-        doc.setFontSize(9);
-        doc.setTextColor(59, 130, 246);
-        doc.setFont("helvetica", "bold");
-        doc.text(`${vendorKey === "Tanpa Vendor" ? "Tanpa Vendor" : vendorKey} — ${stats.total} kendaraan`, 14, startY + 4);
-        doc.setFontSize(7);
-        doc.setTextColor(100);
-        doc.setFont("helvetica", "normal");
-        const extras: string[] = [];
-        if (stats.expiredSoon > 0) extras.push(`Kritis: ${stats.expiredSoon}`);
-        if (stats.attention > 0) extras.push(`Perhatian: ${stats.attention}`);
-        if (stats.safe > 0) extras.push(`Aman: ${stats.safe}`);
-        if (extras.length > 0) doc.text(extras.join(" | "), 90, startY + 4);
-
         const sortedRows = [...rows].sort((a, b) => overallPriority[a.overall.key] - overallPriority[b.overall.key]);
+
+        // Page-break check: if less than 40mm left, start new page
+        if (cursorY > ph - 40) {
+          doc.addPage();
+          cursorY = 18;
+        }
+
+        // Vendor header bar
+        doc.setFillColor(235, 245, 255);
+        doc.setDrawColor(200);
+        doc.roundedRect(14, cursorY, pw - 28, 9, 2, 2, "FD");
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(59, 130, 246);
+        doc.text(vendorKey === "Tanpa Vendor" ? "Tanpa Vendor" : vendorKey, 18, cursorY + 6);
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100);
+        const extraParts: string[] = [];
+        if (stats.expiredSoon > 0) extraParts.push(`${stats.expiredSoon} kritis`);
+        if (stats.attention > 0) extraParts.push(`${stats.attention} perhatian`);
+        if (stats.safe > 0) extraParts.push(`${stats.safe} aman`);
+        doc.text(
+          `${stats.total} kendaraan${extraParts.length > 0 ? ` — ${extraParts.join(", ")}` : ""}`,
+          65, cursorY + 6
+        );
+        cursorY += 12;
 
         const pdfRows = sortedRows.map((row, i) => {
           const kirDoc = getCurrentDocument(row.vehicle.id, "KIR");
@@ -553,11 +596,10 @@ export default function DataMobilPage() {
           ];
         });
 
-        startY += 6;
         autoTable(doc, {
           head: [pdfHeaders],
           body: pdfRows,
-          startY,
+          startY: cursorY,
           columnStyles: {
             0: { cellWidth: pdfColWidths[0] },
             1: { cellWidth: pdfColWidths[1] },
@@ -570,21 +612,48 @@ export default function DataMobilPage() {
             8: { cellWidth: pdfColWidths[8] },
             9: { cellWidth: pdfColWidths[9] },
           },
-          styles: { fontSize: 6.5, cellPadding: 1.5, valign: "top" },
-          headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold", fontSize: 6.5 },
-          alternateRowStyles: { fillColor: [245, 247, 250] },
-          margin: { left: 14, right: 14 },
+          styles: {
+            fontSize: 6.5,
+            cellPadding: 1.5,
+            valign: "top",
+            lineColor: [220, 220, 220],
+            lineWidth: 0.1,
+          },
+          headStyles: {
+            fillColor: [59, 130, 246],
+            textColor: 255,
+            fontStyle: "bold",
+            fontSize: 6.5,
+          },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+          margin: { left: 14, right: 14, bottom: 14 },
+          didParseCell(data) {
+            if (data.section === "body" && [6, 7, 8, 9].includes(data.column.index)) {
+              const text = String(data.cell.raw || "");
+              if (text.startsWith("Expired") || text.startsWith("Akan Habis")) {
+                data.cell.styles.textColor = [220, 38, 38];
+                if (data.column.index === 6) data.cell.styles.fontStyle = "bold";
+              } else if (text.startsWith("Belum") || text.startsWith("Perlu")) {
+                data.cell.styles.textColor = [245, 158, 11];
+              } else if (text.startsWith("Aman") || text.startsWith("Aktif")) {
+                data.cell.styles.textColor = [34, 197, 94];
+              }
+            }
+          },
         });
-        startY = (doc as any).lastAutoTable.finalY + 8;
+        cursorY = (doc as any).lastAutoTable.finalY + 8;
       }
 
+      // ═══════════════ FOOTER (all pages) ═══════════════
       const pageCount = doc.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
+        doc.setDrawColor(200);
+        doc.line(14, ph - 12, pw - 14, ph - 12);
         doc.setFontSize(7);
         doc.setTextColor(150);
-        doc.text(`Halaman ${i} dari ${pageCount}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 8, { align: "right" });
-        doc.text("HRM System - General Affair", 14, doc.internal.pageSize.getHeight() - 8);
+        doc.text("HRM System — General Affair", 14, ph - 6);
+        doc.text(`Halaman ${i} dari ${pageCount}`, pw - 14, ph - 6, { align: "right" });
       }
 
       doc.save(`data_mobil_${localDateStr()}.pdf`);
