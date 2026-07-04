@@ -663,8 +663,8 @@ export default function DataMobilPage() {
         return a[0].toLowerCase().localeCompare(b[0].toLowerCase());
       });
 
-      const pdfHeaders = ["No", "Unit", "Jenis", "Divisi", "Lokasi", "No Rangka", "No Mesin", "Volume", "Tonase", "Suhu", "Status Unit", "KIR", "STNK", "Pajak"];
-      const pdfColWidths = [7, 28, 18, 16, 20, 28, 28, 12, 12, 14, 12, 12, 12, 12];
+      const pdfHeaders = ["No", "Unit", "Jenis", "Divisi", "No Rangka", "No Mesin", "Volume", "Tonase", "Suhu", "Status Unit", "KIR", "STNK", "Pajak"];
+      const pdfColWidths = [7, 30, 20, 18, 30, 30, 14, 14, 16, 14, 14, 14, 14];
       let cursorY = baseCursor;
 
       for (const [vendorKey, rows] of sortedExportGroups) {
@@ -688,7 +688,6 @@ export default function DataMobilPage() {
           row.vehicle.unit,
           row.vehicle.jenis,
           row.vehicle.divisi || "-",
-          row.vehicle.lokasi_administrasi || "-",
           row.vehicle.no_rangka || "-",
           row.vehicle.nomer_mesin || "-",
           row.vehicle.volume || "-",
