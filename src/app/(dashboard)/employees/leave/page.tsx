@@ -59,6 +59,12 @@ function formatTanggal(d: string): string {
   return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
 }
 
+function formatTanggalWaktu(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }) +
+    ", " + d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+}
+
 function countDaysInYear(start: string, end: string, year: number): number {
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
@@ -709,6 +715,7 @@ export default function LeavePage() {
               <tr className="border-b border-border bg-muted/50">
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Pegawai</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-36">Waktu Pengajuan</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Jenis</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Periode</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">Hari</th>
@@ -719,8 +726,8 @@ export default function LeavePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={5} cols={9} /> : paged.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-10 text-sm text-muted-foreground">Tidak ada pengajuan</td></tr>
+              {loading ? <SkeletonTable rows={5} cols={10} /> : paged.length === 0 ? (
+                <tr><td colSpan={10} className="text-center py-10 text-sm text-muted-foreground">Tidak ada pengajuan</td></tr>
               ) : paged.map((row, idx) => {
                 const jc = JENIS_OPTIONS.find((j) => j.value === row.jenis);
                 const sc = STATUS_OPTIONS.find((s) => s.value === row.status);
@@ -737,6 +744,9 @@ export default function LeavePage() {
                           </span>
                         )}
                       </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
+                      {formatTanggalWaktu(row.created_at)}
                     </td>
                     <td className="px-5 py-3.5 text-center">
                       <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${jc?.color}20`, color: jc?.color }}>{row.jenis}</span>
