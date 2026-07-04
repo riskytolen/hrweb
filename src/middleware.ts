@@ -29,14 +29,6 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // IMPORTANT: Do not write any logic between createServerClient and
-  // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   const { pathname } = request.nextUrl;
 
   // Halaman publik (tidak perlu login)
@@ -44,18 +36,27 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse;
   }
 
-  // Jika user belum login dan bukan di halaman login -> redirect ke login
-  if (!user && pathname !== "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
-  }
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  // Jika user sudah login dan di halaman login -> redirect ke dashboard
-  if (user && pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/employees";
-    return NextResponse.redirect(url);
+    // Jika user belum login dan bukan di halaman login -> redirect ke login
+    if (!user && pathname !== "/login") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      return NextResponse.redirect(url);
+    }
+
+    // Jika user sudah login dan di halaman login -> redirect ke dashboard
+    if (user && pathname === "/login") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/employees";
+      return NextResponse.redirect(url);
+    }
+  } catch {
+    // Supabase unreachable — allow request through without auth redirect.
+    // Prevents Worker crash (Error 1101) when Supabase is temporarily down.
   }
 
   return supabaseResponse;
@@ -63,13 +64,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public files (images, etc.)
-     */
-    "/((?!_next/static|_next/image|favicon.ico|models/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|json)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|js|css|json)$).*)",
   ],
 };
