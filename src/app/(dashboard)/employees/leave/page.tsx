@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   CalendarDays, Plus, Search, Check, X, Clock, Pencil, Trash2,
   CircleCheckBig, AlertTriangle, ChevronDown, Download, FileText,
-  Upload, Image, ExternalLink,
+  Upload, Image, ExternalLink, BarChart3, RefreshCw,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -24,6 +24,15 @@ type EmployeeLite = { id: string; nama: string; tanggal_bergabung?: string };
 
 type LeaveRow = DbLeaveRequest & { employeeNama?: string };
 type LeaveSetting = { kuota_cuti_tahunan: number; maks_hari_per_pengajuan: number; prorata: boolean };
+type ReportRow = {
+  employee_id: string;
+  nama: string;
+  tanggal_bergabung: string | null;
+  kuota: number;
+  approved: number;
+  pending: number;
+  sisa: number;
+};
 
 const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -48,6 +57,15 @@ function countDays(start: string, end: string): number {
 
 function formatTanggal(d: string): string {
   return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function countDaysInYear(start: string, end: string, year: number): number {
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  const s = start < yearStart ? yearStart : start;
+  const e = end > yearEnd ? yearEnd : end;
+  if (s > e) return 0;
+  return countDays(s, e);
 }
 
 export default function LeavePage() {
@@ -97,6 +115,15 @@ export default function LeavePage() {
     toastTimer.current = setTimeout(() => setToast({ show: false, title: "", message: "", type: "success" }), 3500);
   }, []);
   useEffect(() => { return () => { if (toastTimer.current) clearTimeout(toastTimer.current); }; }, []);
+
+  // ─── Report ───
+  const [showReport, setShowReport] = useState(false);
+  const [reportYear, setReportYear] = useState(String(new Date().getFullYear()));
+  const [reportSearch, setReportSearch] = useState("");
+  const [reportFilter, setReportFilter] = useState("Semua");
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportEmployees, setReportEmployees] = useState<EmployeeLite[]>([]);
+  const [reportData, setReportData] = useState<ReportRow[]>([]);
 
   useEffect(() => {
     if (showForm) document.body.style.overflow = "hidden";
@@ -481,6 +508,113 @@ export default function LeavePage() {
   const formDays = form.tanggal_mulai && form.tanggal_selesai && form.tanggal_selesai >= form.tanggal_mulai
     ? countDays(form.tanggal_mulai, form.tanggal_selesai) : 0;
 
+  // ─── Report ───
+  const getKuotaForYear = (empId: string, year: number): number => {
+    if (!leaveSetting) return 0;
+    const emp = reportEmployees.find(e => e.id === empId);
+    if (!emp?.tanggal_bergabung || !leaveSetting.prorata) return leaveSetting.kuota_cuti_tahunan;
+    const gabung = new Date(emp.tanggal_bergabung + "T00:00:00");
+    if (gabung.getFullYear() < year) return leaveSetting.kuota_cuti_tahunan;
+    if (gabung.getFullYear() > year) return 0;
+    const sisaBulan = 12 - gabung.getMonth();
+    return Math.ceil((leaveSetting.kuota_cuti_tahunan / 12) * sisaBulan);
+  };
+
+  const generateReportData = useCallback(async () => {
+    setReportLoading(true);
+    const year = parseInt(reportYear) || new Date().getFullYear();
+
+    // Fetch all employees
+    const { data: allEmp } = await supabase
+      .from("pegawai")
+      .select("id, nama, tanggal_bergabung")
+      .order("nama");
+    const empList = allEmp || [];
+    setReportEmployees(empList);
+
+    // Fetch all approved + pending leave of type "Cuti" for the year
+    const yearStart = `${year}-01-01`;
+    const yearEnd = `${year}-12-31`;
+    const { data: leaves } = await supabase
+      .from("leave_requests")
+      .select("employee_id, jenis, tanggal_mulai, tanggal_selesai, status")
+      .eq("jenis", "Cuti")
+      .lte("tanggal_mulai", yearEnd)
+      .gte("tanggal_selesai", yearStart);
+
+    const leaveMap = new Map<string, { approved: number; pending: number }>();
+    leaves?.forEach((l) => {
+      const days = countDaysInYear(l.tanggal_mulai, l.tanggal_selesai, year);
+      if (days === 0) return;
+      if (!leaveMap.has(l.employee_id)) leaveMap.set(l.employee_id, { approved: 0, pending: 0 });
+      const entry = leaveMap.get(l.employee_id)!;
+      if (l.status === "Menunggu") entry.pending += days;
+      else if (l.status === "Disetujui") entry.approved += days;
+    });
+
+    const rows: ReportRow[] = empList.map((emp) => {
+      const l = leaveMap.get(emp.id);
+      const approved = l?.approved || 0;
+      const pending = l?.pending || 0;
+      const kuota = getKuotaForYear(emp.id, year);
+      return {
+        employee_id: emp.id,
+        nama: emp.nama,
+        tanggal_bergabung: emp.tanggal_bergabung || null,
+        kuota,
+        approved,
+        pending,
+        sisa: kuota - approved,
+      };
+    });
+
+    setReportData(rows);
+    setReportLoading(false);
+  }, [reportYear, leaveSetting]);
+
+  const openReport = () => {
+    setReportYear(String(new Date().getFullYear()));
+    setReportSearch("");
+    setReportFilter("Semua");
+    setShowReport(true);
+    // Fetch data will be triggered by useEffect on showReport
+    setTimeout(() => generateReportData(), 0);
+  };
+
+  const exportReportCsv = () => {
+    const rows = visibleReportRows;
+    if (rows.length === 0) return;
+    const year = reportYear;
+    const header = "No,Nama Pegawai,Tanggal Bergabung,Kuota (hari),Disetujui (hari),Pending (hari),Sisa (hari),Status";
+    const body = rows.map((r, i) => {
+      const status = r.sisa <= 0 ? "Habis" : r.sisa <= 3 ? "Menipis" : "Aman";
+      return `${i + 1},"${r.nama}",${r.tanggal_bergabung || "-"},${r.kuota},${r.approved},${r.pending},${r.sisa},${status}`;
+    }).join("\n");
+    const bom = "\uFEFF";
+    const blob = new Blob([bom + header + "\n" + body], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `laporan-sisa-cuti-${year}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("success", "Export Berhasil", `Laporan sisa cuti ${year} (${rows.length} pegawai)`);
+  };
+
+  const visibleReportRows = reportData.filter((r) => {
+    const q = reportSearch.toLowerCase();
+    const matchSearch = r.nama.toLowerCase().includes(q);
+    const sisaStatus = r.sisa <= 0 ? "Habis" : r.sisa <= 3 ? "Menipis" : "Aman";
+    const matchFilter = reportFilter === "Semua" || sisaStatus === reportFilter;
+    return matchSearch && matchFilter;
+  });
+
+  const statusSisa = (sisa: number): { label: string; color: string } => {
+    if (sisa <= 0) return { label: "Habis", color: "#ef4444" };
+    if (sisa <= 3) return { label: "Menipis", color: "#f59e0b" };
+    return { label: "Aman", color: "#10b981" };
+  };
+
   return (
     <RouteGuard permission="leave">
     <div className="space-y-6 animate-fade-in">
@@ -488,7 +622,7 @@ export default function LeavePage() {
         title="Cuti & Izin"
         description="Kelola pengajuan cuti, izin, dan sakit pegawai"
         icon={CalendarDays}
-        actions={canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Ajukan</Button> : undefined}
+        actions={<div className="flex items-center gap-2">{canInput ? <Button icon={Plus} size="sm" onClick={openAdd}>Ajukan</Button> : undefined}<Button variant="outline" size="sm" icon={BarChart3} onClick={openReport}>Laporan</Button></div>}
       />
 
       {/* Toast */}
@@ -972,6 +1106,125 @@ export default function LeavePage() {
                 <Button variant="danger" size="sm" icon={Trash2} className="flex-1" onClick={handleDelete} disabled={deleting}>
                   {deleting ? "Menghapus..." : "Hapus"}
                 </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ LAPORAN KUOTA CUTI ═══ */}
+      {showReport && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowReport(false)} />
+            <div className="relative w-full max-w-4xl bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+              {/* Header */}
+              <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent flex-shrink-0">
+                <button onClick={() => setShowReport(false)} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/20">
+                    <BarChart3 className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Laporan Sisa Cuti {reportYear}</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">Ringkasan kuota dan sisa cuti per pegawai</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div className="px-6 py-3 border-b border-border flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[200px]">
+                  <Search className="w-3.5 h-3.5 text-muted-foreground" />
+                  <input type="text" placeholder="Cari pegawai..." value={reportSearch} onChange={(e) => setReportSearch(e.target.value)}
+                    className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
+                </div>
+                <select value={reportYear} onChange={(e) => { setReportYear(e.target.value); setTimeout(() => generateReportData(), 0); }}
+                  className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none text-foreground">
+                  {Array.from({ length: 10 }, (_, i) => {
+                    const y = new Date().getFullYear() - 1 + i;
+                    return <option key={y} value={y}>{y}</option>;
+                  })}
+                </select>
+                <select value={reportFilter} onChange={(e) => setReportFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-xs outline-none text-foreground">
+                  <option value="Semua">Semua Status</option>
+                  <option value="Aman">Aman</option>
+                  <option value="Menipis">Menipis</option>
+                  <option value="Habis">Habis</option>
+                </select>
+                <Button variant="outline" size="sm" icon={RefreshCw} onClick={generateReportData} disabled={reportLoading}>
+                  {reportLoading ? "Memuat..." : "Muat Ulang"}
+                </Button>
+                <Button variant="outline" size="sm" icon={Download} onClick={exportReportCsv} disabled={visibleReportRows.length === 0 || reportLoading}>
+                  Export CSV
+                </Button>
+              </div>
+
+              {/* Summary */}
+              {!reportLoading && reportData.length > 0 && (
+                <div className="px-6 py-3 border-b border-border bg-muted/20">
+                  <div className="flex items-center gap-4 text-xs flex-wrap">
+                    <span className="text-muted-foreground">Total Pegawai: <span className="font-bold text-foreground">{reportData.length}</span></span>
+                    <span className="text-muted-foreground">Total Kuota: <span className="font-bold text-foreground">{reportData.reduce((s, r) => s + r.kuota, 0)} hari</span></span>
+                    <span className="text-muted-foreground">Disetujui: <span className="font-bold text-success">{reportData.reduce((s, r) => s + r.approved, 0)} hari</span></span>
+                    <span className="text-muted-foreground">Pending: <span className="font-bold text-warning">{reportData.reduce((s, r) => s + r.pending, 0)} hari</span></span>
+                    <span className="text-muted-foreground">Sisa: <span className="font-bold text-primary">{reportData.reduce((s, r) => s + Math.max(0, r.sisa), 0)} hari</span></span>
+                    <span className="text-muted-foreground">Habis: <span className="font-bold text-danger">{reportData.filter((r) => r.sisa <= 0).length} pegawai</span></span>
+                  </div>
+                </div>
+              )}
+
+              {/* Table */}
+              <div className="flex-1 overflow-y-auto">
+                {reportLoading ? (
+                  <div className="p-10 text-center text-sm text-muted-foreground">Memuat data...</div>
+                ) : visibleReportRows.length === 0 ? (
+                  <div className="p-10 text-center text-sm text-muted-foreground">Tidak ada data</div>
+                ) : (
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/50 sticky top-0">
+                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-10">#</th>
+                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Pegawai</th>
+                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-28">Bergabung</th>
+                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Kuota</th>
+                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Disetujui</th>
+                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Pending</th>
+                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-20">Sisa</th>
+                        <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3 w-24">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/50">
+                      {visibleReportRows.map((r, idx) => {
+                        const ss = statusSisa(r.sisa);
+                        return (
+                          <tr key={r.employee_id} className="hover:bg-muted/30">
+                            <td className="px-5 py-3 text-xs text-muted-foreground">{idx + 1}</td>
+                            <td className="px-5 py-3">
+                              <p className="text-sm font-semibold text-foreground">{r.nama}</p>
+                            </td>
+                            <td className="px-5 py-3 text-center text-xs text-muted-foreground">
+                              {r.tanggal_bergabung ? formatTanggal(r.tanggal_bergabung) : "-"}
+                            </td>
+                            <td className="px-5 py-3 text-center text-sm font-semibold text-foreground">{r.kuota}</td>
+                            <td className="px-5 py-3 text-center text-sm font-semibold text-success">{r.approved}</td>
+                            <td className="px-5 py-3 text-center text-sm font-semibold text-warning">{r.pending}</td>
+                            <td className="px-5 py-3 text-center text-sm font-semibold" style={{ color: ss.color }}>{r.sisa}</td>
+                            <td className="px-5 py-3 text-center">
+                              <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: `${ss.color}20`, color: ss.color }}>{ss.label}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
+                <Button size="sm" variant="outline" onClick={() => setShowReport(false)}>Tutup</Button>
               </div>
             </div>
           </div>
