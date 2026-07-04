@@ -549,10 +549,7 @@ export default function DataMobilPage() {
             row.overall.label,
             pdfDocCellContent("KIR", row.statuses.KIR, kirDoc),
             pdfDocCellContent("STNK", row.statuses.STNK, stnkDoc),
-            pdfDocCellContent("Pajak", row.statuses.PAJAK, stnkDoc, stnkDoc
-              ? [{ label: "Jatuh Tempo", date: stnkDoc.pajak_expired_date }]
-              : [{ label: "Jatuh Tempo", date: null }]
-            ),
+            `${row.statuses.PAJAK.label}\nTanggal Pajak: ${formatTanggal(stnkDoc?.pajak_expired_date)}`,
           ];
         });
 
