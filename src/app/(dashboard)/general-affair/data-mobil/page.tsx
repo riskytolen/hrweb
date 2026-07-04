@@ -291,6 +291,8 @@ export default function DataMobilPage() {
   const [documentError, setDocumentError] = useState("");
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [previewMedia, setPreviewMedia] = useState<{ url: string; label: string; mimeType?: string | null } | null>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   const [pdfExporting, setPdfExporting] = useState(false);
 
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
@@ -303,6 +305,16 @@ export default function DataMobilPage() {
   }, []);
 
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   useEffect(() => {
     if (showForm || detailVehicle || deleteConfirm || docModalVehicle || previewMedia) document.body.style.overflow = "hidden";
@@ -452,7 +464,73 @@ export default function DataMobilPage() {
     setExpandedVendors(new Set(vendorGroups.map((g) => g.vendorKey)));
   }, [vendorGroups]);
 
-  const handleExportPdf = async () => {
+  const renderPdfBase = async (doc: any, isVehicleData: boolean) => {
+    const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
+    // ═══════════════ HEADER ═══════════════
+    doc.setFillColor(59, 130, 246);
+    doc.rect(14, 10, pw - 28, 1.5, "F");
+    doc.setFontSize(22);
+    doc.setTextColor(30);
+    doc.setFont("helvetica", "bold");
+    doc.text(isVehicleData ? "Data Kendaraan" : "Laporan Data Kendaraan", 14, 22);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.setFont("helvetica", "normal");
+    doc.text(
+      `General Affair — ${new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`,
+      14, 30
+    );
+    doc.text(`${filteredDocVehicles.length} kendaraan`, pw - 14, 22, { align: "right" });
+    // ═══════════════ SUMMARY CARDS ═══════════════
+    const expCount = filteredDocVehicles.filter((r) => r.overall.key === "Expired" || r.overall.key === "Akan Habis").length;
+    const attnCount = filteredDocVehicles.filter((r) => r.overall.key === "Perlu Diperhatikan" || r.overall.key === "Belum Lengkap").length;
+    const safeCountPdf = filteredDocVehicles.filter((r) => r.overall.key === "Aman").length;
+    const vendorCountPdf = new Set(filteredDocVehicles.map((r) => getVendorKey(r.vehicle))).size;
+    const cardItems = [
+      { label: "Total Kendaraan", value: String(filteredDocVehicles.length), tc: [59, 130, 246], bg: [235, 245, 255] },
+      { label: "Vendor", value: String(vendorCountPdf), tc: [80, 80, 80], bg: [245, 247, 250] },
+      { label: "Kritis", value: String(expCount), tc: [220, 38, 38], bg: [255, 240, 240] },
+      { label: "Perhatian", value: String(attnCount), tc: [245, 158, 11], bg: [255, 250, 235] },
+      { label: "Aman", value: String(safeCountPdf), tc: [34, 197, 94], bg: [235, 255, 240] },
+    ];
+    const cardW = (pw - 28 - 12) / 5;
+    const cardY = 36;
+    cardItems.forEach((c, i) => {
+      const x = 14 + i * (cardW + 3);
+      doc.setFillColor(c.bg[0], c.bg[1], c.bg[2]);
+      doc.setDrawColor(210);
+      doc.roundedRect(x, cardY, cardW, 14, 2, 2, "FD");
+      doc.setFontSize(7);
+      doc.setTextColor(100);
+      doc.setFont("helvetica", "normal");
+      doc.text(c.label, x + 3, cardY + 5);
+      doc.setFontSize(13);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(c.tc[0], c.tc[1], c.tc[2]);
+      doc.text(c.value, x + 3, cardY + 12);
+    });
+    // ═══════════════ FILTER CHIPS ═══════════════
+    let cursorY = cardY + 20;
+    const filterChips: string[] = [];
+    if (docSearch) filterChips.push(`Search: "${docSearch}"`);
+    if (divisionFilter !== "Semua") filterChips.push(`Divisi: ${divisionFilter}`);
+    if (overallFilter !== "Semua") filterChips.push(`Status: ${overallFilter}`);
+    if (vendorFilter !== "Semua") filterChips.push(`Vendor: ${vendorFilter}`);
+    if (filterChips.length > 0) {
+      doc.setFillColor(245, 247, 250);
+      doc.setDrawColor(210);
+      doc.roundedRect(14, cursorY, pw - 28, 7, 2, 2, "FD");
+      doc.setFontSize(7);
+      doc.setTextColor(90);
+      doc.setFont("helvetica", "normal");
+      doc.text(filterChips.join("    "), 18, cursorY + 4.5);
+      cursorY += 11;
+    }
+    return { pw, ph, cursorY };
+  };
+
+  const handleExportDocumentPdf = async () => {
     if (filteredDocVehicles.length === 0) {
       showToast("error", "Tidak Ada Data", "Tidak ada kendaraan yang cocok dengan filter saat ini.");
       return;
@@ -461,79 +539,9 @@ export default function DataMobilPage() {
     try {
       const { default: jsPDF } = await import("jspdf");
       const { default: autoTable } = await import("jspdf-autotable");
-
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-      const pw = doc.internal.pageSize.getWidth();
-      const ph = doc.internal.pageSize.getHeight();
+      const { pw, ph, cursorY: baseCursor } = await renderPdfBase(doc, false);
 
-      // ═══════════════ HEADER ═══════════════
-      doc.setFillColor(59, 130, 246);
-      doc.rect(14, 10, pw - 28, 1.5, "F");
-
-      doc.setFontSize(22);
-      doc.setTextColor(30);
-      doc.setFont("helvetica", "bold");
-      doc.text("Laporan Data Kendaraan", 14, 22);
-
-      doc.setFontSize(10);
-      doc.setTextColor(100);
-      doc.setFont("helvetica", "normal");
-      doc.text(
-        `General Affair — ${new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`,
-        14, 30
-      );
-      doc.text(`${filteredDocVehicles.length} kendaraan`, pw - 14, 22, { align: "right" });
-
-      // ═══════════════ SUMMARY CARDS ═══════════════
-      const expCount = filteredDocVehicles.filter((r) => r.overall.key === "Expired" || r.overall.key === "Akan Habis").length;
-      const attnCount = filteredDocVehicles.filter((r) => r.overall.key === "Perlu Diperhatikan" || r.overall.key === "Belum Lengkap").length;
-      const safeCountPdf = filteredDocVehicles.filter((r) => r.overall.key === "Aman").length;
-      const vendorCountPdf = new Set(filteredDocVehicles.map((r) => getVendorKey(r.vehicle))).size;
-
-      const cardItems = [
-        { label: "Total Kendaraan", value: String(filteredDocVehicles.length), tc: [59, 130, 246], bg: [235, 245, 255] },
-        { label: "Vendor", value: String(vendorCountPdf), tc: [80, 80, 80], bg: [245, 247, 250] },
-        { label: "Kritis", value: String(expCount), tc: [220, 38, 38], bg: [255, 240, 240] },
-        { label: "Perhatian", value: String(attnCount), tc: [245, 158, 11], bg: [255, 250, 235] },
-        { label: "Aman", value: String(safeCountPdf), tc: [34, 197, 94], bg: [235, 255, 240] },
-      ];
-
-      const cardW = (pw - 28 - 12) / 5;
-      const cardY = 36;
-      cardItems.forEach((c, i) => {
-        const x = 14 + i * (cardW + 3);
-        doc.setFillColor(c.bg[0], c.bg[1], c.bg[2]);
-        doc.setDrawColor(210);
-        doc.roundedRect(x, cardY, cardW, 14, 2, 2, "FD");
-        doc.setFontSize(7);
-        doc.setTextColor(100);
-        doc.setFont("helvetica", "normal");
-        doc.text(c.label, x + 3, cardY + 5);
-        doc.setFontSize(13);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(c.tc[0], c.tc[1], c.tc[2]);
-        doc.text(c.value, x + 3, cardY + 12);
-      });
-
-      // ═══════════════ FILTER CHIPS ═══════════════
-      let cursorY = cardY + 20;
-      const filterChips: string[] = [];
-      if (docSearch) filterChips.push(`Search: "${docSearch}"`);
-      if (divisionFilter !== "Semua") filterChips.push(`Divisi: ${divisionFilter}`);
-      if (overallFilter !== "Semua") filterChips.push(`Status: ${overallFilter}`);
-      if (vendorFilter !== "Semua") filterChips.push(`Vendor: ${vendorFilter}`);
-      if (filterChips.length > 0) {
-        doc.setFillColor(245, 247, 250);
-        doc.setDrawColor(210);
-        doc.roundedRect(14, cursorY, pw - 28, 7, 2, 2, "FD");
-        doc.setFontSize(7);
-        doc.setTextColor(90);
-        doc.setFont("helvetica", "normal");
-        doc.text(filterChips.join("    "), 18, cursorY + 4.5);
-        cursorY += 11;
-      }
-
-      // ═══════════════ PER-VENDOR TABLE ═══════════════
       const exportGroups = new Map<string, typeof filteredDocVehicles>();
       for (const row of filteredDocVehicles) {
         const key = getVendorKey(row.vehicle);
@@ -547,18 +555,12 @@ export default function DataMobilPage() {
 
       const pdfHeaders = ["No", "Unit", "Jenis", "Divisi", "Lokasi Administrasi", "Status Unit", "Status Kendaraan", "KIR", "STNK", "Pajak"];
       const pdfColWidths = [7, 30, 22, 20, 25, 14, 20, 42, 42, 42];
+      let cursorY = baseCursor;
 
       for (const [vendorKey, rows] of sortedExportGroups) {
         const stats = getVendorStats(rows);
         const sortedRows = [...rows].sort((a, b) => overallPriority[a.overall.key] - overallPriority[b.overall.key]);
-
-        // Page-break check: if less than 40mm left, start new page
-        if (cursorY > ph - 40) {
-          doc.addPage();
-          cursorY = 18;
-        }
-
-        // Vendor header bar
+        if (cursorY > ph - 40) { doc.addPage(); cursorY = 18; }
         doc.setFillColor(235, 245, 255);
         doc.setDrawColor(200);
         doc.roundedRect(14, cursorY, pw - 28, 9, 2, 2, "FD");
@@ -573,10 +575,7 @@ export default function DataMobilPage() {
         if (stats.expiredSoon > 0) extraParts.push(`${stats.expiredSoon} kritis`);
         if (stats.attention > 0) extraParts.push(`${stats.attention} perhatian`);
         if (stats.safe > 0) extraParts.push(`${stats.safe} aman`);
-        doc.text(
-          `${stats.total} kendaraan${extraParts.length > 0 ? ` — ${extraParts.join(", ")}` : ""}`,
-          65, cursorY + 6
-        );
+        doc.text(`${stats.total} kendaraan${extraParts.length > 0 ? ` — ${extraParts.join(", ")}` : ""}`, 65, cursorY + 6);
         cursorY += 12;
 
         const pdfRows = sortedRows.map((row, i) => {
@@ -600,31 +599,9 @@ export default function DataMobilPage() {
           head: [pdfHeaders],
           body: pdfRows,
           startY: cursorY,
-          columnStyles: {
-            0: { cellWidth: pdfColWidths[0] },
-            1: { cellWidth: pdfColWidths[1] },
-            2: { cellWidth: pdfColWidths[2] },
-            3: { cellWidth: pdfColWidths[3] },
-            4: { cellWidth: pdfColWidths[4] },
-            5: { cellWidth: pdfColWidths[5] },
-            6: { cellWidth: pdfColWidths[6] },
-            7: { cellWidth: pdfColWidths[7] },
-            8: { cellWidth: pdfColWidths[8] },
-            9: { cellWidth: pdfColWidths[9] },
-          },
-          styles: {
-            fontSize: 6.5,
-            cellPadding: 1.5,
-            valign: "top",
-            lineColor: [220, 220, 220],
-            lineWidth: 0.1,
-          },
-          headStyles: {
-            fillColor: [59, 130, 246],
-            textColor: 255,
-            fontStyle: "bold",
-            fontSize: 6.5,
-          },
+          columnStyles: Object.fromEntries(pdfColWidths.map((w, i) => [i, { cellWidth: w }])),
+          styles: { fontSize: 6.5, cellPadding: 1.5, valign: "top", lineColor: [220, 220, 220], lineWidth: 0.1 },
+          headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold", fontSize: 6.5 },
           alternateRowStyles: { fillColor: [248, 250, 252] },
           margin: { left: 14, right: 14, bottom: 14 },
           didParseCell(data) {
@@ -644,7 +621,6 @@ export default function DataMobilPage() {
         cursorY = (doc as any).lastAutoTable.finalY + 8;
       }
 
-      // ═══════════════ FOOTER (all pages) ═══════════════
       const pageCount = doc.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
@@ -655,8 +631,99 @@ export default function DataMobilPage() {
         doc.text("HRM System — General Affair", 14, ph - 6);
         doc.text(`Halaman ${i} dari ${pageCount}`, pw - 14, ph - 6, { align: "right" });
       }
+      doc.save(`dokumen_kendaraan_${localDateStr()}.pdf`);
+      showToast("success", "Export Berhasil", `${filteredDocVehicles.length} kendaraan berhasil diexport ke PDF.`);
+    } catch (err) {
+      showToast("error", "Gagal Export PDF", err instanceof Error ? err.message : "Terjadi kesalahan.");
+    } finally {
+      setPdfExporting(false);
+    }
+  };
 
-      doc.save(`data_mobil_${localDateStr()}.pdf`);
+  const handleExportVehiclePdf = async () => {
+    if (filteredDocVehicles.length === 0) {
+      showToast("error", "Tidak Ada Data", "Tidak ada kendaraan yang cocok dengan filter saat ini.");
+      return;
+    }
+    setPdfExporting(true);
+    try {
+      const { default: jsPDF } = await import("jspdf");
+      const { default: autoTable } = await import("jspdf-autotable");
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const { pw, ph, cursorY: baseCursor } = await renderPdfBase(doc, true);
+
+      const exportGroups = new Map<string, typeof filteredDocVehicles>();
+      for (const row of filteredDocVehicles) {
+        const key = getVendorKey(row.vehicle);
+        if (!exportGroups.has(key)) exportGroups.set(key, []);
+        exportGroups.get(key)!.push(row);
+      }
+      const sortedExportGroups = [...exportGroups.entries()].sort((a, b) => {
+        if (a[1].length !== b[1].length) return b[1].length - a[1].length;
+        return a[0].toLowerCase().localeCompare(b[0].toLowerCase());
+      });
+
+      const pdfHeaders = ["No", "Unit", "Jenis", "Divisi", "Lokasi", "No Rangka", "No Mesin", "Volume", "Tonase", "Suhu", "Status Unit", "KIR", "STNK", "Pajak"];
+      const pdfColWidths = [7, 28, 18, 16, 20, 28, 28, 12, 12, 14, 12, 12, 12, 12];
+      let cursorY = baseCursor;
+
+      for (const [vendorKey, rows] of sortedExportGroups) {
+        const sortedRows = [...rows].sort((a, b) => overallPriority[a.overall.key] - overallPriority[b.overall.key]);
+        if (cursorY > ph - 40) { doc.addPage(); cursorY = 18; }
+        doc.setFillColor(235, 245, 255);
+        doc.setDrawColor(200);
+        doc.roundedRect(14, cursorY, pw - 28, 9, 2, 2, "FD");
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(59, 130, 246);
+        doc.text(vendorKey === "Tanpa Vendor" ? "Tanpa Vendor" : vendorKey, 18, cursorY + 6);
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100);
+        doc.text(`${sortedRows.length} kendaraan`, 65, cursorY + 6);
+        cursorY += 12;
+
+        const pdfRows = sortedRows.map((row, i) => [
+          String(i + 1),
+          row.vehicle.unit,
+          row.vehicle.jenis,
+          row.vehicle.divisi || "-",
+          row.vehicle.lokasi_administrasi || "-",
+          row.vehicle.no_rangka || "-",
+          row.vehicle.nomer_mesin || "-",
+          row.vehicle.volume || "-",
+          row.vehicle.tonase || "-",
+          row.vehicle.suhu || "-",
+          row.vehicle.status || "Aktif",
+          row.vehicle.kir_required ? "Wajib" : "-",
+          row.vehicle.stnk_required ? "Wajib" : "-",
+          row.vehicle.pajak_required ? "Wajib" : "-",
+        ]);
+
+        autoTable(doc, {
+          head: [pdfHeaders],
+          body: pdfRows,
+          startY: cursorY,
+          columnStyles: Object.fromEntries(pdfColWidths.map((w, i) => [i, { cellWidth: w }])),
+          styles: { fontSize: 6.5, cellPadding: 1.5, valign: "middle", lineColor: [220, 220, 220], lineWidth: 0.1 },
+          headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold", fontSize: 6.5 },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+          margin: { left: 14, right: 14, bottom: 14 },
+        });
+        cursorY = (doc as any).lastAutoTable.finalY + 8;
+      }
+
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setDrawColor(200);
+        doc.line(14, ph - 12, pw - 14, ph - 12);
+        doc.setFontSize(7);
+        doc.setTextColor(150);
+        doc.text("HRM System — General Affair", 14, ph - 6);
+        doc.text(`Halaman ${i} dari ${pageCount}`, pw - 14, ph - 6, { align: "right" });
+      }
+      doc.save(`data_kendaraan_${localDateStr()}.pdf`);
       showToast("success", "Export Berhasil", `${filteredDocVehicles.length} kendaraan berhasil diexport ke PDF.`);
     } catch (err) {
       showToast("error", "Gagal Export PDF", err instanceof Error ? err.message : "Terjadi kesalahan.");
@@ -1059,7 +1126,34 @@ export default function DataMobilPage() {
           description="Pantau masa berlaku KIR, STNK, dan Pajak setiap kendaraan"
           icon={Truck}
           actions={<div className="flex items-center gap-2">
-            <Button icon={FileDown} variant="outline" size="sm" onClick={handleExportPdf} disabled={pdfExporting}>{pdfExporting ? "Mengexport..." : "Export PDF"}</Button>
+            <div ref={exportMenuRef} className="relative">
+              <Button icon={FileDown} variant="outline" size="sm" onClick={() => setShowExportMenu((p) => !p)} disabled={pdfExporting}>Export</Button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-2xl shadow-xl overflow-hidden min-w-[220px] animate-fade-in">
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleExportDocumentPdf(); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-muted/50 transition-colors text-left"
+                  >
+                    <FileText className="w-4 h-4 text-primary" />
+                    <div>
+                      <p className="font-semibold">Dokumen Kendaraan</p>
+                      <p className="text-[10px] text-muted-foreground font-normal">KIR, STNK, Pajak, status dokumen</p>
+                    </div>
+                  </button>
+                  <div className="border-t border-border" />
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleExportVehiclePdf(); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-foreground hover:bg-muted/50 transition-colors text-left"
+                  >
+                    <Truck className="w-4 h-4 text-primary" />
+                    <div>
+                      <p className="font-semibold">Data Kendaraan</p>
+                      <p className="text-[10px] text-muted-foreground font-normal">Rangka, mesin, volume, tonase, suhu</p>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
             {canInput && <Button icon={Plus} size="sm" onClick={openAdd}>Tambah Mobil</Button>}
           </div>}
         />
