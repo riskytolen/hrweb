@@ -236,7 +236,7 @@ export default function DataMobilPage() {
   const [loading, setLoading] = useState(true);
   const [docPage, setDocPage] = useState(1);
   const [docSearch, setDocSearch] = useState("");
-  const [docStatusFilter, setDocStatusFilter] = useState<DocumentStatus | "Semua">("Semua");
+  const [divisionFilter, setDivisionFilter] = useState("Semua");
   const [overallFilter, setOverallFilter] = useState<OverallDocumentStatus | "Semua">("Semua");
   const [vendorFilter, setVendorFilter] = useState("Semua");
   const [expandedVendors, setExpandedVendors] = useState<Set<string>>(new Set());
@@ -364,10 +364,10 @@ export default function DataMobilPage() {
       || (vehicle.divisi || "").toLowerCase().includes(q)
       || (vehicle.vendor || "").toLowerCase().includes(q)
       || (vehicle.lokasi_administrasi || "").toLowerCase().includes(q);
-    const matchStatus = docStatusFilter === "Semua" || Object.values(statuses).some((s) => s.key === docStatusFilter);
+    const matchDivision = divisionFilter === "Semua" || (vehicle.divisi || "").toLowerCase() === divisionFilter.toLowerCase();
     const matchOverall = overallFilter === "Semua" || overall.key === overallFilter;
     const matchVendor = vendorFilter === "Semua" || (vehicle.vendor || "Tanpa Vendor") === vendorFilter;
-    return matchSearch && matchStatus && matchOverall && matchVendor;
+    return matchSearch && matchDivision && matchOverall && matchVendor;
   });
 
   const getVendorKey = (v: DbGaVehicle): string => (v.vendor || "Tanpa Vendor").trim();
@@ -865,9 +865,9 @@ export default function DataMobilPage() {
                 className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
             </div>
             <Select
-              value={docStatusFilter}
-              onChange={(v) => { setDocStatusFilter(v as DocumentStatus | "Semua"); setDocPage(1); }}
-              options={["Semua", "Aktif", "Akan Habis", "Expired", "Belum Ada", "Tidak Wajib"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Status" : v }))}
+              value={divisionFilter}
+              onChange={(v) => { setDivisionFilter(v); setDocPage(1); }}
+              options={["Semua", ...new Set(vehicleStatusRows.map((r) => r.vehicle.divisi).filter((d): d is string => !!d))].map((v) => ({ value: v, label: v === "Semua" ? "Semua Divisi" : v }))}
               className="w-44"
             />
             <Select
