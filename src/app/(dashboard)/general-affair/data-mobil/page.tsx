@@ -216,6 +216,28 @@ function localDateStr(date?: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+function pdfDocCellContent(
+  label: string,
+  status: StatusInfo,
+  doc: { issued_date: string | null; expired_date: string | null } | null,
+  extra?: { label: string; date: string | null }[],
+): string {
+  const lines = [status.label];
+  if (doc) {
+    lines.push(`Terbit: ${formatTanggal(doc.issued_date)}`);
+    lines.push(`Sampai: ${formatTanggal(doc.expired_date)}`);
+  } else {
+    lines.push("Terbit: -");
+    lines.push("Sampai: -");
+  }
+  if (extra && extra.length > 0) {
+    for (const e of extra) {
+      lines.push(`${e.label}: ${formatTanggal(e.date)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 function DocumentStatusBadge({ info, onClick }: { info: StatusInfo; onClick?: () => void }) {
   const content = (
     <>
@@ -493,7 +515,8 @@ export default function DataMobilPage() {
         return a[0].toLowerCase().localeCompare(b[0].toLowerCase());
       });
 
-      const pdfHeaders = ["No", "Unit", "Jenis", "Divisi", "Lokasi Administrasi", "Status Unit", "Status Kendaraan", "KIR", "Pajak", "STNK"];
+      const pdfHeaders = ["No", "Unit", "Jenis", "Divisi", "Lokasi Administrasi", "Status Unit", "Status Kendaraan", "KIR", "STNK", "Pajak"];
+      const pdfColWidths = [7, 28, 22, 18, 22, 14, 20, 38, 38, 38];
       let startY = 46;
 
       for (const [vendorKey, rows] of sortedExportGroups) {
@@ -513,26 +536,45 @@ export default function DataMobilPage() {
 
         const sortedRows = [...rows].sort((a, b) => overallPriority[a.overall.key] - overallPriority[b.overall.key]);
 
-        const pdfRows = sortedRows.map((row, i) => [
-          String(i + 1),
-          row.vehicle.unit,
-          row.vehicle.jenis,
-          row.vehicle.divisi || "-",
-          row.vehicle.lokasi_administrasi || "-",
-          row.vehicle.status || "Aktif",
-          row.overall.label,
-          row.statuses.KIR.label,
-          row.statuses.PAJAK.label,
-          row.statuses.STNK.label,
-        ]);
+        const pdfRows = sortedRows.map((row, i) => {
+          const kirDoc = getCurrentDocument(row.vehicle.id, "KIR");
+          const stnkDoc = getCurrentDocument(row.vehicle.id, "STNK");
+          return [
+            String(i + 1),
+            row.vehicle.unit,
+            row.vehicle.jenis,
+            row.vehicle.divisi || "-",
+            row.vehicle.lokasi_administrasi || "-",
+            row.vehicle.status || "Aktif",
+            row.overall.label,
+            pdfDocCellContent("KIR", row.statuses.KIR, kirDoc),
+            pdfDocCellContent("STNK", row.statuses.STNK, stnkDoc),
+            pdfDocCellContent("Pajak", row.statuses.PAJAK, stnkDoc, stnkDoc
+              ? [{ label: "Jatuh Tempo", date: stnkDoc.pajak_expired_date }]
+              : [{ label: "Jatuh Tempo", date: null }]
+            ),
+          ];
+        });
 
         startY += 6;
         autoTable(doc, {
           head: [pdfHeaders],
           body: pdfRows,
           startY,
-          styles: { fontSize: 7, cellPadding: 2 },
-          headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold", fontSize: 7 },
+          columnStyles: {
+            0: { cellWidth: pdfColWidths[0] },
+            1: { cellWidth: pdfColWidths[1] },
+            2: { cellWidth: pdfColWidths[2] },
+            3: { cellWidth: pdfColWidths[3] },
+            4: { cellWidth: pdfColWidths[4] },
+            5: { cellWidth: pdfColWidths[5] },
+            6: { cellWidth: pdfColWidths[6] },
+            7: { cellWidth: pdfColWidths[7] },
+            8: { cellWidth: pdfColWidths[8] },
+            9: { cellWidth: pdfColWidths[9] },
+          },
+          styles: { fontSize: 6.5, cellPadding: 1.5, valign: "top" },
+          headStyles: { fillColor: [59, 130, 246], textColor: 255, fontStyle: "bold", fontSize: 6.5 },
           alternateRowStyles: { fillColor: [245, 247, 250] },
           margin: { left: 14, right: 14 },
         });
