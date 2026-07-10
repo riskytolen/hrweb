@@ -25,8 +25,7 @@ const ACTION_CONFIG: Record<
   batalkan: {
     icon: RotateCcw,
     label: (n) => `Batalkan ${n} Slip`,
-    className:
-      "text-warning border-warning/30 hover:bg-warning/10 hover:text-warning bg-transparent",
+    className: "bg-warning text-white hover:bg-warning/90 border-warning",
   },
   hapus: {
     icon: Trash2,
