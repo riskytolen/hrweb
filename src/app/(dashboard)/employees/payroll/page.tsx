@@ -172,6 +172,8 @@ export default function PayrollPage() {
   const [gapokEditId, setGapokEditId] = useState<string | null>(null);
   const [gapokEditValue, setGapokEditValue] = useState("");
   const [gapokSaving, setGapokSaving] = useState(false);
+  const [gapokStatusFilter, setGapokStatusFilter] = useState<"semua" | "Aktif" | "Tidak Aktif">("semua");
+  const [gapokIsiFilter, setGapokIsiFilter] = useState<"semua" | "terisi" | "belum">("semua");
 
   // ─── Workflow state: Worksheet → Draft → Final ───
   const [activeMainTab, setActiveMainTab] = useState<"worksheet" | "draft" | "final" | "laporan">("worksheet");
@@ -1528,11 +1530,20 @@ export default function PayrollPage() {
   };
 
   // ─── Gapok filter & paginate ───
-  const gapokFiltered = employees.filter((e) =>
-    e.nama.toLowerCase().includes(gapokSearch.toLowerCase()) ||
-    e.id.toLowerCase().includes(gapokSearch.toLowerCase()) ||
-    (e.jabatan?.nama || "").toLowerCase().includes(gapokSearch.toLowerCase())
-  );
+  const gapokFiltered = employees.filter((e) => {
+    // Search
+    const matchSearch =
+      e.nama.toLowerCase().includes(gapokSearch.toLowerCase()) ||
+      e.id.toLowerCase().includes(gapokSearch.toLowerCase()) ||
+      (e.jabatan?.nama || "").toLowerCase().includes(gapokSearch.toLowerCase());
+    if (!matchSearch) return false;
+    // Status filter
+    if (gapokStatusFilter !== "semua" && e.status !== gapokStatusFilter) return false;
+    // Gapok isi filter
+    if (gapokIsiFilter === "terisi" && !e.gaji_pokok) return false;
+    if (gapokIsiFilter === "belum" && e.gaji_pokok) return false;
+    return true;
+  });
   const gapokPaged = gapokFiltered.slice((gapokPage - 1) * PAGE_SIZE, gapokPage * PAGE_SIZE);
   const gapokTotalGapok = employees.reduce((s, e) => s + (e.gaji_pokok || 0), 0);
   const gapokBelumDiisi = employees.filter((e) => !e.gaji_pokok).length;
@@ -1901,6 +1912,36 @@ export default function PayrollPage() {
                 onChange={(e) => { setGapokSearch(e.target.value); setGapokPage(1); }}
                 className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/60 text-foreground"
               />
+            </div>
+          </div>
+
+          {/* Filter controls */}
+          <div className="bg-card rounded-2xl border border-border p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Status:</span>
+                <select
+                  value={gapokStatusFilter}
+                  onChange={(e) => { setGapokStatusFilter(e.target.value as "semua" | "Aktif" | "Tidak Aktif"); setGapokPage(1); }}
+                  className="px-3 py-2 rounded-xl bg-muted border-none text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                >
+                  <option value="semua">Semua Status</option>
+                  <option value="Aktif">Aktif</option>
+                  <option value="Tidak Aktif">Tidak Aktif</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Gaji Pokok:</span>
+                <select
+                  value={gapokIsiFilter}
+                  onChange={(e) => { setGapokIsiFilter(e.target.value as "semua" | "terisi" | "belum"); setGapokPage(1); }}
+                  className="px-3 py-2 rounded-xl bg-muted border-none text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                >
+                  <option value="semua">Semua Gaji Pokok</option>
+                  <option value="terisi">Sudah Diisi</option>
+                  <option value="belum">Belum Diisi</option>
+                </select>
+              </div>
             </div>
           </div>
 
