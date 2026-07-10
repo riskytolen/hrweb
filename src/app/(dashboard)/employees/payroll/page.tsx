@@ -39,7 +39,7 @@ import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
-import { supabase, type DbPayroll, type DbPegawai } from "@/lib/supabase";
+import { supabase, type DbPayroll, type DbPegawai, type NonActivePeriod } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -129,6 +129,27 @@ function formatPeriodLabel(periodKey: string): string {
   const [y, m] = periodKey.split("-").map(Number);
   const d = new Date(y, m - 1, 1);
   return d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+}
+
+// ─── Helper: cek apakah pegawai punya minimal 1 hari aktif dalam rentang ───
+type ActiveCheckEmp = {
+  tanggal_bergabung: string | null;
+  tanggal_keluar: string | null;
+  non_active_periods?: NonActivePeriod[] | null;
+};
+function hasActiveDayInPeriod(emp: ActiveCheckEmp, periodStart: string, periodEnd: string): boolean {
+  if (emp.tanggal_bergabung && emp.tanggal_bergabung > periodEnd) return false;
+  if (emp.tanggal_keluar && emp.tanggal_keluar <= periodStart) return false;
+  if (emp.non_active_periods && emp.non_active_periods.length > 0) {
+    const activeStart = emp.tanggal_bergabung && emp.tanggal_bergabung > periodStart ? emp.tanggal_bergabung : periodStart;
+    const activeEnd = emp.tanggal_keluar && emp.tanggal_keluar <= periodEnd
+      ? String(new Date(new Date(emp.tanggal_keluar).getTime() - 86400000).toISOString().slice(0, 10))
+      : periodEnd;
+    for (const nap of emp.non_active_periods) {
+      if (nap.from <= activeStart && nap.to >= activeEnd) return false;
+    }
+  }
+  return true;
 }
 
 // ─── Pendapatan & Potongan field definitions & currency helpers — see ./constants.ts ───
@@ -312,18 +333,16 @@ export default function PayrollPage() {
       //      periode (penghasilan yang belum dibayarkan), atau tanggal_keluar di dalam periode.
       const { data: allEmps, error: empErr } = await supabase
         .from("pegawai")
-        .select("id, nama, gaji_pokok, tanggal_keluar, status")
+        .select("id, nama, gaji_pokok, tanggal_keluar, status, tanggal_bergabung, non_active_periods")
         .order("nama");
       if (empErr || !allEmps) {
         showToast("error", "Gagal Memuat Pegawai", (empErr as { message?: string } | null)?.message || "Unknown error");
         setGenerating(false);
         return;
       }
-      // Filter di-JS: skip pegawai Tidak Aktif yang sudah keluar sebelum periode
-      // dan tidak punya data aktual di periode (tidak ada yg perlu dibayar)
-      const activeEmps = (allEmps as { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null }[]).filter((e) => {
-        if (e.status === "Aktif") return true;
-        // Tidak Aktif: tetap include untuk dicek data aktualnya di langkah 4-5
+      // Filter di-JS: hanya pegawai yg punya minimal 1 hari aktif dalam rentang periode
+      const activeEmps = (allEmps as { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null; tanggal_bergabung: string | null; non_active_periods: NonActivePeriod[] | null }[]).filter((e) => {
+        if (!hasActiveDayInPeriod(e, genPeriod.start, genPeriod.end)) return false;
         return true;
       });
 
@@ -336,7 +355,7 @@ export default function PayrollPage() {
       const existingSet = new Set((existing || []).map((e: { employee_id: string }) => e.employee_id));
 
       // 3. Filter employees that don't have a slip yet
-      const newEmps = (activeEmps as { id: string; nama: string; gaji_pokok?: number; tanggal_keluar: string | null }[]).filter((e) => !existingSet.has(e.id));
+      const newEmps = (activeEmps as { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null; tanggal_bergabung: string | null; non_active_periods: NonActivePeriod[] | null }[]).filter((e) => !existingSet.has(e.id));
       if (newEmps.length === 0) {
         showToast("error", "Tidak Ada Slip Baru", "Semua pegawai aktif sudah memiliki slip gaji untuk periode ini.");
         setGenerating(false);
@@ -395,21 +414,10 @@ export default function PayrollPage() {
         lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
       });
 
-      // 5c. Filter pegawai Tidak Aktif yang TIDAK punya data aktual di periode.
-      // Gaji pokok selalu diambil apa adanya dari master pegawai, tanpa prorata.
-      const exitDateLookup = new Map<string, string | null>();
-      const statusLookup = new Map<string, string>();
-      (activeEmps as { id: string; status: string; tanggal_keluar: string | null }[]).forEach((e) => {
-        exitDateLookup.set(e.id, e.tanggal_keluar);
-        statusLookup.set(e.id, e.status);
-      });
+      // 5c. Fallback untuk Tidak Aktif tanpa tanggal_keluar: butuh catatan absen di periode
       const empsWithData = newEmps.filter((e) => {
-        if (statusLookup.get(e.id) === "Aktif") return true;
-        // Tidak Aktif: skip kalau tidak punya catatan absen di periode.
-        // Titik/lembur tanpa absen tetap dianggap anomali data.
-        const exitDate = exitDateLookup.get(e.id);
-        // Tidak Aktif + tanggal_keluar valid tetap include untuk dibayarkan jika ada slip baru.
-        if (exitDate) return true;
+        if (e.status !== "Tidak Aktif") return true;
+        if (e.tanggal_keluar) return true; // sudah dicek hasActiveDayInPeriod
         // Tidak Aktif + NULL tanggal_keluar → hanya include kalau ada catatan absen
         const hariAdaCatatan = new Set(
           attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
@@ -1604,7 +1612,7 @@ export default function PayrollPage() {
       // 1. Fetch semua pegawai. Gaji pokok selalu mengikuti master pegawai.
       const { data: allEmps, error: empErr } = await supabase
         .from("pegawai")
-        .select("id, nama, gaji_pokok, tanggal_keluar, status")
+        .select("id, nama, gaji_pokok, tanggal_keluar, status, tanggal_bergabung, non_active_periods")
         .order("nama");
       if (empErr || !allEmps) {
         showToast("error", "Gagal Memuat Pegawai", (empErr as { message?: string } | null)?.message || "Unknown error");
@@ -1660,17 +1668,20 @@ export default function PayrollPage() {
       });
 
       // 3. Bangun insert rows untuk pegawai yang eligible.
-      type Emp = { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null };
+      type Emp = { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null; tanggal_bergabung: string | null; non_active_periods: NonActivePeriod[] | null };
 
       const inserts = (allEmps as Emp[]).flatMap((e) => {
         const gapokFull = e.gaji_pokok || 0;
-        const isInactiveNoExitDate = e.status === "Tidak Aktif" && !e.tanggal_keluar;
 
-        if (isInactiveNoExitDate) {
+        // Skip jika tidak punya hari aktif dalam periode
+        if (!hasActiveDayInPeriod(e, genPeriod.start, genPeriod.end)) return [];
+
+        // Fallback untuk Tidak Aktif tanpa tanggal_keluar: butuh catatan absen
+        if (e.status === "Tidak Aktif" && !e.tanggal_keluar) {
           const hariDenganCatatan = new Set(
             attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
           ).size;
-          if (hariDenganCatatan === 0) return []; // Skip: Tidak Aktif tanpa catatan absen
+          if (hariDenganCatatan === 0) return [];
         }
 
         const sourceTitik = dpTotals.get(e.id) || 0;
