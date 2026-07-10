@@ -265,7 +265,7 @@ export default function PayrollPage() {
   const fetchPayrolls = useCallback(async () => {
     const { data, error } = await supabase
       .from("payrolls")
-      .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening)")
+      .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening, status)")
       .eq("periode", periodKey)
       .order("id", { ascending: true });
     if (error) { showToast("error", "Gagal Memuat Payroll", error.message); return; }
@@ -626,7 +626,7 @@ export default function PayrollPage() {
       .from("payrolls")
       .update(updatePayload)
       .eq("id", selectedPayroll.id)
-      .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening)")
+      .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening, status)")
       .single();
 
     if (error) {
@@ -688,7 +688,7 @@ export default function PayrollPage() {
       .from("payrolls")
       .update(updatePayload)
       .eq("id", selectedPayroll.id)
-      .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening)")
+      .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening, status)")
       .single();
 
     if (error) {
