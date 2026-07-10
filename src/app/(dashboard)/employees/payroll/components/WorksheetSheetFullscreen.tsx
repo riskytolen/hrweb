@@ -178,10 +178,10 @@ export default function WorksheetSheetFullscreen({
   };
 
   const isKeteranganCol = (key: string) => key.endsWith("_keterangan");
-  const gridBorder = "border-r border-b border-slate-200/80 dark:border-slate-800/80";
-  const headerGridBorder = "border-r border-b border-slate-200 dark:border-slate-800";
-  const footerGridBorder = "border-r border-t border-slate-200 dark:border-slate-800";
-  const frozenDivider = (key: string) => key === "_nama" && "border-r border-r-slate-300/80 dark:border-r-slate-700/80";
+  const gridBorder = "border-r border-b border-dotted border-slate-400/75 dark:border-slate-600/75";
+  const headerGridBorder = "border-r border-b border-dotted border-slate-400/75 dark:border-slate-600/75";
+  const footerGridBorder = "border-r border-t border-dotted border-slate-400/75 dark:border-slate-600/75";
+  const frozenDivider = (key: string) => key === "_nama" && "border-r border-dotted border-r-slate-500/80 dark:border-r-slate-500/80";
 
   const getCellValue = (row: PayrollRow, col: SheetCol): string => {
     if (col.key === "_no") return "";
@@ -292,7 +292,7 @@ export default function WorksheetSheetFullscreen({
           {/* ── Group header row ── */}
           <thead className="sticky top-0 z-50 shadow-[0_3px_10px_-6px_rgba(15,23,42,0.8)]">
             {/* Row 1: Group labels */}
-            <tr className="border-b border-slate-200 dark:border-slate-800">
+            <tr className="border-b border-dotted border-slate-400/75 dark:border-slate-600/75">
               {/* Info group */}
               {leadingInfoCols.map((c) => (
                 <th key={c.key} style={getColumnStyle(c)} className={cn(
@@ -306,29 +306,29 @@ export default function WorksheetSheetFullscreen({
                 </th>
               ))}
               {/* Pendapatan group */}
-              <th colSpan={pendapatanCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-emerald-600 border-r border-b border-white/25 dark:border-slate-800/70 text-center leading-tight">
+              <th colSpan={pendapatanCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-emerald-600 border-r border-b border-dotted border-white/40 dark:border-slate-600/75 text-center leading-tight">
                 Pendapatan
               </th>
               {/* Potongan group */}
-              <th colSpan={potonganCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-rose-600 border-r border-b border-white/25 dark:border-slate-800/70 text-center leading-tight">
+              <th colSpan={potonganCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-rose-600 border-r border-b border-dotted border-white/40 dark:border-slate-600/75 text-center leading-tight">
                 Potongan
               </th>
               {/* Netto group */}
-              <th className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-primary border-r border-b border-white/25 dark:border-slate-800/70 text-center leading-tight">
+              <th className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-primary border-r border-b border-dotted border-white/40 dark:border-slate-600/75 text-center leading-tight">
                 Netto
               </th>
               {/* Rekening group */}
-              <th colSpan={3} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-blue-600 border-r border-b border-white/25 dark:border-slate-800/70 text-center leading-tight">
+              <th colSpan={3} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-blue-600 border-r border-b border-dotted border-white/40 dark:border-slate-600/75 text-center leading-tight">
                 Rekening
               </th>
               {aksiCol && (
-                <th style={getColumnStyle(aksiCol)} className={cn("h-6 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 border-l border-l-slate-200 dark:border-l-slate-800 leading-tight", headerGridBorder)}>
+                <th style={getColumnStyle(aksiCol)} className={cn("h-6 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 border-l border-dotted border-l-slate-400/75 dark:border-l-slate-600/75 leading-tight", headerGridBorder)}>
                   Aksi
                 </th>
               )}
             </tr>
             {/* Row 2: Individual columns */}
-            <tr className="border-b border-slate-200 dark:border-slate-800">
+            <tr className="border-b border-dotted border-slate-400/75 dark:border-slate-600/75">
               {SHEET_COLS.map((c) => {
                 const groupBg = c.group === "pendapatan"
                   ? "bg-emerald-50 dark:bg-emerald-950"
@@ -375,7 +375,7 @@ export default function WorksheetSheetFullscreen({
               const rowBg = isChanged ? "bg-amber-50/70 dark:bg-amber-950/40" : idx % 2 === 0 ? "bg-card" : "bg-muted/30";
               const frozenBg = isChanged ? "bg-amber-50 dark:bg-amber-950" : idx % 2 === 0 ? "bg-card" : "bg-muted";
               return (
-                <tr key={row.id} className={cn("border-b border-slate-200/80 dark:border-slate-800/80 transition-colors", rowBg)}>
+                <tr key={row.id} className={cn("border-b border-dotted border-slate-400/75 dark:border-slate-600/75 transition-colors", rowBg)}>
                   {SHEET_COLS.map((c) => {
                       if (c.key === "_aksi") {
                       return (
@@ -562,7 +562,7 @@ export default function WorksheetSheetFullscreen({
           {/* ── Footer: Grand Total ── */}
           {filtered.length > 0 && (
             <tfoot className="sticky bottom-0 z-10">
-              <tr className="border-t border-slate-200 dark:border-slate-800 bg-card shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.06)]">
+              <tr className="border-t border-dotted border-slate-400/75 dark:border-slate-600/75 bg-card shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.06)]">
                 {SHEET_COLS.map((c) => {
                   if (c.key === "_no") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky z-40 bg-card", footerGridBorder)} />;
                   if (c.key === "_nama") return (
