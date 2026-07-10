@@ -41,11 +41,25 @@ interface WorksheetSheetFullscreenProps {
 
 const READONLY_KEYS = new Set(["gaji_pokok", "pendapatan_titik", "lembur", "potongan_absen"]);
 const FROZEN_COLS = new Set(["_no", "_nik", "_nama"]);
-const FROZEN_OFFSETS: Record<string, string> = {
-  _no: "left-0",
-  _nik: "left-10",
-  _nama: "left-[136px]",
+const FROZEN_LEFT_PX: Record<string, number> = {
+  _no: 0,
+  _nik: 48,
+  _nama: 158,
 };
+const FIXED_COLUMN_WIDTHS: Record<string, number> = {
+  _no: 48,
+  _nik: 110,
+  _nama: 240,
+};
+
+function getColumnWidth(col: { key: string; width: string }): number {
+  if (FIXED_COLUMN_WIDTHS[col.key]) return FIXED_COLUMN_WIDTHS[col.key];
+  if (col.width.includes("w-32")) return 128;
+  if (col.width.includes("w-28")) return 112;
+  if (col.width.includes("w-24")) return 96;
+  if (col.width.includes("w-20")) return 80;
+  return 96;
+}
 
 export default function WorksheetSheetFullscreen({
   filtered,
@@ -85,9 +99,9 @@ export default function WorksheetSheetFullscreen({
   // Column definition: label, key, group, width, editable
   type SheetCol = { label: string; key: string; group: "info" | "pendapatan" | "potongan" | "netto" | "rekening"; width: string; editable: boolean };
   const SHEET_COLS: SheetCol[] = [
-    { label: "No", key: "_no", group: "info", width: "w-10", editable: false },
-    { label: "ID", key: "_nik", group: "info", width: "w-24", editable: false },
-    { label: "Nama", key: "_nama", group: "info", width: "min-w-[180px]", editable: false },
+    { label: "No", key: "_no", group: "info", width: "w-[48px]", editable: false },
+    { label: "ID", key: "_nik", group: "info", width: "w-[110px]", editable: false },
+    { label: "Nama", key: "_nama", group: "info", width: "w-[240px]", editable: false },
     { label: "Jabatan", key: "_jabatan", group: "info", width: "w-32", editable: false },
     { label: "Status", key: "_status", group: "info", width: "w-20", editable: false },
     ...PENDAPATAN_FIELDS.filter((f) => f.key !== "total_pendapatan").map((f) => ({
@@ -115,13 +129,28 @@ export default function WorksheetSheetFullscreen({
 
   const pendapatanCols = SHEET_COLS.filter((c) => c.group === "pendapatan");
   const potonganCols = SHEET_COLS.filter((c) => c.group === "potongan");
+  const leadingInfoCols = SHEET_COLS.filter((c) => ["_no", "_nik", "_nama", "_jabatan", "_status"].includes(c.key));
+  const aksiCol = SHEET_COLS.find((c) => c.key === "_aksi");
+
+  const getColumnStyle = (col: SheetCol): React.CSSProperties => {
+    const width = getColumnWidth(col);
+    const left = FROZEN_LEFT_PX[col.key];
+    return {
+      width,
+      minWidth: width,
+      maxWidth: width,
+      ...(left !== undefined ? { left } : {}),
+    };
+  };
+
+  const frozenDivider = (key: string) => key === "_nama" && "border-r-2 border-r-primary/30 shadow-[6px_0_12px_-10px_rgba(15,23,42,0.7)]";
 
   const getCellValue = (row: PayrollRow, col: SheetCol): string => {
     if (col.key === "_no") return "";
     if (col.key === "_nik") return row.employee_id;
     if (col.key === "_nama") return row.pegawaiNama || "";
     if (col.key === "_jabatan") return row.pegawaiJabatan || "-";
-    if (col.key === "_status") return (row as unknown as Record<string, string>)?.pegawaiStatus || "-";
+    if (col.key === "_status") return (row.pegawai as { status?: string } | undefined)?.status || "-";
     if (col.key === "_total_pend") return formatCurrency(wsComputeTotals(row.id).totalPendapatan);
     if (col.key === "_total_pot") return formatCurrency(wsComputeTotals(row.id).totalPotongan);
     if (col.key === "_netto") return formatCurrency(wsComputeTotals(row.id).netto);
@@ -213,20 +242,25 @@ export default function WorksheetSheetFullscreen({
       </div>
 
       {/* ── Table wrapper ── */}
-      <div ref={tableRef} className="flex-1 overflow-auto">
-        <table className="w-full border-collapse">
+      <div ref={tableRef} className="flex-1 overflow-auto bg-card [scrollbar-gutter:stable]">
+        <table className="w-max min-w-full border-separate border-spacing-0">
+          <colgroup>
+            {SHEET_COLS.map((c) => {
+              const width = getColumnWidth(c);
+              return <col key={c.key} style={{ width, minWidth: width, maxWidth: width }} />;
+            })}
+          </colgroup>
           {/* ── Group header row ── */}
-          <thead className="sticky top-0 z-20">
+          <thead className="sticky top-0 z-50 shadow-[0_3px_10px_-6px_rgba(15,23,42,0.8)]">
             {/* Row 1: Group labels */}
             <tr className="border-b border-border">
               {/* Info group */}
-              {SHEET_COLS.filter((c) => c.group === "info").map((c) => (
-                <th key={c.key} className={cn(
+              {leadingInfoCols.map((c) => (
+                <th key={c.key} style={getColumnStyle(c)} className={cn(
                   c.width,
-                  "px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-muted border-r border-border/50",
-                  FROZEN_COLS.has(c.key) && "sticky z-30",
-                  FROZEN_COLS.has(c.key) && FROZEN_OFFSETS[c.key],
-                  c.key === "_nik" && "border-r-2 border-r-primary/30",
+                  "h-7 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 border-r border-border/70",
+                  FROZEN_COLS.has(c.key) && "sticky z-[70]",
+                  frozenDivider(c.key),
                 )}>
                   {c.label === "Aksi" ? "" : ""}
                 </th>
@@ -247,30 +281,35 @@ export default function WorksheetSheetFullscreen({
               <th colSpan={3} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-blue-600 text-center">
                 Rekening
               </th>
+              {aksiCol && (
+                <th style={getColumnStyle(aksiCol)} className="h-7 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 border-l border-border/70">
+                  Aksi
+                </th>
+              )}
             </tr>
             {/* Row 2: Individual columns */}
             <tr className="border-b border-border">
               {SHEET_COLS.map((c) => {
                 const groupBg = c.group === "pendapatan"
-                  ? "bg-emerald-50 dark:bg-emerald-500/[0.06]"
+                  ? "bg-emerald-50 dark:bg-emerald-950"
                   : c.group === "potongan"
-                  ? "bg-rose-50 dark:bg-rose-500/[0.06]"
+                  ? "bg-rose-50 dark:bg-rose-950"
                   : c.group === "netto"
-                  ? "bg-primary/[0.04]"
+                  ? "bg-blue-50 dark:bg-blue-950"
                   : c.group === "rekening"
-                  ? "bg-blue-50 dark:bg-blue-500/[0.06]"
-                  : "bg-muted";
+                  ? "bg-sky-50 dark:bg-sky-950"
+                  : "bg-slate-100 dark:bg-slate-900";
                 return (
                   <th
                     key={c.key}
+                    style={getColumnStyle(c)}
                     className={cn(
                       c.width,
-                      "px-1 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-r border-border/50 whitespace-nowrap text-center",
+                      "h-9 px-1 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-r border-b border-border/70 whitespace-nowrap text-center",
                       groupBg,
                       (c.group === "info" || c.group === "rekening") && "font-normal text-[9px]",
-                      FROZEN_COLS.has(c.key) && "sticky z-30",
-                      FROZEN_COLS.has(c.key) && FROZEN_OFFSETS[c.key],
-                      c.key === "_nik" && "border-r-2 border-r-primary/30",
+                      FROZEN_COLS.has(c.key) && "sticky z-[70]",
+                      frozenDivider(c.key),
                     )}
                   >
                     {c.label}
@@ -292,13 +331,14 @@ export default function WorksheetSheetFullscreen({
               const computed = wsComputeTotals(row.id);
               const isChanged = wsChangedCells.has(row.id);
               const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null } | undefined;
-              const rowBg = isChanged ? "bg-amber-50/40 dark:bg-amber-500/[0.03]" : idx % 2 === 0 ? "bg-card" : "bg-muted/10";
+              const rowBg = isChanged ? "bg-amber-50/70 dark:bg-amber-950/40" : idx % 2 === 0 ? "bg-card" : "bg-muted/30";
+              const frozenBg = isChanged ? "bg-amber-50 dark:bg-amber-950" : idx % 2 === 0 ? "bg-card" : "bg-muted";
               return (
                 <tr key={row.id} className={cn("border-b border-border/40 transition-colors", rowBg)}>
                   {SHEET_COLS.map((c) => {
                     if (c.key === "_aksi") {
                       return (
-                        <td key={c.key} className={cn(c.width, "px-1 py-1")}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1")}>
                           <div className="flex items-center justify-center gap-0.5">
                             {canEdit && setBuatSlipConfirm && (
                               <button
@@ -343,24 +383,24 @@ export default function WorksheetSheetFullscreen({
                       );
                     }
                     if (c.key === "_no") {
-                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground text-center sticky left-0 z-20", rowBg)}>{idx + 1}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground text-center sticky z-30 border-r border-border/60", frozenBg)}>{idx + 1}</td>;
                     }
                     if (c.key === "_nama") {
                       return (
-                        <td key={c.key} className={cn(c.width, "px-2 py-1.5 sticky left-[136px] z-20", rowBg, "border-r-2 border-r-primary/30")}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 sticky z-30", frozenBg, frozenDivider(c.key))}>
                           <p className="text-[11px] font-semibold text-foreground truncate">{row.pegawaiNama}</p>
                         </td>
                       );
                     }
                     if (c.key === "_nik") {
-                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] font-mono text-muted-foreground sticky left-10 z-20", rowBg)}>{row.employee_id}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] font-mono text-muted-foreground sticky z-30 border-r border-border/60", frozenBg)}>{row.employee_id}</td>;
                     }
                     if (c.key === "_jabatan") {
-                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground truncate")}>{row.pegawaiJabatan}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground truncate")}>{row.pegawaiJabatan}</td>;
                     }
                     if (c.key === "_status") {
                       return (
-                        <td key={c.key} className={cn(c.width, "px-2 py-1.5")}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5")}>
                           <span className={cn(
                             "inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded",
                             (row.pegawai as { status?: string } | undefined)?.status === "Aktif"
@@ -375,7 +415,7 @@ export default function WorksheetSheetFullscreen({
                     if (c.group === "pendapatan" && c.key !== "_total_pend") {
                       const isNum = typeof getCellNumeric(row, c) === "number";
                       return (
-                        <td key={c.key} className={cn(c.width, "px-1 py-1")}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1")}>
                           {c.editable ? cellInput(row, c) : (
                             <span className={cn(
                               "block text-right text-[11px] tabular-nums px-2 py-1.5",
@@ -389,14 +429,14 @@ export default function WorksheetSheetFullscreen({
                     }
                     if (c.key === "_total_pend") {
                       return (
-                        <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-right text-[11px] font-bold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50/30 dark:bg-emerald-500/[0.02]")}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-right text-[11px] font-bold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50 dark:bg-emerald-950")}>
                           {getCellValue(row, c)}
                         </td>
                       );
                     }
                     if (c.group === "potongan" && c.key !== "_total_pot") {
                       return (
-                        <td key={c.key} className={cn(c.width, "px-1 py-1")}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1")}>
                           {c.editable ? cellInput(row, c) : (
                             <span className={cn(
                               "block text-right text-[11px] tabular-nums px-2 py-1.5",
@@ -410,26 +450,26 @@ export default function WorksheetSheetFullscreen({
                     }
                     if (c.key === "_total_pot") {
                       return (
-                        <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-right text-[11px] font-bold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50/30 dark:bg-rose-500/[0.02]")}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-right text-[11px] font-bold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50 dark:bg-rose-950")}>
                           {getCellValue(row, c)}
                         </td>
                       );
                     }
                     if (c.key === "_netto") {
                       return (
-                        <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-right text-xs font-extrabold tabular-nums bg-primary/[0.02]", computed.netto >= 0 ? "text-primary" : "text-danger")}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-right text-xs font-extrabold tabular-nums bg-blue-50 dark:bg-blue-950", computed.netto >= 0 ? "text-primary" : "text-danger")}>
                           {getCellValue(row, c)}
                         </td>
                       );
                     }
                     if (c.key === "_bank") {
-                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground")}>{peg?.bank || "-"}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground")}>{peg?.bank || "-"}</td>;
                     }
                     if (c.key === "_no_rek") {
-                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] font-mono text-foreground")}>{peg?.no_rekening || "-"}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] font-mono text-foreground")}>{peg?.no_rekening || "-"}</td>;
                     }
                     if (c.key === "_an") {
-                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground truncate")}>{peg?.nama_rekening || "-"}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground truncate")}>{peg?.nama_rekening || "-"}</td>;
                     }
                     return null;
                   })}
@@ -443,39 +483,39 @@ export default function WorksheetSheetFullscreen({
             <tfoot className="sticky bottom-0 z-10">
               <tr className="border-t-2 border-border bg-card shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.08)]">
                 {SHEET_COLS.map((c) => {
-                  if (c.key === "_no") return <td key={c.key} className={cn(c.width, "px-2 py-2 sticky left-0 z-30 bg-card")} />;
+                  if (c.key === "_no") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 sticky z-40 bg-card border-r border-border/60")} />;
                   if (c.key === "_nama") return (
-                    <td key={c.key} className={cn(c.width, "px-2 py-2 sticky left-[136px] z-30 bg-card border-r-2 border-r-primary/30")}>
+                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 sticky z-40 bg-card", frozenDivider(c.key))}>
                       <p className="text-[10px] font-bold text-foreground uppercase tracking-wider">Grand Total</p>
                     </td>
                   );
-                  if (c.key === "_nik") return <td key={c.key} className={cn(c.width, "px-2 py-2 sticky left-10 z-30 bg-card")} />;
+                  if (c.key === "_nik") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 sticky z-40 bg-card border-r border-border/60")} />;
                   if (c.key === "_jabatan" || c.key === "_status" || c.key === "_bank" || c.key === "_no_rek" || c.key === "_an" || c.key === "_aksi") {
-                    return <td key={c.key} className={cn(c.width, "px-2 py-2")} />;
+                    return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2")} />;
                   }
                   if (c.key === "_total_pend") {
                     return (
-                      <td key={c.key} className={cn(c.width, "px-2 py-2 text-right text-[11px] font-extrabold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50/50 dark:bg-emerald-500/[0.04]")}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 text-right text-[11px] font-extrabold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50 dark:bg-emerald-950")}>
                         {getGrandTotal(c)}
                       </td>
                     );
                   }
                   if (c.key === "_total_pot") {
                     return (
-                      <td key={c.key} className={cn(c.width, "px-2 py-2 text-right text-[11px] font-extrabold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50/50 dark:bg-rose-500/[0.04]")}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 text-right text-[11px] font-extrabold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50 dark:bg-rose-950")}>
                         {getGrandTotal(c)}
                       </td>
                     );
                   }
                   if (c.key === "_netto") {
                     return (
-                      <td key={c.key} className={cn(c.width, "px-2 py-2 text-right text-xs font-extrabold text-primary tabular-nums bg-primary/[0.04]")}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 text-right text-xs font-extrabold text-primary tabular-nums bg-blue-50 dark:bg-blue-950")}>
                         {getGrandNetto()}
                       </td>
                     );
                   }
                   return (
-                    <td key={c.key} className={cn(c.width, "px-1 py-2 text-right text-[11px] font-bold text-foreground tabular-nums")}>
+                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-2 text-right text-[11px] font-bold text-foreground tabular-nums")}>
                       {getGrandTotal(c)}
                     </td>
                   );
