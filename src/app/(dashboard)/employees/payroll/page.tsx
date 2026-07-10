@@ -1005,6 +1005,63 @@ export default function PayrollPage() {
     }
   };
 
+  // ─── Export CSV Gaji Pokok ───
+  const exportGapokCsv = async () => {
+    const data = gapokFiltered;
+    if (data.length === 0) {
+      showToast("error", "Tidak Ada Data", "Tidak ada data gaji pokok untuk di-export.");
+      return;
+    }
+    try {
+      const periodLabel = formatPeriodLabel(periodKey);
+      const filename = `Gaji_Pokok_${periodLabel.replace(/\s/g, "_")}.csv`;
+
+      const csvEscape = (v: unknown): string => {
+        const s = String(v ?? "");
+        return /[,"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+
+      const headers = ["No", "ID", "Nama Pegawai", "Jabatan", "Status", "Gaji Pokok"];
+      const rows = data.map((e, idx) => [
+        idx + 1,
+        e.id,
+        e.nama,
+        e.jabatan?.nama || "-",
+        e.status,
+        e.gaji_pokok || 0,
+      ]);
+
+      const csvContent = [
+        headers.join(","),
+        ...rows.map((r) => r.map(csvEscape).join(",")),
+      ].join("\r\n");
+
+      // UTF-8 BOM for Excel compatibility
+      const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showToast("success", "Export CSV", `${data.length} data gaji pokok diekspor ke ${filename}.`);
+
+      await logAudit({
+        supabase,
+        action: "export",
+        entityType: "pegawai",
+        entityLabel: `Export CSV Gaji Pokok ${periodLabel}`,
+        metadata: { periode: periodKey, jumlah_pegawai: data.length, filename },
+      });
+    } catch (err) {
+      console.error("[Payroll] Export CSV Gaji Pokok failed:", err);
+      showToast("error", "Gagal Export", err instanceof Error ? err.message : "Tidak dapat membuat file CSV.");
+    }
+  };
+
   // ─── Export PDF slip gaji ───
   const exportSlipPDF = async (payroll: PayrollRow) => {
     const { default: jsPDF } = await import("jspdf");
@@ -1943,6 +2000,11 @@ export default function PayrollPage() {
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
+            {activeTab === "gapok" && (
+              <Button variant="outline" icon={Download} size="sm" onClick={exportGapokCsv} disabled={gapokFiltered.length === 0}>
+                Export CSV
+              </Button>
+            )}
             <Button
               variant={activeTab === "gapok" ? "primary" : "outline"}
               icon={Banknote}
