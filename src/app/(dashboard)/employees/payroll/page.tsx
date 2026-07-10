@@ -57,7 +57,8 @@ import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, for
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
 
-const PAGE_SIZE = 15;
+const GAPOK_PAGE_SIZE = 15;
+const PAYROLL_PAGE_SIZE = 100;
 const CUT_OFF_DAY = 7;
 const SUPABASE_PAGE_SIZE = 1000;
 const PAYROLL_PERIOD_STORAGE_KEY = "hrweb.payroll.periodKey";
@@ -1733,14 +1734,14 @@ export default function PayrollPage() {
     if (gapokIsiFilter === "belum" && e.gaji_pokok) return false;
     return true;
   });
-  const gapokPaged = gapokFiltered.slice((gapokPage - 1) * PAGE_SIZE, gapokPage * PAGE_SIZE);
+  const gapokPaged = gapokFiltered.slice((gapokPage - 1) * GAPOK_PAGE_SIZE, gapokPage * GAPOK_PAGE_SIZE);
   const gapokTotalGapok = employees.reduce((s, e) => s + (e.gaji_pokok || 0), 0);
   const gapokBelumDiisi = employees.filter((e) => !e.gaji_pokok).length;
 
   // ─── Filter & paginate (by tab + search) ───
   const tabFiltered = getRowsForMainTab(activeMainTab);
   const filtered = getFilteredRowsForMainTab(activeMainTab);
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const paged = filtered.slice((page - 1) * PAYROLL_PAGE_SIZE, page * PAYROLL_PAGE_SIZE);
   const scopedSelectedRows = filtered.filter((p) => selectedIds.has(p.id));
   const scopedSelectedIds = scopedSelectedRows.map((p) => p.id);
   const scopedDraftSelectedCount = scopedSelectedRows.filter((p) => p.status === "Draft").length;
@@ -2206,7 +2207,7 @@ export default function PayrollPage() {
                     const isEditing = gapokEditId === emp.id;
                     return (
                       <tr key={emp.id} className="hover:bg-muted/30">
-                        <td className="px-5 py-3.5 text-xs text-muted-foreground">{(gapokPage - 1) * PAGE_SIZE + idx + 1}</td>
+                        <td className="px-5 py-3.5 text-xs text-muted-foreground">{(gapokPage - 1) * GAPOK_PAGE_SIZE + idx + 1}</td>
                         <td className="px-5 py-3.5"><span className="text-xs font-mono text-muted-foreground">{emp.id}</span></td>
                         <td className="px-5 py-3.5"><p className="text-sm font-semibold text-foreground">{emp.nama}</p></td>
                         <td className="px-5 py-3.5 text-sm text-muted-foreground">{emp.jabatan?.nama || "-"}</td>
@@ -2276,7 +2277,7 @@ export default function PayrollPage() {
                 </tbody>
               </table>
             </div>
-            <Pagination currentPage={gapokPage} totalItems={gapokFiltered.length} pageSize={PAGE_SIZE} onPageChange={setGapokPage} />
+            <Pagination currentPage={gapokPage} totalItems={gapokFiltered.length} pageSize={GAPOK_PAGE_SIZE} onPageChange={setGapokPage} />
           </div>
         </>
       )}
@@ -2455,7 +2456,7 @@ export default function PayrollPage() {
                   const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null } | undefined;
                   return (
                     <tr key={row.id} className="hover:bg-muted/20 transition-colors">
-                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAYROLL_PAGE_SIZE + idx + 1}</td>
                       <td className="px-5 py-3.5 cursor-pointer" onClick={() => openDetail(row)}>
                         <p className="text-sm font-semibold text-foreground">{row.pegawaiNama}</p>
                         <p className="text-xs text-muted-foreground">{row.pegawaiJabatan}</p>
@@ -2480,7 +2481,7 @@ export default function PayrollPage() {
               </tbody>
             </table>
           </div>
-          <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+          <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAYROLL_PAGE_SIZE} onPageChange={setPage} />
         </div>
       ) : (
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
@@ -2621,7 +2622,7 @@ export default function PayrollPage() {
                       }}
                     />
                   </td>
-                  <td className="px-2 py-3.5 text-xs text-muted-foreground cursor-pointer" onClick={() => openDetail(row)}>{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                  <td className="px-2 py-3.5 text-xs text-muted-foreground cursor-pointer" onClick={() => openDetail(row)}>{(page - 1) * PAYROLL_PAGE_SIZE + idx + 1}</td>
                   <td className="px-5 py-3.5 cursor-pointer" onClick={() => openDetail(row)}>
                     <p className="text-sm font-semibold text-foreground">{row.pegawaiNama}</p>
                     <p className="text-xs text-muted-foreground">{row.pegawaiJabatan}</p>
@@ -2657,7 +2658,7 @@ export default function PayrollPage() {
             </tbody>
           </table>
         </div>
-        <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+        <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAYROLL_PAGE_SIZE} onPageChange={setPage} />
       </div>
       )}
 
