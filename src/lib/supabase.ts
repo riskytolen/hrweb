@@ -145,8 +145,10 @@ export interface DbPayroll {
   gaji_pokok: number;
   pendapatan_titik: number;
   extra_job: number;
+  extra_job_keterangan: string | null;
   uang_makan: number;
   insentif: number;
+  insentif_keterangan: string | null;
   tunjangan_jabatan: number;
   transport: number;
   tunjangan_lain: number;
@@ -157,8 +159,10 @@ export interface DbPayroll {
   // Potongan
   koperasi: number;
   pinjaman_perusahaan: number;
+  pinjaman_perusahaan_keterangan: string | null;
   potongan_absen: number;
   potongan_lain: number;
+  potongan_lain_keterangan: string | null;
   jht: number;
   bpjs_kesehatan: number;
   total_potongan: number;

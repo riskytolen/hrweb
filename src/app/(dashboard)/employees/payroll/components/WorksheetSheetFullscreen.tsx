@@ -29,6 +29,8 @@ interface WorksheetSheetFullscreenProps {
   prevPeriod: () => void;
   nextPeriod: () => void;
   handleWsChange: (id: number, field: string, rawValue: string) => void;
+  handleWsKeteranganChange: (id: number, fieldKey: string, value: string) => void;
+  wsKeterangan: Record<number, Record<string, string>>;
   handleWsSaveRow: (id: number) => Promise<void>;
   isCellChanged: (id: number, field: string) => boolean;
   wsComputeTotals: (id: number) => { totalPendapatan: number; totalPotongan: number; netto: number };
@@ -72,6 +74,8 @@ export default function WorksheetSheetFullscreen({
   prevPeriod,
   nextPeriod,
   handleWsChange,
+  handleWsKeteranganChange,
+  wsKeterangan,
   handleWsSaveRow,
   isCellChanged,
   wsComputeTotals,
@@ -104,21 +108,41 @@ export default function WorksheetSheetFullscreen({
     { label: "Nama", key: "_nama", group: "info", width: "w-[240px]", editable: false },
     { label: "Jabatan", key: "_jabatan", group: "info", width: "w-32", editable: false },
     { label: "Status", key: "_status", group: "info", width: "w-20", editable: false },
-    ...PENDAPATAN_FIELDS.filter((f) => f.key !== "total_pendapatan").map((f) => ({
-      label: f.label,
-      key: f.key,
-      group: "pendapatan" as const,
-      width: f.key === "gaji_pokok" || f.key === "pendapatan_titik" ? "w-28" : f.key === "lembur" ? "w-28" : "w-24",
-      editable: !f.readonly && !READONLY_KEYS.has(f.key),
-    })),
+    ...PENDAPATAN_FIELDS.filter((f) => f.key !== "total_pendapatan").flatMap((f) => {
+      const cols: SheetCol[] = [{
+        label: f.label,
+        key: f.key,
+        group: "pendapatan" as const,
+        width: f.key === "gaji_pokok" || f.key === "pendapatan_titik" ? "w-28" : f.key === "lembur" ? "w-28" : "w-24",
+        editable: !f.readonly && !READONLY_KEYS.has(f.key),
+      }];
+      if (f.keteranganKey) cols.push({
+        label: `Ket. ${f.label}`,
+        key: f.keteranganKey,
+        group: "pendapatan" as const,
+        width: "w-40",
+        editable: true,
+      });
+      return cols;
+    }),
     { label: "Total Pend", key: "_total_pend", group: "pendapatan", width: "w-28", editable: false },
-    ...POTONGAN_FIELDS.filter((f) => f.key !== "total_potongan").map((f) => ({
-      label: f.label,
-      key: f.key,
-      group: "potongan" as const,
-      width: "w-24",
-      editable: !f.readonly && !READONLY_KEYS.has(f.key),
-    })),
+    ...POTONGAN_FIELDS.filter((f) => f.key !== "total_potongan").flatMap((f) => {
+      const cols: SheetCol[] = [{
+        label: f.label,
+        key: f.key,
+        group: "potongan" as const,
+        width: "w-24",
+        editable: !f.readonly && !READONLY_KEYS.has(f.key),
+      }];
+      if (f.keteranganKey) cols.push({
+        label: `Ket. ${f.label}`,
+        key: f.keteranganKey,
+        group: "potongan" as const,
+        width: "w-40",
+        editable: true,
+      });
+      return cols;
+    }),
     { label: "Total Pot", key: "_total_pot", group: "potongan", width: "w-28", editable: false },
     { label: "Netto", key: "_netto", group: "netto", width: "w-28", editable: false },
     { label: "Bank", key: "_bank", group: "rekening", width: "w-20", editable: false },
@@ -143,6 +167,7 @@ export default function WorksheetSheetFullscreen({
     };
   };
 
+  const isKeteranganCol = (key: string) => key.endsWith("_keterangan");
   const frozenDivider = (key: string) => key === "_nama" && "border-r-2 border-r-primary/30 shadow-[6px_0_12px_-10px_rgba(15,23,42,0.7)]";
 
   const getCellValue = (row: PayrollRow, col: SheetCol): string => {
@@ -171,6 +196,7 @@ export default function WorksheetSheetFullscreen({
     if (col.group === "info" || col.group === "rekening" || col.group === "netto") return "";
     if (col.key === "_total_pend") return formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).totalPendapatan, 0));
     if (col.key === "_total_pot") return formatCurrency(filtered.reduce((s, r) => s + wsComputeTotals(r.id).totalPotongan, 0));
+    if (isKeteranganCol(col.key)) return "";
     return formatCurrency(filtered.reduce((s, r) => s + getCellNumeric(r, col), 0));
   };
 
@@ -413,6 +439,26 @@ export default function WorksheetSheetFullscreen({
                       );
                     }
                     if (c.group === "pendapatan" && c.key !== "_total_pend") {
+                      if (isKeteranganCol(c.key)) {
+                        return (
+                          <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1")}>
+                            <input
+                              type="text"
+                              value={wsKeterangan[row.id]?.[c.key] || ""}
+                              onChange={(e) => handleWsKeteranganChange(row.id, c.key, e.target.value)}
+                              placeholder="Ket."
+                              onClick={(e) => e.stopPropagation()}
+                              readOnly={!c.editable}
+                              className={cn(
+                                "w-full text-[10px] tabular-nums px-2 py-1.5 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
+                                !c.editable && "!bg-transparent text-muted-foreground cursor-default border-transparent",
+                                c.editable && !isCellChanged(row.id, c.key) && "border-transparent hover:border-border/60 focus:border-primary focus:ring-1 focus:ring-primary/20 bg-transparent",
+                                c.editable && isCellChanged(row.id, c.key) && "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20",
+                              )}
+                            />
+                          </td>
+                        );
+                      }
                       const isNum = typeof getCellNumeric(row, c) === "number";
                       return (
                         <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1")}>
@@ -435,6 +481,26 @@ export default function WorksheetSheetFullscreen({
                       );
                     }
                     if (c.group === "potongan" && c.key !== "_total_pot") {
+                      if (isKeteranganCol(c.key)) {
+                        return (
+                          <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1")}>
+                            <input
+                              type="text"
+                              value={wsKeterangan[row.id]?.[c.key] || ""}
+                              onChange={(e) => handleWsKeteranganChange(row.id, c.key, e.target.value)}
+                              placeholder="Ket."
+                              onClick={(e) => e.stopPropagation()}
+                              readOnly={!c.editable}
+                              className={cn(
+                                "w-full text-[10px] tabular-nums px-2 py-1.5 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
+                                !c.editable && "!bg-transparent text-muted-foreground cursor-default border-transparent",
+                                c.editable && !isCellChanged(row.id, c.key) && "border-transparent hover:border-border/60 focus:border-primary focus:ring-1 focus:ring-primary/20 bg-transparent",
+                                c.editable && isCellChanged(row.id, c.key) && "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20",
+                              )}
+                            />
+                          </td>
+                        );
+                      }
                       return (
                         <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1")}>
                           {c.editable ? cellInput(row, c) : (

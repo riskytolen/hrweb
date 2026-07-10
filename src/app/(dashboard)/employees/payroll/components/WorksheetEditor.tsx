@@ -45,6 +45,8 @@ interface WorksheetEditorProps {
   nextPeriod: () => void;
 
   handleWsChange: (id: number, field: string, rawValue: string) => void;
+  handleWsKeteranganChange: (id: number, fieldKey: string, value: string) => void;
+  wsKeterangan: Record<number, Record<string, string>>;
   handleWsSaveRow: (id: number) => Promise<void>;
   handleWsRefreshSources: () => Promise<void>;
   initWsData: (rows: PayrollRow[]) => void;
@@ -79,6 +81,8 @@ export default function WorksheetEditor({
   prevPeriod,
   nextPeriod,
   handleWsChange,
+  handleWsKeteranganChange,
+  wsKeterangan,
   handleWsSaveRow,
   handleWsRefreshSources,
   initWsData,
@@ -248,7 +252,7 @@ export default function WorksheetEditor({
                                 const wsLembur = isLembur ? wsLemburBreakdown[row.id] : null;
                                 const wsLemburLoad = isLembur ? !!wsLemburLoading[row.id] : false;
                                 return (
-                                  <div key={f.key} className={cn(isLembur ? "space-y-1.5" : "flex items-center gap-2")}>
+                                  <div key={f.key} className={cn(isLembur || f.keteranganKey ? "space-y-1.5" : "flex items-center gap-2")}>
                                     <div className="flex items-center gap-2">
                                       <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
                                       {f.readonly ? (
@@ -274,6 +278,25 @@ export default function WorksheetEditor({
                                         </div>
                                       )}
                                     </div>
+                                    {f.keteranganKey && (
+                                      <div className="pl-[136px]">
+                                        <input
+                                          type="text"
+                                          value={wsKeterangan[row.id]?.[f.keteranganKey] || ""}
+                                          onChange={(e) => handleWsKeteranganChange(row.id, f.keteranganKey!, e.target.value)}
+                                          placeholder="Keterangan..."
+                                          onClick={(e) => e.stopPropagation()}
+                                          readOnly={!canEdit}
+                                          className={cn(
+                                            "w-full text-[10px] px-2 py-1 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
+                                            !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
+                                            isCellChanged(row.id, f.keteranganKey)
+                                              ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
+                                              : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                          )}
+                                        />
+                                      </div>
+                                    )}
                                     {isLembur && (
                                       <div>
                                         {wsLemburLoad ? (
@@ -338,7 +361,7 @@ export default function WorksheetEditor({
                                 const wsBreakdown = isPotAbsen ? wsAbsenBreakdown[row.id] : null;
                                 const wsBreakdownLoading = isPotAbsen ? !!wsAbsenLoading[row.id] : false;
                                 return (
-                                  <div key={f.key} className={cn(isPotAbsen ? "space-y-1.5" : "flex items-center gap-2")}>
+                                  <div key={f.key} className={cn(isPotAbsen || f.keteranganKey ? "space-y-1.5" : "flex items-center gap-2")}>
                                     <div className="flex items-center gap-2">
                                       <span className="text-[11px] text-muted-foreground w-32 flex-shrink-0 truncate">{f.label}</span>
                                       {f.readonly ? (
@@ -364,6 +387,25 @@ export default function WorksheetEditor({
                                         </div>
                                       )}
                                     </div>
+                                    {f.keteranganKey && (
+                                      <div className="pl-[136px]">
+                                        <input
+                                          type="text"
+                                          value={wsKeterangan[row.id]?.[f.keteranganKey] || ""}
+                                          onChange={(e) => handleWsKeteranganChange(row.id, f.keteranganKey!, e.target.value)}
+                                          placeholder="Keterangan..."
+                                          onClick={(e) => e.stopPropagation()}
+                                          readOnly={!canEdit}
+                                          className={cn(
+                                            "w-full text-[10px] px-2 py-1 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
+                                            !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
+                                            isCellChanged(row.id, f.keteranganKey)
+                                              ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
+                                              : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
+                                          )}
+                                        />
+                                      </div>
+                                    )}
                                     {isPotAbsen && (
                                       <div>
                                         {wsBreakdownLoading ? (

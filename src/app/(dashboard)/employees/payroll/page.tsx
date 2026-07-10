@@ -52,7 +52,7 @@ import BreakdownAbsen, { type AbsenItem } from "./components/BreakdownAbsen";
 import BreakdownLembur, { type LemburItem } from "./components/BreakdownLembur";
 import WorksheetEditor from "./components/WorksheetEditor";
 import WorksheetSheetFullscreen from "./components/WorksheetSheetFullscreen";
-import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
+import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type FieldDef, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
@@ -181,6 +181,7 @@ export default function PayrollPage() {
   const [showDetail, setShowDetail] = useState(false);
   const [selectedPayroll, setSelectedPayroll] = useState<PayrollRow | null>(null);
   const [editForm, setEditForm] = useState<Record<string, number>>({});
+  const [editKeterangan, setEditKeterangan] = useState<Record<string, string>>({});
   const [editCatatan, setEditCatatan] = useState("");
   const [saving, setSaving] = useState(false);
   const detailRequestSeq = useRef(0);
@@ -204,6 +205,7 @@ export default function PayrollPage() {
   // ─── Workflow state: Worksheet → Draft → Final ───
   const [activeMainTab, setActiveMainTab] = useState<"worksheet" | "draft" | "final" | "laporan">("worksheet");
   const [wsData, setWsData] = useState<Record<number, Record<string, number>>>({});
+  const [wsKeterangan, setWsKeterangan] = useState<Record<number, Record<string, string>>>({});
   /** Map<payrollId, Set<fieldKey>> — track cell-level changes untuk highlight */
   const [wsChangedCells, setWsChangedCells] = useState<Map<number, Set<string>>>(new Map());
   const [wsSaving, setWsSaving] = useState(false);
@@ -464,6 +466,10 @@ export default function PayrollPage() {
           bpjs_kesehatan: 0,
           status: "Draft",
           catatan: null,
+          extra_job_keterangan: null,
+          insentif_keterangan: null,
+          pinjaman_perusahaan_keterangan: null,
+          potongan_lain_keterangan: null,
         };
       });
 
@@ -524,6 +530,11 @@ export default function PayrollPage() {
     PENDAPATAN_FIELDS.forEach((f) => { form[f.key] = (row as unknown as Record<string, number>)[f.key] || 0; });
     POTONGAN_FIELDS.forEach((f) => { form[f.key] = (row as unknown as Record<string, number>)[f.key] || 0; });
     setEditForm(form);
+    const ket: Record<string, string> = {};
+    [...PENDAPATAN_FIELDS, ...POTONGAN_FIELDS].forEach((f) => {
+      if (f.keteranganKey) ket[f.keteranganKey] = (row as unknown as Record<string, string | null>)[f.keteranganKey] || "";
+    });
+    setEditKeterangan(ket);
     setEditCatatan(row.catatan || "");
     setShowDetail(true);
     setAbsenBreakdown(null);
@@ -633,6 +644,9 @@ export default function PayrollPage() {
     });
     POTONGAN_FIELDS.forEach((f) => {
       if (!f.readonly) updatePayload[f.key] = editForm[f.key] || 0;
+    });
+    [...PENDAPATAN_FIELDS, ...POTONGAN_FIELDS].forEach((f) => {
+      if (f.keteranganKey) updatePayload[f.keteranganKey] = editKeterangan[f.keteranganKey] || null;
     });
 
     const { data, error } = await supabase
@@ -893,12 +907,24 @@ export default function PayrollPage() {
       const filenameScope = scopeLabel ? `${scopeLabel}_` : "Slip_Gaji_";
       const filename = `${filenameScope}${periodLabel.replace(/\s/g, "_")}.xlsx`;
 
-      // Build rows
+      const flatHeaders = (fields: FieldDef[]): string[] =>
+        fields.flatMap((f) => f.keteranganKey ? [f.label, `Ket. ${f.label}`] : [f.label]);
+      const flatValues = (p: PayrollRow, fields: FieldDef[]): (string | number)[] =>
+        fields.flatMap((f) => f.keteranganKey
+          ? [(p as unknown as Record<string, number>)[f.key] || 0, (p as unknown as Record<string, string | null>)[f.keteranganKey] || ""]
+          : [(p as unknown as Record<string, number>)[f.key] || 0]
+        );
+      const flatTotals = (fields: FieldDef[]): (string | number)[] =>
+        fields.flatMap((f) => f.keteranganKey
+          ? [rowsToExport.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0), ""]
+          : [rowsToExport.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)]
+        );
+
       const headers = [
         "No", "ID Pegawai", "Nama", "Periode",
-        ...PENDAPATAN_FIELDS.map((f) => f.label),
+        ...flatHeaders(PENDAPATAN_FIELDS),
         "Total Pendapatan",
-        ...POTONGAN_FIELDS.map((f) => f.label),
+        ...flatHeaders(POTONGAN_FIELDS),
         "Total Potongan",
         "Netto", "Status", "Catatan",
       ];
@@ -908,9 +934,9 @@ export default function PayrollPage() {
         p.employee_id,
         p.pegawaiNama || "-",
         periodLabel,
-        ...PENDAPATAN_FIELDS.map((f) => (p as unknown as Record<string, number>)[f.key] || 0),
+        ...flatValues(p, PENDAPATAN_FIELDS),
         p.total_pendapatan,
-        ...POTONGAN_FIELDS.map((f) => (p as unknown as Record<string, number>)[f.key] || 0),
+        ...flatValues(p, POTONGAN_FIELDS),
         p.total_potongan,
         p.netto,
         p.status,
@@ -920,13 +946,9 @@ export default function PayrollPage() {
       // Total row
       const totalRow = [
         "", "", "TOTAL", "",
-        ...PENDAPATAN_FIELDS.map((f) =>
-          rowsToExport.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)
-        ),
+        ...flatTotals(PENDAPATAN_FIELDS),
         rowsToExport.reduce((s, p) => s + p.total_pendapatan, 0),
-        ...POTONGAN_FIELDS.map((f) =>
-          rowsToExport.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)
-        ),
+        ...flatTotals(POTONGAN_FIELDS),
         rowsToExport.reduce((s, p) => s + p.total_potongan, 0),
         rowsToExport.reduce((s, p) => s + p.netto, 0),
         "", "",
@@ -1049,10 +1071,14 @@ export default function PayrollPage() {
     doc.text("PENDAPATAN", margin, y);
     y += 2;
 
-    const pendapatanData = PENDAPATAN_FIELDS.map((f) => [
-      f.label,
-      formatCurrency((payroll as unknown as Record<string, number>)[f.key] || 0),
-    ]);
+    const pendapatanData: (string | number)[][] = [];
+    PENDAPATAN_FIELDS.forEach((f) => {
+      pendapatanData.push([f.label, formatCurrency((payroll as unknown as Record<string, number>)[f.key] || 0)]);
+      if (f.keteranganKey) {
+        const ket = (payroll as unknown as Record<string, string | null>)[f.keteranganKey];
+        if (ket) pendapatanData.push([`   Ket: ${ket}`, ""]);
+      }
+    });
     pendapatanData.push(["Total Pendapatan", formatCurrency(payroll.total_pendapatan)]);
 
     autoTable(doc, {
@@ -1083,10 +1109,14 @@ export default function PayrollPage() {
     doc.text("POTONGAN", margin, y);
     y += 2;
 
-    const potonganData = POTONGAN_FIELDS.map((f) => [
-      f.label,
-      formatCurrency((payroll as unknown as Record<string, number>)[f.key] || 0),
-    ]);
+    const potonganData: (string | number)[][] = [];
+    POTONGAN_FIELDS.forEach((f) => {
+      potonganData.push([f.label, formatCurrency((payroll as unknown as Record<string, number>)[f.key] || 0)]);
+      if (f.keteranganKey) {
+        const ket = (payroll as unknown as Record<string, string | null>)[f.keteranganKey];
+        if (ket) potonganData.push([`   Ket: ${ket}`, ""]);
+      }
+    });
     potonganData.push(["Total Potongan", formatCurrency(payroll.total_potongan)]);
 
     autoTable(doc, {
@@ -1160,13 +1190,20 @@ export default function PayrollPage() {
   // ─── Worksheet helpers ───
   const initWsData = useCallback((rows: PayrollRow[]) => {
     const data: Record<number, Record<string, number>> = {};
+    const keterangan: Record<number, Record<string, string>> = {};
     rows.forEach((r) => {
       const vals: Record<string, number> = {};
       PENDAPATAN_FIELDS.forEach((f) => { vals[f.key] = (r as unknown as Record<string, number>)[f.key] || 0; });
       POTONGAN_FIELDS.forEach((f) => { vals[f.key] = (r as unknown as Record<string, number>)[f.key] || 0; });
       data[r.id] = vals;
+      const ket: Record<string, string> = {};
+      [...PENDAPATAN_FIELDS, ...POTONGAN_FIELDS].forEach((f) => {
+        if (f.keteranganKey) ket[f.keteranganKey] = (r as unknown as Record<string, string | null>)[f.keteranganKey] || "";
+      });
+      keterangan[r.id] = ket;
     });
     setWsData(data);
+    setWsKeterangan(keterangan);
     setWsChangedCells(new Map());
   }, []);
 
@@ -1256,6 +1293,18 @@ export default function PayrollPage() {
     });
   };
 
+  const handleWsKeteranganChange = (id: number, fieldKey: string, value: string) => {
+    if (!canEdit) return;
+    setWsKeterangan((prev) => ({ ...prev, [id]: { ...prev[id], [fieldKey]: value } }));
+    setWsChangedCells((prev) => {
+      const next = new Map(prev);
+      const cells = new Set(next.get(id) ?? []);
+      cells.add(fieldKey);
+      next.set(id, cells);
+      return next;
+    });
+  };
+
   const wsComputeTotals = (id: number) => {
     const vals = wsData[id];
     if (!vals) return { totalPendapatan: 0, totalPotongan: 0, netto: 0 };
@@ -1264,10 +1313,16 @@ export default function PayrollPage() {
     return { totalPendapatan, totalPotongan, netto: totalPendapatan - totalPotongan };
   };
 
-  const buildWsUpdatePayload = (vals: Record<string, number>) => {
-    const payload: Record<string, number> = {};
+  const buildWsUpdatePayload = (id: number, vals: Record<string, number>) => {
+    const payload: Record<string, number | string | null> = {};
     PENDAPATAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
     POTONGAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
+    const ket = wsKeterangan[id];
+    if (ket) {
+      [...PENDAPATAN_FIELDS, ...POTONGAN_FIELDS].forEach((f) => {
+        if (f.keteranganKey) payload[f.keteranganKey] = ket[f.keteranganKey] || null;
+      });
+    }
     return payload;
   };
 
@@ -1284,7 +1339,7 @@ export default function PayrollPage() {
     setWsSaving(true);
     const { error } = await supabase
       .from("payrolls")
-      .update(buildWsUpdatePayload(vals))
+      .update(buildWsUpdatePayload(id, vals))
       .eq("id", id)
       .eq("status", "Worksheet");
     setWsSaving(false);
@@ -1712,6 +1767,10 @@ export default function PayrollPage() {
           bpjs_kesehatan: 0,
           status: "Worksheet",
           catatan: null,
+          extra_job_keterangan: null,
+          insentif_keterangan: null,
+          pinjaman_perusahaan_keterangan: null,
+          potongan_lain_keterangan: null,
           last_recomputed_at: new Date().toISOString(),
           source_gaji_pokok: sourceGapok,
           source_titik: sourceTitik,
@@ -1820,6 +1879,8 @@ export default function PayrollPage() {
         prevPeriod={prevPeriod}
         nextPeriod={nextPeriod}
         handleWsChange={handleWsChange}
+        handleWsKeteranganChange={handleWsKeteranganChange}
+        wsKeterangan={wsKeterangan}
         handleWsSaveRow={handleWsSaveRow}
         isCellChanged={isCellChanged}
         wsComputeTotals={wsComputeTotals}
@@ -2181,6 +2242,8 @@ export default function PayrollPage() {
             prevPeriod={prevPeriod}
             nextPeriod={nextPeriod}
             handleWsChange={handleWsChange}
+            handleWsKeteranganChange={handleWsKeteranganChange}
+            wsKeterangan={wsKeterangan}
             handleWsSaveRow={handleWsSaveRow}
             handleWsRefreshSources={handleWsRefreshSources}
             initWsData={initWsData}
@@ -2631,7 +2694,7 @@ export default function PayrollPage() {
                       {PENDAPATAN_FIELDS.map((f) => {
                         const isLembur = f.key === "lembur";
                         return (
-                          <div key={f.key} className={cn(isLembur ? "space-y-2" : "flex items-center gap-3")}>
+                          <div key={f.key} className={cn(isLembur || f.keteranganKey ? "space-y-2" : "flex items-center gap-3")}>
                             <div className="flex items-center gap-3">
                               <label className="text-xs text-muted-foreground w-36 flex-shrink-0">
                                 {f.label}
@@ -2656,6 +2719,21 @@ export default function PayrollPage() {
                                 />
                               </div>
                             </div>
+                            {f.keteranganKey && (
+                              <div className="pl-[152px]">
+                                <input
+                                  type="text"
+                                  value={editKeterangan[f.keteranganKey] || ""}
+                                  onChange={(e) => {
+                                    if (selectedPayroll.status === "Final" || !canEdit) return;
+                                    setEditKeterangan((prev) => ({ ...prev, [f.keteranganKey!]: e.target.value }));
+                                  }}
+                                  placeholder="Keterangan..."
+                                  readOnly={selectedPayroll.status === "Final" || !canEdit}
+                                  className={cn(inputClass, "text-xs", (selectedPayroll.status === "Final" || !canEdit) && "bg-muted/60 text-muted-foreground cursor-not-allowed")}
+                                />
+                              </div>
+                            )}
                             {isLembur && (
                               <div>
                                 {lemburBreakdownLoading ? (
@@ -2716,31 +2794,47 @@ export default function PayrollPage() {
                     </div>
                     <div className="space-y-2.5">
                       {POTONGAN_FIELDS.map((f) => (
-                        <div key={f.key} className="flex items-center gap-3">
-                          <label className="text-xs text-muted-foreground w-36 flex-shrink-0">
-                            {f.label}
-                            {f.readonly && <span className="text-[9px] text-primary ml-1">(auto)</span>}
-                          </label>
-                          <div className="flex-1 min-w-0">
-                            <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">Rp</span>
-                              <input
-                                type="text"
-                                value={formatInputCurrency(editForm[f.key] || 0)}
-                                onChange={(e) => {
-                                  if (f.readonly || selectedPayroll.status === "Final" || !canEdit) return;
-                                  const val = parseCurrencyInput(e.target.value);
-                                  setEditForm((prev) => ({ ...prev, [f.key]: val }));
-                                }}
-                                readOnly={f.readonly || selectedPayroll.status === "Final" || !canEdit}
-                                className={cn(
-                                  inputClass,
-                                  "pl-9 text-right",
-                                  (f.readonly || selectedPayroll.status === "Final" || !canEdit) && "bg-muted/60 text-muted-foreground cursor-not-allowed"
-                                )}
-                              />
-                            </div>
-                            {f.key === "potongan_absen" && (
+                        <div key={f.key} className={cn(f.keteranganKey ? "space-y-2" : "flex items-center gap-3")}>
+                          <div className="flex items-center gap-3">
+                            <label className="text-xs text-muted-foreground w-36 flex-shrink-0">
+                              {f.label}
+                              {f.readonly && <span className="text-[9px] text-primary ml-1">(auto)</span>}
+                            </label>
+                            <div className="flex-1 min-w-0">
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">Rp</span>
+                                <input
+                                  type="text"
+                                  value={formatInputCurrency(editForm[f.key] || 0)}
+                                  onChange={(e) => {
+                                    if (f.readonly || selectedPayroll.status === "Final" || !canEdit) return;
+                                    const val = parseCurrencyInput(e.target.value);
+                                    setEditForm((prev) => ({ ...prev, [f.key]: val }));
+                                  }}
+                                  readOnly={f.readonly || selectedPayroll.status === "Final" || !canEdit}
+                                  className={cn(
+                                    inputClass,
+                                    "pl-9 text-right",
+                                    (f.readonly || selectedPayroll.status === "Final" || !canEdit) && "bg-muted/60 text-muted-foreground cursor-not-allowed"
+                                  )}
+                                />
+                              </div>
+                              {f.keteranganKey && (
+                                <div className="mt-2">
+                                  <input
+                                    type="text"
+                                    value={editKeterangan[f.keteranganKey] || ""}
+                                    onChange={(e) => {
+                                      if (selectedPayroll.status === "Final" || !canEdit) return;
+                                      setEditKeterangan((prev) => ({ ...prev, [f.keteranganKey!]: e.target.value }));
+                                    }}
+                                    placeholder="Keterangan..."
+                                    readOnly={selectedPayroll.status === "Final" || !canEdit}
+                                    className={cn(inputClass, "text-xs", (selectedPayroll.status === "Final" || !canEdit) && "bg-muted/60 text-muted-foreground cursor-not-allowed")}
+                                  />
+                                </div>
+                              )}
+                              {f.key === "potongan_absen" && (
                               <div className="mt-3">
                                 {absenBreakdownLoading ? (
                                   <div className="text-[10px] text-muted-foreground text-right animate-pulse">Memuat detail...</div>
@@ -2794,6 +2888,7 @@ export default function PayrollPage() {
                             )}
                           </div>
                         </div>
+                      </div>
                       ))}
                       <div className="flex items-center gap-3 pt-2 border-t border-border">
                         <span className="text-xs font-bold text-foreground w-36">Total Potongan</span>
