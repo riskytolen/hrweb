@@ -1,7 +1,7 @@
 import Button from "@/components/ui/Button";
 import { X, Trash2, FileCheck, RotateCcw, ShieldCheck, type LucideIcon } from "lucide-react";
 
-export type BatchActionType = "buat" | "finalkan" | "batalkan" | "hapus";
+export type BatchActionType = "buat" | "finalkan" | "batalkan" | "hapus" | "draftkan";
 
 interface BatchAction {
   type: BatchActionType;
@@ -32,6 +32,12 @@ const ACTION_CONFIG: Record<
     icon: Trash2,
     label: (n) => `Hapus ${n} Slip`,
     className: "bg-danger text-white hover:bg-danger/90 border-danger",
+  },
+  draftkan: {
+    icon: RotateCcw,
+    label: (n) => `Kembalikan ${n} ke Draft`,
+    className:
+      "text-warning border-warning/30 hover:bg-warning/10 hover:text-warning bg-transparent",
   },
 };
 

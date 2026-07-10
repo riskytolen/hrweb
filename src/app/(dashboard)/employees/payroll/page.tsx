@@ -233,6 +233,7 @@ export default function PayrollPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkFinalConfirm, setBulkFinalConfirm] = useState(false);
+  const [bulkDraftConfirm, setBulkDraftConfirm] = useState(false);
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [singleFinalConfirm, setSingleFinalConfirm] = useState<PayrollRow | null>(null);
   const [computeWorksheetConfirm, setComputeWorksheetConfirm] = useState(false);
@@ -893,6 +894,69 @@ export default function PayrollPage() {
     setBulkUpdating(false);
     setBulkFinalConfirm(false);
     setSelectedIds(new Set()); // Reset selection setelah aksi berhasil
+  };
+
+  const handleBulkDraft = async () => {
+    if (!isSuperAdmin) {
+      showToast("error", "Tidak Diizinkan", "Hanya super admin yang dapat mengembalikan Final ke Draft.");
+      setBulkDraftConfirm(false);
+      return;
+    }
+    if (activeMainTab !== "final") {
+      showToast("error", "Tab Tidak Sesuai", "Batch Draft hanya bisa dilakukan dari tab Final.");
+      setBulkDraftConfirm(false);
+      return;
+    }
+    const scopedRows = getScopedSelectedRows();
+    if (scopedRows.length === 0) return;
+    setBulkUpdating(true);
+
+    const finalsToUpdate = scopedRows.filter((p) => p.status === "Final");
+    if (finalsToUpdate.length === 0) {
+      showToast("error", "Info", "Semua slip yang dipilih sudah bukan Final.");
+      setBulkUpdating(false);
+      setBulkDraftConfirm(false);
+      return;
+    }
+
+    const finalIds = finalsToUpdate.map((p) => p.id);
+    const { error } = await supabase
+      .from("payrolls")
+      .update({ status: "Draft", locked_at: null, locked_by: null })
+      .in("id", finalIds);
+
+    if (error) {
+      showToast("error", "Gagal Mengembalikan ke Draft", error.message);
+      setBulkUpdating(false);
+      setBulkDraftConfirm(false);
+      return;
+    }
+
+    await logAudit({
+      supabase,
+      action: "status_change",
+      entityType: "payrolls",
+      entityId: `bulk-draft-${finalIds.length}`,
+      entityLabel: `Bulk update ${finalIds.length} slip gaji ke Draft`,
+      metadata: { from: "Final", to: "Draft", ids: finalIds, records: finalsToUpdate.map((r) => ({ id: r.id, nama: r.pegawaiNama })) },
+    });
+
+    setPayrolls((prev) =>
+      prev.map((p) =>
+        finalIds.includes(p.id) ? { ...p, status: "Draft", locked_at: null, locked_by: null } : p,
+      ),
+    );
+    showToast("success", "Slip Dikembalikan", `${finalIds.length} slip gaji berhasil dikembalikan ke Draft.`);
+
+    if (selectedPayroll && finalIds.includes(selectedPayroll.id)) {
+      setSelectedPayroll((prev) =>
+        prev ? { ...prev, status: "Draft", locked_at: null, locked_by: null } : null,
+      );
+    }
+
+    setBulkUpdating(false);
+    setBulkDraftConfirm(false);
+    setSelectedIds(new Set());
   };
 
   // ─── Export Excel (xlsx) ───
@@ -1680,6 +1744,7 @@ export default function PayrollPage() {
   const scopedSelectedRows = filtered.filter((p) => selectedIds.has(p.id));
   const scopedSelectedIds = scopedSelectedRows.map((p) => p.id);
   const scopedDraftSelectedCount = scopedSelectedRows.filter((p) => p.status === "Draft").length;
+  const scopedFinalSelectedCount = scopedSelectedRows.filter((p) => p.status === "Final").length;
   const hasUnsavedBuatSlipSelection = buatSlipConfirm?.ids.some((id) => wsChangedCells.has(id)) ?? false;
 
   // ─── Summary ───
@@ -2457,11 +2522,11 @@ export default function PayrollPage() {
             <FinalPillBadge />
           </div>
         )}
-        {canEdit && <BatchActionBar
+        {(canEdit || (activeMainTab === "final" && isSuperAdmin)) && <BatchActionBar
           count={scopedSelectedRows.length}
           onClear={() => setSelectedIds(new Set())}
           actions={(() => {
-            const acts: { type: "buat" | "finalkan" | "batalkan" | "hapus"; onClick: () => void }[] = [];
+            const acts: { type: "buat" | "finalkan" | "batalkan" | "hapus" | "draftkan"; onClick: () => void }[] = [];
             if (activeMainTab === "draft") {
               acts.push({
                 type: "batalkan",
@@ -2472,10 +2537,18 @@ export default function PayrollPage() {
                 onClick: () => setBulkFinalConfirm(true),
               });
             }
-            acts.push({
-              type: "hapus",
-              onClick: () => setBulkDeleteConfirm(true),
-            });
+            if (activeMainTab === "final" && isSuperAdmin) {
+              acts.push({
+                type: "draftkan",
+                onClick: () => setBulkDraftConfirm(true),
+              });
+            }
+            if (canEdit) {
+              acts.push({
+                type: "hapus",
+                onClick: () => setBulkDeleteConfirm(true),
+              });
+            }
             return acts;
           })()}
         />}
@@ -2485,10 +2558,10 @@ export default function PayrollPage() {
               <tr className="border-b border-border bg-muted/50">
                 <th className="px-5 py-3.5 w-12 text-center">
                   <input type="checkbox" className="rounded border-muted-foreground/30 text-primary cursor-pointer w-4 h-4 disabled:opacity-40 disabled:cursor-not-allowed"
-                    disabled={!canEdit}
+                    disabled={!canEdit && !(activeMainTab === "final" && isSuperAdmin)}
                     checked={paged.length > 0 && paged.every(r => selectedIds.has(r.id))}
                     onChange={(e) => {
-                      if (!canEdit) return;
+                      if (!canEdit && !(activeMainTab === "final" && isSuperAdmin)) return;
                       if (e.target.checked) {
                         setSelectedIds(new Set([...selectedIds, ...paged.map(r => r.id)]));
                       } else {
@@ -2537,10 +2610,10 @@ export default function PayrollPage() {
                 <tr key={row.id} className={cn("hover:bg-muted/30 transition-colors", selectedIds.has(row.id) && "bg-primary/5")}>
                   <td className="px-5 py-3.5 text-center">
                     <input type="checkbox" className="rounded border-muted-foreground/30 text-primary cursor-pointer w-4 h-4 disabled:opacity-40 disabled:cursor-not-allowed"
-                      disabled={!canEdit}
+                      disabled={!canEdit && !(activeMainTab === "final" && isSuperAdmin)}
                       checked={selectedIds.has(row.id)}
                       onChange={(e) => {
-                        if (!canEdit) return;
+                        if (!canEdit && !(activeMainTab === "final" && isSuperAdmin)) return;
                         const next = new Set(selectedIds);
                         if (e.target.checked) next.add(row.id);
                         else next.delete(row.id);
@@ -3159,6 +3232,34 @@ export default function PayrollPage() {
                 </Button>
                 <Button size="sm" className="flex-1 bg-success hover:bg-success/90 text-white border-success" icon={bulkUpdating ? Loader2 : CircleCheckBig} onClick={handleBulkFinal} disabled={bulkUpdating || scopedDraftSelectedCount === 0}>
                   {bulkUpdating ? "Memproses..." : "Ya, Finalkan"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ Bulk Draft Confirmation Modal (Final → Draft) ═══ */}
+      {bulkDraftConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !bulkUpdating && setBulkDraftConfirm(false)} />
+            <div className="relative bg-card rounded-2xl border border-border shadow-2xl w-full max-w-sm mx-4 animate-fade-in">
+              <div className="px-6 py-5 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-warning/10 flex items-center justify-center mx-auto mb-4">
+                  <RotateCcw className="w-6 h-6 text-warning" />
+                </div>
+                <h3 className="text-sm font-bold text-foreground mb-1">Kembalikan {scopedFinalSelectedCount} Slip ke Draft?</h3>
+                <p className="text-xs text-muted-foreground">
+                  Slip gaji akan dikembalikan ke status <strong>Draft</strong> sehingga bisa diedit ulang. Slip tidak akan muncul di aplikasi mobile sampai difinalkan kembali.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 px-6 py-4 border-t border-border">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setBulkDraftConfirm(false)} disabled={bulkUpdating}>
+                  Batal
+                </Button>
+                <Button size="sm" className="flex-1" icon={bulkUpdating ? Loader2 : RotateCcw} onClick={handleBulkDraft} disabled={bulkUpdating || scopedFinalSelectedCount === 0}>
+                  {bulkUpdating ? "Memproses..." : "Ya, Kembalikan"}
                 </Button>
               </div>
             </div>
