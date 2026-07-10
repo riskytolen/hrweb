@@ -30,6 +30,7 @@ import {
   BarChart3,
   ShieldCheck,
   Lock,
+  Maximize2,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -50,6 +51,7 @@ import StatusBadge, { type LegacyPayrollStatus } from "./components/StatusBadge"
 import BreakdownAbsen, { type AbsenItem } from "./components/BreakdownAbsen";
 import BreakdownLembur, { type LemburItem } from "./components/BreakdownLembur";
 import WorksheetEditor from "./components/WorksheetEditor";
+import WorksheetSheetFullscreen from "./components/WorksheetSheetFullscreen";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
 
 // ─── Types ───
@@ -174,6 +176,9 @@ export default function PayrollPage() {
   const [gapokSaving, setGapokSaving] = useState(false);
   const [gapokStatusFilter, setGapokStatusFilter] = useState<"semua" | "Aktif" | "Tidak Aktif">("semua");
   const [gapokIsiFilter, setGapokIsiFilter] = useState<"semua" | "terisi" | "belum">("semua");
+
+  // ─── Fullscreen sheet mode ───
+  const [sheetMode, setSheetMode] = useState(false);
 
   // ─── Workflow state: Worksheet → Draft → Final ───
   const [activeMainTab, setActiveMainTab] = useState<"worksheet" | "draft" | "final" | "laporan">("worksheet");
@@ -1791,6 +1796,29 @@ export default function PayrollPage() {
   };
 
   return (
+    <>
+    {sheetMode && (
+      <WorksheetSheetFullscreen
+        filtered={getFilteredRowsForMainTab("worksheet")}
+        wsData={wsData}
+        wsChangedCells={wsChangedCells}
+        wsAbsenBreakdown={wsAbsenBreakdown}
+        wsLemburBreakdown={wsLemburBreakdown}
+        wsSaving={wsSaving}
+        period={period}
+        prevPeriod={prevPeriod}
+        nextPeriod={nextPeriod}
+        handleWsChange={handleWsChange}
+        handleWsSaveRow={handleWsSaveRow}
+        isCellChanged={isCellChanged}
+        wsComputeTotals={wsComputeTotals}
+        exportSlipPDF={exportSlipPDF}
+        setDeleteConfirm={setDeleteConfirm}
+        setBuatSlipConfirm={setBuatSlipConfirm}
+        canEdit={canEdit}
+        onClose={() => setSheetMode(false)}
+      />
+    )}
     <RouteGuard permission="payroll">
     <div className="space-y-6 animate-fade-in">
       <PageHeader
@@ -1827,6 +1855,11 @@ export default function PayrollPage() {
                 }} disabled={wsComputing || loading || !canEdit}>
                   {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
                 </Button>
+                {activeMainTab === "worksheet" && (
+                  <Button variant="outline" icon={Maximize2} size="sm" onClick={() => setSheetMode(true)}>
+                    Spreadsheet
+                  </Button>
+                )}
               </>
             )}
             <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
@@ -3071,6 +3104,7 @@ export default function PayrollPage() {
 
     </div>
     </RouteGuard>
+    </>
   );
 }
 

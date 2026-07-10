@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import {
   CreditCard,
   Search,
@@ -14,12 +14,10 @@ import {
   Loader2,
   FileCheck,
   RefreshCw,
-  Maximize2,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { cn, formatCurrency } from "@/lib/utils";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "../constants";
-import WorksheetSheetFullscreen from "./WorksheetSheetFullscreen";
 
 type WsBreakdownAbsen = { telat: number; alpha: number; lainnya: number; items: AbsenBreakdownItem[] } | null;
 type WsBreakdownLembur = { total: number; items: LemburBreakdownItem[] } | null;
@@ -93,32 +91,7 @@ export default function WorksheetEditor({
   onOpenBatchFill,
   canEdit,
 }: WorksheetEditorProps) {
-  const [sheetMode, setSheetMode] = useState(false);
   return (
-    <>
-    {/* ── Fullscreen Sheet Mode ── */}
-    {sheetMode && (
-      <WorksheetSheetFullscreen
-        filtered={filtered}
-        wsData={wsData}
-        wsChangedCells={wsChangedCells}
-        wsAbsenBreakdown={wsAbsenBreakdown}
-        wsLemburBreakdown={wsLemburBreakdown}
-        wsSaving={wsSaving}
-        period={period}
-        prevPeriod={prevPeriod}
-        nextPeriod={nextPeriod}
-        handleWsChange={handleWsChange}
-        handleWsSaveRow={handleWsSaveRow}
-        isCellChanged={isCellChanged}
-        wsComputeTotals={wsComputeTotals}
-        exportSlipPDF={exportSlipPDF}
-        setDeleteConfirm={setDeleteConfirm}
-        setBuatSlipConfirm={setBuatSlipConfirm}
-        canEdit={canEdit}
-        onClose={() => setSheetMode(false)}
-      />
-    )}
     <div className="bg-card rounded-2xl border border-border overflow-hidden">
       {/* ── Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-border bg-card">
@@ -155,10 +128,6 @@ export default function WorksheetEditor({
             <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => setSearch(e.target.value)}
               className="bg-transparent text-[11px] outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
           </div>
-          <button onClick={() => setSheetMode(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">
-            <Maximize2 className="w-3 h-3" /> Spreadsheet
-          </button>
           {canEdit && <button onClick={handleWsRefreshSources} disabled={wsRefreshing || wsSaving}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             <RefreshCw className={cn("w-3 h-3", wsRefreshing && "animate-spin")} />
@@ -517,6 +486,5 @@ export default function WorksheetEditor({
         </table>
       </div>
     </div>
-    </>
   );
 }
