@@ -36,8 +36,9 @@ interface WorksheetSheetFullscreenProps {
   wsComputeTotals: (id: number) => { totalPendapatan: number; totalPotongan: number; netto: number };
   exportSlipPDF: (row: PayrollRow) => void;
   setDeleteConfirm: (v: { id: number; nama: string } | null) => void;
-  setBuatSlipConfirm: (v: { ids: number[]; mode: "single" | "bulk" } | null) => void;
+  setBuatSlipConfirm: ((v: { ids: number[]; mode: "single" | "bulk" } | null) => void) | undefined;
   canEdit: boolean;
+  mode: "Worksheet" | "Draft" | "Final";
   onClose: () => void;
 }
 
@@ -83,9 +84,18 @@ export default function WorksheetSheetFullscreen({
   setDeleteConfirm,
   setBuatSlipConfirm,
   canEdit,
+  mode,
   onClose,
 }: WorksheetSheetFullscreenProps) {
   const tableRef = useRef<HTMLDivElement>(null);
+  const isReadOnly = mode === "Final";
+
+  const modeLabel =
+    mode === "Worksheet" ? "Worksheet" :
+    mode === "Draft" ? "Draft" :
+    "Final";
+  const modeSubLabel =
+    mode === "Final" ? " — read-only, terkunci" : "";
 
   // Lock body scroll + Esc handler
   useEffect(() => {
@@ -212,7 +222,7 @@ export default function WorksheetSheetFullscreen({
         onChange={(e) => handleWsChange(row.id, col.key, e.target.value)}
         placeholder="0"
         onClick={(e) => e.stopPropagation()}
-        readOnly={!col.editable}
+        readOnly={!col.editable || isReadOnly}
         className={cn(
           "w-full text-right text-[11px] tabular-nums px-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
           !col.editable && "!bg-transparent text-muted-foreground cursor-default border-transparent",
@@ -232,7 +242,7 @@ export default function WorksheetSheetFullscreen({
             <CreditCard className="w-4 h-4 text-white" />
           </div>
           <div className="min-w-0">
-            <h2 className="text-sm font-bold text-foreground">Worksheet — Mode Spreadsheet</h2>
+            <h2 className="text-sm font-bold text-foreground">{modeLabel} — Mode Spreadsheet{modeSubLabel}</h2>
             <p className="text-[10px] text-muted-foreground">{filtered.length} pegawai</p>
           </div>
         </div>
@@ -362,11 +372,11 @@ export default function WorksheetSheetFullscreen({
               return (
                 <tr key={row.id} className={cn("border-b border-border/40 transition-colors", rowBg)}>
                   {SHEET_COLS.map((c) => {
-                    if (c.key === "_aksi") {
+                      if (c.key === "_aksi") {
                       return (
                         <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1")}>
                           <div className="flex items-center justify-center gap-0.5">
-                            {canEdit && setBuatSlipConfirm && (
+                            {!isReadOnly && canEdit && setBuatSlipConfirm && mode === "Worksheet" && (
                               <button
                                 onClick={() => setBuatSlipConfirm({ ids: [row.id], mode: "single" })}
                                 className="p-1 rounded hover:bg-primary-light text-muted-foreground hover:text-primary"
@@ -382,7 +392,7 @@ export default function WorksheetSheetFullscreen({
                             >
                               <Download className="w-3 h-3" />
                             </button>
-                            {canEdit && (
+                            {!isReadOnly && canEdit && (
                               <button
                                 onClick={() => setDeleteConfirm?.({ id: row.id, nama: row.pegawaiNama || row.employee_id })}
                                 className="p-1 rounded hover:bg-danger/10 text-muted-foreground hover:text-danger"
@@ -391,7 +401,7 @@ export default function WorksheetSheetFullscreen({
                                 <Trash2 className="w-3 h-3" />
                               </button>
                             )}
-                            {canEdit && isChanged && (
+                            {!isReadOnly && canEdit && isChanged && (
                               <button
                                 onClick={() => handleWsSaveRow(row.id)}
                                 disabled={wsSaving}
@@ -490,7 +500,7 @@ export default function WorksheetSheetFullscreen({
                               onChange={(e) => handleWsKeteranganChange(row.id, c.key, e.target.value)}
                               placeholder="Ket."
                               onClick={(e) => e.stopPropagation()}
-                              readOnly={!c.editable}
+                              readOnly={!c.editable || isReadOnly}
                               className={cn(
                                 "w-full text-[10px] tabular-nums px-2 py-1.5 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
                                 !c.editable && "!bg-transparent text-muted-foreground cursor-default border-transparent",

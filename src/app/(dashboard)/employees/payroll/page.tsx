@@ -1404,6 +1404,8 @@ export default function PayrollPage() {
 
   const handleWsChange = (id: number, field: string, rawValue: string) => {
     if (!canEdit) return;
+    const row = payrolls.find((p) => p.id === id);
+    if (row?.status === "Final") return;
     const value = parseCurrencyInput(rawValue);
     setWsData((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
     setWsChangedCells((prev) => {
@@ -1417,6 +1419,8 @@ export default function PayrollPage() {
 
   const handleWsKeteranganChange = (id: number, fieldKey: string, value: string) => {
     if (!canEdit) return;
+    const row = payrolls.find((p) => p.id === id);
+    if (row?.status === "Final") return;
     setWsKeterangan((prev) => ({ ...prev, [id]: { ...prev[id], [fieldKey]: value } }));
     setWsChangedCells((prev) => {
       const next = new Map(prev);
@@ -1457,13 +1461,20 @@ export default function PayrollPage() {
     const vals = wsData[id];
     if (!vals) return;
 
+    const row = payrolls.find((p) => p.id === id);
+    const status = row?.status;
+    if (!status || status === "Final") {
+      showToast("error", "Slip Terkunci", "Slip Final tidak dapat diedit.");
+      return;
+    }
+
     const changedCellCount = wsChangedCells.get(id)?.size || 0;
     setWsSaving(true);
     const { error } = await supabase
       .from("payrolls")
       .update(buildWsUpdatePayload(id, vals))
       .eq("id", id)
-      .eq("status", "Worksheet");
+      .eq("status", status);
     setWsSaving(false);
 
     if (error) {
@@ -1471,12 +1482,12 @@ export default function PayrollPage() {
       return;
     }
 
-    const row = payrolls.find((p) => p.id === id);
+    const statusLabel = status === "Draft" ? "Draft" : "Worksheet";
     await logAudit({
       supabase,
       action: "update",
       entityType: "payrolls",
-      entityLabel: `Worksheet ${row?.pegawaiNama || row?.employee_id || id}`,
+      entityLabel: `${statusLabel} ${row?.pegawaiNama || row?.employee_id || id}`,
       metadata: {
         periode: periodKey,
         payroll_id: id,
@@ -1490,7 +1501,7 @@ export default function PayrollPage() {
       next.delete(id);
       return next;
     });
-    showToast("success", "Worksheet Disimpan", `${row?.pegawaiNama || "Pegawai"} berhasil diperbarui.`);
+    showToast("success", `${statusLabel} Disimpan`, `${row?.pegawaiNama || "Pegawai"} berhasil diperbarui.`);
 
     if (wsChangedCells.size === 1) {
       await fetchPayrolls();
@@ -1992,7 +2003,7 @@ export default function PayrollPage() {
     <>
     {sheetMode && (
       <WorksheetSheetFullscreen
-        filtered={getFilteredRowsForMainTab("worksheet")}
+        filtered={getFilteredRowsForMainTab(activeMainTab === "laporan" ? "final" : activeMainTab)}
         wsData={wsData}
         wsChangedCells={wsChangedCells}
         wsAbsenBreakdown={wsAbsenBreakdown}
@@ -2009,8 +2020,9 @@ export default function PayrollPage() {
         wsComputeTotals={wsComputeTotals}
         exportSlipPDF={exportSlipPDF}
         setDeleteConfirm={setDeleteConfirm}
-        setBuatSlipConfirm={setBuatSlipConfirm}
+        setBuatSlipConfirm={activeMainTab === "worksheet" ? setBuatSlipConfirm : undefined}
         canEdit={canEdit}
+        mode={activeMainTab === "laporan" ? "Final" : (activeMainTab.charAt(0).toUpperCase() + activeMainTab.slice(1)) as "Worksheet" | "Draft" | "Final"}
         onClose={() => setSheetMode(false)}
       />
     )}
@@ -2050,7 +2062,7 @@ export default function PayrollPage() {
                 }} disabled={wsComputing || loading || !canEdit}>
                   {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
                 </Button>
-                {activeMainTab === "worksheet" && (
+                {activeMainTab !== "laporan" && (
                   <Button variant="outline" icon={Maximize2} size="sm" onClick={() => setSheetMode(true)}>
                     Spreadsheet
                   </Button>
