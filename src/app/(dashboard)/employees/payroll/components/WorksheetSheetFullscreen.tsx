@@ -227,7 +227,7 @@ export default function WorksheetSheetFullscreen({
         onClick={(e) => e.stopPropagation()}
         readOnly={!col.editable || isReadOnly}
         className={cn(
-          "w-full text-right text-[11px] tabular-nums px-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
+          "w-full text-right text-[10px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all leading-tight",
           (!col.editable || isReadOnly) && "!bg-transparent text-muted-foreground cursor-default border-transparent",
           col.editable && !isReadOnly && !isCellChanged(row.id, col.key) && "border-transparent hover:border-border/60 focus:border-primary focus:ring-1 focus:ring-primary/20 bg-transparent",
           col.editable && !isReadOnly && isCellChanged(row.id, col.key) && "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20",
@@ -297,7 +297,7 @@ export default function WorksheetSheetFullscreen({
               {leadingInfoCols.map((c) => (
                 <th key={c.key} style={getColumnStyle(c)} className={cn(
                   c.width,
-                   "h-7 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900",
+                   "h-6 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 leading-tight",
                    headerGridBorder,
                   FROZEN_COLS.has(c.key) && "sticky z-[70]",
                   frozenDivider(c.key),
@@ -306,23 +306,23 @@ export default function WorksheetSheetFullscreen({
                 </th>
               ))}
               {/* Pendapatan group */}
-              <th colSpan={pendapatanCols.length} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-emerald-600 border-r-2 border-b border-emerald-800/80 dark:border-emerald-400/50 text-center">
+              <th colSpan={pendapatanCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-emerald-600 border-r-2 border-b border-emerald-800/80 dark:border-emerald-400/50 text-center leading-tight">
                 Pendapatan
               </th>
               {/* Potongan group */}
-              <th colSpan={potonganCols.length} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-rose-600 border-r-2 border-b border-rose-800/80 dark:border-rose-400/50 text-center">
+              <th colSpan={potonganCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-rose-600 border-r-2 border-b border-rose-800/80 dark:border-rose-400/50 text-center leading-tight">
                 Potongan
               </th>
               {/* Netto group */}
-              <th className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-primary border-r-2 border-b border-primary/70 text-center">
+              <th className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-primary border-r-2 border-b border-primary/70 text-center leading-tight">
                 Netto
               </th>
               {/* Rekening group */}
-              <th colSpan={3} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-blue-600 border-r border-b border-blue-800/80 dark:border-blue-400/50 text-center">
+              <th colSpan={3} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-blue-600 border-r border-b border-blue-800/80 dark:border-blue-400/50 text-center leading-tight">
                 Rekening
               </th>
               {aksiCol && (
-                <th style={getColumnStyle(aksiCol)} className={cn("h-7 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 border-l-2 border-l-slate-300 dark:border-l-slate-700", headerGridBorder)}>
+                <th style={getColumnStyle(aksiCol)} className={cn("h-6 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 border-l-2 border-l-slate-300 dark:border-l-slate-700 leading-tight", headerGridBorder)}>
                   Aksi
                 </th>
               )}
@@ -345,7 +345,7 @@ export default function WorksheetSheetFullscreen({
                     style={getColumnStyle(c)}
                     className={cn(
                       c.width,
-                      "h-9 px-1 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap text-center",
+                      "h-7 px-1 py-1 text-[9px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap text-center leading-tight",
                       headerGridBorder,
                       groupBg,
                       (c.group === "info" || c.group === "rekening") && "font-normal text-[9px]",
@@ -379,31 +379,31 @@ export default function WorksheetSheetFullscreen({
                   {SHEET_COLS.map((c) => {
                       if (c.key === "_aksi") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-0.5 py-0.5", gridBorder)}>
                           <div className="flex items-center justify-center gap-0.5">
                             {!isReadOnly && canEdit && setBuatSlipConfirm && mode === "Worksheet" && (
                               <button
                                 onClick={() => setBuatSlipConfirm({ ids: [row.id], mode: "single" })}
-                                className="p-1 rounded hover:bg-primary-light text-muted-foreground hover:text-primary"
+                                className="p-0.5 rounded-sm hover:bg-primary-light text-muted-foreground hover:text-primary"
                                 title="Buat Slip"
                               >
-                                <FileCheck className="w-3 h-3" />
+                                <FileCheck className="w-2.5 h-2.5" />
                               </button>
                             )}
                             <button
                               onClick={() => exportSlipPDF(row)}
-                              className="p-1 rounded hover:bg-primary-light text-muted-foreground hover:text-primary"
+                              className="p-0.5 rounded-sm hover:bg-primary-light text-muted-foreground hover:text-primary"
                               title="PDF"
                             >
-                              <Download className="w-3 h-3" />
+                              <Download className="w-2.5 h-2.5" />
                             </button>
                             {!isReadOnly && canEdit && (
                               <button
                                 onClick={() => setDeleteConfirm?.({ id: row.id, nama: row.pegawaiNama || row.employee_id })}
-                                className="p-1 rounded hover:bg-danger/10 text-muted-foreground hover:text-danger"
+                                className="p-0.5 rounded-sm hover:bg-danger/10 text-muted-foreground hover:text-danger"
                                 title="Hapus"
                               >
-                                <Trash2 className="w-3 h-3" />
+                                <Trash2 className="w-2.5 h-2.5" />
                               </button>
                             )}
                             {!isReadOnly && canEdit && isChanged && (
@@ -411,12 +411,12 @@ export default function WorksheetSheetFullscreen({
                                 onClick={() => handleWsSaveRow(row.id)}
                                 disabled={wsSaving}
                                 className={cn(
-                                  "p-1 rounded transition-colors",
+                                  "p-0.5 rounded-sm transition-colors",
                                   wsSaving ? "text-muted-foreground/50" : "text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10"
                                 )}
                                 title="Simpan"
                               >
-                                {wsSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                {wsSaving ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Save className="w-2.5 h-2.5" />}
                               </button>
                             )}
                           </div>
@@ -424,26 +424,26 @@ export default function WorksheetSheetFullscreen({
                       );
                     }
                     if (c.key === "_no") {
-                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground text-center sticky z-30", frozenBg, gridBorder)}>{idx + 1}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-[9px] text-muted-foreground text-center sticky z-30 leading-tight", frozenBg, gridBorder)}>{idx + 1}</td>;
                     }
                     if (c.key === "_nama") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 sticky z-30", frozenBg, gridBorder, frozenDivider(c.key))}>
-                          <p className="text-[11px] font-semibold text-foreground truncate">{row.pegawaiNama}</p>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 sticky z-30", frozenBg, gridBorder, frozenDivider(c.key))}>
+                          <p className="text-[10px] font-semibold text-foreground truncate leading-tight">{row.pegawaiNama}</p>
                         </td>
                       );
                     }
                     if (c.key === "_nik") {
-                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] font-mono text-muted-foreground sticky z-30", frozenBg, gridBorder)}>{row.employee_id}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-[9px] font-mono text-muted-foreground sticky z-30 leading-tight", frozenBg, gridBorder)}>{row.employee_id}</td>;
                     }
                     if (c.key === "_jabatan") {
-                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground truncate", gridBorder)}>{row.pegawaiJabatan}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-[9px] text-muted-foreground truncate leading-tight", gridBorder)}>{row.pegawaiJabatan}</td>;
                     }
                     if (c.key === "_status") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5", gridBorder)}>
                           <span className={cn(
-                            "inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                            "inline-block text-[9px] font-semibold px-1 py-0 rounded-sm leading-tight",
                             (row.pegawai as { status?: string } | undefined)?.status === "Aktif"
                               ? "text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-500/10"
                               : "text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-500/10"
@@ -456,7 +456,7 @@ export default function WorksheetSheetFullscreen({
                     if (c.group === "pendapatan" && c.key !== "_total_pend") {
                       if (isKeteranganCol(c.key)) {
                         return (
-                          <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1", gridBorder)}>
+                          <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-0.5 py-0.5", gridBorder)}>
                             <input
                               type="text"
                               value={wsKeterangan[row.id]?.[c.key] || ""}
@@ -465,7 +465,7 @@ export default function WorksheetSheetFullscreen({
                               onClick={(e) => e.stopPropagation()}
                               readOnly={!c.editable || isReadOnly}
                               className={cn(
-                                "w-full text-[10px] tabular-nums px-2 py-1.5 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
+                                "w-full text-[9px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all leading-tight",
                                 (!c.editable || isReadOnly) && "!bg-transparent text-muted-foreground cursor-default border-transparent",
                                 c.editable && !isReadOnly && !isCellChanged(row.id, c.key) && "border-transparent hover:border-border/60 focus:border-primary focus:ring-1 focus:ring-primary/20 bg-transparent",
                                 c.editable && !isReadOnly && isCellChanged(row.id, c.key) && "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20",
@@ -476,10 +476,10 @@ export default function WorksheetSheetFullscreen({
                       }
                       const isNum = typeof getCellNumeric(row, c) === "number";
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-0.5 py-0.5", gridBorder)}>
                           {c.editable ? cellInput(row, c) : (
                             <span className={cn(
-                              "block text-right text-[11px] tabular-nums px-2 py-1.5",
+                              "block text-right text-[10px] tabular-nums px-1 py-0.5 leading-tight",
                               "text-emerald-700 dark:text-emerald-400 font-medium"
                             )}>
                               {isNum ? formatCurrency(getCellNumeric(row, c)) : getCellValue(row, c)}
@@ -490,7 +490,7 @@ export default function WorksheetSheetFullscreen({
                     }
                     if (c.key === "_total_pend") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-right text-[11px] font-bold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50 dark:bg-emerald-950", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[10px] font-bold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50 dark:bg-emerald-950 leading-tight", gridBorder)}>
                           {getCellValue(row, c)}
                         </td>
                       );
@@ -498,7 +498,7 @@ export default function WorksheetSheetFullscreen({
                     if (c.group === "potongan" && c.key !== "_total_pot") {
                       if (isKeteranganCol(c.key)) {
                         return (
-                          <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1", gridBorder)}>
+                          <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-0.5 py-0.5", gridBorder)}>
                             <input
                               type="text"
                               value={wsKeterangan[row.id]?.[c.key] || ""}
@@ -507,7 +507,7 @@ export default function WorksheetSheetFullscreen({
                               onClick={(e) => e.stopPropagation()}
                               readOnly={!c.editable || isReadOnly}
                               className={cn(
-                                "w-full text-[10px] tabular-nums px-2 py-1.5 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
+                                "w-full text-[9px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all leading-tight",
                                 (!c.editable || isReadOnly) && "!bg-transparent text-muted-foreground cursor-default border-transparent",
                                 c.editable && !isReadOnly && !isCellChanged(row.id, c.key) && "border-transparent hover:border-border/60 focus:border-primary focus:ring-1 focus:ring-primary/20 bg-transparent",
                                 c.editable && !isReadOnly && isCellChanged(row.id, c.key) && "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20",
@@ -517,10 +517,10 @@ export default function WorksheetSheetFullscreen({
                         );
                       }
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-0.5 py-0.5", gridBorder)}>
                           {c.editable ? cellInput(row, c) : (
                             <span className={cn(
-                              "block text-right text-[11px] tabular-nums px-2 py-1.5",
+                              "block text-right text-[10px] tabular-nums px-1 py-0.5 leading-tight",
                               "text-rose-600 dark:text-rose-400 font-medium"
                             )}>
                               {formatCurrency(getCellNumeric(row, c))}
@@ -531,26 +531,26 @@ export default function WorksheetSheetFullscreen({
                     }
                     if (c.key === "_total_pot") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-right text-[11px] font-bold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50 dark:bg-rose-950", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[10px] font-bold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50 dark:bg-rose-950 leading-tight", gridBorder)}>
                           {getCellValue(row, c)}
                         </td>
                       );
                     }
                     if (c.key === "_netto") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-right text-xs font-extrabold tabular-nums bg-blue-50 dark:bg-blue-950", computed.netto >= 0 ? "text-primary" : "text-danger", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[11px] font-extrabold tabular-nums bg-blue-50 dark:bg-blue-950 leading-tight", computed.netto >= 0 ? "text-primary" : "text-danger", gridBorder)}>
                           {getCellValue(row, c)}
                         </td>
                       );
                     }
                     if (c.key === "_bank") {
-                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground", gridBorder)}>{peg?.bank || "-"}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-[9px] text-muted-foreground leading-tight", gridBorder)}>{peg?.bank || "-"}</td>;
                     }
                     if (c.key === "_no_rek") {
-                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] font-mono text-foreground", gridBorder)}>{peg?.no_rekening || "-"}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-[9px] font-mono text-foreground leading-tight", gridBorder)}>{peg?.no_rekening || "-"}</td>;
                     }
                     if (c.key === "_an") {
-                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground truncate", gridBorder)}>{peg?.nama_rekening || "-"}</td>;
+                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-[9px] text-muted-foreground truncate leading-tight", gridBorder)}>{peg?.nama_rekening || "-"}</td>;
                     }
                     return null;
                   })}
@@ -564,39 +564,39 @@ export default function WorksheetSheetFullscreen({
             <tfoot className="sticky bottom-0 z-10">
               <tr className="border-t-2 border-slate-400 dark:border-slate-600 bg-card shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.08)]">
                 {SHEET_COLS.map((c) => {
-                  if (c.key === "_no") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 sticky z-40 bg-card", footerGridBorder)} />;
+                  if (c.key === "_no") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky z-40 bg-card", footerGridBorder)} />;
                   if (c.key === "_nama") return (
-                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 sticky z-40 bg-card", footerGridBorder, frozenDivider(c.key))}>
-                      <p className="text-[10px] font-bold text-foreground uppercase tracking-wider">Grand Total</p>
+                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky z-40 bg-card", footerGridBorder, frozenDivider(c.key))}>
+                      <p className="text-[9px] font-bold text-foreground uppercase tracking-wider leading-tight">Grand Total</p>
                     </td>
                   );
-                  if (c.key === "_nik") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 sticky z-40 bg-card", footerGridBorder)} />;
+                  if (c.key === "_nik") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky z-40 bg-card", footerGridBorder)} />;
                   if (c.key === "_jabatan" || c.key === "_status" || c.key === "_bank" || c.key === "_no_rek" || c.key === "_an" || c.key === "_aksi") {
-                    return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2", footerGridBorder)} />;
+                    return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1", footerGridBorder)} />;
                   }
                   if (c.key === "_total_pend") {
                     return (
-                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 text-right text-[11px] font-extrabold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50 dark:bg-emerald-950", footerGridBorder)}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[10px] font-extrabold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50 dark:bg-emerald-950 leading-tight", footerGridBorder)}>
                         {getGrandTotal(c)}
                       </td>
                     );
                   }
                   if (c.key === "_total_pot") {
                     return (
-                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 text-right text-[11px] font-extrabold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50 dark:bg-rose-950", footerGridBorder)}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[10px] font-extrabold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50 dark:bg-rose-950 leading-tight", footerGridBorder)}>
                         {getGrandTotal(c)}
                       </td>
                     );
                   }
                   if (c.key === "_netto") {
                     return (
-                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-2 py-2 text-right text-xs font-extrabold text-primary tabular-nums bg-blue-50 dark:bg-blue-950", footerGridBorder)}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[11px] font-extrabold text-primary tabular-nums bg-blue-50 dark:bg-blue-950 leading-tight", footerGridBorder)}>
                         {getGrandNetto()}
                       </td>
                     );
                   }
                   return (
-                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-2 text-right text-[11px] font-bold text-foreground tabular-nums", footerGridBorder)}>
+                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[10px] font-bold text-foreground tabular-nums leading-tight", footerGridBorder)}>
                       {getGrandTotal(c)}
                     </td>
                   );
