@@ -40,6 +40,12 @@ interface WorksheetSheetFullscreenProps {
 }
 
 const READONLY_KEYS = new Set(["gaji_pokok", "pendapatan_titik", "lembur", "potongan_absen"]);
+const FROZEN_COLS = new Set(["_no", "_nik", "_nama"]);
+const FROZEN_OFFSETS: Record<string, string> = {
+  _no: "left-0",
+  _nik: "left-10",
+  _nama: "left-[136px]",
+};
 
 export default function WorksheetSheetFullscreen({
   filtered,
@@ -80,7 +86,7 @@ export default function WorksheetSheetFullscreen({
   type SheetCol = { label: string; key: string; group: "info" | "pendapatan" | "potongan" | "netto" | "rekening"; width: string; editable: boolean };
   const SHEET_COLS: SheetCol[] = [
     { label: "No", key: "_no", group: "info", width: "w-10", editable: false },
-    { label: "NIK", key: "_nik", group: "info", width: "w-24", editable: false },
+    { label: "ID", key: "_nik", group: "info", width: "w-24", editable: false },
     { label: "Nama", key: "_nama", group: "info", width: "min-w-[180px]", editable: false },
     { label: "Jabatan", key: "_jabatan", group: "info", width: "w-32", editable: false },
     { label: "Status", key: "_status", group: "info", width: "w-20", editable: false },
@@ -181,6 +187,22 @@ export default function WorksheetSheetFullscreen({
             <span className="text-[11px] font-bold text-foreground px-2.5 min-w-[200px] text-center whitespace-nowrap">{period.label}</span>
             <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronRight className="w-3.5 h-3.5" /></button>
           </div>
+          <div className="flex items-center gap-1 border-l border-border pl-2 ml-2">
+            <button
+              onClick={() => tableRef.current?.scrollBy({ left: -600, behavior: "smooth" })}
+              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="Geser ke kiri"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => tableRef.current?.scrollBy({ left: 600, behavior: "smooth" })}
+              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="Geser ke kanan"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
           <button
             onClick={onClose}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-danger/10 text-danger hover:bg-danger/20 transition-colors"
@@ -199,24 +221,30 @@ export default function WorksheetSheetFullscreen({
             <tr className="border-b border-border">
               {/* Info group */}
               {SHEET_COLS.filter((c) => c.group === "info").map((c) => (
-                <th key={c.key} className={cn(c.width, "px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-muted border-r border-border/50")}>
+                <th key={c.key} className={cn(
+                  c.width,
+                  "px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-muted border-r border-border/50",
+                  FROZEN_COLS.has(c.key) && "sticky z-30",
+                  FROZEN_COLS.has(c.key) && FROZEN_OFFSETS[c.key],
+                  c.key === "_nik" && "border-r-2 border-r-primary/30",
+                )}>
                   {c.label === "Aksi" ? "" : ""}
                 </th>
               ))}
               {/* Pendapatan group */}
-              <th colSpan={pendapatanCols.length} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/[0.04] border-r border-emerald-200/50 dark:border-emerald-500/10 text-center">
+              <th colSpan={pendapatanCols.length} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-emerald-600 border-r border-emerald-700/50 text-center">
                 Pendapatan
               </th>
               {/* Potongan group */}
-              <th colSpan={potonganCols.length} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/[0.04] border-r border-rose-200/50 dark:border-rose-500/10 text-center">
+              <th colSpan={potonganCols.length} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-rose-600 border-r border-rose-700/50 text-center">
                 Potongan
               </th>
               {/* Netto group */}
-              <th className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/[0.04] border-r border-primary/10 text-center">
+              <th className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-primary border-r border-primary/20 text-center">
                 Netto
               </th>
               {/* Rekening group */}
-              <th colSpan={3} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/[0.04] text-center">
+              <th colSpan={3} className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-blue-600 text-center">
                 Rekening
               </th>
             </tr>
@@ -224,14 +252,14 @@ export default function WorksheetSheetFullscreen({
             <tr className="border-b border-border">
               {SHEET_COLS.map((c) => {
                 const groupBg = c.group === "pendapatan"
-                  ? "bg-emerald-50/60 dark:bg-emerald-500/[0.02]"
+                  ? "bg-emerald-50 dark:bg-emerald-500/[0.06]"
                   : c.group === "potongan"
-                  ? "bg-rose-50/60 dark:bg-rose-500/[0.02]"
+                  ? "bg-rose-50 dark:bg-rose-500/[0.06]"
                   : c.group === "netto"
-                  ? "bg-primary/[0.02]"
+                  ? "bg-primary/[0.04]"
                   : c.group === "rekening"
-                  ? "bg-blue-50/60 dark:bg-blue-500/[0.02]"
-                  : "bg-muted/50";
+                  ? "bg-blue-50 dark:bg-blue-500/[0.06]"
+                  : "bg-muted";
                 return (
                   <th
                     key={c.key}
@@ -240,6 +268,9 @@ export default function WorksheetSheetFullscreen({
                       "px-1 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-r border-border/50 whitespace-nowrap text-center",
                       groupBg,
                       (c.group === "info" || c.group === "rekening") && "font-normal text-[9px]",
+                      FROZEN_COLS.has(c.key) && "sticky z-30",
+                      FROZEN_COLS.has(c.key) && FROZEN_OFFSETS[c.key],
+                      c.key === "_nik" && "border-r-2 border-r-primary/30",
                     )}
                   >
                     {c.label}
@@ -312,17 +343,17 @@ export default function WorksheetSheetFullscreen({
                       );
                     }
                     if (c.key === "_no") {
-                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground text-center")}>{idx + 1}</td>;
+                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground text-center sticky left-0 z-20", rowBg)}>{idx + 1}</td>;
                     }
                     if (c.key === "_nama") {
                       return (
-                        <td key={c.key} className={cn(c.width, "px-2 py-1.5")}>
+                        <td key={c.key} className={cn(c.width, "px-2 py-1.5 sticky left-[136px] z-20", rowBg, "border-r-2 border-r-primary/30")}>
                           <p className="text-[11px] font-semibold text-foreground truncate">{row.pegawaiNama}</p>
                         </td>
                       );
                     }
                     if (c.key === "_nik") {
-                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] font-mono text-muted-foreground")}>{row.employee_id}</td>;
+                      return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] font-mono text-muted-foreground sticky left-10 z-20", rowBg)}>{row.employee_id}</td>;
                     }
                     if (c.key === "_jabatan") {
                       return <td key={c.key} className={cn(c.width, "px-2 py-1.5 text-[10px] text-muted-foreground truncate")}>{row.pegawaiJabatan}</td>;
@@ -412,13 +443,14 @@ export default function WorksheetSheetFullscreen({
             <tfoot className="sticky bottom-0 z-10">
               <tr className="border-t-2 border-border bg-card shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.08)]">
                 {SHEET_COLS.map((c) => {
-                  if (c.key === "_no") return <td key={c.key} className={cn(c.width, "px-2 py-2")} />;
+                  if (c.key === "_no") return <td key={c.key} className={cn(c.width, "px-2 py-2 sticky left-0 z-30 bg-card")} />;
                   if (c.key === "_nama") return (
-                    <td key={c.key} className={cn(c.width, "px-2 py-2")}>
+                    <td key={c.key} className={cn(c.width, "px-2 py-2 sticky left-[136px] z-30 bg-card border-r-2 border-r-primary/30")}>
                       <p className="text-[10px] font-bold text-foreground uppercase tracking-wider">Grand Total</p>
                     </td>
                   );
-                  if (c.key === "_nik" || c.key === "_jabatan" || c.key === "_status" || c.key === "_bank" || c.key === "_no_rek" || c.key === "_an" || c.key === "_aksi") {
+                  if (c.key === "_nik") return <td key={c.key} className={cn(c.width, "px-2 py-2 sticky left-10 z-30 bg-card")} />;
+                  if (c.key === "_jabatan" || c.key === "_status" || c.key === "_bank" || c.key === "_no_rek" || c.key === "_an" || c.key === "_aksi") {
                     return <td key={c.key} className={cn(c.width, "px-2 py-2")} />;
                   }
                   if (c.key === "_total_pend") {
