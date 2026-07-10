@@ -36,8 +36,7 @@ const ACTION_CONFIG: Record<
   draftkan: {
     icon: RotateCcw,
     label: (n) => `Kembalikan ${n} ke Draft`,
-    className:
-      "text-warning border-warning/30 hover:bg-warning/10 hover:text-warning bg-transparent",
+    className: "bg-warning text-white hover:bg-warning/90 border-warning",
   },
 };
 
