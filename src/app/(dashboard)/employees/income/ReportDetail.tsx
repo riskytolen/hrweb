@@ -21,10 +21,10 @@ import DatePicker from "@/components/ui/DatePicker";
 import Portal from "@/components/ui/Portal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
-import { supabase, type DbDeliveryPoint } from "@/lib/supabase";
+import { supabase, type DbDeliveryPoint, type NonActivePeriod } from "@/lib/supabase";
 
 type DeliveryQueryRow = DbDeliveryPoint & {
-  pegawai?: { nama: string | null } | null;
+  pegawai?: { nama: string | null; tanggal_bergabung: string | null; tanggal_keluar: string | null; non_active_periods: NonActivePeriod[] | null } | null;
   delivery_zones?: { nama: string | null; color: string | null } | null;
   delivery_statuses?: { nama: string | null; kode?: string | null; color: string | null } | null;
 };
@@ -82,7 +82,7 @@ interface ReportDetailProps {
 }
 
 const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
-const DELIVERY_SELECT = "*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)";
+const DELIVERY_SELECT = "*, pegawai(nama, tanggal_bergabung, tanggal_keluar, non_active_periods), delivery_zones(nama, color), delivery_statuses(nama, kode, color)";
 const DELIVERY_FETCH_CHUNK_SIZE = 1000;
 
 async function fetchDeliveryRowsInRange(start: string, end: string): Promise<{ data: DeliveryQueryRow[]; error: QueryError | null }> {
@@ -136,6 +136,21 @@ function formatDisplayDate(dateStr: string): string {
   if (!dateStr) return "-";
   const d = new Date(dateStr + "T00:00:00");
   return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function isInNonActivePeriod(dateStr: string, periods: NonActivePeriod[] | null | undefined): boolean {
+  if (!periods || periods.length === 0) return false;
+  return periods.some((p) => dateStr >= p.from && dateStr <= p.to);
+}
+
+function isPegawaiActiveOnDate(
+  emp: { tanggal_bergabung?: string | null; tanggal_keluar?: string | null; non_active_periods?: NonActivePeriod[] | null } | null | undefined,
+  dateStr: string,
+): boolean {
+  if (!emp) return true;
+  if (emp.tanggal_bergabung && dateStr < emp.tanggal_bergabung) return false;
+  if (emp.tanggal_keluar && dateStr >= emp.tanggal_keluar) return false;
+  return !isInNonActivePeriod(dateStr, emp.non_active_periods);
 }
 
 export default function ReportDetail({ show, onClose, zones, dStatuses }: ReportDetailProps) {
@@ -210,7 +225,9 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   }, [show, fetchReport]);
 
   // ─── Process raw data into ReportRow[], then group both ways ───
-  const processData = (data: DbDeliveryPoint[]) => {
+  const processData = (data: DeliveryQueryRow[]) => {
+    // Hanya proses baris yang pegawainya aktif pada tanggal tersebut
+    const activeData = data.filter((d) => isPegawaiActiveOnDate(d.pegawai, d.tanggal));
     const map = new Map<string, {
       employee_id: string;
       employee_nama: string;
@@ -225,7 +242,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
       daily_details: ReportDailyDetail[];
     }>();
 
-    data.forEach((d) => {
+    activeData.forEach((d) => {
       const zNama = d.delivery_zones?.nama || "-";
       const zColor = d.delivery_zones?.color || "#3b82f6";
       const empNama = d.pegawai?.nama || d.employee_nama || d.employee_id || "?";

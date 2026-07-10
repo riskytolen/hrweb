@@ -109,7 +109,7 @@ export default function AttendancePage() {
 
         {viewMode === "ringkasan" && <SummaryView employees={employees} />}
 
-        {viewMode === "denda" && <FineReportView employees={employees} />}
+        {viewMode === "denda" && <FineReportView employees={employees} canEdit={canEdit} showToast={showToast} />}
 
         <AttendanceModals
           formModalRef={formModalRef}

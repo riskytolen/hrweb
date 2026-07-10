@@ -1,15 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import {
   Search, ChevronLeft, ChevronRight, ChevronDown, CalendarDays, Filter, Download, FileText,
   AlertTriangle, Clock, TrendingDown, Users,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
+import Portal from "@/components/ui/Portal";
 import Pagination from "@/components/ui/Pagination";
 import { SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
+import { supabase } from "@/lib/supabase";
+import { logAudit } from "@/lib/audit";
 import { SUMMARY_PAGE_SIZE } from "../lib/attendance-constants";
 import { getSummaryPeriodRange, getSummaryCurrentPeriodKey } from "../lib/attendance-helpers";
 import { useFineReportData, computeFineReportSummary, type FineReportItem } from "../lib/hooks/use-fine-report-data";
@@ -34,9 +37,11 @@ type SortKey = "nama" | "denda" | "kejadian";
 
 type FineReportViewProps = {
   employees: EmployeeLite[];
+  canEdit?: boolean;
+  showToast?: (type: "success" | "error", title: string, message?: string) => void;
 };
 
-export function FineReportView({ employees }: FineReportViewProps) {
+export function FineReportView({ employees, canEdit, showToast }: FineReportViewProps) {
   const [dateMode, setDateMode] = useState<"periode" | "custom">("periode");
   const [periodKey, setPeriodKey] = useState(getSummaryCurrentPeriodKey);
   const [customStart, setCustomStart] = useState("");
@@ -46,6 +51,10 @@ export function FineReportView({ employees }: FineReportViewProps) {
   const [filterType, setFilterType] = useState<"semua" | "telat" | "alpha">("semua");
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [nihilConfirm, setNihilConfirm] = useState<{
+    group: EmployeeFineGroup;
+    type: "telat" | "alpha" | "semua";
+  } | null>(null);
 
   const period = useMemo(
     () => dateMode === "periode"
@@ -61,7 +70,7 @@ export function FineReportView({ employees }: FineReportViewProps) {
     return `${s} – ${e}`;
   }, [period.start, period.end]);
 
-  const { items, loading } = useFineReportData(period, employees);
+  const { items, loading, reload } = useFineReportData(period, employees);
   const summary = useMemo(() => computeFineReportSummary(items), [items]);
 
   const groups = useMemo(() => {
@@ -128,6 +137,38 @@ export function FineReportView({ employees }: FineReportViewProps) {
   );
 
   const exportMenu = useDropdown();
+
+  const handleNihil = useCallback(async () => {
+    if (!nihilConfirm || !canEdit || !showToast) return;
+    const { group, type } = nihilConfirm;
+    const itemsToUpdate = group.items.filter((it) => {
+      if (type === "telat") return it.status === "Terlambat" || it.status === "Telat";
+      if (type === "alpha") return it.status === "Alpha";
+      return true;
+    });
+    if (itemsToUpdate.length === 0) { setNihilConfirm(null); return; }
+    const ids = itemsToUpdate.map((it) => it.id);
+    const totalDenda = itemsToUpdate.reduce((s, it) => s + it.denda, 0);
+    try {
+      const { error } = await supabase.from("attendance_records").update({ denda: 0 }).in("id", ids);
+      if (error) throw error;
+      await logAudit({
+        supabase, action: "update", entityType: "attendance_records",
+        entityId: group.employee_id,
+        entityLabel: `Nihil denda ${type} ${group.employeeNama}`,
+        metadata: {
+          type, employee_id: group.employee_id, employee_nama: group.employeeNama,
+          record_count: ids.length, total_denda_sebelum: totalDenda,
+        },
+      });
+      showToast("success", "Denda Dinihilkan", `${group.employeeNama}: ${ids.length} record (Rp${formatCurrency(totalDenda)})`);
+      setNihilConfirm(null);
+      await reload();
+    } catch (err) {
+      showToast("error", "Gagal", err instanceof Error ? err.message : "Terjadi kesalahan.");
+      setNihilConfirm(null);
+    }
+  }, [nihilConfirm, canEdit, showToast, reload]);
 
   const navigatePeriod = (dir: -1 | 1) => {
     if (dateMode !== "periode") return;
@@ -481,6 +522,28 @@ export function FineReportView({ employees }: FineReportViewProps) {
                                 })}
                               </tbody>
                             </table>
+                            {canEdit && (
+                              <div className="flex items-center gap-2 mt-3 pb-1">
+                                {g.kejadianTelat > 0 && (
+                                  <button type="button" onClick={() => setNihilConfirm({ group: g, type: "telat" })}
+                                    className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-warning/10 text-warning hover:bg-warning/20 transition-colors">
+                                    Nihilkan Telat ({formatCurrency(g.dendaTelat)})
+                                  </button>
+                                )}
+                                {g.kejadianAlpha > 0 && (
+                                  <button type="button" onClick={() => setNihilConfirm({ group: g, type: "alpha" })}
+                                    className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 transition-colors">
+                                    Nihilkan Alpha ({formatCurrency(g.dendaAlpha)})
+                                  </button>
+                                )}
+                                {g.kejadianTelat > 0 && g.kejadianAlpha > 0 && (
+                                  <button type="button" onClick={() => setNihilConfirm({ group: g, type: "semua" })}
+                                    className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-danger/10 text-danger hover:bg-danger/20 transition-colors">
+                                    Nihilkan Semua ({formatCurrency(g.totalDenda)})
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -514,6 +577,44 @@ export function FineReportView({ employees }: FineReportViewProps) {
         </div>
         <Pagination currentPage={page} totalItems={filtered.length} pageSize={SUMMARY_PAGE_SIZE} onPageChange={setPage} />
       </div>
+
+      {nihilConfirm && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setNihilConfirm(null)} />
+            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+              <div className="p-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4">
+                  <AlertTriangle className="w-7 h-7 text-danger" />
+                </div>
+                <h3 className="text-base font-bold text-foreground">Nihilkan Denda?</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  {nihilConfirm.type === "telat" && `Denda Telat`}
+                  {nihilConfirm.type === "alpha" && `Denda Alpha`}
+                  {nihilConfirm.type === "semua" && `Semua Denda`}
+                  {' '}untuk <span className="font-semibold text-foreground">{nihilConfirm.group.employeeNama}</span> akan dinolkan.
+                </p>
+                <div className="flex items-center justify-center gap-6 mt-4 text-xs text-muted-foreground">
+                  <span>{nihilConfirm.type === "telat" ? nihilConfirm.group.kejadianTelat : nihilConfirm.type === "alpha" ? nihilConfirm.group.kejadianAlpha : nihilConfirm.group.totalKejadian} record</span>
+                  <span className="font-semibold text-danger tabular-nums">
+                    Rp{formatCurrency(
+                      nihilConfirm.type === "telat" ? nihilConfirm.group.dendaTelat :
+                      nihilConfirm.type === "alpha" ? nihilConfirm.group.dendaAlpha :
+                      nihilConfirm.group.totalDenda
+                    )}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setNihilConfirm(null)}>Batal</Button>
+                <Button variant="danger" size="sm" className="flex-1" onClick={handleNihil}>
+                  Ya, Nihilkan
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
     </div>
   );
 }
