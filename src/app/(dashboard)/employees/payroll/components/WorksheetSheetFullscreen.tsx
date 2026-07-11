@@ -112,22 +112,40 @@ export default function WorksheetSheetFullscreen({
 
   // Column definition: label, key, group, width, editable
   type SheetCol = { label: string; key: string; group: "info" | "pendapatan" | "potongan" | "netto" | "rekening"; width: string; editable: boolean };
+  const sheetLabels: Record<string, string> = {
+    gaji_pokok: "GAPOK",
+    pendapatan_titik: "GAPOK+TITIK",
+    lembur: "LEMBUR",
+    extra_job: "EXTRA JOB BIAYA",
+    uang_makan: "UANG MAKAN",
+    insentif: "INSENTIVE BIAYA",
+    tunjangan_jabatan: "TJH JABATAN",
+    transport: "TRANSPORT",
+    tunjangan_lain: "TUNJANGAN LAIN LAIN",
+    tambahan_lain: "TAMBAHAN LAIN LAIN",
+    koperasi: "KOPERASI",
+    pinjaman_perusahaan: "PINJAMAN PERUSAHAAN BIAYA",
+    potongan_absen: "POTONGAN ABSEN BIAYA",
+    potongan_lain: "POTONGAN LAIN BIAYA",
+    jht: "JHT",
+    bpjs_kesehatan: "BPJS KES",
+  };
   const SHEET_COLS: SheetCol[] = [
-    { label: "No", key: "_no", group: "info", width: "w-[48px]", editable: false },
+    { label: "DRIVER", key: "_no", group: "info", width: "w-[48px]", editable: false },
     { label: "ID", key: "_nik", group: "info", width: "w-[110px]", editable: false },
-    { label: "Nama", key: "_nama", group: "info", width: "w-[240px]", editable: false },
-    { label: "Jabatan", key: "_jabatan", group: "info", width: "w-32", editable: false },
-    { label: "Status", key: "_status", group: "info", width: "w-20", editable: false },
+    { label: "NAMA", key: "_nama", group: "info", width: "w-[240px]", editable: false },
+    { label: "STATUS", key: "_jabatan", group: "info", width: "w-32", editable: false },
+    { label: "AKTIF", key: "_status", group: "info", width: "w-20", editable: false },
     ...PENDAPATAN_FIELDS.filter((f) => f.key !== "total_pendapatan").flatMap((f) => {
       const cols: SheetCol[] = [{
-        label: f.label,
+        label: sheetLabels[f.key] ?? f.label.toUpperCase(),
         key: f.key,
         group: "pendapatan" as const,
         width: f.key === "gaji_pokok" || f.key === "pendapatan_titik" ? "w-28" : f.key === "lembur" ? "w-28" : "w-24",
         editable: !f.readonly && !READONLY_KEYS.has(f.key),
       }];
       if (f.keteranganKey) cols.push({
-        label: `Ket. ${f.label}`,
+        label: "KET",
         key: f.keteranganKey,
         group: "pendapatan" as const,
         width: "w-40",
@@ -135,17 +153,17 @@ export default function WorksheetSheetFullscreen({
       });
       return cols;
     }),
-    { label: "Total Pend", key: "_total_pend", group: "pendapatan", width: "w-28", editable: false },
+    { label: "TOTAL", key: "_total_pend", group: "pendapatan", width: "w-28", editable: false },
     ...POTONGAN_FIELDS.filter((f) => f.key !== "total_potongan").flatMap((f) => {
       const cols: SheetCol[] = [{
-        label: f.label,
+        label: sheetLabels[f.key] ?? f.label.toUpperCase(),
         key: f.key,
         group: "potongan" as const,
         width: "w-24",
         editable: !f.readonly && !READONLY_KEYS.has(f.key),
       }];
       if (f.keteranganKey) cols.push({
-        label: `Ket. ${f.label}`,
+        label: "KET",
         key: f.keteranganKey,
         group: "potongan" as const,
         width: "w-40",
@@ -153,12 +171,12 @@ export default function WorksheetSheetFullscreen({
       });
       return cols;
     }),
-    { label: "Total Pot", key: "_total_pot", group: "potongan", width: "w-28", editable: false },
-    { label: "Netto", key: "_netto", group: "netto", width: "w-28", editable: false },
-    { label: "Bank", key: "_bank", group: "rekening", width: "w-20", editable: false },
-    { label: "No.Rek", key: "_no_rek", group: "rekening", width: "w-32", editable: false },
-    { label: "A/N", key: "_an", group: "rekening", width: "w-32", editable: false },
-    { label: "Aksi", key: "_aksi", group: "info", width: "w-24", editable: false },
+    { label: "TOTAL", key: "_total_pot", group: "potongan", width: "w-28", editable: false },
+    { label: "NETTO INCOME", key: "_netto", group: "netto", width: "w-28", editable: false },
+    { label: "NO REKENING", key: "_no_rek", group: "rekening", width: "w-32", editable: false },
+    { label: "NAMA REKENING", key: "_an", group: "rekening", width: "w-32", editable: false },
+    { label: "BANK", key: "_bank", group: "rekening", width: "w-20", editable: false },
+    { label: "AKSI", key: "_aksi", group: "info", width: "w-24", editable: false },
   ];
 
   const pendapatanCols = SHEET_COLS.filter((c) => c.group === "pendapatan");
@@ -297,7 +315,7 @@ export default function WorksheetSheetFullscreen({
               {leadingInfoCols.map((c) => (
                 <th key={c.key} style={getColumnStyle(c)} className={cn(
                   c.width,
-                   "h-6 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 leading-tight",
+                   "h-6 px-1 py-0 text-[9px] font-bold uppercase tracking-wider bg-[#a6a6a6] text-black leading-tight",
                    headerGridBorder,
                   FROZEN_COLS.has(c.key) && "sticky z-[70]",
                   frozenDivider(c.key),
@@ -306,23 +324,23 @@ export default function WorksheetSheetFullscreen({
                 </th>
               ))}
               {/* Pendapatan group */}
-              <th colSpan={pendapatanCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-emerald-600 border-r border-b border-dotted border-white/40 dark:border-slate-600/75 text-center leading-tight">
-                Pendapatan
+              <th colSpan={pendapatanCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-black bg-[#a6a6a6] border-r border-b border-dotted border-slate-400/75 dark:border-slate-600/75 text-center leading-tight">
+                PENDAPATAN
               </th>
               {/* Potongan group */}
-              <th colSpan={potonganCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-rose-600 border-r border-b border-dotted border-white/40 dark:border-slate-600/75 text-center leading-tight">
-                Potongan
+              <th colSpan={potonganCols.length} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-black bg-[#a6a6a6] border-r border-b border-dotted border-slate-400/75 dark:border-slate-600/75 text-center leading-tight">
+                PENGELUARAN/POTONGAN
               </th>
               {/* Netto group */}
-              <th className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-primary border-r border-b border-dotted border-white/40 dark:border-slate-600/75 text-center leading-tight">
-                Netto
+              <th className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-black bg-[#a6a6a6] border-r border-b border-dotted border-slate-400/75 dark:border-slate-600/75 text-center leading-tight">
+                NETTO INCOME
               </th>
               {/* Rekening group */}
-              <th colSpan={3} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white bg-blue-600 border-r border-b border-dotted border-white/40 dark:border-slate-600/75 text-center leading-tight">
-                Rekening
+              <th colSpan={3} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-black bg-[#a6a6a6] border-r border-b border-dotted border-slate-400/75 dark:border-slate-600/75 text-center leading-tight">
+                REKENING
               </th>
               {aksiCol && (
-                <th style={getColumnStyle(aksiCol)} className={cn("h-6 px-1 py-0 text-[9px] font-semibold uppercase tracking-wider bg-slate-100 dark:bg-slate-900 border-l border-dotted border-l-slate-400/75 dark:border-l-slate-600/75 leading-tight", headerGridBorder)}>
+                <th style={getColumnStyle(aksiCol)} className={cn("h-6 px-1 py-0 text-[9px] font-bold uppercase tracking-wider bg-[#a6a6a6] text-black border-l border-dotted border-l-slate-400/75 dark:border-l-slate-600/75 leading-tight", headerGridBorder)}>
                   Aksi
                 </th>
               )}
@@ -330,25 +348,16 @@ export default function WorksheetSheetFullscreen({
             {/* Row 2: Individual columns */}
             <tr className="border-b border-dotted border-slate-400/75 dark:border-slate-600/75">
               {SHEET_COLS.map((c) => {
-                const groupBg = c.group === "pendapatan"
-                  ? "bg-emerald-50 dark:bg-emerald-950"
-                  : c.group === "potongan"
-                  ? "bg-rose-50 dark:bg-rose-950"
-                  : c.group === "netto"
-                  ? "bg-blue-50 dark:bg-blue-950"
-                  : c.group === "rekening"
-                  ? "bg-sky-50 dark:bg-sky-950"
-                  : "bg-slate-100 dark:bg-slate-900";
+                const groupBg = "bg-[#d9d9d9] text-black";
                 return (
                   <th
                     key={c.key}
                     style={getColumnStyle(c)}
                     className={cn(
                       c.width,
-                      "h-7 px-1 py-1 text-[9px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap text-center leading-tight",
+                      "h-7 px-1 py-1 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap text-center leading-tight",
                       headerGridBorder,
                       groupBg,
-                      (c.group === "info" || c.group === "rekening") && "font-normal text-[9px]",
                       FROZEN_COLS.has(c.key) && "sticky z-[70]",
                       frozenDivider(c.key),
                     )}
@@ -372,8 +381,8 @@ export default function WorksheetSheetFullscreen({
               const computed = wsComputeTotals(row.id);
               const isChanged = wsChangedCells.has(row.id);
               const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null } | undefined;
-              const rowBg = isChanged ? "bg-amber-50/70 dark:bg-amber-950/40" : idx % 2 === 0 ? "bg-card" : "bg-muted/30";
-              const frozenBg = isChanged ? "bg-amber-50 dark:bg-amber-950" : idx % 2 === 0 ? "bg-card" : "bg-muted";
+              const rowBg = isChanged ? "bg-amber-50/70 dark:bg-amber-950/40" : idx % 2 === 0 ? "bg-[#f0f0f0] dark:bg-slate-900" : "bg-white dark:bg-slate-950";
+              const frozenBg = isChanged ? "bg-amber-50 dark:bg-amber-950" : idx % 2 === 0 ? "bg-[#f0f0f0] dark:bg-slate-900" : "bg-white dark:bg-slate-950";
               return (
                 <tr key={row.id} className={cn("border-b border-dotted border-slate-400/75 dark:border-slate-600/75 transition-colors", rowBg)}>
                   {SHEET_COLS.map((c) => {
@@ -480,7 +489,7 @@ export default function WorksheetSheetFullscreen({
                           {c.editable ? cellInput(row, c) : (
                             <span className={cn(
                               "block text-right text-[10px] tabular-nums px-1 py-0.5 leading-tight",
-                              "text-emerald-700 dark:text-emerald-400 font-medium"
+                              "text-black dark:text-slate-100 font-medium"
                             )}>
                               {isNum ? formatCurrency(getCellNumeric(row, c)) : getCellValue(row, c)}
                             </span>
@@ -490,7 +499,7 @@ export default function WorksheetSheetFullscreen({
                     }
                     if (c.key === "_total_pend") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[10px] font-bold text-emerald-800 dark:text-emerald-300 tabular-nums bg-emerald-50 dark:bg-emerald-950 leading-tight", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[10px] font-bold text-black dark:text-slate-100 tabular-nums bg-[#e6e6e6] dark:bg-slate-800 leading-tight", gridBorder)}>
                           {getCellValue(row, c)}
                         </td>
                       );
@@ -521,7 +530,7 @@ export default function WorksheetSheetFullscreen({
                           {c.editable ? cellInput(row, c) : (
                             <span className={cn(
                               "block text-right text-[10px] tabular-nums px-1 py-0.5 leading-tight",
-                              "text-rose-600 dark:text-rose-400 font-medium"
+                              "text-black dark:text-slate-100 font-medium"
                             )}>
                               {formatCurrency(getCellNumeric(row, c))}
                             </span>
@@ -531,14 +540,14 @@ export default function WorksheetSheetFullscreen({
                     }
                     if (c.key === "_total_pot") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[10px] font-bold text-rose-700 dark:text-rose-300 tabular-nums bg-rose-50 dark:bg-rose-950 leading-tight", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[10px] font-bold text-black dark:text-slate-100 tabular-nums bg-[#e6e6e6] dark:bg-slate-800 leading-tight", gridBorder)}>
                           {getCellValue(row, c)}
                         </td>
                       );
                     }
                     if (c.key === "_netto") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[11px] font-extrabold tabular-nums bg-blue-50 dark:bg-blue-950 leading-tight", computed.netto >= 0 ? "text-primary" : "text-danger", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[11px] font-extrabold text-black dark:text-slate-100 tabular-nums bg-[#e6e6e6] dark:bg-slate-800 leading-tight", gridBorder)}>
                           {getCellValue(row, c)}
                         </td>
                       );
