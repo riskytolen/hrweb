@@ -57,7 +57,7 @@ function isExpired(tanggalBerakhir: string | null): boolean {
 
 export default function AnnouncementsPage() {
   const { getPermissionLevel } = useAuth();
-  const permLevel = getPermissionLevel("employees");
+  const permLevel = getPermissionLevel("announcements");
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
 
@@ -235,7 +235,7 @@ export default function AnnouncementsPage() {
   };
 
   return (
-    <RouteGuard permission="employees">
+    <RouteGuard permission="announcements">
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Pengumuman"

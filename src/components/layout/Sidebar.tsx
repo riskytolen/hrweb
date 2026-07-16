@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -99,7 +100,7 @@ const allSections: MenuSection[] = [
           { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, permission: "payroll" },
           { name: "Kinerja", href: "/employees/performance", icon: Award, permission: "performance" },
           { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, permission: "legal" },
-          { name: "Pengumuman", href: "/employees/announcements", icon: Megaphone, permission: "employees" },
+          { name: "Pengumuman", href: "/employees/announcements", icon: Megaphone, permission: "announcements" },
           { name: "Rekrutmen", href: "/employees/recruitment", icon: UserPlus, permission: "recruitment" },
         ],
       },
@@ -139,6 +140,7 @@ const allSections: MenuSection[] = [
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { isSuperAdmin, hasPermission, isLoading, profile } = useAuth();
 
   // Filter section/entries berdasarkan permission user
@@ -245,7 +247,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             collapsed ? "justify-center px-2" : "px-3 gap-2",
           )}
         >
-          <a
+          <Link
             href="/employees"
             className={cn(
               "flex items-center gap-2.5 min-w-0",
@@ -262,7 +264,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 <p className="text-[9px] font-medium text-blue-300/60 uppercase tracking-[0.18em]">HRM System</p>
               </div>
             )}
-          </a>
+          </Link>
 
           {!collapsed && (
             <button
@@ -283,7 +285,19 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             collapsed ? "px-2" : "px-3",
           )}
         >
-          {sections.map((section, sIdx) => (
+          {isLoading ? (
+            <div className={cn(collapsed ? "px-1 space-y-2" : "px-2 space-y-2")}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    "rounded-lg bg-white/[0.04] animate-pulse",
+                    collapsed ? "h-10 w-10 mx-auto" : "h-[38px]",
+                  )}
+                />
+              ))}
+            </div>
+          ) : sections.map((section, sIdx) => (
             <div key={section.label} className={cn(sIdx > 0 && (collapsed ? "mt-3 pt-3 border-t border-white/[0.05]" : "mt-4"))}>
               {/* Section label */}
               {!collapsed && (
@@ -300,7 +314,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     const LinkIcon = entry.icon;
                     return (
                       <div key={entry.key} className="relative group/trigger">
-                        <a
+                        <Link
                           href={entry.href}
                           className={cn(
                             "w-full flex items-center rounded-lg transition-colors",
@@ -326,7 +340,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                           {!collapsed && (
                             <span
                               className={cn(
-                                "flex-1 text-left text-[12.5px] truncate",
+                                "flex-1 left text-[12.5px] truncate",
                                 isActive ? "font-semibold text-white" : "font-medium",
                               )}
                             >
@@ -338,7 +352,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                           {!collapsed && isActive && (
                             <span className="w-1 h-1 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex-shrink-0" />
                           )}
-                        </a>
+                        </Link>
 
                         {collapsed && (
                           <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-md shadow-xl ring-1 ring-white/10 opacity-0 invisible group-hover/trigger:opacity-100 group-hover/trigger:visible whitespace-nowrap z-50 transition-opacity">
@@ -362,7 +376,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                         <button
                           onClick={() => {
                             if (collapsed) {
-                              window.location.href = group.items[0].href;
+                              router.push(group.items[0].href);
                             } else {
                               toggleGroup(group.key);
                             }
@@ -449,7 +463,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                                   {isActive && (
                                     <span className="absolute -left-[15px] top-1/2 -translate-y-1/2 h-[18px] w-[2px] rounded-r-full bg-gradient-to-b from-blue-400 to-cyan-400" />
                                   )}
-                                  <a
+                                  <Link
                                     href={item.href}
                                     className={cn(
                                       "flex items-center gap-2 px-2 py-[7px] rounded-md text-[12px] transition-colors",
@@ -466,7 +480,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                                       strokeWidth={2}
                                     />
                                     <span className="truncate">{item.name}</span>
-                                  </a>
+            </Link>
                                 </li>
                               );
                             })}
