@@ -2697,11 +2697,20 @@ export default function IncomePage() {
 
                           {/* Status */}
                           <td className="px-4 py-1.5">
-                            <select value={row.status_id || ""} onChange={(e) => handleBatchRowChange(row.rowKey, "status_id", parseInt(e.target.value) || 0)}
-                              className="w-full text-[11px] px-2 py-1.5 rounded-md border border-dashed border-border bg-transparent outline-none focus:border-primary text-foreground">
-                              <option value="">-</option>
-                              {dStatuses.map((s) => (<option key={s.id} value={s.id}>{s.nama}</option>))}
-                            </select>
+                            <Select
+                              value={String(row.status_id || "")}
+                              onChange={(val) => handleBatchRowChange(row.rowKey, "status_id", parseInt(val) || 0)}
+                              options={[
+                                { value: "", label: "Tidak ada", selectedLabel: "-" },
+                                ...dStatuses.map((s) => ({
+                                  value: String(s.id),
+                                  label: s.nama,
+                                  selectedLabel: s.kode || s.nama,
+                                  color: s.color,
+                                })),
+                              ]}
+                              placeholder="-"
+                            />
                           </td>
 
                           {/* Catatan */}
@@ -2875,11 +2884,23 @@ export default function IncomePage() {
                             </td>
                             {/* Status */}
                             <td className="px-1.5 py-1.5">
-                              <select value={row.status_id || ""} onChange={(e) => handleBatchRowChange(row.rowKey, "status_id", parseInt(e.target.value) || 0)}
-                                className="w-full text-[13px] px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none focus:border-primary text-foreground">
-                                <option value="">-</option>
-                                {dStatuses.map((s) => (<option key={s.id} value={s.id}>{s.nama}</option>))}
-                              </select>
+                              <Select
+                                value={String(row.status_id || "")}
+                                onChange={(val) => handleBatchRowChange(row.rowKey, "status_id", parseInt(val) || 0)}
+                                options={[
+                                  { value: "", label: "Tidak ada", selectedLabel: "-" },
+                                  ...dStatuses.map((s) => ({
+                                    value: String(s.id),
+                                    label: s.nama,
+                                    selectedLabel: s.kode || s.nama,
+                                    color: s.color,
+                                  })),
+                                ]}
+                                placeholder="-"
+                                portal
+                                portalMinWidth={240}
+                                className="[&>button]:px-2 [&>button]:py-2 [&>button]:text-[13px]"
+                              />
                             </td>
                             {/* Catatan */}
                             <td className="px-1.5 py-1.5">

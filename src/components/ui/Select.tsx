@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 export interface SelectOption {
   value: string;
   label: string;
+  selectedLabel?: string;
+  color?: string;
 }
 
 interface SelectProps {
@@ -50,7 +52,10 @@ export default function Select({
   const selected = options.find((o) => o.value === value);
 
   const filtered = isSearchable && search
-    ? options.filter((o) => o.label.toLowerCase().includes(search.toLowerCase()))
+    ? options.filter((o) =>
+        o.label.toLowerCase().includes(search.toLowerCase()) ||
+        (o.selectedLabel && o.selectedLabel.toLowerCase().includes(search.toLowerCase()))
+      )
     : options;
 
   const updatePortalPosition = useCallback(() => {
@@ -225,10 +230,22 @@ export default function Select({
                     : "text-foreground",
                 )}
               >
-                <span className="truncate">{option.label}</span>
-                {isSelected && (
-                  <Check className="w-3.5 h-3.5 shrink-0 text-primary" />
-                )}
+                <div className="flex items-center gap-2 min-w-0">
+                  {option.color && (
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: option.color }} />
+                  )}
+                  <span className="truncate">{option.label}</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {option.selectedLabel && (
+                    <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                      {option.selectedLabel}
+                    </span>
+                  )}
+                  {isSelected && (
+                    <Check className="w-3.5 h-3.5 shrink-0 text-primary" />
+                  )}
+                </div>
               </button>
             );
           })
@@ -259,10 +276,17 @@ export default function Select({
         )}
       >
         <span className={cn(
-          "truncate text-left",
+          "truncate text-left flex items-center gap-1.5",
           !selected && "text-muted-foreground/50"
         )}>
-          {selected ? selected.label : placeholder}
+          {selected ? (
+            <>
+              {selected.color && (
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: selected.color }} />
+              )}
+              <span className="truncate">{selected.selectedLabel || selected.label}</span>
+            </>
+          ) : placeholder}
         </span>
         <ChevronDown className={cn(
           "w-4 h-4 shrink-0 text-muted-foreground transition-transform duration-200",
