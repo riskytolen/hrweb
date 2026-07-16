@@ -2739,17 +2739,27 @@ export default function IncomePage() {
                   className="min-h-0 flex-1 cursor-grab overflow-auto overscroll-contain active:cursor-grabbing"
                   style={{ WebkitOverflowScrolling: "touch", touchAction: "none" }}
                 >
-                  <table className="w-full min-w-[660px]" style={{ zoom: batchTableZoom }}>
+                  <table className="w-full min-w-[780px] table-fixed" style={{ zoom: batchTableZoom }}>
+                    <colgroup>
+                      <col className="w-9" />
+                      <col className="w-[164px]" />
+                      <col className="w-[124px]" />
+                      <col className="w-[88px]" />
+                      <col className="w-[88px]" />
+                      <col className="w-[104px]" />
+                      <col className="w-[96px]" />
+                      <col className="w-20" />
+                    </colgroup>
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-card border-b-2 border-border shadow-sm">
                         <th className="sticky left-0 z-20 bg-card text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-9 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">#</th>
-                        <th className="sticky left-9 z-20 bg-card text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 min-w-[164px] shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">Pegawai</th>
-                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 min-w-[120px]">Nama Titik</th>
-                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-[68px]">Pos</th>
-                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-[68px]">Titik</th>
-                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-[70px]">Status</th>
-                        <th className="text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 min-w-[76px]">Catatan</th>
-                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-[58px]"></th>
+                        <th className="sticky left-9 z-20 bg-card text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">Pegawai</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2">Nama Titik</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2">Pos</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2">Titik</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2">Status</th>
+                        <th className="text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2">Catatan</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
