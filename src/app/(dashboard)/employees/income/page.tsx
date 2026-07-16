@@ -336,6 +336,12 @@ export default function IncomePage() {
     contentX: number;
     contentY: number;
   } | null>(null);
+  const batchPanRef = useRef<{
+    x: number;
+    y: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
 
   // ─── Single Input State ───
   const [showSingleForm, setShowSingleForm] = useState(false);
@@ -438,7 +444,19 @@ export default function IncomePage() {
     });
 
     const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 1) {
+        batchPinchRef.current = null;
+        batchPanRef.current = {
+          x: event.touches[0].clientX,
+          y: event.touches[0].clientY,
+          scrollLeft: scrollArea.scrollLeft,
+          scrollTop: scrollArea.scrollTop,
+        };
+        return;
+      }
       if (event.touches.length !== 2) return;
+      event.preventDefault();
+      batchPanRef.current = null;
       const rect = scrollArea.getBoundingClientRect();
       const center = touchCenter(event.touches);
       const zoom = batchTableZoomRef.current;
@@ -452,27 +470,45 @@ export default function IncomePage() {
 
     const handleTouchMove = (event: TouchEvent) => {
       const pinch = batchPinchRef.current;
-      if (!pinch || event.touches.length !== 2) return;
+      if (pinch && event.touches.length === 2) {
+        event.preventDefault();
+
+        const ratio = touchDistance(event.touches) / pinch.distance;
+        const nextZoom = Math.min(BATCH_ZOOM_MAX, Math.max(BATCH_ZOOM_MIN, pinch.startZoom * ratio));
+        const rect = scrollArea.getBoundingClientRect();
+        const center = touchCenter(event.touches);
+        batchTableZoomRef.current = nextZoom;
+        setBatchTableZoom(nextZoom);
+
+        requestAnimationFrame(() => {
+          scrollArea.scrollLeft = pinch.contentX * nextZoom - (center.x - rect.left);
+          scrollArea.scrollTop = pinch.contentY * nextZoom - (center.y - rect.top);
+        });
+        return;
+      }
+
+      const pan = batchPanRef.current;
+      if (!pan || event.touches.length !== 1) return;
       event.preventDefault();
-
-      const ratio = touchDistance(event.touches) / pinch.distance;
-      const nextZoom = Math.min(BATCH_ZOOM_MAX, Math.max(BATCH_ZOOM_MIN, pinch.startZoom * ratio));
-      const rect = scrollArea.getBoundingClientRect();
-      const center = touchCenter(event.touches);
-      batchTableZoomRef.current = nextZoom;
-      setBatchTableZoom(nextZoom);
-
-      requestAnimationFrame(() => {
-        scrollArea.scrollLeft = pinch.contentX * nextZoom - (center.x - rect.left);
-        scrollArea.scrollTop = pinch.contentY * nextZoom - (center.y - rect.top);
-      });
+      scrollArea.scrollLeft = pan.scrollLeft - (event.touches[0].clientX - pan.x);
+      scrollArea.scrollTop = pan.scrollTop - (event.touches[0].clientY - pan.y);
     };
 
     const handleTouchEnd = (event: TouchEvent) => {
       if (event.touches.length < 2) batchPinchRef.current = null;
+      if (event.touches.length === 1) {
+        batchPanRef.current = {
+          x: event.touches[0].clientX,
+          y: event.touches[0].clientY,
+          scrollLeft: scrollArea.scrollLeft,
+          scrollTop: scrollArea.scrollTop,
+        };
+      } else {
+        batchPanRef.current = null;
+      }
     };
 
-    scrollArea.addEventListener("touchstart", handleTouchStart, { passive: true });
+    scrollArea.addEventListener("touchstart", handleTouchStart, { passive: false });
     scrollArea.addEventListener("touchmove", handleTouchMove, { passive: false });
     scrollArea.addEventListener("touchend", handleTouchEnd, { passive: true });
     scrollArea.addEventListener("touchcancel", handleTouchEnd, { passive: true });
@@ -582,6 +618,12 @@ export default function IncomePage() {
   };
 
   // ─── Batch handlers ───
+  const updateBatchTableZoom = (value: number) => {
+    const nextZoom = Math.min(BATCH_ZOOM_MAX, Math.max(BATCH_ZOOM_MIN, value));
+    batchTableZoomRef.current = nextZoom;
+    setBatchTableZoom(nextZoom);
+  };
+
   const openBatch = () => {
     setBatchDate(localDateStr());
     // Mulai dari worksheet kosong; pegawai dipilih manual per baris.
@@ -2672,7 +2714,7 @@ export default function IncomePage() {
                 <div
                   ref={batchTableScrollRef}
                   className="min-h-0 flex-1 cursor-grab overflow-auto overscroll-contain active:cursor-grabbing"
-                  style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" }}
+                  style={{ WebkitOverflowScrolling: "touch", touchAction: "none" }}
                 >
                   <table className="w-full min-w-[660px]" style={{ zoom: batchTableZoom }}>
                     <thead className="sticky top-0 z-10">
@@ -2823,17 +2865,34 @@ export default function IncomePage() {
                   <p className="truncate text-[10px] text-muted-foreground/60">
                     Swipe untuk geser &middot; Cubit 2 jari untuk zoom
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      batchTableZoomRef.current = 1;
-                      setBatchTableZoom(1);
-                    }}
-                    className="flex-shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-bold tabular-nums text-foreground hover:bg-muted/80"
-                    title="Reset zoom ke 100%"
-                  >
-                    {Math.round(batchTableZoom * 100)}%
-                  </button>
+                  <div className="flex flex-shrink-0 items-center overflow-hidden rounded-md border border-border bg-muted">
+                    <button
+                      type="button"
+                      onClick={() => updateBatchTableZoom(batchTableZoomRef.current - 0.1)}
+                      disabled={batchTableZoom <= BATCH_ZOOM_MIN}
+                      className="flex h-7 w-7 items-center justify-center text-sm font-bold text-foreground hover:bg-card disabled:opacity-30"
+                      aria-label="Perkecil tabel"
+                    >
+                      -
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateBatchTableZoom(1)}
+                      className="h-7 min-w-12 border-x border-border px-1.5 text-[10px] font-bold tabular-nums text-foreground hover:bg-card"
+                      title="Reset zoom ke 100%"
+                    >
+                      {Math.round(batchTableZoom * 100)}%
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateBatchTableZoom(batchTableZoomRef.current + 0.1)}
+                      disabled={batchTableZoom >= BATCH_ZOOM_MAX}
+                      className="flex h-7 w-7 items-center justify-center text-sm font-bold text-foreground hover:bg-card disabled:opacity-30"
+                      aria-label="Perbesar tabel"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
               </div>
 
