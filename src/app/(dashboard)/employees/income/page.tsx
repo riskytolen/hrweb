@@ -2675,6 +2675,8 @@ export default function IncomePage() {
                                   placeholder="Pilih pegawai..."
                                   searchable
                                   hasError={isDuplicate}
+                                  portal
+                                  portalMinWidth={280}
                                   className="[&>button]:px-2 [&>button]:py-2 [&>button]:text-[13px]"
                                 />
                                 {(empStatus === "Training" || isDbDuplicate) && (
@@ -2698,6 +2700,8 @@ export default function IncomePage() {
                                 placeholder="Pilih titik..."
                                 searchable
                                 hasError={isDuplicate}
+                                portal
+                                portalMinWidth={240}
                                 className="[&>button]:px-2 [&>button]:py-2 [&>button]:text-[13px]"
                               />
                             </td>
