@@ -330,6 +330,7 @@ export default function IncomePage() {
   const [batchTableZoom, setBatchTableZoom] = useState(1);
   const batchTableZoomRef = useRef(1);
   const batchTableScrollRef = useRef<HTMLDivElement>(null);
+  const [batchGestureSurface, setBatchGestureSurface] = useState<HTMLDivElement | null>(null);
   const batchPinchRef = useRef<{
     distance: number;
     startZoom: number;
@@ -430,56 +431,61 @@ export default function IncomePage() {
   }, [showBatch, showSingleForm, showEditForm, showCalendar, showReport]);
 
   useEffect(() => {
-    const scrollArea = batchTableScrollRef.current;
+    const scrollArea = batchGestureSurface;
     if (!showBatch || !scrollArea) return;
 
-    const touchDistance = (touches: TouchList) => {
-      const dx = touches[1].clientX - touches[0].clientX;
-      const dy = touches[1].clientY - touches[0].clientY;
-      return Math.hypot(dx, dy);
-    };
-    const touchCenter = (touches: TouchList) => ({
-      x: (touches[0].clientX + touches[1].clientX) / 2,
-      y: (touches[0].clientY + touches[1].clientY) / 2,
-    });
+    const activePointers = new Map<number, { x: number; y: number }>();
 
-    const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length === 1) {
+    const getDistance = () => {
+      const pts = Array.from(activePointers.values());
+      if (pts.length < 2) return 0;
+      return Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+    };
+
+    const getCenter = () => {
+      const pts = Array.from(activePointers.values());
+      const sum = pts.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+      return { x: sum.x / pts.length, y: sum.y / pts.length };
+    };
+
+    const handleDown = (e: PointerEvent) => {
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      scrollArea.setPointerCapture(e.pointerId);
+
+      if (activePointers.size === 1) {
         batchPinchRef.current = null;
         batchPanRef.current = {
-          x: event.touches[0].clientX,
-          y: event.touches[0].clientY,
+          x: e.clientX,
+          y: e.clientY,
           scrollLeft: scrollArea.scrollLeft,
           scrollTop: scrollArea.scrollTop,
         };
-        return;
+      } else if (activePointers.size === 2) {
+        batchPanRef.current = null;
+        const rect = scrollArea.getBoundingClientRect();
+        const center = getCenter();
+        const zoom = batchTableZoomRef.current;
+        batchPinchRef.current = {
+          distance: getDistance(),
+          startZoom: zoom,
+          contentX: (scrollArea.scrollLeft + center.x - rect.left) / zoom,
+          contentY: (scrollArea.scrollTop + center.y - rect.top) / zoom,
+        };
       }
-      if (event.touches.length !== 2) return;
-      event.preventDefault();
-      batchPanRef.current = null;
-      const rect = scrollArea.getBoundingClientRect();
-      const center = touchCenter(event.touches);
-      const zoom = batchTableZoomRef.current;
-      batchPinchRef.current = {
-        distance: touchDistance(event.touches),
-        startZoom: zoom,
-        contentX: (scrollArea.scrollLeft + center.x - rect.left) / zoom,
-        contentY: (scrollArea.scrollTop + center.y - rect.top) / zoom,
-      };
     };
 
-    const handleTouchMove = (event: TouchEvent) => {
-      const pinch = batchPinchRef.current;
-      if (pinch && event.touches.length === 2) {
-        event.preventDefault();
+    const handleMove = (e: PointerEvent) => {
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        const ratio = touchDistance(event.touches) / pinch.distance;
+      const pinch = batchPinchRef.current;
+      if (pinch && activePointers.size === 2) {
+        e.preventDefault();
+        const ratio = getDistance() / pinch.distance;
         const nextZoom = Math.min(BATCH_ZOOM_MAX, Math.max(BATCH_ZOOM_MIN, pinch.startZoom * ratio));
         const rect = scrollArea.getBoundingClientRect();
-        const center = touchCenter(event.touches);
+        const center = getCenter();
         batchTableZoomRef.current = nextZoom;
         setBatchTableZoom(nextZoom);
-
         requestAnimationFrame(() => {
           scrollArea.scrollLeft = pinch.contentX * nextZoom - (center.x - rect.left);
           scrollArea.scrollTop = pinch.contentY * nextZoom - (center.y - rect.top);
@@ -488,38 +494,52 @@ export default function IncomePage() {
       }
 
       const pan = batchPanRef.current;
-      if (!pan || event.touches.length !== 1) return;
-      event.preventDefault();
-      scrollArea.scrollLeft = pan.scrollLeft - (event.touches[0].clientX - pan.x);
-      scrollArea.scrollTop = pan.scrollTop - (event.touches[0].clientY - pan.y);
+      if (pan && activePointers.size === 1) {
+        e.preventDefault();
+        scrollArea.scrollLeft = pan.scrollLeft - (e.clientX - pan.x);
+        scrollArea.scrollTop = pan.scrollTop - (e.clientY - pan.y);
+      }
     };
 
-    const handleTouchEnd = (event: TouchEvent) => {
-      if (event.touches.length < 2) batchPinchRef.current = null;
-      if (event.touches.length === 1) {
+    const handleUp = (e: PointerEvent) => {
+      scrollArea.releasePointerCapture(e.pointerId);
+      activePointers.delete(e.pointerId);
+
+      if (activePointers.size === 0) {
+        batchPinchRef.current = null;
+        batchPanRef.current = null;
+      } else if (activePointers.size === 1) {
+        batchPinchRef.current = null;
+        const remaining = activePointers.values().next().value!;
         batchPanRef.current = {
-          x: event.touches[0].clientX,
-          y: event.touches[0].clientY,
+          x: remaining.x,
+          y: remaining.y,
           scrollLeft: scrollArea.scrollLeft,
           scrollTop: scrollArea.scrollTop,
         };
-      } else {
+      }
+    };
+
+    const handleCancel = (e: PointerEvent) => {
+      activePointers.delete(e.pointerId);
+      if (activePointers.size === 0) {
+        batchPinchRef.current = null;
         batchPanRef.current = null;
       }
     };
 
-    scrollArea.addEventListener("touchstart", handleTouchStart, { passive: false });
-    scrollArea.addEventListener("touchmove", handleTouchMove, { passive: false });
-    scrollArea.addEventListener("touchend", handleTouchEnd, { passive: true });
-    scrollArea.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+    scrollArea.addEventListener("pointerdown", handleDown, { passive: false });
+    scrollArea.addEventListener("pointermove", handleMove, { passive: false });
+    scrollArea.addEventListener("pointerup", handleUp, { passive: true });
+    scrollArea.addEventListener("pointercancel", handleCancel, { passive: true });
 
     return () => {
-      scrollArea.removeEventListener("touchstart", handleTouchStart);
-      scrollArea.removeEventListener("touchmove", handleTouchMove);
-      scrollArea.removeEventListener("touchend", handleTouchEnd);
-      scrollArea.removeEventListener("touchcancel", handleTouchEnd);
+      scrollArea.removeEventListener("pointerdown", handleDown);
+      scrollArea.removeEventListener("pointermove", handleMove);
+      scrollArea.removeEventListener("pointerup", handleUp);
+      scrollArea.removeEventListener("pointercancel", handleCancel);
     };
-  }, [showBatch]);
+  }, [showBatch, batchGestureSurface]);
 
   // ─── Single input handlers ───
   const openSingle = () => {
@@ -2712,7 +2732,10 @@ export default function IncomePage() {
               {/* ── Worksheet table (mobile) ── */}
               <div className="min-h-0 flex-1 overflow-hidden lg:hidden flex flex-col">
                 <div
-                  ref={batchTableScrollRef}
+                  ref={(el) => {
+                    batchTableScrollRef.current = el;
+                    setBatchGestureSurface(el);
+                  }}
                   className="min-h-0 flex-1 cursor-grab overflow-auto overscroll-contain active:cursor-grabbing"
                   style={{ WebkitOverflowScrolling: "touch", touchAction: "none" }}
                 >
