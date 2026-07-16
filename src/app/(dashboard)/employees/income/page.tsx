@@ -514,17 +514,8 @@ export default function IncomePage() {
   // ─── Batch handlers ───
   const openBatch = () => {
     setBatchDate(localDateStr());
-    // Pre-populate dengan semua pegawai aktif, satu baris per nama
-    setBatchRows(employees.map((e) => ({
-      rowKey: nextRowKey(),
-      employee_id: e.id,
-      nama: e.nama,
-      zone_id: 0,
-      role: "",
-      jumlah_titik: "",
-      catatan: "",
-      status_id: 0,
-    })));
+    // Mulai dari worksheet kosong; pegawai dipilih manual per baris.
+    setBatchRows(Array.from({ length: DEFAULT_BLANK_ROWS }, () => blankRow()));
     setBatchTab("semua");
     setBatchSearch("");
     setDragIdx(null);
@@ -935,8 +926,9 @@ export default function IncomePage() {
   // Batch filtered (search by nama + mobile tab)
   const batchFiltered = batchRows.filter((r) => {
     if (batchSearch && !r.nama.toLowerCase().includes(batchSearch.toLowerCase())) return false;
-    if (batchTab === "terisi") return !!(r.zone_id || r.role || hasPointInput(r.jumlah_titik));
-    if (batchTab === "kosong") return !(r.zone_id || r.role || hasPointInput(r.jumlah_titik));
+    const isTouched = !!(r.employee_id || r.zone_id || r.role || hasPointInput(r.jumlah_titik));
+    if (batchTab === "terisi") return isTouched;
+    if (batchTab === "kosong") return !isTouched;
     return true;
   });
   const batchFilled = batchRows.filter((r) => r.employee_id && hasPointInput(r.jumlah_titik) && r.zone_id && r.role).length;
@@ -2629,7 +2621,7 @@ export default function IncomePage() {
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-card border-b-2 border-border shadow-sm">
                         <th className="sticky left-0 z-20 bg-card text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-10 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">#</th>
-                        <th className="sticky left-[40px] z-20 bg-card text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[130px] shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">Pegawai</th>
+                        <th className="sticky left-[40px] z-20 bg-card text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[190px] shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">Pegawai</th>
                         <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[140px]">Nama Titik</th>
                         <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[76px]">Pos</th>
                         <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[76px]">Titik</th>
@@ -2642,7 +2634,7 @@ export default function IncomePage() {
                       {batchFiltered.length === 0 ? (
                         <tr>
                           <td colSpan={8} className="text-center py-10 text-xs text-muted-foreground">
-                            {batchTab === "terisi" ? "Belum ada data yang diisi" : batchTab === "kosong" ? "Semua pegawai sudah diisi" : "Tidak ada pegawai ditemukan"}
+                            {batchTab === "terisi" ? "Belum ada data yang diisi" : batchTab === "kosong" ? "Tidak ada baris kosong" : "Tidak ada pegawai ditemukan"}
                           </td>
                         </tr>
                       ) : batchFiltered.map((row, idx) => {
@@ -2672,13 +2664,27 @@ export default function IncomePage() {
                             </td>
                             {/* Sticky: Nama */}
                             <td className="sticky left-[40px] z-10 bg-card px-2 py-2 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
-                              <div className="flex items-center gap-1 min-w-0">
-                                <p className="text-[13px] font-semibold text-foreground truncate max-w-[110px]">{row.nama}</p>
-                                {empStatus === "Training" && (
-                                  <span className="text-[7px] font-bold text-amber-600 bg-amber-500/10 px-1 py-0.5 rounded flex-shrink-0">TRAINING</span>
-                                )}
-                                {isDbDuplicate && (
-                                  <span className="text-[7px] font-bold text-warning bg-warning/10 px-1 py-0.5 rounded flex-shrink-0">ADA</span>
+                              <div className="min-w-[174px] space-y-1">
+                                <Select
+                                  value={row.employee_id || ""}
+                                  onChange={(val) => handleEmployeeChange(row.rowKey, val)}
+                                  options={employees.map((e) => ({
+                                    value: e.id,
+                                    label: e.status === "Training" ? `${e.nama}  • Training` : e.nama,
+                                  }))}
+                                  placeholder="Pilih pegawai..."
+                                  searchable
+                                  hasError={isDuplicate}
+                                />
+                                {(empStatus === "Training" || isDbDuplicate) && (
+                                  <div className="flex items-center gap-1">
+                                    {empStatus === "Training" && (
+                                      <span className="text-[7px] font-bold text-amber-600 bg-amber-500/10 px-1 py-0.5 rounded">TRAINING</span>
+                                    )}
+                                    {isDbDuplicate && (
+                                      <span className="text-[7px] font-bold text-warning bg-warning/10 px-1 py-0.5 rounded">SUDAH ADA</span>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             </td>
@@ -2733,8 +2739,8 @@ export default function IncomePage() {
                             {/* Aksi */}
                             <td className="px-1 py-2">
                               <div className="flex items-center justify-center gap-0.5">
-                                <button type="button" onClick={() => addSubRow(row.rowKey)} title="Tambah entri lagi"
-                                  className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary-light transition-colors">
+                                <button type="button" onClick={() => addSubRow(row.rowKey)} title="Tambah entri lagi" disabled={!row.employee_id}
+                                  className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary-light transition-colors disabled:opacity-30 disabled:pointer-events-none">
                                   <Plus className="w-4 h-4" />
                                 </button>
                                 <button type="button" onClick={() => removeRow(row.rowKey)} title="Hapus baris"
