@@ -45,17 +45,12 @@ interface WorksheetSheetFullscreenProps {
 
 const READONLY_KEYS = new Set(["gaji_pokok", "pendapatan_titik", "lembur", "potongan_absen"]);
 const FROZEN_COLS = new Set(["_no", "_nik", "_nama", "_jabatan", "_status"]);
-const FROZEN_LEFT_PX: Record<string, number> = {
-  _no: 0,
-  _nik: 48,
-  _nama: 158,
-  _jabatan: 398,
-  _status: 526,
-};
+const NAME_COLUMN_MIN_WIDTH = 180;
+const NAME_COLUMN_CHAR_WIDTH = 8;
+const NAME_COLUMN_PADDING = 24;
 const FIXED_COLUMN_WIDTHS: Record<string, number> = {
   _no: 48,
   _nik: 110,
-  _nama: 240,
   _jabatan: 128,
   _status: 80,
 };
@@ -116,6 +111,30 @@ export default function WorksheetSheetFullscreen({
     );
   }, [filtered, searchQuery]);
 
+  const nameColumnWidth = useMemo(() => {
+    const longestNameLength = filtered.reduce(
+      (longest, row) => Math.max(longest, Array.from(row.pegawaiNama?.trim() || "").length),
+      "NAMA".length,
+    );
+    return Math.max(
+      NAME_COLUMN_MIN_WIDTH,
+      longestNameLength * NAME_COLUMN_CHAR_WIDTH + NAME_COLUMN_PADDING,
+    );
+  }, [filtered]);
+
+  const frozenLeftPx = useMemo(() => {
+    const noWidth = FIXED_COLUMN_WIDTHS._no;
+    const nikWidth = FIXED_COLUMN_WIDTHS._nik;
+    const jabatanWidth = FIXED_COLUMN_WIDTHS._jabatan;
+    return {
+      _no: 0,
+      _nik: noWidth,
+      _nama: noWidth + nikWidth,
+      _jabatan: noWidth + nikWidth + nameColumnWidth,
+      _status: noWidth + nikWidth + nameColumnWidth + jabatanWidth,
+    };
+  }, [nameColumnWidth]);
+
   // ─── Group header colors ───
   const GROUP_HEADER_COLORS: Record<string, string> = {
     info: "bg-[#a6a6a6]",
@@ -161,7 +180,7 @@ export default function WorksheetSheetFullscreen({
   const SHEET_COLS: SheetCol[] = [
     { label: "DRIVER", key: "_no", group: "info", width: "w-[48px]", editable: false },
     { label: "ID", key: "_nik", group: "info", width: "w-[110px]", editable: false },
-    { label: "NAMA", key: "_nama", group: "info", width: "w-[240px]", editable: false },
+    { label: "NAMA", key: "_nama", group: "info", width: "w-auto", editable: false },
     { label: "STATUS", key: "_jabatan", group: "info", width: "w-32", editable: false },
     { label: "AKTIF", key: "_status", group: "info", width: "w-20", editable: false },
     ...PENDAPATAN_FIELDS.filter((f) => f.key !== "total_pendapatan").flatMap((f) => {
@@ -212,9 +231,12 @@ export default function WorksheetSheetFullscreen({
   const leadingInfoCols = SHEET_COLS.filter((c) => ["_no", "_nik", "_nama", "_jabatan", "_status"].includes(c.key));
   const aksiCol = SHEET_COLS.find((c) => c.key === "_aksi");
 
+  const getResolvedColumnWidth = (col: SheetCol): number =>
+    col.key === "_nama" ? nameColumnWidth : getColumnWidth(col);
+
   const getColumnStyle = (col: SheetCol): React.CSSProperties => {
-    const width = getColumnWidth(col);
-    const left = FROZEN_LEFT_PX[col.key];
+    const width = getResolvedColumnWidth(col);
+    const left = frozenLeftPx[col.key as keyof typeof frozenLeftPx];
     return {
       width,
       minWidth: width,
@@ -343,7 +365,7 @@ export default function WorksheetSheetFullscreen({
         <table className="w-max min-w-full border-separate border-spacing-0 bg-white text-slate-950">
           <colgroup>
             {SHEET_COLS.map((c) => {
-              const width = getColumnWidth(c);
+              const width = getResolvedColumnWidth(c);
               return <col key={c.key} style={{ width, minWidth: width, maxWidth: width }} />;
             })}
           </colgroup>
