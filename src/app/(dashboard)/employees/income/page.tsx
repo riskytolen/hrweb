@@ -508,11 +508,24 @@ export default function IncomePage() {
     }
   };
 
+  // Batch mobile filter tab
+  const [batchTab, setBatchTab] = useState<"semua" | "terisi" | "kosong">("semua");
+
   // ─── Batch handlers ───
   const openBatch = () => {
     setBatchDate(localDateStr());
-    // Worksheet kosong: 10 baris blank. Admin isi sendiri sesuai surat jalan.
-    setBatchRows(Array.from({ length: DEFAULT_BLANK_ROWS }, () => blankRow()));
+    // Pre-populate dengan semua pegawai aktif, satu baris per nama
+    setBatchRows(employees.map((e) => ({
+      rowKey: nextRowKey(),
+      employee_id: e.id,
+      nama: e.nama,
+      zone_id: 0,
+      role: "",
+      jumlah_titik: "",
+      catatan: "",
+      status_id: 0,
+    })));
+    setBatchTab("semua");
     setBatchSearch("");
     setDragIdx(null);
     setDragOverIdx(null);
@@ -542,6 +555,28 @@ export default function IncomePage() {
   /** Tambah n baris kosong di akhir tabel. */
   const addBlankRows = (count: number) => {
     setBatchRows((prev) => [...prev, ...Array.from({ length: count }, () => blankRow())]);
+  };
+
+  /** Tambah sub-baris untuk pegawai yang sama (untuk entri kedua dst). */
+  const addSubRow = (sourceRowKey: string) => {
+    const source = batchRows.find((r) => r.rowKey === sourceRowKey);
+    if (!source || !source.employee_id) return;
+    const newRow: BatchRow = {
+      rowKey: nextRowKey(),
+      employee_id: source.employee_id,
+      nama: source.nama,
+      zone_id: 0,
+      role: "",
+      jumlah_titik: "",
+      catatan: "",
+      status_id: 0,
+    };
+    setBatchRows((prev) => {
+      const idx = prev.findIndex((r) => r.rowKey === sourceRowKey);
+      const copy = [...prev];
+      copy.splice(idx + 1, 0, newRow);
+      return copy;
+    });
   };
 
   /** Hapus 1 baris (kapan saja, tanpa syarat). */
@@ -897,10 +932,13 @@ export default function IncomePage() {
   const totalPendapatan = deliveries.reduce((s, d) => s + d.total, 0);
   const totalEntri = deliveries.length;
 
-  // Batch filtered (search by nama, kosong = tampil semua termasuk baris blank)
-  const batchFiltered = batchSearch
-    ? batchRows.filter((r) => r.nama.toLowerCase().includes(batchSearch.toLowerCase()))
-    : batchRows;
+  // Batch filtered (search by nama + mobile tab)
+  const batchFiltered = batchRows.filter((r) => {
+    if (batchSearch && !r.nama.toLowerCase().includes(batchSearch.toLowerCase())) return false;
+    if (batchTab === "terisi") return !!(r.zone_id || r.role || hasPointInput(r.jumlah_titik));
+    if (batchTab === "kosong") return !(r.zone_id || r.role || hasPointInput(r.jumlah_titik));
+    return true;
+  });
   const batchFilled = batchRows.filter((r) => r.employee_id && hasPointInput(r.jumlah_titik) && r.zone_id && r.role).length;
   // Baris yang setengah terisi (ada salah satu field tapi tidak lengkap)
   const batchIncomplete = batchRows.filter((r) => {
@@ -2351,7 +2389,7 @@ export default function IncomePage() {
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
             <div className="relative w-full max-w-7xl bg-card sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ height: "100vh", maxHeight: "100vh" }}>
 
-              {/* ── Header: Title + Tanggal + Search + Counter ── */}
+              {/* ── Header: Title + Tanggal + Search + Counter + Tabs ── */}
               <div className="px-3 sm:px-5 py-3 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
                 <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
                   {/* Title */}
@@ -2366,12 +2404,12 @@ export default function IncomePage() {
                   </div>
 
                   {/* Tanggal */}
-                  <div className="w-48 flex-shrink-0">
+                  <div className="w-40 sm:w-48 flex-shrink-0">
                     <DatePicker value={batchDate} onChange={(val) => setBatchDate(val)} placeholder="Pilih tanggal" />
                   </div>
 
                   {/* Search */}
-                  <div className="flex-1 flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2 border border-border focus-within:border-primary">
+                  <div className="flex-1 flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2 border border-border focus-within:border-primary min-w-[120px]">
                     <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                     <input type="text" placeholder="Cari pegawai..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
                       className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
@@ -2384,7 +2422,24 @@ export default function IncomePage() {
                   </div>
 
                   {/* Close */}
-                  <button onClick={tryCloseBatch} disabled={batchSaving} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50 flex-shrink-0"><X className="w-4 h-4" /></button>
+                  <button onClick={tryCloseBatch} disabled={batchSaving} className="p-2 sm:p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50 flex-shrink-0 min-h-[36px] min-w-[36px] sm:min-h-auto sm:min-w-auto flex items-center justify-center"><X className="w-4 h-4" /></button>
+                </div>
+                {/* Mobile filter tabs */}
+                <div className="flex items-center gap-1.5 mt-3 lg:hidden overflow-x-auto pb-1">
+                  {(["semua", "terisi", "kosong"] as const).map((tab) => (
+                    <button key={tab} type="button" onClick={() => setBatchTab(tab)}
+                      className={cn(
+                        "whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold transition-all min-h-[36px]",
+                        batchTab === tab
+                          ? "bg-primary text-white shadow-sm"
+                          : "bg-muted text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {tab === "semua" && `Semua (${batchRows.length})`}
+                      {tab === "terisi" && `Terisi`}
+                      {tab === "kosong" && `Kosong`}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -2567,120 +2622,137 @@ export default function IncomePage() {
                 </table>
               </div>
 
-              {/* ── Worksheet cards (mobile) ── */}
-              <div className="flex-1 overflow-y-auto p-3 lg:hidden space-y-2">
-                {batchFiltered.map((row, idx) => {
-                  const hasEmp = !!row.employee_id;
-                  const hasTitik = hasPointInput(row.jumlah_titik);
-                  const hasDiv = !!row.zone_id;
-                  const hasRole = !!row.role;
-                  const touched = hasEmp || hasTitik || hasDiv || hasRole;
-                  const isComplete = hasEmp && hasTitik && hasDiv && hasRole;
-                  const isIncomplete = touched && !isComplete;
-                  const isDuplicate = batchDuplicateKeys.has(row.rowKey);
-                  const isDbDuplicate = dbDuplicateRowKeys.has(row.rowKey);
-                  const empStatus = row.employee_id ? employees.find((e) => e.id === row.employee_id)?.status : undefined;
+              {/* ── Worksheet table (mobile) ── */}
+              <div className="flex-1 overflow-hidden lg:hidden flex flex-col">
+                <div className="overflow-x-auto flex-1">
+                  <table className="w-full min-w-[580px]">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-card border-b-2 border-border shadow-sm">
+                        <th className="sticky left-0 z-20 bg-card text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-10 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">#</th>
+                        <th className="sticky left-[40px] z-20 bg-card text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[130px] shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">Pegawai</th>
+                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[140px]">Nama Titik</th>
+                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[76px]">Pos</th>
+                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[76px]">Titik</th>
+                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[80px]">Status</th>
+                        <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[90px]">Catatan</th>
+                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[64px]"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {batchFiltered.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="text-center py-10 text-xs text-muted-foreground">
+                            {batchTab === "terisi" ? "Belum ada data yang diisi" : batchTab === "kosong" ? "Semua pegawai sudah diisi" : "Tidak ada pegawai ditemukan"}
+                          </td>
+                        </tr>
+                      ) : batchFiltered.map((row, idx) => {
+                        const hasEmp = !!row.employee_id;
+                        const hasTitik = hasPointInput(row.jumlah_titik);
+                        const hasDiv = !!row.zone_id;
+                        const hasRole = !!row.role;
+                        const touched = hasEmp || hasTitik || hasDiv || hasRole;
+                        const isComplete = hasEmp && hasTitik && hasDiv && hasRole;
+                        const isIncomplete = touched && !isComplete;
+                        const isDuplicate = batchDuplicateKeys.has(row.rowKey);
+                        const isDbDuplicate = dbDuplicateRowKeys.has(row.rowKey);
+                        const empStatus = row.employee_id ? employees.find((e) => e.id === row.employee_id)?.status : undefined;
 
-                  return (
-                    <div key={row.rowKey} className={cn(
-                      "rounded-xl border p-3 space-y-2.5 bg-card",
-                      isDuplicate ? "border-danger/40 bg-danger/[0.04]" : isDbDuplicate ? "border-warning/40 bg-warning/[0.04]" : isIncomplete ? "border-danger/20" : isComplete ? "border-success/30" : "border-border"
-                    )}>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={cn("text-[10px] font-mono font-bold", isComplete ? "text-success" : isIncomplete ? "text-danger" : "text-muted-foreground")}>
-                            #{idx + 1}
-                          </span>
-                          {empStatus === "Training" && (
-                            <span className="text-[8px] font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded">TRAINING</span>
-                          )}
-                          {isDbDuplicate && (
-                            <span className="text-[8px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded">SUDAH ADA</span>
-                          )}
-                        </div>
-                        <button type="button" onClick={() => removeRow(row.rowKey)}
-                          className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      <Select
-                        value={row.employee_id || ""}
-                        onChange={(val) => handleEmployeeChange(row.rowKey, val)}
-                        options={employees.map((e) => ({ value: e.id, label: e.status === "Training" ? `${e.nama}  • Training` : e.nama }))}
-                        placeholder="Pilih pegawai..."
-                        searchable
-                        hasError={isDuplicate}
-                      />
-
-                      <Select
-                        value={row.zone_id ? String(row.zone_id) : ""}
-                        onChange={(val) => handleBatchRowChange(row.rowKey, "zone_id", parseInt(val) || 0)}
-                        options={zones.map((d) => ({ value: String(d.id), label: d.nama }))}
-                        placeholder="Pilih nama titik..."
-                        searchable
-                        hasError={isDuplicate}
-                      />
-
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Posisi</label>
-                          <div className="flex gap-1">
-                            <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Driver" ? "" : "Driver")}
-                              className={cn("flex-1 py-2 rounded-lg text-xs font-bold transition-all",
-                                row.role === "Driver" ? "bg-blue-500 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-500/10"
-                              )}>Driver</button>
-                            <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Helper" ? "" : "Helper")}
-                              className={cn("flex-1 py-2 rounded-lg text-xs font-bold transition-all",
-                                row.role === "Helper" ? "bg-orange-500 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-orange-50 hover:text-orange-500 dark:hover:bg-orange-500/10"
-                              )}>Helper</button>
-                          </div>
-                        </div>
-                        <div className="w-24">
-                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Titik</label>
-                          <input type="number" min={0} placeholder="-" value={row.jumlah_titik}
-                            onChange={(e) => handleBatchRowChange(row.rowKey, "jumlah_titik", e.target.value)}
-                            className={cn("w-full text-center px-2 py-2 rounded-lg border text-sm font-bold outline-none transition-colors focus:border-primary",
-                              hasTitik ? "border-success/40 bg-success/[0.06] text-success" : "border-dashed border-border bg-transparent text-foreground placeholder:text-muted-foreground/40"
-                            )} />
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Status</label>
-                          <select value={row.status_id || ""} onChange={(e) => handleBatchRowChange(row.rowKey, "status_id", parseInt(e.target.value) || 0)}
-                            className="w-full text-xs px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none focus:border-primary text-foreground">
-                            <option value="">-</option>
-                            {dStatuses.map((s) => (<option key={s.id} value={s.id}>{s.nama}</option>))}
-                          </select>
-                        </div>
-                        <div className="flex-1">
-                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Catatan</label>
-                          <input type="text" placeholder="..." value={row.catatan}
-                            onChange={(e) => handleBatchRowChange(row.rowKey, "catatan", e.target.value)}
-                            className="w-full text-xs px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary text-foreground placeholder:text-muted-foreground/30" />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* Add row buttons (mobile) */}
-                <div className="flex items-center justify-center gap-2 pt-1">
-                  <button type="button" onClick={() => addBlankRows(1)}
-                    className="flex items-center gap-1 text-xs font-medium text-primary hover:bg-primary-light px-3 py-2 rounded-lg transition-colors border border-dashed border-primary/40 flex-1 justify-center min-h-[44px]">
-                    <Plus className="w-3.5 h-3.5" />Tambah 1
-                  </button>
-                  <button type="button" onClick={() => addBlankRows(ADD_ROWS_BATCH)}
-                    className="flex items-center gap-1 text-xs font-medium text-primary hover:bg-primary-light px-3 py-2 rounded-lg transition-colors border border-dashed border-primary/40 flex-1 justify-center min-h-[44px]">
-                    <Plus className="w-3.5 h-3.5" />Tambah {ADD_ROWS_BATCH}
-                  </button>
-                  <button type="button" onClick={removeBlankRows}
-                    className="flex items-center gap-1 text-xs font-medium text-danger hover:bg-danger-light px-3 py-2 rounded-lg transition-colors border border-dashed border-danger/40 flex-1 justify-center min-h-[44px]">
-                    <RotateCcw className="w-3.5 h-3.5" />Hapus kosong
-                  </button>
+                        return (
+                          <tr key={row.rowKey}
+                            className={cn(
+                              "border-b border-border/30 transition-colors",
+                              isDuplicate ? "bg-danger/[0.06]" : isDbDuplicate ? "bg-warning/[0.08]" : isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/30"
+                            )}
+                          >
+                            {/* Sticky: # */}
+                            <td className="sticky left-0 z-10 bg-card px-2 py-2 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                              <span className={cn("text-[11px] font-mono font-bold", isComplete ? "text-success" : isIncomplete ? "text-danger" : "text-muted-foreground")}>
+                                {idx + 1}
+                              </span>
+                            </td>
+                            {/* Sticky: Nama */}
+                            <td className="sticky left-[40px] z-10 bg-card px-2 py-2 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                              <div className="flex items-center gap-1 min-w-0">
+                                <p className="text-[13px] font-semibold text-foreground truncate max-w-[110px]">{row.nama}</p>
+                                {empStatus === "Training" && (
+                                  <span className="text-[7px] font-bold text-amber-600 bg-amber-500/10 px-1 py-0.5 rounded flex-shrink-0">TRAINING</span>
+                                )}
+                                {isDbDuplicate && (
+                                  <span className="text-[7px] font-bold text-warning bg-warning/10 px-1 py-0.5 rounded flex-shrink-0">ADA</span>
+                                )}
+                              </div>
+                            </td>
+                            {/* Nama Titik */}
+                            <td className="px-2 py-2">
+                              <Select
+                                value={row.zone_id ? String(row.zone_id) : ""}
+                                onChange={(val) => handleBatchRowChange(row.rowKey, "zone_id", parseInt(val) || 0)}
+                                options={zones.map((d) => ({ value: String(d.id), label: d.nama }))}
+                                placeholder="Pilih titik..."
+                                searchable
+                                hasError={isDuplicate}
+                              />
+                            </td>
+                            {/* Posisi */}
+                            <td className="px-2 py-2">
+                              <div className="flex items-center justify-center gap-1">
+                                <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Driver" ? "" : "Driver")}
+                                  className={cn("w-9 h-9 rounded-md text-[11px] font-bold transition-all flex items-center justify-center",
+                                    row.role === "Driver" ? "bg-blue-500 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-500/10"
+                                  )}>D</button>
+                                <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Helper" ? "" : "Helper")}
+                                  className={cn("w-9 h-9 rounded-md text-[11px] font-bold transition-all flex items-center justify-center",
+                                    row.role === "Helper" ? "bg-orange-500 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-orange-50 hover:text-orange-500 dark:hover:bg-orange-500/10"
+                                  )}>H</button>
+                              </div>
+                            </td>
+                            {/* Titik */}
+                            <td className="px-2 py-2">
+                              <input type="number" min={0} inputMode="numeric" placeholder="-" value={row.jumlah_titik}
+                                onChange={(e) => handleBatchRowChange(row.rowKey, "jumlah_titik", e.target.value)}
+                                className={cn("w-full text-center px-2 py-2 rounded-lg border text-[16px] font-bold outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
+                                  hasTitik ? "border-success/40 bg-success/[0.06] text-success" : isIncomplete && !hasTitik ? "border-danger/50 bg-danger/[0.03] text-foreground placeholder:text-danger/40" : "border-dashed border-border bg-transparent text-foreground placeholder:text-muted-foreground/40"
+                                )}
+                                style={{ fontSize: "16px" }}
+                              />
+                            </td>
+                            {/* Status */}
+                            <td className="px-2 py-2">
+                              <select value={row.status_id || ""} onChange={(e) => handleBatchRowChange(row.rowKey, "status_id", parseInt(e.target.value) || 0)}
+                                className="w-full text-[13px] px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none focus:border-primary text-foreground">
+                                <option value="">-</option>
+                                {dStatuses.map((s) => (<option key={s.id} value={s.id}>{s.nama}</option>))}
+                              </select>
+                            </td>
+                            {/* Catatan */}
+                            <td className="px-2 py-2">
+                              <input type="text" placeholder="..." value={row.catatan}
+                                onChange={(e) => handleBatchRowChange(row.rowKey, "catatan", e.target.value)}
+                                className="w-full text-[13px] px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-muted-foreground/30 text-foreground" />
+                            </td>
+                            {/* Aksi */}
+                            <td className="px-1 py-2">
+                              <div className="flex items-center justify-center gap-0.5">
+                                <button type="button" onClick={() => addSubRow(row.rowKey)} title="Tambah entri lagi"
+                                  className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary-light transition-colors">
+                                  <Plus className="w-4 h-4" />
+                                </button>
+                                <button type="button" onClick={() => removeRow(row.rowKey)} title="Hapus baris"
+                                  className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-danger hover:bg-danger-light transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
+                {/* Hint */}
+                <p className="text-[10px] text-muted-foreground/60 text-center py-1.5 border-t border-border/30 bg-muted/10 flex-shrink-0">
+                  Geser tabel &rarr; untuk kolom lainnya &middot; Ketuk (+) untuk entri kedua pegawai yang sama
+                </p>
               </div>
 
               {/* ── Footer ── */}
