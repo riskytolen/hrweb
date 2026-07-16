@@ -652,44 +652,44 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
         </div>
 
         {/* ── Filter Bar ── */}
-        <div className="px-5 py-3 border-b border-border bg-card">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="px-3 sm:px-5 py-3 border-b border-border bg-card">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {/* Report tab toggle */}
             <div className="flex items-center bg-muted rounded-xl p-0.5">
               <button
                 onClick={() => setReportTab("zona")}
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
                   reportTab === "zona"
                     ? "bg-card text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 <Hash className="w-3 h-3" />
-                Per Nama Titik
+                <span className="hidden xs:inline">Per </span>Nama Titik
               </button>
               <button
                 onClick={() => setReportTab("pegawai")}
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
                   reportTab === "pegawai"
                     ? "bg-card text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 <User className="w-3 h-3" />
-                Per Pegawai
+                <span className="hidden xs:inline">Per </span>Pegawai
               </button>
             </div>
 
-            <div className="h-6 w-px bg-border" />
+            <div className="h-6 w-px bg-border hidden sm:block" />
 
             {/* Date mode toggle */}
             <div className="flex items-center bg-muted rounded-xl p-0.5">
               <button
                 onClick={() => setDateMode("periode")}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
                   dateMode === "periode"
                     ? "bg-card text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
@@ -700,7 +700,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               <button
                 onClick={() => setDateMode("custom")}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
                   dateMode === "custom"
                     ? "bg-card text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
@@ -712,18 +712,18 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
             {/* Periode mode: navigator */}
             {dateMode === "periode" && (
-              <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+              <div className="flex items-center gap-1 bg-muted rounded-xl p-1 w-full sm:w-auto">
                 <button
                   onClick={() => {
                     const [y, m] = periodKey.split("-").map(Number);
                     const prev = new Date(y, m - 2, 1);
                     setPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
                   }}
-                  className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"
+                  className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors min-h-[36px] min-w-[36px] flex items-center justify-center"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <div className="px-3 py-1 text-center min-w-[240px]">
+                <div className="px-3 py-1 text-center flex-1 sm:min-w-[240px]">
                   <p className="text-xs font-bold text-foreground">{effectiveDates.label}</p>
                 </div>
                 <button
@@ -732,7 +732,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                     const next = new Date(y, m, 1);
                     setPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
                   }}
-                  className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"
+                  className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors min-h-[36px] min-w-[36px] flex items-center justify-center"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -741,26 +741,26 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
             {/* Custom mode: date pickers */}
             {dateMode === "custom" && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 w-full sm:w-auto">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
                   <Calendar className="w-3.5 h-3.5" />
-                  Dari
+                  <span>Dari</span>
                 </div>
-                <div className="w-44">
+                <div className="w-full sm:w-44">
                   <DatePicker value={customStart} onChange={setCustomStart} placeholder="Tanggal mulai" />
                 </div>
-                <span className="text-xs text-muted-foreground">s/d</span>
-                <div className="w-44">
+                <span className="text-xs text-muted-foreground hidden sm:inline">s/d</span>
+                <div className="w-full sm:w-44">
                   <DatePicker value={customEnd} onChange={setCustomEnd} placeholder="Tanggal akhir" />
                 </div>
               </div>
             )}
 
-            <div className="h-6 w-px bg-border" />
+            <div className="h-6 w-px bg-border hidden sm:block" />
 
             {/* Search */}
-            <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[200px] max-w-[320px]">
-              <Search className="w-3.5 h-3.5 text-muted-foreground" />
+            <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[150px] sm:min-w-[200px] max-w-full sm:max-w-[320px] w-full sm:w-auto">
+              <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
               <input
                 type="text"
                 placeholder={reportTab === "zona" ? "Cari pegawai..." : "Cari pegawai atau nama titik..."}
@@ -773,8 +773,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
         </div>
 
         {/* ── Summary Cards ── */}
-        <div className="px-5 py-3 border-b border-border bg-muted/20">
-          <div className="flex items-center gap-4">
+        <div className="px-3 sm:px-5 py-3 border-b border-border bg-muted/20">
+          <div className="flex items-center gap-3 sm:gap-4 overflow-x-auto pb-1 sm:pb-0">
             <div className="flex items-center gap-2 px-3 py-2 bg-card rounded-xl border border-border">
               <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Wallet className="w-3.5 h-3.5 text-primary" />

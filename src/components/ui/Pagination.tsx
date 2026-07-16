@@ -66,7 +66,7 @@ export default function Pagination({
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage <= 1}
             className={cn(
-              "p-1.5 rounded-lg text-muted-foreground transition-colors",
+              "p-1.5 sm:p-1.5 rounded-lg text-muted-foreground transition-colors min-h-[36px] min-w-[36px] sm:min-h-[auto] sm:min-w-[auto] flex items-center justify-center",
               currentPage <= 1 ? "opacity-30 cursor-not-allowed" : "hover:bg-muted hover:text-foreground"
             )}
           >
@@ -81,7 +81,7 @@ export default function Pagination({
                 key={page}
                 onClick={() => onPageChange(page)}
                 className={cn(
-                  "min-w-[32px] h-8 rounded-lg text-xs font-medium transition-colors",
+                  "min-w-[36px] sm:min-w-[32px] h-9 sm:h-8 rounded-lg text-xs font-medium transition-colors flex items-center justify-center",
                   page === currentPage
                     ? "bg-primary text-white shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -96,7 +96,7 @@ export default function Pagination({
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage >= totalPages}
             className={cn(
-              "p-1.5 rounded-lg text-muted-foreground transition-colors",
+              "p-1.5 sm:p-1.5 rounded-lg text-muted-foreground transition-colors min-h-[36px] min-w-[36px] sm:min-h-[auto] sm:min-w-[auto] flex items-center justify-center",
               currentPage >= totalPages ? "opacity-30 cursor-not-allowed" : "hover:bg-muted hover:text-foreground"
             )}
           >

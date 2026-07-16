@@ -30,12 +30,15 @@ import {
   Briefcase,
   Truck,
   HardDrive,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }
 
 interface SubItem {
@@ -138,7 +141,7 @@ const allSections: MenuSection[] = [
   },
 ];
 
-export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { isSuperAdmin, hasPermission, isLoading, profile } = useAuth();
@@ -227,14 +230,25 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const roleLabel = profile?.roles?.nama ?? (isSuperAdmin ? "Super Admin" : "User");
 
   return (
-    <aside
-      className={cn(
-        "fixed left-0 top-0 z-40 h-screen flex flex-col",
-        "transition-[width] duration-300 ease-in-out",
-        "border-r border-white/[0.05]",
-        collapsed ? "w-[64px]" : "w-[240px]",
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
+          onClick={onMobileClose}
+        />
       )}
-    >
+      <aside
+        className={cn(
+          "fixed left-0 top-0 z-40 h-screen flex flex-col",
+          "transition-[width,transform] duration-300 ease-in-out",
+          "border-r border-white/[0.05]",
+          collapsed ? "w-[64px]" : "w-[240px]",
+          // Mobile: drawer slides from left
+          "max-lg:fixed max-lg:top-0 max-lg:left-0 max-lg:h-screen max-lg:z-40",
+          mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-full",
+        )}
+      >
       {/* Background: solid dark + subtle vertical gradient highlight, tanpa grid/blob */}
       <div className="absolute inset-0 bg-[#0b1120]" />
       <div className="absolute inset-x-0 top-0 h-64 bg-gradient-to-b from-blue-500/[0.04] to-transparent pointer-events-none" />
@@ -266,16 +280,26 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             )}
           </Link>
 
+          {/* Desktop collapse toggle */}
           {!collapsed && (
             <button
               onClick={onToggle}
-              className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors flex-shrink-0"
+              className="hidden lg:inline-flex p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors flex-shrink-0"
               aria-label="Tutup sidebar"
               title="Tutup sidebar"
             >
               <PanelLeftClose className="w-4 h-4" />
             </button>
           )}
+          {/* Mobile close button */}
+          <button
+            onClick={onMobileClose}
+            className="lg:hidden p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors flex-shrink-0"
+            aria-label="Tutup menu"
+            title="Tutup menu"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Navigation */}
@@ -316,6 +340,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                       <div key={entry.key} className="relative group/trigger">
                         <Link
                           href={entry.href}
+                          onClick={onMobileClose}
                           className={cn(
                             "w-full flex items-center rounded-lg transition-colors",
                             collapsed
@@ -376,6 +401,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                         <button
                           onClick={() => {
                             if (collapsed) {
+                              onMobileClose();
                               router.push(group.items[0].href);
                             } else {
                               toggleGroup(group.key);
@@ -465,6 +491,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                                   )}
                                   <Link
                                     href={item.href}
+                                    onClick={onMobileClose}
                                     className={cn(
                                       "flex items-center gap-2 px-2 py-[7px] rounded-md text-[12px] transition-colors",
                                       isActive
@@ -545,5 +572,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         }
       `}</style>
     </aside>
+    </>
   );
 }

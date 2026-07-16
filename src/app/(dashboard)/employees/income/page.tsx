@@ -16,6 +16,7 @@ import {
   RotateCcw,
   AlertTriangle,
   CalendarDays,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -338,6 +339,7 @@ export default function IncomePage() {
   const [editError, setEditError] = useState("");
 
   const [showReport, setShowReport] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; title: string; message: string; type: "success" | "error" }>({ show: false, title: "", message: "", type: "success" });
@@ -1375,8 +1377,8 @@ export default function IncomePage() {
             </div>
             {/* Mobile: primary action + dropdown menu */}
             <div className="flex sm:hidden items-center gap-1.5">
-              {canInput && <Button variant="outline" icon={User} size="sm" onClick={openSingle}>Tunggal</Button>}
-              {canInput && <Button icon={Users} size="sm" onClick={openBatch}>Bulk</Button>}
+              {canInput && <Button variant="outline" icon={User} size="sm" onClick={openSingle} className="min-h-[44px]">Tunggal</Button>}
+              {canInput && <Button icon={Users} size="sm" onClick={openBatch} className="min-h-[44px]">Bulk</Button>}
               <_HeaderMenu
                 onShowReport={() => setShowReport(true)}
                 onOpenCalendar={openCalendar}
@@ -1462,31 +1464,51 @@ export default function IncomePage() {
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-2 mt-3 pt-3 border-t border-border sm:hidden">
-          <Select
-            value={employeeFilter}
-            onChange={(val) => { setEmployeeFilter(val); setPage(1); }}
-            options={employeeDropdownOptions}
-            placeholder="Semua pegawai"
-            searchable
-            className={filterSelectClass}
-          />
-          <Select
-            value={zoneFilter}
-            onChange={(val) => { setZoneFilter(val); setPage(1); }}
-            options={zoneDropdownOptions}
-            placeholder="Semua nama titik"
-            searchable
-            className={filterSelectClass}
-          />
-          <Select
-            value={roleFilter}
-            onChange={(val) => { setRoleFilter(val as "" | "Driver" | "Helper"); setPage(1); }}
-            options={roleDropdownOptions}
-            placeholder="Semua posisi"
-            searchable
-            className={filterSelectClass}
-          />
+        <div className="sm:hidden mt-3 pt-3 border-t border-border">
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen((v) => !v)}
+            className="flex items-center justify-between w-full px-3 py-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors min-h-[44px]"
+          >
+            <span className="text-xs font-medium text-foreground">Filter</span>
+            <div className="flex items-center gap-2">
+              {hasColumnFilters && (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                  {[employeeFilter, zoneFilter, roleFilter].filter(Boolean).length} aktif
+                </span>
+              )}
+              <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", mobileFiltersOpen && "rotate-180")} />
+            </div>
+          </button>
+          {mobileFiltersOpen && (
+            <div className="mt-2 space-y-2 animate-fade-in">
+              <Select
+                value={employeeFilter}
+                onChange={(val) => { setEmployeeFilter(val); setPage(1); }}
+                options={employeeDropdownOptions}
+                placeholder="Semua pegawai"
+                searchable
+                className={filterSelectClass}
+              />
+              <Select
+                value={zoneFilter}
+                onChange={(val) => { setZoneFilter(val); setPage(1); }}
+                options={zoneDropdownOptions}
+                placeholder="Semua nama titik"
+                searchable
+                className={filterSelectClass}
+              />
+              <Select
+                value={roleFilter}
+                onChange={(val) => { setRoleFilter(val as "" | "Driver" | "Helper"); setPage(1); }}
+                options={roleDropdownOptions}
+                placeholder="Semua posisi"
+                searchable
+                className={filterSelectClass}
+              />
+            </div>
+          )}
         </div>
         {hasColumnFilters && (
           <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-border">
@@ -1608,8 +1630,8 @@ export default function IncomePage() {
                 </div>
                 {canEdit && (
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    <button onClick={() => openEdit(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary"><Pencil className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.tanggal})` })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => openEdit(row)} className="p-2 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary min-h-[36px] min-w-[36px] flex items-center justify-center"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setDeleteConfirm({ id: row.id, nama: `${row.employeeNama} (${row.tanggal})` })} className="p-2 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger min-h-[36px] min-w-[36px] flex items-center justify-center"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 )}
               </div>
@@ -1729,7 +1751,7 @@ export default function IncomePage() {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap justify-end">
                 <div className="flex items-center gap-1 rounded-2xl border border-border/70 bg-muted/45 p-1 shadow-sm shadow-black/5">
                   <button
                     type="button"
@@ -1791,7 +1813,7 @@ export default function IncomePage() {
                 <thead className="sticky top-0 z-20">
                   <tr>
                     {/* Sticky corner */}
-                    <th className="sticky left-0 z-30 bg-card border-b-2 border-r-2 border-border px-4 py-3 text-left min-w-[180px] shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]">
+                    <th className="sticky left-0 z-30 bg-card border-b-2 border-r-2 border-border px-3 sm:px-4 py-3 text-left min-w-[130px] sm:min-w-[180px] shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]">
                       <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pegawai</span>
                     </th>
                     {calDateList.map((dt) => {
@@ -1805,7 +1827,7 @@ export default function IncomePage() {
                       const isNewMonth = day === 1;
                       return (
                         <th key={dateStr} className={cn(
-                          "border-b-2 border-r border-border px-1 py-2 text-center min-w-[120px]",
+                          "border-b-2 border-r border-border px-0.5 sm:px-1 py-1 sm:py-2 text-center min-w-[90px] sm:min-w-[120px]",
                           isNewMonth && "border-l-2 border-l-primary/30",
                           isToday ? "bg-primary text-white" : isSunday ? "bg-red-100" : isSaturday ? "bg-amber-100" : "bg-card"
                         )}>
@@ -1843,14 +1865,14 @@ export default function IncomePage() {
                     return (
                       <tr key={emp.id} className={cn("group transition-colors", isEven ? "" : "bg-muted/[0.03]")}>
                         {/* Employee name - sticky left */}
-                        <td className={cn("sticky left-0 z-10 border-b border-r-2 border-border px-4 py-2.5 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]", isEven ? "bg-card" : "bg-card")}>
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-                              <User className="w-3.5 h-3.5 text-primary/70" />
+                        <td className={cn("sticky left-0 z-10 border-b border-r-2 border-border px-3 sm:px-4 py-2.5 shadow-[2px_0_8px_-2px_rgba(0,0,0,0.06)]", isEven ? "bg-card" : "bg-card")}>
+                          <div className="flex items-center gap-1.5 sm:gap-2">
+                            <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
+                              <User className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-primary/70" />
                             </div>
                             <div className="min-w-0">
-                              <p className="text-xs font-semibold text-foreground truncate max-w-[130px]">{emp.nama}</p>
-                              {emp.jabatanNama && <p className="text-[8px] font-medium text-muted-foreground truncate max-w-[130px]">{emp.jabatanNama}</p>}
+                              <p className="text-[11px] sm:text-xs font-semibold text-foreground truncate max-w-[90px] sm:max-w-[130px]">{emp.nama}</p>
+                              {emp.jabatanNama && <p className="text-[7px] sm:text-[8px] font-medium text-muted-foreground truncate max-w-[90px] sm:max-w-[130px]">{emp.jabatanNama}</p>}
                             </div>
                           </div>
                         </td>
@@ -1886,7 +1908,7 @@ export default function IncomePage() {
                             <td key={dateStr} id={`cal-${emp.id}-${dateStr}`}
                               onClick={() => !calEditCell && openCalCell(emp.id, emp.nama, dateStr)}
                               className={cn(
-                                "border-b border-r border-border/60 px-1 py-1 align-top min-w-[120px] transition-colors cursor-pointer",
+                                "border-b border-r border-border/60 px-0.5 sm:px-1 py-0.5 sm:py-1 align-top min-w-[90px] sm:min-w-[120px] transition-colors cursor-pointer",
                                 isNewMonth && "border-l-2 border-l-primary/30",
                                 isCellEditing ? "ring-2 ring-primary ring-inset bg-primary/[0.06]" : isActiveAnomaly ? "ring-2 ring-danger ring-inset bg-danger/[0.10]" : isActiveEmpty ? "ring-2 ring-danger ring-inset bg-danger/[0.08]" : isActiveStatus ? "ring-2 ring-warning ring-inset bg-warning/[0.08]" : validation?.isAnomaly ? "ring-1 ring-danger/70 ring-inset bg-danger/[0.06]" : isToday ? "bg-primary/[0.03]" : isSunday ? "bg-red-500/[0.03]" : isSaturday ? "bg-amber-500/[0.02]" : "",
                                 !calEditCell && "hover:bg-primary/[0.04]",
@@ -2038,9 +2060,9 @@ export default function IncomePage() {
 
             {/* ── Calendar Cell Edit Panel ── */}
             {calEditCell && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget && !calEditSaving) setCalEditCell(null); }}>
+              <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget && !calEditSaving) setCalEditCell(null); }}>
                 <div className="absolute inset-0 bg-black/30" />
-                <div className="relative w-full max-w-2xl bg-card rounded-2xl shadow-2xl animate-scale-in flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+                <div className="relative w-full max-w-2xl bg-card sm:rounded-2xl shadow-2xl animate-slide-up sm:animate-scale-in flex flex-col" style={{ maxHeight: "calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))" }}>
                   {/* Header */}
                   <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/30 rounded-t-2xl">
                     <div>
@@ -2212,10 +2234,10 @@ export default function IncomePage() {
       {/* ═══ SINGLE INPUT MODAL ═══ */}
       {showSingleForm && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !singleSaving && setShowSingleForm(false)} />
-            <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+            <div className="relative w-full max-w-lg bg-card sm:rounded-2xl shadow-2xl animate-slide-up sm:animate-scale-in overflow-hidden flex flex-col max-h-[90vh] sm:max-h-auto">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-gradient-to-r from-primary/5 to-transparent flex-shrink-0">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
                     <User className="w-4 h-4 text-primary" />
@@ -2228,7 +2250,7 @@ export default function IncomePage() {
                 <button onClick={() => setShowSingleForm(false)} disabled={singleSaving} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50"><X className="w-4 h-4" /></button>
               </div>
 
-              <div className="p-5 space-y-4">
+              <div className="p-5 space-y-4 overflow-y-auto flex-1">
                 {singleError && (
                   <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{singleError}
@@ -2384,8 +2406,8 @@ export default function IncomePage() {
                 </div>
               </div>
 
-              {/* ── Worksheet table ── */}
-              <div className="flex-1 overflow-y-auto">
+              {/* ── Worksheet table (desktop) ── */}
+              <div className="flex-1 overflow-y-auto max-lg:hidden">
                 <table className="w-full">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-card border-b-2 border-border shadow-sm">
@@ -2545,6 +2567,122 @@ export default function IncomePage() {
                 </table>
               </div>
 
+              {/* ── Worksheet cards (mobile) ── */}
+              <div className="flex-1 overflow-y-auto p-3 lg:hidden space-y-2">
+                {batchFiltered.map((row, idx) => {
+                  const hasEmp = !!row.employee_id;
+                  const hasTitik = hasPointInput(row.jumlah_titik);
+                  const hasDiv = !!row.zone_id;
+                  const hasRole = !!row.role;
+                  const touched = hasEmp || hasTitik || hasDiv || hasRole;
+                  const isComplete = hasEmp && hasTitik && hasDiv && hasRole;
+                  const isIncomplete = touched && !isComplete;
+                  const isDuplicate = batchDuplicateKeys.has(row.rowKey);
+                  const isDbDuplicate = dbDuplicateRowKeys.has(row.rowKey);
+                  const empStatus = row.employee_id ? employees.find((e) => e.id === row.employee_id)?.status : undefined;
+
+                  return (
+                    <div key={row.rowKey} className={cn(
+                      "rounded-xl border p-3 space-y-2.5 bg-card",
+                      isDuplicate ? "border-danger/40 bg-danger/[0.04]" : isDbDuplicate ? "border-warning/40 bg-warning/[0.04]" : isIncomplete ? "border-danger/20" : isComplete ? "border-success/30" : "border-border"
+                    )}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={cn("text-[10px] font-mono font-bold", isComplete ? "text-success" : isIncomplete ? "text-danger" : "text-muted-foreground")}>
+                            #{idx + 1}
+                          </span>
+                          {empStatus === "Training" && (
+                            <span className="text-[8px] font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded">TRAINING</span>
+                          )}
+                          {isDbDuplicate && (
+                            <span className="text-[8px] font-bold text-warning bg-warning/10 px-1.5 py-0.5 rounded">SUDAH ADA</span>
+                          )}
+                        </div>
+                        <button type="button" onClick={() => removeRow(row.rowKey)}
+                          className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <Select
+                        value={row.employee_id || ""}
+                        onChange={(val) => handleEmployeeChange(row.rowKey, val)}
+                        options={employees.map((e) => ({ value: e.id, label: e.status === "Training" ? `${e.nama}  • Training` : e.nama }))}
+                        placeholder="Pilih pegawai..."
+                        searchable
+                        hasError={isDuplicate}
+                      />
+
+                      <Select
+                        value={row.zone_id ? String(row.zone_id) : ""}
+                        onChange={(val) => handleBatchRowChange(row.rowKey, "zone_id", parseInt(val) || 0)}
+                        options={zones.map((d) => ({ value: String(d.id), label: d.nama }))}
+                        placeholder="Pilih nama titik..."
+                        searchable
+                        hasError={isDuplicate}
+                      />
+
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Posisi</label>
+                          <div className="flex gap-1">
+                            <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Driver" ? "" : "Driver")}
+                              className={cn("flex-1 py-2 rounded-lg text-xs font-bold transition-all",
+                                row.role === "Driver" ? "bg-blue-500 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-500/10"
+                              )}>Driver</button>
+                            <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Helper" ? "" : "Helper")}
+                              className={cn("flex-1 py-2 rounded-lg text-xs font-bold transition-all",
+                                row.role === "Helper" ? "bg-orange-500 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-orange-50 hover:text-orange-500 dark:hover:bg-orange-500/10"
+                              )}>Helper</button>
+                          </div>
+                        </div>
+                        <div className="w-24">
+                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Titik</label>
+                          <input type="number" min={0} placeholder="-" value={row.jumlah_titik}
+                            onChange={(e) => handleBatchRowChange(row.rowKey, "jumlah_titik", e.target.value)}
+                            className={cn("w-full text-center px-2 py-2 rounded-lg border text-sm font-bold outline-none transition-colors focus:border-primary",
+                              hasTitik ? "border-success/40 bg-success/[0.06] text-success" : "border-dashed border-border bg-transparent text-foreground placeholder:text-muted-foreground/40"
+                            )} />
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Status</label>
+                          <select value={row.status_id || ""} onChange={(e) => handleBatchRowChange(row.rowKey, "status_id", parseInt(e.target.value) || 0)}
+                            className="w-full text-xs px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none focus:border-primary text-foreground">
+                            <option value="">-</option>
+                            {dStatuses.map((s) => (<option key={s.id} value={s.id}>{s.nama}</option>))}
+                          </select>
+                        </div>
+                        <div className="flex-1">
+                          <label className="text-[10px] font-semibold text-foreground mb-1 block">Catatan</label>
+                          <input type="text" placeholder="..." value={row.catatan}
+                            onChange={(e) => handleBatchRowChange(row.rowKey, "catatan", e.target.value)}
+                            className="w-full text-xs px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary text-foreground placeholder:text-muted-foreground/30" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Add row buttons (mobile) */}
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  <button type="button" onClick={() => addBlankRows(1)}
+                    className="flex items-center gap-1 text-xs font-medium text-primary hover:bg-primary-light px-3 py-2 rounded-lg transition-colors border border-dashed border-primary/40 flex-1 justify-center min-h-[44px]">
+                    <Plus className="w-3.5 h-3.5" />Tambah 1
+                  </button>
+                  <button type="button" onClick={() => addBlankRows(ADD_ROWS_BATCH)}
+                    className="flex items-center gap-1 text-xs font-medium text-primary hover:bg-primary-light px-3 py-2 rounded-lg transition-colors border border-dashed border-primary/40 flex-1 justify-center min-h-[44px]">
+                    <Plus className="w-3.5 h-3.5" />Tambah {ADD_ROWS_BATCH}
+                  </button>
+                  <button type="button" onClick={removeBlankRows}
+                    className="flex items-center gap-1 text-xs font-medium text-danger hover:bg-danger-light px-3 py-2 rounded-lg transition-colors border border-dashed border-danger/40 flex-1 justify-center min-h-[44px]">
+                    <RotateCcw className="w-3.5 h-3.5" />Hapus kosong
+                  </button>
+                </div>
+              </div>
+
               {/* ── Footer ── */}
               <div className="px-5 py-3 border-t border-border bg-muted/20">
                 <div className="flex items-center justify-between">
@@ -2585,9 +2723,9 @@ export default function IncomePage() {
       {/* ═══ DUPLICATE CONFIRM DIALOG ═══ */}
       {showDuplicateConfirm && (
         <Portal>
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+            <div className="relative w-full max-w-sm bg-card sm:rounded-2xl shadow-2xl overflow-hidden animate-slide-up sm:animate-scale-in">
               <div className="p-6 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-warning/10 flex items-center justify-center mx-auto mb-4">
                   <AlertTriangle className="w-7 h-7 text-warning" />
@@ -2615,9 +2753,9 @@ export default function IncomePage() {
       {/* ═══ CLOSE CONFIRM DIALOG ═══ */}
       {showCloseConfirm && (
         <Portal>
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+            <div className="relative w-full max-w-sm bg-card sm:rounded-2xl shadow-2xl overflow-hidden animate-slide-up sm:animate-scale-in">
               <div className="p-6 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-warning/10 flex items-center justify-center mx-auto mb-4">
                   <AlertTriangle className="w-7 h-7 text-warning" />
@@ -2637,14 +2775,14 @@ export default function IncomePage() {
       {/* ═══ EDIT SINGLE MODAL ═══ */}
       {showEditForm && editingId && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowEditForm(false)} />
-            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30 rounded-t-2xl">
+            <div className="relative w-full max-w-sm bg-card sm:rounded-2xl shadow-2xl animate-slide-up sm:animate-scale-in overflow-hidden flex flex-col max-h-[90vh] sm:max-h-auto">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30 flex-shrink-0">
                 <h2 className="text-sm font-bold text-foreground">Edit Input Titik</h2>
                 <button onClick={() => setShowEditForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
               </div>
-              <div className="p-5 space-y-4">
+              <div className="p-5 space-y-4 overflow-y-auto flex-1">
                 {editError && (
                   <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-danger-light border border-danger/20 text-danger text-xs font-medium animate-fade-in">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />{editError}
@@ -2707,9 +2845,9 @@ export default function IncomePage() {
       {/* ═══ DELETE CONFIRM ═══ */}
       {deleteConfirm && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteConfirm(null)} />
-            <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl overflow-hidden animate-scale-in">
+            <div className="relative w-full max-w-sm bg-card sm:rounded-2xl shadow-2xl overflow-hidden animate-slide-up sm:animate-scale-in">
               <div className="p-6 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-danger/10 flex items-center justify-center mx-auto mb-4"><Trash2 className="w-7 h-7 text-danger" /></div>
                 <h3 className="text-base font-bold text-foreground">Hapus Input Titik?</h3>
@@ -2751,7 +2889,7 @@ function _HeaderMenu({ onShowReport, onOpenCalendar }: { onShowReport: () => voi
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="p-2 rounded-xl border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+        className="p-2.5 sm:p-2 rounded-xl border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
         aria-label="Menu lainnya"
       >
         <MoreVertical className="w-4 h-4" />
