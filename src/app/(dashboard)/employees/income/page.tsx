@@ -2377,12 +2377,15 @@ export default function IncomePage() {
       {/* ═══ BATCH INPUT MODAL ═══ */}
       {showBatch && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-3">
+          <div className="fixed inset-0 z-50 flex items-stretch justify-center p-0 sm:items-center sm:p-3">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-            <div className="relative w-full max-w-7xl bg-card sm:rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" style={{ height: "100vh", maxHeight: "100vh" }}>
+            <div className="relative flex h-[100dvh] max-h-[100dvh] w-full max-w-7xl flex-col overflow-hidden bg-card shadow-2xl animate-slide-up sm:h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-1.5rem)] sm:rounded-2xl sm:animate-scale-in">
 
               {/* ── Header: Title + Tanggal + Search + Counter + Tabs ── */}
-              <div className="px-3 sm:px-5 py-3 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+              <div
+                className="flex-shrink-0 px-3 pb-3 sm:px-5 border-b border-border bg-gradient-to-r from-primary/5 to-transparent"
+                style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top, 0px))" }}
+              >
                 <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
                   {/* Title */}
                   <div className="flex items-center gap-2.5 flex-shrink-0">
@@ -2404,7 +2407,7 @@ export default function IncomePage() {
                   <div className="flex-1 flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2 border border-border focus-within:border-primary min-w-[120px]">
                     <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                     <input type="text" placeholder="Cari pegawai..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
-                      className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
+                      className="bg-transparent text-base sm:text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
                   </div>
 
                   {/* Counter */}
@@ -2436,25 +2439,25 @@ export default function IncomePage() {
               </div>
 
               {/* ── Worksheet toolbar ── */}
-              <div className="px-5 py-1.5 border-b border-border flex items-center justify-between bg-muted/20">
-                <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <div className="flex-shrink-0 px-3 sm:px-5 py-1.5 border-b border-border flex items-center justify-between bg-muted/20">
+                <p className="hidden text-[10px] text-muted-foreground sm:flex items-center gap-1">
                   <GripVertical className="w-3 h-3" />Drag baris untuk ubah urutan
                 </p>
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => addBlankRows(1)} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
+                <div className="flex w-full items-center justify-between gap-1 sm:w-auto sm:justify-start">
+                  <button type="button" onClick={() => addBlankRows(1)} className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
                     <Plus className="w-3 h-3" />1 Baris
                   </button>
-                  <button type="button" onClick={() => addBlankRows(ADD_ROWS_BATCH)} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
+                  <button type="button" onClick={() => addBlankRows(ADD_ROWS_BATCH)} className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
                     <Plus className="w-3 h-3" />{ADD_ROWS_BATCH} Baris
                   </button>
-                  <button type="button" onClick={removeBlankRows} className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-2 py-1 rounded-md transition-colors">
+                  <button type="button" onClick={removeBlankRows} className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-2 py-1 rounded-md transition-colors">
                     <RotateCcw className="w-3 h-3" />Hapus Kosong
                   </button>
                 </div>
               </div>
 
               {/* ── Worksheet table (desktop) ── */}
-              <div className="flex-1 overflow-y-auto max-lg:hidden">
+              <div className="min-h-0 flex-1 overflow-y-auto max-lg:hidden">
                 <table className="w-full">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-card border-b-2 border-border shadow-sm">
@@ -2615,8 +2618,8 @@ export default function IncomePage() {
               </div>
 
               {/* ── Worksheet table (mobile) ── */}
-              <div className="flex-1 overflow-hidden lg:hidden flex flex-col">
-                <div className="overflow-x-auto flex-1">
+              <div className="min-h-0 flex-1 overflow-hidden lg:hidden flex flex-col">
+                <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
                   <table className="w-full min-w-[660px]">
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-card border-b-2 border-border shadow-sm">
@@ -2768,9 +2771,12 @@ export default function IncomePage() {
               </div>
 
               {/* ── Footer ── */}
-              <div className="px-5 py-3 border-t border-border bg-muted/20">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+              <div
+                className="flex-shrink-0 px-3 sm:px-5 pt-3 border-t border-border bg-muted/20"
+                style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))" }}
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
                     {batchDuplicateKeys.size > 0 ? (
                       <div className="flex items-center gap-2 text-sm">
                         <div className="w-2 h-2 rounded-full bg-danger animate-pulse" />
@@ -2791,9 +2797,9 @@ export default function IncomePage() {
                       <span className="text-xs text-muted-foreground">Belum ada data yang diisi</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={tryCloseBatch} disabled={batchSaving}>Batal</Button>
-                    <Button size="sm" icon={Check} onClick={handleBatchSave} disabled={batchSaving || !batchCanSave}>
+                  <div className="flex w-full items-center gap-2 sm:w-auto">
+                    <Button variant="outline" size="sm" className="min-h-[44px] flex-1 sm:min-h-0 sm:flex-none" onClick={tryCloseBatch} disabled={batchSaving}>Batal</Button>
+                    <Button size="sm" icon={Check} className="min-h-[44px] flex-1 sm:min-h-0 sm:flex-none" onClick={handleBatchSave} disabled={batchSaving || !batchCanSave}>
                       {batchSaving ? "Menyimpan..." : `Simpan ${batchFilled > 0 ? batchFilled + " Data" : ""}`}
                     </Button>
                   </div>
