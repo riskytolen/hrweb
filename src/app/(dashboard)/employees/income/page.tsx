@@ -2510,37 +2510,42 @@ export default function IncomePage() {
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
             <div className="relative flex h-[100dvh] max-h-[100dvh] w-full max-w-7xl flex-col overflow-hidden bg-card shadow-2xl animate-slide-up sm:h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-1.5rem)] sm:rounded-2xl sm:animate-scale-in">
 
-              {/* ── Header: Title + Tanggal + Search + Counter + Tabs ── */}
+              {/* ── Header: Title + Tanggal + Search + Counter ── */}
               <div
-                className="flex-shrink-0 px-3 pb-3 sm:px-5 border-b border-border bg-gradient-to-r from-primary/5 to-transparent"
-                style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top, 0px))" }}
+                className="flex-shrink-0 border-b border-border bg-gradient-to-r from-primary/5 to-transparent px-2.5 pb-2 sm:px-5 sm:pb-3"
+                style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top, 0px))" }}
               >
-                <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+                <div className="flex items-center gap-1.5 sm:flex-wrap sm:gap-4">
                   {/* Title */}
-                  <div className="flex items-center gap-2.5 flex-shrink-0">
+                  <div className="hidden items-center gap-2.5 sm:flex sm:flex-shrink-0">
                     <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                       <Users className="w-4 h-4 text-primary" />
                     </div>
-                    <div className="hidden sm:block">
+                    <div>
                       <h2 className="text-sm font-bold text-foreground leading-tight">Input Titik Harian</h2>
                       <p className="text-[10px] text-muted-foreground">Kosongkan yang tidak bertugas</p>
                     </div>
                   </div>
 
                   {/* Tanggal */}
-                  <div className="w-40 sm:w-48 flex-shrink-0">
-                    <DatePicker value={batchDate} onChange={(val) => setBatchDate(val)} placeholder="Pilih tanggal" />
+                  <div className="w-[132px] flex-shrink-0 sm:w-48">
+                    <DatePicker
+                      value={batchDate}
+                      onChange={(val) => setBatchDate(val)}
+                      placeholder="Pilih tanggal"
+                      className="h-9 gap-1.5 rounded-lg px-2 py-0 text-xs sm:h-auto sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2.5 sm:text-sm"
+                    />
                   </div>
 
                   {/* Search */}
-                  <div className="flex-1 flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-2 border border-border focus-within:border-primary min-w-[120px]">
-                    <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                    <input type="text" placeholder="Cari pegawai..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
+                  <div className="flex h-9 min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 focus-within:border-primary sm:h-auto sm:min-w-[120px] sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2">
+                    <Search className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                    <input type="text" placeholder="Cari..." value={batchSearch} onChange={(e) => setBatchSearch(e.target.value)}
                       className="bg-transparent text-base sm:text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
                   </div>
 
                   {/* Counter */}
-                  <div className={cn("flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-semibold flex-shrink-0", batchFilled > 0 ? "border-success/30 bg-success-light/50 text-success" : "border-border bg-muted/30 text-muted-foreground")}>
+                  <div className={cn("hidden items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-semibold flex-shrink-0 sm:flex", batchFilled > 0 ? "border-success/30 bg-success-light/50 text-success" : "border-border bg-muted/30 text-muted-foreground")}>
                     <Check className="w-3.5 h-3.5" />
                     <span>{batchFilled}<span className="text-xs font-normal text-muted-foreground">/{batchRows.length}</span></span>
                   </div>
@@ -2551,19 +2556,23 @@ export default function IncomePage() {
               </div>
 
               {/* ── Worksheet toolbar ── */}
-              <div className="flex-shrink-0 px-3 sm:px-5 py-1.5 border-b border-border flex items-center justify-between bg-muted/20">
+              <div className="flex flex-shrink-0 items-center justify-between gap-1 border-b border-border bg-muted/20 px-2 py-0.5 sm:px-5 sm:py-1.5">
                 <p className="hidden text-[10px] text-muted-foreground sm:flex items-center gap-1">
                   <GripVertical className="w-3 h-3" />Drag baris untuk ubah urutan
                 </p>
-                <div className="flex w-full items-center justify-between gap-1 sm:w-auto sm:justify-start">
+                <div className={cn("flex h-7 flex-shrink-0 items-center gap-1 rounded-lg border px-2 text-[10px] font-semibold sm:hidden", batchFilled > 0 ? "border-success/30 bg-success-light/50 text-success" : "border-border bg-muted/30 text-muted-foreground")}>
+                  <Check className="h-3 w-3" />
+                  <span>{batchFilled}<span className="font-normal text-muted-foreground">/{batchRows.length}</span></span>
+                </div>
+                <div className="flex min-w-0 flex-1 items-center justify-between gap-0.5 sm:w-auto sm:flex-none sm:justify-start sm:gap-1">
                   <button type="button" onClick={() => addBlankRows(1)} className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
-                    <Plus className="w-3 h-3" />1 Baris
+                    <Plus className="w-3 h-3" /><span className="sm:hidden">1</span><span className="hidden sm:inline">1 Baris</span>
                   </button>
                   <button type="button" onClick={() => addBlankRows(ADD_ROWS_BATCH)} className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors">
-                    <Plus className="w-3 h-3" />{ADD_ROWS_BATCH} Baris
+                    <Plus className="w-3 h-3" /><span className="sm:hidden">{ADD_ROWS_BATCH}</span><span className="hidden sm:inline">{ADD_ROWS_BATCH} Baris</span>
                   </button>
                   <button type="button" onClick={removeBlankRows} className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-2 py-1 rounded-md transition-colors">
-                    <RotateCcw className="w-3 h-3" />Hapus Kosong
+                    <RotateCcw className="w-3 h-3" /><span className="sm:hidden">Kosong</span><span className="hidden sm:inline">Hapus Kosong</span>
                   </button>
                 </div>
               </div>
@@ -2931,35 +2940,50 @@ export default function IncomePage() {
 
               {/* ── Footer ── */}
               <div
-                className="flex-shrink-0 px-3 sm:px-5 pt-3 border-t border-border bg-muted/20"
-                style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))" }}
+                className="flex-shrink-0 border-t border-border bg-muted/20 px-2.5 pt-1.5 sm:px-5 sm:pt-3"
+                style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))" }}
               >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex min-w-0 items-center gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 flex-1 items-center">
                     {batchDuplicateKeys.size > 0 ? (
-                      <div className="flex items-center gap-2 text-sm">
-                        <div className="w-2 h-2 rounded-full bg-danger animate-pulse" />
-                        <span className="text-danger text-xs font-medium">Ada nama titik + posisi yang sama dalam satu pegawai</span>
+                      <div className="flex min-w-0 items-center gap-1.5 text-sm">
+                        <div className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-danger sm:h-2 sm:w-2" />
+                        <span className="truncate text-[10px] font-medium text-danger sm:text-xs">
+                          <span className="sm:hidden">Duplikat</span>
+                          <span className="hidden sm:inline">Ada nama titik + posisi yang sama dalam satu pegawai</span>
+                        </span>
                       </div>
                     ) : batchIncomplete.length > 0 ? (
-                      <div className="flex items-center gap-2 text-sm">
-                        <div className="w-2 h-2 rounded-full bg-danger animate-pulse" />
-                        <span className="text-danger text-xs font-medium">{batchIncomplete.length} data belum lengkap</span>
+                      <div className="flex min-w-0 items-center gap-1.5 text-sm">
+                        <div className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-danger sm:h-2 sm:w-2" />
+                        <span className="truncate text-[10px] font-medium text-danger sm:text-xs">
+                          <span className="sm:hidden">{batchIncomplete.length} belum lengkap</span>
+                          <span className="hidden sm:inline">{batchIncomplete.length} data belum lengkap</span>
+                        </span>
                       </div>
                     ) : batchFilled > 0 ? (
-                      <div className="flex items-center gap-2 text-sm">
-                        <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                        <span className="text-muted-foreground">Siap simpan</span>
-                        <span className="font-bold text-foreground">{batchFilled} pegawai</span>
+                      <div className="flex min-w-0 items-center gap-1.5 text-sm">
+                        <div className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-success sm:h-2 sm:w-2" />
+                        <span className="truncate text-[10px] font-bold text-foreground sm:hidden">{batchFilled} siap</span>
+                        <span className="hidden text-muted-foreground sm:inline">Siap simpan</span>
+                        <span className="hidden font-bold text-foreground sm:inline">{batchFilled} pegawai</span>
                       </div>
                     ) : (
-                      <span className="text-xs text-muted-foreground">Belum ada data yang diisi</span>
+                      <span className="truncate text-[10px] text-muted-foreground sm:text-xs">
+                        <span className="sm:hidden">Belum diisi</span>
+                        <span className="hidden sm:inline">Belum ada data yang diisi</span>
+                      </span>
                     )}
                   </div>
-                  <div className="flex w-full items-center gap-2 sm:w-auto">
-                    <Button variant="outline" size="sm" className="min-h-[44px] flex-1 sm:min-h-0 sm:flex-none" onClick={tryCloseBatch} disabled={batchSaving}>Batal</Button>
-                    <Button size="sm" icon={Check} className="min-h-[44px] flex-1 sm:min-h-0 sm:flex-none" onClick={handleBatchSave} disabled={batchSaving || !batchCanSave}>
-                      {batchSaving ? "Menyimpan..." : `Simpan ${batchFilled > 0 ? batchFilled + " Data" : ""}`}
+                  <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
+                    <Button variant="outline" size="sm" className="h-9 min-h-0 flex-none px-3 py-0 text-[11px] sm:h-auto sm:py-2 sm:text-xs" onClick={tryCloseBatch} disabled={batchSaving}>Batal</Button>
+                    <Button size="sm" icon={Check} className="h-9 min-h-0 flex-none px-3 py-0 text-[11px] sm:h-auto sm:py-2 sm:text-xs" onClick={handleBatchSave} disabled={batchSaving || !batchCanSave}>
+                      {batchSaving ? "Menyimpan..." : (
+                        <>
+                          <span className="sm:hidden">Simpan{batchFilled > 0 ? ` ${batchFilled}` : ""}</span>
+                          <span className="hidden sm:inline">Simpan {batchFilled > 0 ? `${batchFilled} Data` : ""}</span>
+                        </>
+                      )}
                     </Button>
                   </div>
                 </div>
