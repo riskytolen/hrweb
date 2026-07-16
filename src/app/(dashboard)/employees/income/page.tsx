@@ -144,6 +144,8 @@ let rowKeyCounter = 0;
 const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
+const BATCH_ZOOM_MIN = 0.7;
+const BATCH_ZOOM_MAX = 1.25;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const filterSelectClass = "normal-case tracking-normal";
 const tableHeaderFilterClass = "mt-2 min-w-[140px] normal-case tracking-normal";
@@ -325,6 +327,15 @@ export default function IncomePage() {
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState<{ newRows: Record<string, unknown>[]; updateRows: { id: number; data: Record<string, unknown> }[]; dupCount: number }>({ newRows: [], updateRows: [], dupCount: 0 });
   const [dbDuplicateRowKeys, setDbDuplicateRowKeys] = useState<Set<string>>(new Set());
+  const [batchTableZoom, setBatchTableZoom] = useState(1);
+  const batchTableZoomRef = useRef(1);
+  const batchTableScrollRef = useRef<HTMLDivElement>(null);
+  const batchPinchRef = useRef<{
+    distance: number;
+    startZoom: number;
+    contentX: number;
+    contentY: number;
+  } | null>(null);
 
   // ─── Single Input State ───
   const [showSingleForm, setShowSingleForm] = useState(false);
@@ -411,6 +422,68 @@ export default function IncomePage() {
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
   }, [showBatch, showSingleForm, showEditForm, showCalendar, showReport]);
+
+  useEffect(() => {
+    const scrollArea = batchTableScrollRef.current;
+    if (!showBatch || !scrollArea) return;
+
+    const touchDistance = (touches: TouchList) => {
+      const dx = touches[1].clientX - touches[0].clientX;
+      const dy = touches[1].clientY - touches[0].clientY;
+      return Math.hypot(dx, dy);
+    };
+    const touchCenter = (touches: TouchList) => ({
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2,
+    });
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 2) return;
+      const rect = scrollArea.getBoundingClientRect();
+      const center = touchCenter(event.touches);
+      const zoom = batchTableZoomRef.current;
+      batchPinchRef.current = {
+        distance: touchDistance(event.touches),
+        startZoom: zoom,
+        contentX: (scrollArea.scrollLeft + center.x - rect.left) / zoom,
+        contentY: (scrollArea.scrollTop + center.y - rect.top) / zoom,
+      };
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const pinch = batchPinchRef.current;
+      if (!pinch || event.touches.length !== 2) return;
+      event.preventDefault();
+
+      const ratio = touchDistance(event.touches) / pinch.distance;
+      const nextZoom = Math.min(BATCH_ZOOM_MAX, Math.max(BATCH_ZOOM_MIN, pinch.startZoom * ratio));
+      const rect = scrollArea.getBoundingClientRect();
+      const center = touchCenter(event.touches);
+      batchTableZoomRef.current = nextZoom;
+      setBatchTableZoom(nextZoom);
+
+      requestAnimationFrame(() => {
+        scrollArea.scrollLeft = pinch.contentX * nextZoom - (center.x - rect.left);
+        scrollArea.scrollTop = pinch.contentY * nextZoom - (center.y - rect.top);
+      });
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (event.touches.length < 2) batchPinchRef.current = null;
+    };
+
+    scrollArea.addEventListener("touchstart", handleTouchStart, { passive: true });
+    scrollArea.addEventListener("touchmove", handleTouchMove, { passive: false });
+    scrollArea.addEventListener("touchend", handleTouchEnd, { passive: true });
+    scrollArea.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+
+    return () => {
+      scrollArea.removeEventListener("touchstart", handleTouchStart);
+      scrollArea.removeEventListener("touchmove", handleTouchMove);
+      scrollArea.removeEventListener("touchend", handleTouchEnd);
+      scrollArea.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, [showBatch]);
 
   // ─── Single input handlers ───
   const openSingle = () => {
@@ -508,18 +581,16 @@ export default function IncomePage() {
     }
   };
 
-  // Batch mobile filter tab
-  const [batchTab, setBatchTab] = useState<"semua" | "terisi" | "kosong">("semua");
-
   // ─── Batch handlers ───
   const openBatch = () => {
     setBatchDate(localDateStr());
     // Mulai dari worksheet kosong; pegawai dipilih manual per baris.
     setBatchRows(Array.from({ length: DEFAULT_BLANK_ROWS }, () => blankRow()));
-    setBatchTab("semua");
     setBatchSearch("");
     setDragIdx(null);
     setDragOverIdx(null);
+    batchTableZoomRef.current = 1;
+    setBatchTableZoom(1);
     setDbDuplicateRowKeys(new Set());
     setShowBatch(true);
   };
@@ -923,14 +994,10 @@ export default function IncomePage() {
   const totalPendapatan = deliveries.reduce((s, d) => s + d.total, 0);
   const totalEntri = deliveries.length;
 
-  // Batch filtered (search by nama + mobile tab)
-  const batchFiltered = batchRows.filter((r) => {
-    if (batchSearch && !r.nama.toLowerCase().includes(batchSearch.toLowerCase())) return false;
-    const isTouched = !!(r.employee_id || r.zone_id || r.role || hasPointInput(r.jumlah_titik));
-    if (batchTab === "terisi") return isTouched;
-    if (batchTab === "kosong") return !isTouched;
-    return true;
-  });
+  // Batch filtered by employee name.
+  const batchFiltered = batchSearch
+    ? batchRows.filter((r) => r.nama.toLowerCase().includes(batchSearch.toLowerCase()))
+    : batchRows;
   const batchFilled = batchRows.filter((r) => r.employee_id && hasPointInput(r.jumlah_titik) && r.zone_id && r.role).length;
   // Baris yang setengah terisi (ada salah satu field tapi tidak lengkap)
   const batchIncomplete = batchRows.filter((r) => {
@@ -2419,23 +2486,6 @@ export default function IncomePage() {
                   {/* Close */}
                   <button onClick={tryCloseBatch} disabled={batchSaving} className="p-2 sm:p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50 flex-shrink-0 min-h-[36px] min-w-[36px] sm:min-h-auto sm:min-w-auto flex items-center justify-center"><X className="w-4 h-4" /></button>
                 </div>
-                {/* Mobile filter tabs */}
-                <div className="flex items-center gap-1.5 mt-3 lg:hidden overflow-x-auto pb-1">
-                  {(["semua", "terisi", "kosong"] as const).map((tab) => (
-                    <button key={tab} type="button" onClick={() => setBatchTab(tab)}
-                      className={cn(
-                        "whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold transition-all min-h-[36px]",
-                        batchTab === tab
-                          ? "bg-primary text-white shadow-sm"
-                          : "bg-muted text-muted-foreground hover:text-foreground"
-                      )}
-                    >
-                      {tab === "semua" && `Semua (${batchRows.length})`}
-                      {tab === "terisi" && `Terisi`}
-                      {tab === "kosong" && `Kosong`}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {/* ── Worksheet toolbar ── */}
@@ -2619,8 +2669,12 @@ export default function IncomePage() {
 
               {/* ── Worksheet table (mobile) ── */}
               <div className="min-h-0 flex-1 overflow-hidden lg:hidden flex flex-col">
-                <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-                  <table className="w-full min-w-[660px]">
+                <div
+                  ref={batchTableScrollRef}
+                  className="min-h-0 flex-1 cursor-grab overflow-auto overscroll-contain active:cursor-grabbing"
+                  style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" }}
+                >
+                  <table className="w-full min-w-[660px]" style={{ zoom: batchTableZoom }}>
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-card border-b-2 border-border shadow-sm">
                         <th className="sticky left-0 z-20 bg-card text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-9 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">#</th>
@@ -2637,7 +2691,7 @@ export default function IncomePage() {
                       {batchFiltered.length === 0 ? (
                         <tr>
                           <td colSpan={8} className="text-center py-10 text-xs text-muted-foreground">
-                            {batchTab === "terisi" ? "Belum ada data yang diisi" : batchTab === "kosong" ? "Tidak ada baris kosong" : "Tidak ada pegawai ditemukan"}
+                            Tidak ada pegawai ditemukan
                           </td>
                         </tr>
                       ) : batchFiltered.map((row, idx) => {
@@ -2765,9 +2819,22 @@ export default function IncomePage() {
                   </table>
                 </div>
                 {/* Hint */}
-                <p className="text-[10px] text-muted-foreground/60 text-center py-1.5 border-t border-border/30 bg-muted/10 flex-shrink-0">
-                  Geser tabel &rarr; untuk kolom lainnya &middot; Ketuk (+) untuk entri kedua pegawai yang sama
-                </p>
+                <div className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-border/30 bg-muted/10 px-3 py-1.5">
+                  <p className="truncate text-[10px] text-muted-foreground/60">
+                    Swipe untuk geser &middot; Cubit 2 jari untuk zoom
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      batchTableZoomRef.current = 1;
+                      setBatchTableZoom(1);
+                    }}
+                    className="flex-shrink-0 rounded-md bg-muted px-2 py-1 text-[10px] font-bold tabular-nums text-foreground hover:bg-muted/80"
+                    title="Reset zoom ke 100%"
+                  >
+                    {Math.round(batchTableZoom * 100)}%
+                  </button>
+                </div>
               </div>
 
               {/* ── Footer ── */}
