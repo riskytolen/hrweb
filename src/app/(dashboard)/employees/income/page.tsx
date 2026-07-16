@@ -2617,17 +2617,17 @@ export default function IncomePage() {
               {/* ── Worksheet table (mobile) ── */}
               <div className="flex-1 overflow-hidden lg:hidden flex flex-col">
                 <div className="overflow-x-auto flex-1">
-                  <table className="w-full min-w-[580px]">
+                  <table className="w-full min-w-[660px]">
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-card border-b-2 border-border shadow-sm">
-                        <th className="sticky left-0 z-20 bg-card text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-10 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">#</th>
-                        <th className="sticky left-[40px] z-20 bg-card text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[190px] shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">Pegawai</th>
-                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[140px]">Nama Titik</th>
-                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[76px]">Pos</th>
-                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[76px]">Titik</th>
-                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[80px]">Status</th>
-                        <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 min-w-[90px]">Catatan</th>
-                        <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-2.5 w-[64px]"></th>
+                        <th className="sticky left-0 z-20 bg-card text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-9 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">#</th>
+                        <th className="sticky left-9 z-20 bg-card text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 min-w-[164px] shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">Pegawai</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 min-w-[120px]">Nama Titik</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-[68px]">Pos</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-[68px]">Titik</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-[70px]">Status</th>
+                        <th className="text-left text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 min-w-[76px]">Catatan</th>
+                        <th className="text-center text-[9px] font-bold text-muted-foreground uppercase tracking-wider px-1.5 py-2 w-[58px]"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2657,14 +2657,14 @@ export default function IncomePage() {
                             )}
                           >
                             {/* Sticky: # */}
-                            <td className="sticky left-0 z-10 bg-card px-2 py-2 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                            <td className="sticky left-0 z-10 bg-card px-1.5 py-1.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
                               <span className={cn("text-[11px] font-mono font-bold", isComplete ? "text-success" : isIncomplete ? "text-danger" : "text-muted-foreground")}>
                                 {idx + 1}
                               </span>
                             </td>
                             {/* Sticky: Nama */}
-                            <td className="sticky left-[40px] z-10 bg-card px-2 py-2 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
-                              <div className="min-w-[174px] space-y-1">
+                            <td className="sticky left-9 z-10 bg-card px-1.5 py-1.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                              <div className="min-w-[148px] space-y-1">
                                 <Select
                                   value={row.employee_id || ""}
                                   onChange={(val) => handleEmployeeChange(row.rowKey, val)}
@@ -2675,6 +2675,7 @@ export default function IncomePage() {
                                   placeholder="Pilih pegawai..."
                                   searchable
                                   hasError={isDuplicate}
+                                  className="[&>button]:px-2 [&>button]:py-2 [&>button]:text-[13px]"
                                 />
                                 {(empStatus === "Training" || isDbDuplicate) && (
                                   <div className="flex items-center gap-1">
@@ -2689,7 +2690,7 @@ export default function IncomePage() {
                               </div>
                             </td>
                             {/* Nama Titik */}
-                            <td className="px-2 py-2">
+                            <td className="px-1.5 py-1.5">
                               <Select
                                 value={row.zone_id ? String(row.zone_id) : ""}
                                 onChange={(val) => handleBatchRowChange(row.rowKey, "zone_id", parseInt(val) || 0)}
@@ -2697,10 +2698,11 @@ export default function IncomePage() {
                                 placeholder="Pilih titik..."
                                 searchable
                                 hasError={isDuplicate}
+                                className="[&>button]:px-2 [&>button]:py-2 [&>button]:text-[13px]"
                               />
                             </td>
                             {/* Posisi */}
-                            <td className="px-2 py-2">
+                            <td className="px-1.5 py-1.5">
                               <div className="flex items-center justify-center gap-1">
                                 <button type="button" onClick={() => handleBatchRowChange(row.rowKey, "role", row.role === "Driver" ? "" : "Driver")}
                                   className={cn("w-9 h-9 rounded-md text-[11px] font-bold transition-all flex items-center justify-center",
@@ -2713,7 +2715,7 @@ export default function IncomePage() {
                               </div>
                             </td>
                             {/* Titik */}
-                            <td className="px-2 py-2">
+                            <td className="px-1.5 py-1.5">
                               <input type="number" min={0} inputMode="numeric" placeholder="-" value={row.jumlah_titik}
                                 onChange={(e) => handleBatchRowChange(row.rowKey, "jumlah_titik", e.target.value)}
                                 className={cn("w-full text-center px-2 py-2 rounded-lg border text-[16px] font-bold outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20",
@@ -2723,7 +2725,7 @@ export default function IncomePage() {
                               />
                             </td>
                             {/* Status */}
-                            <td className="px-2 py-2">
+                            <td className="px-1.5 py-1.5">
                               <select value={row.status_id || ""} onChange={(e) => handleBatchRowChange(row.rowKey, "status_id", parseInt(e.target.value) || 0)}
                                 className="w-full text-[13px] px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none focus:border-primary text-foreground">
                                 <option value="">-</option>
@@ -2731,13 +2733,13 @@ export default function IncomePage() {
                               </select>
                             </td>
                             {/* Catatan */}
-                            <td className="px-2 py-2">
+                            <td className="px-1.5 py-1.5">
                               <input type="text" placeholder="..." value={row.catatan}
                                 onChange={(e) => handleBatchRowChange(row.rowKey, "catatan", e.target.value)}
                                 className="w-full text-[13px] px-2 py-2 rounded-lg border border-dashed border-border bg-transparent outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-muted-foreground/30 text-foreground" />
                             </td>
                             {/* Aksi */}
-                            <td className="px-1 py-2">
+                            <td className="px-0.5 py-1.5">
                               <div className="flex items-center justify-center gap-0.5">
                                 <button type="button" onClick={() => addSubRow(row.rowKey)} title="Tambah entri lagi" disabled={!row.employee_id}
                                   className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary-light transition-colors disabled:opacity-30 disabled:pointer-events-none">
