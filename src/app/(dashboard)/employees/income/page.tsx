@@ -144,7 +144,7 @@ let rowKeyCounter = 0;
 const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
-const BATCH_ZOOM_MIN = 0.7;
+const BATCH_ZOOM_MIN = 0.5;
 const BATCH_ZOOM_MAX = 1.25;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const filterSelectClass = "normal-case tracking-normal";
@@ -1084,6 +1084,10 @@ export default function IncomePage() {
       seenCombos.set(combo, r.rowKey);
     }
   });
+  const batchTotalDriver = batchRows.reduce((s, r) => s + (r.role === "Driver" && hasPointInput(r.jumlah_titik) ? parsePointInput(r.jumlah_titik) : 0), 0);
+  const batchTotalHelper = batchRows.reduce((s, r) => s + (r.role === "Helper" && hasPointInput(r.jumlah_titik) ? parsePointInput(r.jumlah_titik) : 0), 0);
+  const batchTotalAll = batchTotalDriver + batchTotalHelper;
+  const fmt = (n: number) => n.toLocaleString("id-ID");
   const batchCanSave = batchFilled > 0 && batchIncomplete.length === 0 && batchDuplicateKeys.size === 0 && !!batchDate;
   const singleCanSave = !!singleForm.tanggal && !!singleForm.employee_id && !!singleForm.zone_id && !!singleForm.role && hasPointInput(singleForm.jumlah_titik);
 
@@ -2902,11 +2906,21 @@ export default function IncomePage() {
                     </tbody>
                   </table>
                 </div>
-                {/* Hint */}
+                {/* Hint + Totals */}
                 <div className="flex flex-shrink-0 items-center justify-between gap-2 border-t border-border/30 bg-muted/10 px-3 py-1.5">
-                  <p className="truncate text-[10px] text-muted-foreground/60">
-                    Swipe untuk geser &middot; Cubit 2 jari untuk zoom
-                  </p>
+                  <div className="flex min-w-0 items-center gap-2.5 truncate">
+                    <span className="flex items-center gap-1 tabular-nums text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                      D <span className="font-bold">{fmt(batchTotalDriver)}</span>
+                    </span>
+                    <span className="flex items-center gap-1 tabular-nums text-[10px] font-semibold text-orange-600 dark:text-orange-400">
+                      H <span className="font-bold">{fmt(batchTotalHelper)}</span>
+                    </span>
+                    {batchTotalAll > 0 && (
+                      <span className="flex items-center gap-1 tabular-nums text-[10px] font-bold text-foreground">
+                        Total <span className="text-primary">{fmt(batchTotalAll)}</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-shrink-0 items-center overflow-hidden rounded-md border border-border bg-muted">
                     <button
                       type="button"
@@ -2975,6 +2989,19 @@ export default function IncomePage() {
                       </span>
                     )}
                   </div>
+                  {batchTotalAll > 0 && (
+                    <div className="hidden items-center gap-3 text-[11px] font-bold tabular-nums sm:flex">
+                      <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                        Driver <span>{fmt(batchTotalDriver)}</span>
+                      </span>
+                      <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400">
+                        Helper <span>{fmt(batchTotalHelper)}</span>
+                      </span>
+                      <span className="flex items-center gap-1 text-foreground">
+                        Total <span className="text-primary">{fmt(batchTotalAll)}</span>
+                      </span>
+                    </div>
+                  )}
                   <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
                     <Button variant="outline" size="sm" className="h-9 min-h-0 flex-none px-3 py-0 text-[11px] sm:h-auto sm:py-2 sm:text-xs" onClick={tryCloseBatch} disabled={batchSaving}>Batal</Button>
                     <Button size="sm" icon={Check} className="h-9 min-h-0 flex-none px-3 py-0 text-[11px] sm:h-auto sm:py-2 sm:text-xs" onClick={handleBatchSave} disabled={batchSaving || !batchCanSave}>
