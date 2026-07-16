@@ -334,7 +334,7 @@ export default function IncomePage() {
   // ─── Edit single row ───
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ zone_id: 0, role: "Driver", jumlah_titik: "", status_id: 0 });
+  const [editForm, setEditForm] = useState({ zone_id: 0, role: "Driver", jumlah_titik: "", status_id: 0, catatan: "" });
   const [editError, setEditError] = useState("");
 
   const [showReport, setShowReport] = useState(false);
@@ -744,7 +744,13 @@ export default function IncomePage() {
 
   // ─── Edit single ───
   const openEdit = (row: DeliveryRow) => {
-    setEditForm({ zone_id: row.zone_id, role: row.role, jumlah_titik: String(row.jumlah_titik), status_id: row.status_id || 0 });
+    setEditForm({
+      zone_id: row.zone_id,
+      role: row.role,
+      jumlah_titik: String(row.jumlah_titik),
+      status_id: row.status_id || 0,
+      catatan: row.catatan || "",
+    });
     setEditError("");
     setEditingId(row.id);
     setShowEditForm(true);
@@ -782,6 +788,7 @@ export default function IncomePage() {
       jumlah_titik: parsePointInput(editForm.jumlah_titik),
       rate_per_point: rateData?.rate_per_point || row.rate_per_point,
       status_id: editForm.status_id || null,
+      catatan: editForm.catatan || null,
     };
 
     const { data: updated, error: updateError } = await supabase
@@ -2667,6 +2674,16 @@ export default function IncomePage() {
                     onChange={(val) => setEditForm({ ...editForm, status_id: parseInt(val) || 0 })}
                     options={[{ value: "", label: "Tidak ada" }, ...dStatuses.map((s) => ({ value: String(s.id), label: s.nama }))]}
                     placeholder="Pilih status"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan <span className="text-muted-foreground font-normal">(opsional)</span></label>
+                  <input
+                    type="text"
+                    value={editForm.catatan}
+                    onChange={(e) => setEditForm({ ...editForm, catatan: e.target.value })}
+                    className={inputClass}
+                    placeholder="Tambahkan catatan jika perlu"
                   />
                 </div>
               </div>
