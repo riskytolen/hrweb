@@ -746,7 +746,7 @@ export default function IncomePage() {
         const tanggalSet = new Set<string>();
         newRows.forEach((r) => { if (r.tanggal) tanggalSet.add(String(r.tanggal)); });
         updateRows.forEach((r) => {
-          if ("tanggal" in r.data && r.data.tanggal) tanggalSet.add(String(r.data.tanggal));
+          if (batchDate) tanggalSet.add(batchDate);
         });
         const tanggalList = Array.from(tanggalSet).sort();
         await logAudit({

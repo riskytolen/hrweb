@@ -661,25 +661,44 @@ export default function MasterDataPage() {
     if (!zoneForm.nama.trim()) return;
     const cleanNama = toTitleCase(zoneForm.nama.trim());
     if (editingZoneId !== null) {
+      const oldZone = zoneList.find((z) => z.id === editingZoneId);
       const { error } = await supabase.from("delivery_zones").update({ nama: cleanNama, deskripsi: zoneForm.deskripsi || null, color: zoneForm.color, status: zoneForm.status }).eq("id", editingZoneId);
       if (error) {
         showSuccess("Gagal", error.message);
         return;
       }
       showSuccess("Nama Titik Diperbarui", `Data nama titik "${cleanNama}" telah disimpan.`);
+      await logAudit({
+        supabase,
+        action: "update",
+        entityType: "delivery_zones",
+        entityId: editingZoneId,
+        entityLabel: cleanNama,
+        oldData: oldZone ? { nama: oldZone.nama, color: oldZone.color, status: oldZone.status } : null,
+        newData: { nama: cleanNama, color: zoneForm.color, status: zoneForm.status },
+      });
     } else {
-      const { error } = await supabase.from("delivery_zones").insert({ nama: cleanNama, deskripsi: zoneForm.deskripsi || null, color: zoneForm.color, status: zoneForm.status });
+      const { data: inserted, error } = await supabase.from("delivery_zones").insert({ nama: cleanNama, deskripsi: zoneForm.deskripsi || null, color: zoneForm.color, status: zoneForm.status }).select("id").single();
       if (error) {
         showSuccess("Gagal", error.message.includes("duplicate") ? "Nama titik sudah ada." : error.message);
         return;
       }
       showSuccess("Nama Titik Ditambahkan", `Nama titik "${cleanNama}" berhasil ditambahkan.`);
+      await logAudit({
+        supabase,
+        action: "create",
+        entityType: "delivery_zones",
+        entityId: inserted?.id,
+        entityLabel: cleanNama,
+        newData: { nama: cleanNama, color: zoneForm.color, status: zoneForm.status },
+      });
     }
     setShowZoneForm(false);
     fetchZones();
     fetchRates();
   };
   const handleDeleteZone = async (id: number) => {
+    const oldZone = zoneList.find((z) => z.id === id);
     const { error } = await supabase.from("delivery_zones").delete().eq("id", id);
     setDeleteConfirm(null);
     if (error) {
@@ -689,6 +708,16 @@ export default function MasterDataPage() {
       return;
     }
     showSuccess("Nama Titik Dihapus", "Data nama titik telah dihapus dari sistem.");
+    if (oldZone) {
+      await logAudit({
+        supabase,
+        action: "delete",
+        entityType: "delivery_zones",
+        entityId: id,
+        entityLabel: oldZone.nama,
+        oldData: { nama: oldZone.nama, color: oldZone.color, status: oldZone.status },
+      });
+    }
     fetchZones();
     fetchRates();
   };
@@ -696,7 +725,18 @@ export default function MasterDataPage() {
     const z = zoneList.find((x) => x.id === id);
     if (!z) return;
     const newStatus = z.status === "Aktif" ? "Tidak Aktif" : "Aktif";
-    await supabase.from("delivery_zones").update({ status: newStatus }).eq("id", id);
+    const { error } = await supabase.from("delivery_zones").update({ status: newStatus }).eq("id", id);
+    if (!error) {
+      await logAudit({
+        supabase,
+        action: "status_change",
+        entityType: "delivery_zones",
+        entityId: id,
+        entityLabel: z.nama,
+        oldData: { status: z.status },
+        newData: { status: newStatus },
+      });
+    }
     fetchZones();
   };
 
@@ -722,35 +762,64 @@ export default function MasterDataPage() {
     const zoneNama = zoneList.find((z) => z.id === rateForm.zone_id)?.nama || "";
 
     // Upsert Driver rate
+    let driverChanges: Record<string, unknown> | null = null;
     if (rateForm.driver_rate) {
       const existing = rateRows.find((r) => r.zone_id === rateForm.zone_id);
+      const newRate = parseInt(rateForm.driver_rate) || 0;
       if (existing?.driverRateId) {
-        await supabase.from("point_rates").update({ rate_per_point: parseInt(rateForm.driver_rate) || 0 }).eq("id", existing.driverRateId);
+        const oldRate = existing.driverRate;
+        await supabase.from("point_rates").update({ rate_per_point: newRate }).eq("id", existing.driverRateId);
+        if (oldRate !== newRate) driverChanges = { role: "Driver", lama: oldRate, baru: newRate };
       } else {
-        await supabase.from("point_rates").insert({ zone_id: rateForm.zone_id, role: "Driver", rate_per_point: parseInt(rateForm.driver_rate) || 0 });
+        await supabase.from("point_rates").insert({ zone_id: rateForm.zone_id, role: "Driver", rate_per_point: newRate });
+        driverChanges = { role: "Driver", lama: null, baru: newRate };
       }
     }
     // Upsert Helper rate
+    let helperChanges: Record<string, unknown> | null = null;
     if (rateForm.helper_rate) {
       const existing = rateRows.find((r) => r.zone_id === rateForm.zone_id);
+      const newRate = parseInt(rateForm.helper_rate) || 0;
       if (existing?.helperRateId) {
-        await supabase.from("point_rates").update({ rate_per_point: parseInt(rateForm.helper_rate) || 0 }).eq("id", existing.helperRateId);
+        const oldRate = existing.helperRate;
+        await supabase.from("point_rates").update({ rate_per_point: newRate }).eq("id", existing.helperRateId);
+        if (oldRate !== newRate) helperChanges = { role: "Helper", lama: oldRate, baru: newRate };
       } else {
-        await supabase.from("point_rates").insert({ zone_id: rateForm.zone_id, role: "Helper", rate_per_point: parseInt(rateForm.helper_rate) || 0 });
+        await supabase.from("point_rates").insert({ zone_id: rateForm.zone_id, role: "Helper", rate_per_point: newRate });
+        helperChanges = { role: "Helper", lama: null, baru: newRate };
       }
     }
 
     showSuccess(editingRateZoneId ? "Harga Titik Diperbarui" : "Harga Titik Ditambahkan", `Tarif titik "${zoneNama}" telah disimpan.`);
     setShowRateForm(false);
+    const rateChanges = [driverChanges, helperChanges].filter(Boolean);
+    if (rateChanges.length > 0) {
+      await logAudit({
+        supabase,
+        action: editingRateZoneId ? "update" : "create",
+        entityType: "point_rates",
+        entityId: rateForm.zone_id,
+        entityLabel: `Harga titik "${zoneNama}"`,
+        metadata: { zone_id: rateForm.zone_id, zone_nama: zoneNama, perubahan: rateChanges },
+      });
+    }
     fetchRates();
   };
   const handleDeleteRate = async (zoneId: number) => {
-    // Delete both driver & helper rates for this zone
     const row = rateRows.find((r) => r.zone_id === zoneId);
+    const zoneNama = row?.zoneNama || "";
     if (row?.driverRateId) await supabase.from("point_rates").delete().eq("id", row.driverRateId);
     if (row?.helperRateId) await supabase.from("point_rates").delete().eq("id", row.helperRateId);
     setDeleteConfirm(null);
     showSuccess("Harga Titik Dihapus", "Data tarif titik telah dihapus dari sistem.");
+    await logAudit({
+      supabase,
+      action: "delete",
+      entityType: "point_rates",
+      entityId: zoneId,
+      entityLabel: `Harga titik "${zoneNama}"`,
+      oldData: row ? { driverRate: row.driverRate, helperRate: row.helperRate } : null,
+    });
     fetchRates();
   };
 
@@ -855,7 +924,7 @@ export default function MasterDataPage() {
         await logAudit({
           supabase,
           action: "update",
-          entityType: "point_rates",
+          entityType: "delivery_points",
           entityId: syncRow.zone_id,
           entityLabel: `Sinkron harga titik "${syncRow.zoneNama}"`,
           metadata: {
@@ -864,6 +933,7 @@ export default function MasterDataPage() {
             range_start: range.start,
             range_end: range.end,
             range_label: range.label,
+            sumber: "sync_harga",
             driver_rate_baru: syncRow.driverRate,
             helper_rate_baru: syncRow.helperRate,
             jumlah_driver: driverUpdated,
@@ -911,27 +981,69 @@ export default function MasterDataPage() {
   const handleSaveDStatus = async () => {
     if (!dStatusForm.nama.trim() || !dStatusForm.kode.trim()) return;
     const cleanNama = toTitleCase(dStatusForm.nama.trim());
-    const payload = { nama: cleanNama, kode: dStatusForm.kode.toUpperCase(), color: dStatusForm.color, status: dStatusForm.status };
+    const cleanKode = dStatusForm.kode.toUpperCase();
+    const payload = { nama: cleanNama, kode: cleanKode, color: dStatusForm.color, status: dStatusForm.status };
     if (editingDStatusId !== null) {
+      const oldStatus = dStatusList.find((s) => s.id === editingDStatusId);
       await supabase.from("delivery_statuses").update(payload).eq("id", editingDStatusId);
       showSuccess("Status Diperbarui", `Status "${cleanNama}" telah disimpan.`);
+      await logAudit({
+        supabase,
+        action: "update",
+        entityType: "delivery_statuses",
+        entityId: editingDStatusId,
+        entityLabel: `${cleanKode} — ${cleanNama}`,
+        oldData: oldStatus ? { nama: oldStatus.nama, kode: oldStatus.kode, color: oldStatus.color, status: oldStatus.status } : null,
+        newData: payload,
+      });
     } else {
-      await supabase.from("delivery_statuses").insert(payload);
+      const { data: inserted } = await supabase.from("delivery_statuses").insert(payload).select("id").single();
       showSuccess("Status Ditambahkan", `Status "${cleanNama}" berhasil ditambahkan.`);
+      await logAudit({
+        supabase,
+        action: "create",
+        entityType: "delivery_statuses",
+        entityId: inserted?.id,
+        entityLabel: `${cleanKode} — ${cleanNama}`,
+        newData: payload,
+      });
     }
     setShowDStatusForm(false);
     fetchDStatuses();
   };
   const handleDeleteDStatus = async (id: number) => {
+    const oldStatus = dStatusList.find((s) => s.id === id);
     await supabase.from("delivery_statuses").delete().eq("id", id);
     setDeleteConfirm(null);
     showSuccess("Status Dihapus", "Data status telah dihapus.");
+    if (oldStatus) {
+      await logAudit({
+        supabase,
+        action: "delete",
+        entityType: "delivery_statuses",
+        entityId: id,
+        entityLabel: `${oldStatus.kode} — ${oldStatus.nama}`,
+        oldData: { nama: oldStatus.nama, kode: oldStatus.kode, color: oldStatus.color, status: oldStatus.status },
+      });
+    }
     fetchDStatuses();
   };
   const handleToggleDStatusStatus = async (id: number) => {
     const s = dStatusList.find((s) => s.id === id);
     if (!s) return;
-    await supabase.from("delivery_statuses").update({ status: s.status === "Aktif" ? "Tidak Aktif" : "Aktif" }).eq("id", id);
+    const newStatus = s.status === "Aktif" ? "Tidak Aktif" : "Aktif";
+    const { error } = await supabase.from("delivery_statuses").update({ status: newStatus }).eq("id", id);
+    if (!error) {
+      await logAudit({
+        supabase,
+        action: "status_change",
+        entityType: "delivery_statuses",
+        entityId: id,
+        entityLabel: `${s.kode} — ${s.nama}`,
+        oldData: { status: s.status },
+        newData: { status: newStatus },
+      });
+    }
     fetchDStatuses();
   };
 
