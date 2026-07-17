@@ -144,8 +144,7 @@ let rowKeyCounter = 0;
 const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
-const BATCH_ZOOM_MIN = 0.45;
-const BATCH_ZOOM_MAX = 1.25;
+
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const filterSelectClass = "normal-case tracking-normal";
 const tableHeaderFilterClass = "mt-2 min-w-[140px] normal-case tracking-normal";
@@ -327,22 +326,7 @@ export default function IncomePage() {
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState<{ newRows: Record<string, unknown>[]; updateRows: { id: number; data: Record<string, unknown> }[]; dupCount: number }>({ newRows: [], updateRows: [], dupCount: 0 });
   const [dbDuplicateRowKeys, setDbDuplicateRowKeys] = useState<Set<string>>(new Set());
-  const [batchTableZoom, setBatchTableZoom] = useState(1);
-  const batchTableZoomRef = useRef(1);
-  const batchTableScrollRef = useRef<HTMLDivElement>(null);
-  const [batchGestureSurface, setBatchGestureSurface] = useState<HTMLDivElement | null>(null);
-  const batchPinchRef = useRef<{
-    distance: number;
-    startZoom: number;
-    contentX: number;
-    contentY: number;
-  } | null>(null);
-  const batchPanRef = useRef<{
-    x: number;
-    y: number;
-    scrollLeft: number;
-    scrollTop: number;
-  } | null>(null);
+  const MOBILE_TABLE_ZOOM = 0.45;
 
   // ─── Single Input State ───
   const [showSingleForm, setShowSingleForm] = useState(false);
@@ -430,116 +414,7 @@ export default function IncomePage() {
     return () => { document.body.style.overflow = ""; };
   }, [showBatch, showSingleForm, showEditForm, showCalendar, showReport]);
 
-  useEffect(() => {
-    const scrollArea = batchGestureSurface;
-    if (!showBatch || !scrollArea) return;
 
-    const activePointers = new Map<number, { x: number; y: number }>();
-
-    const getDistance = () => {
-      const pts = Array.from(activePointers.values());
-      if (pts.length < 2) return 0;
-      return Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-    };
-
-    const getCenter = () => {
-      const pts = Array.from(activePointers.values());
-      const sum = pts.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-      return { x: sum.x / pts.length, y: sum.y / pts.length };
-    };
-
-    const handleDown = (e: PointerEvent) => {
-      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      scrollArea.setPointerCapture(e.pointerId);
-
-      if (activePointers.size === 1) {
-        batchPinchRef.current = null;
-        batchPanRef.current = {
-          x: e.clientX,
-          y: e.clientY,
-          scrollLeft: scrollArea.scrollLeft,
-          scrollTop: scrollArea.scrollTop,
-        };
-      } else if (activePointers.size === 2) {
-        batchPanRef.current = null;
-        const rect = scrollArea.getBoundingClientRect();
-        const center = getCenter();
-        const zoom = batchTableZoomRef.current;
-        batchPinchRef.current = {
-          distance: getDistance(),
-          startZoom: zoom,
-          contentX: (scrollArea.scrollLeft + center.x - rect.left) / zoom,
-          contentY: (scrollArea.scrollTop + center.y - rect.top) / zoom,
-        };
-      }
-    };
-
-    const handleMove = (e: PointerEvent) => {
-      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-      const pinch = batchPinchRef.current;
-      if (pinch && activePointers.size === 2) {
-        e.preventDefault();
-        const ratio = getDistance() / pinch.distance;
-        const nextZoom = Math.min(BATCH_ZOOM_MAX, Math.max(BATCH_ZOOM_MIN, pinch.startZoom * ratio));
-        const rect = scrollArea.getBoundingClientRect();
-        const center = getCenter();
-        batchTableZoomRef.current = nextZoom;
-        setBatchTableZoom(nextZoom);
-        requestAnimationFrame(() => {
-          scrollArea.scrollLeft = pinch.contentX * nextZoom - (center.x - rect.left);
-          scrollArea.scrollTop = pinch.contentY * nextZoom - (center.y - rect.top);
-        });
-        return;
-      }
-
-      const pan = batchPanRef.current;
-      if (pan && activePointers.size === 1) {
-        e.preventDefault();
-        scrollArea.scrollLeft = pan.scrollLeft - (e.clientX - pan.x);
-        scrollArea.scrollTop = pan.scrollTop - (e.clientY - pan.y);
-      }
-    };
-
-    const handleUp = (e: PointerEvent) => {
-      scrollArea.releasePointerCapture(e.pointerId);
-      activePointers.delete(e.pointerId);
-
-      if (activePointers.size === 0) {
-        batchPinchRef.current = null;
-        batchPanRef.current = null;
-      } else if (activePointers.size === 1) {
-        batchPinchRef.current = null;
-        const remaining = activePointers.values().next().value!;
-        batchPanRef.current = {
-          x: remaining.x,
-          y: remaining.y,
-          scrollLeft: scrollArea.scrollLeft,
-          scrollTop: scrollArea.scrollTop,
-        };
-      }
-    };
-
-    const handleCancel = (e: PointerEvent) => {
-      activePointers.delete(e.pointerId);
-      if (activePointers.size === 0) {
-        batchPinchRef.current = null;
-        batchPanRef.current = null;
-      }
-    };
-
-    scrollArea.addEventListener("pointerdown", handleDown, { passive: false });
-    scrollArea.addEventListener("pointermove", handleMove, { passive: false });
-    scrollArea.addEventListener("pointerup", handleUp, { passive: true });
-    scrollArea.addEventListener("pointercancel", handleCancel, { passive: true });
-
-    return () => {
-      scrollArea.removeEventListener("pointerdown", handleDown);
-      scrollArea.removeEventListener("pointermove", handleMove);
-      scrollArea.removeEventListener("pointerup", handleUp);
-      scrollArea.removeEventListener("pointercancel", handleCancel);
-    };
-  }, [showBatch, batchGestureSurface]);
 
   // ─── Single input handlers ───
   const openSingle = () => {
@@ -638,12 +513,6 @@ export default function IncomePage() {
   };
 
   // ─── Batch handlers ───
-  const updateBatchTableZoom = (value: number) => {
-    const nextZoom = Math.min(BATCH_ZOOM_MAX, Math.max(BATCH_ZOOM_MIN, value));
-    batchTableZoomRef.current = nextZoom;
-    setBatchTableZoom(nextZoom);
-  };
-
   const openBatch = () => {
     setBatchDate(localDateStr());
     // Mulai dari worksheet kosong; pegawai dipilih manual per baris.
@@ -651,8 +520,6 @@ export default function IncomePage() {
     setBatchSearch("");
     setDragIdx(null);
     setDragOverIdx(null);
-    batchTableZoomRef.current = 1;
-    setBatchTableZoom(1);
     setDbDuplicateRowKeys(new Set());
     setShowBatch(true);
   };
@@ -2754,14 +2621,10 @@ export default function IncomePage() {
               {/* ── Worksheet table (mobile) ── */}
               <div className="min-h-0 flex-1 overflow-hidden lg:hidden flex flex-col">
                 <div
-                  ref={(el) => {
-                    batchTableScrollRef.current = el;
-                    setBatchGestureSurface(el);
-                  }}
-                  className="min-h-0 flex-1 cursor-grab overflow-auto overscroll-contain active:cursor-grabbing"
-                  style={{ WebkitOverflowScrolling: "touch", touchAction: "none" }}
+                  className="min-h-0 flex-1 overflow-auto overscroll-contain"
+                  style={{ WebkitOverflowScrolling: "touch" }}
                 >
-                  <table className="w-full min-w-[864px] table-fixed" style={{ zoom: batchTableZoom }}>
+                  <table className="w-full min-w-[864px] table-fixed" style={{ zoom: MOBILE_TABLE_ZOOM }}>
                     <colgroup>
                       <col className="w-9" />
                       <col className="w-[164px]" />
@@ -2941,34 +2804,6 @@ export default function IncomePage() {
                         Total <span className="text-primary">{fmt(batchTotalAll)}</span>
                       </span>
                     )}
-                  </div>
-                  <div className="flex flex-shrink-0 items-center overflow-hidden rounded-md border border-border bg-muted">
-                    <button
-                      type="button"
-                      onClick={() => updateBatchTableZoom(batchTableZoomRef.current - 0.1)}
-                      disabled={batchTableZoom <= BATCH_ZOOM_MIN}
-                      className="flex h-7 w-7 items-center justify-center text-sm font-bold text-foreground hover:bg-card disabled:opacity-30"
-                      aria-label="Perkecil tabel"
-                    >
-                      -
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateBatchTableZoom(1)}
-                      className="h-7 min-w-12 border-x border-border px-1.5 text-[10px] font-bold tabular-nums text-foreground hover:bg-card"
-                      title="Reset zoom ke 100%"
-                    >
-                      {Math.round(batchTableZoom * 100)}%
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateBatchTableZoom(batchTableZoomRef.current + 0.1)}
-                      disabled={batchTableZoom >= BATCH_ZOOM_MAX}
-                      className="flex h-7 w-7 items-center justify-center text-sm font-bold text-foreground hover:bg-card disabled:opacity-30"
-                      aria-label="Perbesar tabel"
-                    >
-                      +
-                    </button>
                   </div>
                 </div>
               </div>
