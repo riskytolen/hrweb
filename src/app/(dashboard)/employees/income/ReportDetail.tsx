@@ -74,6 +74,13 @@ type EmployeeGroup = {
   total_hari: number;
 };
 
+type RingkasanRow = {
+  employee_id: string;
+  employee_nama: string;
+  total_titik: number;
+  total_pendapatan: number;
+};
+
 interface ReportDetailProps {
   show: boolean;
   onClose: () => void;
@@ -156,7 +163,7 @@ function isPegawaiActiveOnDate(
 export default function ReportDetail({ show, onClose, zones, dStatuses }: ReportDetailProps) {
   const [loading, setLoading] = useState(false);
   const [dateMode, setDateMode] = useState<"periode" | "custom">("periode");
-  const [reportTab, setReportTab] = useState<"zona" | "pegawai">("zona");
+  const [reportTab, setReportTab] = useState<"zona" | "pegawai" | "ringkasan">("zona");
 
   // Periode mode state
   const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
@@ -182,6 +189,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const [reportRows, setReportRows] = useState<ReportRow[]>([]);
   const [zoneGroups, setZoneGroups] = useState<ZoneGroup[]>([]);
   const [employeeGroups, setEmployeeGroups] = useState<EmployeeGroup[]>([]);
+  const [ringkasanRows, setRingkasanRows] = useState<RingkasanRow[]>([]);
   const [expandedDailyKey, setExpandedDailyKey] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -349,6 +357,22 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     const eGroups = Array.from(empMap.values()).sort((a, b) => a.employee_nama.localeCompare(b.employee_nama));
     eGroups.forEach((g) => g.rows.sort((a, b) => a.zone_nama.localeCompare(b.zone_nama)));
     setEmployeeGroups(eGroups);
+
+    // ── Ringkasan: aggregate by employee (ignore zone & role) ──
+    const ringkasanMap = new Map<string, RingkasanRow>();
+    activeData.forEach((d) => {
+      const empId = d.employee_id || "unknown";
+      const empNama = d.pegawai?.nama || d.employee_nama || empId || "?";
+      if (!ringkasanMap.has(empId)) {
+        ringkasanMap.set(empId, { employee_id: empId, employee_nama: empNama, total_titik: 0, total_pendapatan: 0 });
+      }
+      const entry = ringkasanMap.get(empId)!;
+      entry.total_titik += d.jumlah_titik;
+      entry.total_pendapatan += d.total;
+    });
+    const rRows = Array.from(ringkasanMap.values())
+      .sort((a, b) => b.total_pendapatan - a.total_pendapatan || b.total_titik - a.total_titik || a.employee_nama.localeCompare(b.employee_nama));
+    setRingkasanRows(rRows);
     setExpandedDailyKey(null);
   };
 
@@ -374,14 +398,24 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     }))
     .filter((g) => g.rows.length > 0);
 
+  const filteredRingkasanRows = ringkasanRows.filter((r) =>
+    r.employee_nama.toLowerCase().includes(search.toLowerCase())
+  );
+
   const filteredTotalTitik = reportTab === "zona"
     ? filteredZoneGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0)
-    : filteredEmpGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0);
+    : reportTab === "pegawai"
+    ? filteredEmpGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0)
+    : filteredRingkasanRows.reduce((s, r) => s + r.total_titik, 0);
   const filteredTotalPendapatan = reportTab === "zona"
     ? filteredZoneGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_pendapatan, 0), 0)
-    : filteredEmpGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_pendapatan, 0), 0);
+    : reportTab === "pegawai"
+    ? filteredEmpGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_pendapatan, 0), 0)
+    : filteredRingkasanRows.reduce((s, r) => s + r.total_pendapatan, 0);
 
-  const hasData = reportTab === "zona" ? filteredZoneGroups.length > 0 : filteredEmpGroups.length > 0;
+  const hasData = reportTab === "zona" ? filteredZoneGroups.length > 0
+    : reportTab === "pegawai" ? filteredEmpGroups.length > 0
+    : filteredRingkasanRows.length > 0;
 
   // ─── Period text for export ───
   const periodeText = dateMode === "periode"
@@ -391,7 +425,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   // ─── Export CSV ───
   const exportCSV = () => {
     if (reportTab === "zona") exportCSVZona();
-    else exportCSVPegawai();
+    else if (reportTab === "pegawai") exportCSVPegawai();
+    else exportCSVRingkasan();
   };
 
   const exportCSVZona = () => {
@@ -439,6 +474,18 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     downloadCSV(csvRows, `Rekap_Titik_PerPegawai_${startDate}_${endDate}.csv`);
   };
 
+  const exportCSVRingkasan = () => {
+    const headers = ["Nama Pegawai", "Total Titik", "Total Pendapatan"];
+    const csvRows = [headers.join(",")];
+
+    filteredRingkasanRows.forEach((r) => {
+      csvRows.push([`"${r.employee_nama}"`, r.total_titik, r.total_pendapatan].join(","));
+    });
+    csvRows.push([`"TOTAL"`, filteredRingkasanRows.reduce((s, r) => s + r.total_titik, 0), filteredRingkasanRows.reduce((s, r) => s + r.total_pendapatan, 0)].join(","));
+
+    downloadCSV(csvRows, `Rekap_Titik_Ringkasan_${startDate}_${endDate}.csv`);
+  };
+
   const downloadCSV = (csvRows: string[], filename: string) => {
     const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -453,7 +500,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   // ─── Export PDF ───
   const exportPDF = async () => {
     if (reportTab === "zona") await exportPDFZona();
-    else await exportPDFPegawai();
+    else if (reportTab === "pegawai") await exportPDFPegawai();
+    else await exportPDFRingkasan();
   };
 
   const exportPDFZona = async () => {
@@ -592,6 +640,54 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     setShowExportMenu(false);
   };
 
+  const exportPDFRingkasan = async () => {
+    const { default: jsPDF } = await import("jspdf");
+    const { default: autoTable } = await import("jspdf-autotable");
+
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text("Laporan Ringkasan Titik Pegawai", pageWidth / 2, 15, { align: "center" });
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Periode: ${periodeText}`, pageWidth / 2, 21, { align: "center" });
+
+    const tableData = filteredRingkasanRows.map((r, idx) => [
+      idx + 1, r.employee_nama, formatNumber(r.total_titik), formatCurrency(r.total_pendapatan),
+    ]);
+    tableData.push([
+      "", "TOTAL",
+      formatNumber(filteredRingkasanRows.reduce((s, r) => s + r.total_titik, 0)),
+      formatCurrency(filteredRingkasanRows.reduce((s, r) => s + r.total_pendapatan, 0)),
+    ]);
+
+    autoTable(doc, {
+      startY: 28,
+      head: [["#", "Pegawai", "Total Titik", "Total Pendapatan"]],
+      body: tableData,
+      theme: "grid",
+      headStyles: { fillColor: [16, 185, 129], fontSize: 9, fontStyle: "bold", halign: "center" },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: {
+        0: { halign: "center", cellWidth: 10 },
+        2: { halign: "right", cellWidth: 30 },
+        3: { halign: "right", cellWidth: 45 },
+      },
+      didParseCell: (data) => {
+        if (data.row.index === tableData.length - 1) {
+          data.cell.styles.fontStyle = "bold";
+          data.cell.styles.fillColor = [243, 244, 246];
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    doc.save(`Rekap_Titik_Ringkasan_${startDate}_${endDate}.pdf`);
+    setShowExportMenu(false);
+  };
+
   if (!show) return null;
 
   return (
@@ -606,7 +702,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
             <div>
               <h2 className="text-sm font-bold text-foreground">Laporan Detail Rekap Titik</h2>
               <p className="text-[10px] text-muted-foreground">
-                {reportTab === "zona" ? "Rekap titik per nama titik" : "Rekap titik per pegawai"} dalam periode tertentu
+                {reportTab === "zona" ? "Rekap titik per nama titik" : reportTab === "pegawai" ? "Rekap titik per pegawai" : "Ringkasan total per pegawai"} dalam periode tertentu
               </p>
             </div>
           </div>
@@ -679,6 +775,18 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               >
                 <User className="w-3 h-3" />
                 <span className="hidden xs:inline">Per </span>Pegawai
+              </button>
+              <button
+                onClick={() => setReportTab("ringkasan")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
+                  reportTab === "ringkasan"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <TrendingUp className="w-3 h-3" />
+                Ringkasan
               </button>
             </div>
 
@@ -763,7 +871,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
               <input
                 type="text"
-                placeholder={reportTab === "zona" ? "Cari pegawai..." : "Cari pegawai atau nama titik..."}
+                placeholder={reportTab === "zona" ? "Cari pegawai..." : reportTab === "pegawai" ? "Cari pegawai atau nama titik..." : "Cari pegawai..."}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground"
@@ -912,7 +1020,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                 totalPendapatan={search ? filteredTotalPendapatan : grandTotalPendapatan}
               />
             </div>
-          ) : (
+          ) : reportTab === "pegawai" ? (
             /* ═══ TAB: PER PEGAWAI ═══ */
             <div className="space-y-6">
               {filteredEmpGroups.map((group) => (
@@ -1059,6 +1167,40 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                   </div>
                 </div>
               ))}
+
+              {/* Grand Total */}
+              <GrandTotalCard
+                totalTitik={search ? filteredTotalTitik : grandTotalTitik}
+                totalPendapatan={search ? filteredTotalPendapatan : grandTotalPendapatan}
+              />
+            </div>
+          ) : (
+            /* ═══ TAB: RINGKASAN ═══ */
+            <div className="space-y-4">
+              <div className="bg-card rounded-2xl border border-border overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/20">
+                        <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-10">#</th>
+                        <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Pegawai</th>
+                        <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-28">Total Titik</th>
+                        <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-44">Total Pendapatan</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/50">
+                      {filteredRingkasanRows.map((row, idx) => (
+                        <tr key={row.employee_id} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-5 py-3 text-xs text-muted-foreground">{idx + 1}</td>
+                          <td className="px-5 py-3"><p className="text-sm font-semibold text-foreground">{row.employee_nama}</p></td>
+                          <td className="px-5 py-3 text-right text-sm font-bold text-foreground tabular-nums">{formatNumber(row.total_titik)}</td>
+                          <td className="px-5 py-3 text-right text-sm font-semibold text-foreground tabular-nums">{formatCurrency(row.total_pendapatan)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
 
               {/* Grand Total */}
               <GrandTotalCard
