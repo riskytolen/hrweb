@@ -144,7 +144,7 @@ let rowKeyCounter = 0;
 const nextRowKey = () => `row-${++rowKeyCounter}`;
 
 const PAGE_SIZE = 15;
-const BATCH_ZOOM_MIN = 0.5;
+const BATCH_ZOOM_MIN = 0.45;
 const BATCH_ZOOM_MAX = 1.25;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const filterSelectClass = "normal-case tracking-normal";
