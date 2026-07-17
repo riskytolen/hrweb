@@ -694,7 +694,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     <Portal>
       <style>{`
         @media (max-width: 639px) {
-          .mobile-zoom-inner { width: 200%; zoom: 0.5; }
+          .mobile-zoom-inner { width: 100%; zoom: 0.5; }
+          .mobile-zoom-inner .break-words { overflow-wrap: break-word; word-break: break-word; }
         }
       `}</style>
       <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
@@ -928,7 +929,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
         </div>
 
         {/* ── Report Content ── */}
-        <div className="flex-1 overflow-auto px-5 py-4">
+        <div className="flex-1 overflow-auto px-2 sm:px-5 py-4">
           {loading ? (
             <div className="space-y-6">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -949,19 +950,19 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
             <div className="space-y-6">
               {filteredZoneGroups.map((group) => (
                 <div key={group.zone_id} className="bg-card rounded-2xl border border-border overflow-hidden">
-                  <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/30">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 px-2 sm:px-5 py-2 sm:py-3 border-b border-border bg-muted/30">
                     <div className="flex items-center gap-2.5">
                       <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: group.zone_color }} />
                       <h3 className="text-sm font-bold text-foreground">{group.zone_nama}</h3>
-                      <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md font-medium">
+                      <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md font-medium whitespace-nowrap">
                         {group.rows.length} pegawai
                       </span>
                     </div>
-                    <div className="flex items-center gap-4 text-xs">
-                      <span className="text-muted-foreground">
+                    <div className="flex items-center gap-3 sm:gap-4 text-[10px] sm:text-xs">
+                      <span className="text-muted-foreground whitespace-nowrap">
                         Titik: <strong className="text-foreground">{formatNumber(group.rows.reduce((s, r) => s + r.total_titik, 0))}</strong>
                       </span>
-                      <span className="text-muted-foreground">
+                      <span className="text-muted-foreground whitespace-nowrap">
                         Pendapatan: <strong className="text-foreground">{formatCurrency(group.rows.reduce((s, r) => s + r.total_pendapatan, 0))}</strong>
                       </span>
                     </div>
@@ -984,7 +985,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                         {group.rows.map((row, idx) => (
                           <tr key={`${row.employee_id}-${row.role}`} className="hover:bg-muted/30 transition-colors">
                             <td className="px-5 py-3 text-xs text-muted-foreground">{idx + 1}</td>
-                            <td className="px-5 py-3"><p className="text-sm font-semibold text-foreground">{row.employee_nama}</p></td>
+                            <td className="px-5 py-3"><p className="text-sm font-semibold text-foreground break-words">{row.employee_nama}</p></td>
                             <td className="px-5 py-3 text-center">
                               <span className={cn("text-[10px] font-bold px-2.5 py-1 rounded-lg",
                                 row.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
@@ -993,7 +994,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                             <td className="px-5 py-3 text-right text-sm font-bold text-foreground">{formatNumber(row.total_titik)}</td>
                             <td className="px-5 py-3 text-right text-sm font-semibold text-foreground">{formatCurrency(row.total_pendapatan)}</td>
                             <td className="px-5 py-3 text-center text-sm text-foreground">{row.jumlah_hari}</td>
-                            <td className="px-5 py-3">
+                            <td className="px-5 py-3 break-words">
                               {row.status_summary.length > 0 ? (
                                 <div className="flex items-center gap-1 flex-wrap">
                                   {row.status_summary.map((s) => (
@@ -1033,24 +1034,24 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               {filteredEmpGroups.map((group) => (
                 <div key={group.employee_id} className="bg-card rounded-2xl border border-border overflow-hidden">
                   {/* Employee Header */}
-                  <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/30">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 px-2 sm:px-5 py-2 sm:py-3 border-b border-border bg-muted/30">
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
                         <User className="w-3.5 h-3.5 text-primary" />
                       </div>
                       <h3 className="text-sm font-bold text-foreground">{group.employee_nama}</h3>
-                      <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md font-medium">
+                      <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-md font-medium whitespace-nowrap">
                         {group.rows.length} nama titik
                       </span>
                     </div>
-                    <div className="flex items-center gap-4 text-xs">
-                      <span className="text-muted-foreground">
+                    <div className="flex items-center gap-3 sm:gap-4 text-[10px] sm:text-xs">
+                      <span className="text-muted-foreground whitespace-nowrap">
                         Titik: <strong className="text-foreground">{formatNumber(group.subtotal_titik)}</strong>
                       </span>
-                      <span className="text-muted-foreground">
+                      <span className="text-muted-foreground whitespace-nowrap">
                         Pendapatan: <strong className="text-foreground">{formatCurrency(group.subtotal_pendapatan)}</strong>
                       </span>
-                      <span className="text-muted-foreground">
+                      <span className="text-muted-foreground whitespace-nowrap">
                         Hari: <strong className="text-foreground">{group.total_hari}</strong>
                       </span>
                     </div>
@@ -1088,8 +1089,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                     aria-expanded={isExpanded}
                                   >
                                     <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.zone_color }} />
-                                    <span>{row.zone_nama}</span>
-                                    <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", isExpanded && "rotate-180 text-primary")} />
+                                    <span className="break-words">{row.zone_nama}</span>
+                                    <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform flex-shrink-0", isExpanded && "rotate-180 text-primary")} />
                                   </button>
                                 </td>
                                 <td className="px-5 py-3 text-center">
@@ -1123,8 +1124,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                         </div>
                                         <p className="text-[11px] text-muted-foreground">{row.daily_details.length} hari</p>
                                       </div>
-                                      <div className="overflow-hidden sm:overflow-x-auto">
-                                        <div className="mobile-zoom-inner">
+                                      <div className="sm:overflow-x-auto">
                                         <table className="w-full">
                                           <thead>
                                             <tr className="border-b border-border/70 bg-muted/10">
@@ -1138,22 +1138,21 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                           <tbody className="divide-y divide-border/50">
                                             {row.daily_details.map((detail, detailIdx) => (
                                               <tr key={`${detail.tanggal}-${detailIdx}`}>
-                                                <td className="px-4 py-2 text-xs font-medium text-foreground">{formatDisplayDate(detail.tanggal)}</td>
-                                                <td className="px-4 py-2 text-right text-xs font-bold text-foreground">{formatNumber(detail.jumlah_titik)}</td>
-                                                <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">{formatCurrency(detail.total_pendapatan)}</td>
-                                                <td className="px-4 py-2">
+                                                <td className="px-4 py-2 text-xs font-medium text-foreground break-words">{formatDisplayDate(detail.tanggal)}</td>
+                                                <td className="px-4 py-2 text-right text-xs font-bold text-foreground whitespace-nowrap">{formatNumber(detail.jumlah_titik)}</td>
+                                                <td className="px-4 py-2 text-right text-xs font-semibold text-foreground whitespace-nowrap">{formatCurrency(detail.total_pendapatan)}</td>
+                                                <td className="px-4 py-2 break-words">
                                                   {detail.status_nama ? (
                                                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md" style={{ backgroundColor: `${detail.status_color || "#6b7280"}20`, color: detail.status_color || "#6b7280" }}>
                                                       {detail.status_nama}
                                                     </span>
                                                   ) : <span className="text-xs text-muted-foreground italic">-</span>}
                                                 </td>
-                                                <td className="px-4 py-2 text-xs text-muted-foreground">{detail.catatan || <span className="italic">-</span>}</td>
+                                                <td className="px-4 py-2 text-xs text-muted-foreground break-words">{detail.catatan || <span className="italic">-</span>}</td>
                                               </tr>
                                             ))}
                                           </tbody>
                                         </table>
-                                        </div>
                                       </div>
                                     </div>
                                   </td>
@@ -1232,22 +1231,22 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 function GrandTotalCard({ totalTitik, totalPendapatan }: { totalTitik: number; totalPendapatan: number }) {
   return (
     <div className="bg-card rounded-2xl border-2 border-primary/20 overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-3 sm:px-5 py-3 sm:py-4 gap-2 sm:gap-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-            <TrendingUp className="w-4 h-4 text-primary" />
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+            <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
           </div>
-          <span className="text-sm font-bold text-foreground">Grand Total</span>
+          <span className="text-xs sm:text-sm font-bold text-foreground">Grand Total</span>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-3 sm:gap-6">
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground font-medium">Total Titik</p>
-            <p className="text-lg font-bold text-primary">{formatNumber(totalTitik)}</p>
+            <p className="text-sm sm:text-lg font-bold text-primary">{formatNumber(totalTitik)}</p>
           </div>
-          <div className="h-8 w-px bg-border" />
+          <div className="h-6 sm:h-8 w-px bg-border" />
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground font-medium">Total Pendapatan</p>
-            <p className="text-lg font-bold text-primary">{formatCurrency(totalPendapatan)}</p>
+            <p className="text-sm sm:text-lg font-bold text-primary">{formatCurrency(totalPendapatan)}</p>
           </div>
         </div>
       </div>
