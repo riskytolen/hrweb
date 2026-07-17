@@ -22,6 +22,7 @@ interface SelectProps {
   hasError?: boolean;
   portal?: boolean;
   portalMinWidth?: number;
+  compact?: boolean;
 }
 
 export default function Select({
@@ -34,6 +35,7 @@ export default function Select({
   hasError,
   portal = false,
   portalMinWidth = 240,
+  compact = false,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -266,8 +268,11 @@ export default function Select({
           setSearch("");
         }}
         className={cn(
-          "w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border text-sm outline-none transition-all duration-200",
-          "bg-muted/30 text-foreground",
+          "w-full flex items-center justify-between outline-none transition-all duration-200",
+          "bg-muted/30 text-foreground border",
+          compact
+            ? "gap-1 px-1.5 py-1.5 rounded-lg text-[11px]"
+            : "gap-2 px-3 py-2.5 rounded-xl text-sm",
           open
             ? "border-primary ring-2 ring-primary/10"
             : hasError
@@ -276,20 +281,22 @@ export default function Select({
         )}
       >
         <span className={cn(
-          "truncate text-left flex items-center gap-1.5",
+          "text-left flex items-center",
+          compact ? "gap-1 overflow-visible" : "truncate gap-1.5",
           !selected && "text-muted-foreground/50"
         )}>
           {selected ? (
             <>
               {selected.color && (
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: selected.color }} />
+                <span className={cn("rounded-full flex-shrink-0", compact ? "w-1.5 h-1.5" : "w-2 h-2")} style={{ backgroundColor: selected.color }} />
               )}
-              <span className="truncate">{selected.selectedLabel || selected.label}</span>
+              <span className={cn(compact ? "overflow-visible whitespace-nowrap" : "truncate")}>{selected.selectedLabel || selected.label}</span>
             </>
           ) : placeholder}
         </span>
         <ChevronDown className={cn(
-          "w-4 h-4 shrink-0 text-muted-foreground transition-transform duration-200",
+          "shrink-0 text-muted-foreground transition-transform duration-200",
+          compact ? "w-3 h-3" : "w-4 h-4",
           open && "rotate-180 text-primary"
         )} />
       </button>

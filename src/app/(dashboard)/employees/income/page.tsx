@@ -2761,14 +2761,14 @@ export default function IncomePage() {
                   className="min-h-0 flex-1 cursor-grab overflow-auto overscroll-contain active:cursor-grabbing"
                   style={{ WebkitOverflowScrolling: "touch", touchAction: "none" }}
                 >
-                  <table className="w-full min-w-[780px] table-fixed" style={{ zoom: batchTableZoom }}>
+                  <table className="w-full min-w-[824px] table-fixed" style={{ zoom: batchTableZoom }}>
                     <colgroup>
                       <col className="w-9" />
                       <col className="w-[164px]" />
                       <col className="w-[124px]" />
                       <col className="w-[88px]" />
                       <col className="w-[88px]" />
-                      <col className="w-[104px]" />
+                      <col className="w-[148px]" />
                       <col className="w-[96px]" />
                       <col className="w-20" />
                     </colgroup>
@@ -2897,9 +2897,9 @@ export default function IncomePage() {
                                   })),
                                 ]}
                                 placeholder="-"
+                                compact
                                 portal
                                 portalMinWidth={240}
-                                className="[&>button]:px-2 [&>button]:py-2 [&>button]:text-[13px]"
                               />
                             </td>
                             {/* Catatan */}
