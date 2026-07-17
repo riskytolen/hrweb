@@ -2458,7 +2458,7 @@ export default function IncomePage() {
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-40">Nama Titik</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Posisi</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-20">Titik</th>
-                      <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Status</th>
+                      <th className="w-[220px] min-w-[220px] px-3 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Status</th>
                       <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-28">Catatan</th>
                       <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-12"></th>
                     </tr>
@@ -2563,20 +2563,21 @@ export default function IncomePage() {
                           </td>
 
                           {/* Status */}
-                          <td className="px-4 py-1.5">
+                          <td className="px-3 py-1.5">
                             <Select
                               value={String(row.status_id || "")}
                               onChange={(val) => handleBatchRowChange(row.rowKey, "status_id", parseInt(val) || 0)}
                               options={[
-                                { value: "", label: "Tidak ada", selectedLabel: "-" },
+                                { value: "", label: "Tidak ada" },
                                 ...dStatuses.map((s) => ({
                                   value: String(s.id),
-                                  label: s.nama,
-                                  selectedLabel: s.kode || s.nama,
+                                  label: s.kode ? `${s.kode} - ${s.nama}` : s.nama,
                                   color: s.color,
                                 })),
                               ]}
-                              placeholder="-"
+                              placeholder="Pilih status..."
+                              portal
+                              portalMinWidth={280}
                             />
                           </td>
 
