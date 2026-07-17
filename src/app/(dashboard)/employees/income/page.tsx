@@ -1440,7 +1440,7 @@ export default function IncomePage() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="hidden lg:grid grid-cols-2 lg:grid-cols-3 gap-4">
         {loading ? Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="bg-card rounded-2xl border border-border p-4 flex items-center gap-3">
             <Skeleton className="w-10 h-10 rounded-xl" />
