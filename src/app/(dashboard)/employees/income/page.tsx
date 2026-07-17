@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clock,
   FileText,
   MoreVertical,
 } from "lucide-react";
@@ -33,6 +34,7 @@ import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase, type DbAttendanceRecord, type DbDeliveryPoint, type NonActivePeriod } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import ReportDetail from "./ReportDetail";
+import { duplicateKey, groupByZone, mergeIntoWorksheet, type HistoryZoneGroup, type HistoryRowItem } from "./history-copy";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
@@ -328,6 +330,13 @@ export default function IncomePage() {
   const [dbDuplicateRowKeys, setDbDuplicateRowKeys] = useState<Set<string>>(new Set());
   const MOBILE_TABLE_ZOOM = 0.45;
 
+  // ─── Copy History State ───
+  const [showCopyHistory, setShowCopyHistory] = useState(false);
+  const [copySourceDate, setCopySourceDate] = useState("");
+  const [copyLoading, setCopyLoading] = useState(false);
+  const [copyGroups, setCopyGroups] = useState<HistoryZoneGroup[]>([]);
+  const [copySourceError, setCopySourceError] = useState("");
+
   // ─── Single Input State ───
   const [showSingleForm, setShowSingleForm] = useState(false);
   const [singleForm, setSingleForm] = useState<SingleForm>(() => blankSingleForm());
@@ -541,6 +550,111 @@ export default function IncomePage() {
     if ((field === "zone_id" || field === "role") && dbDuplicateRowKeys.has(rowKey)) {
       setDbDuplicateRowKeys((prev) => { const n = new Set(prev); n.delete(rowKey); return n; });
     }
+  };
+
+  // ─── Copy History ───
+  const openCopyHistory = () => {
+    setCopySourceDate("");
+    setCopyGroups([]);
+    setCopySourceError("");
+    setShowCopyHistory(true);
+  };
+
+  const getExistingBatchKeys = useCallback(() => {
+    return new Set(batchRows.filter((r) => r.employee_id).map((r) => duplicateKey(r.employee_id, r.zone_id, r.role)));
+  }, [batchRows]);
+
+  const fetchHistoryData = async () => {
+    if (!copySourceDate || !batchDate) return;
+    if (copySourceDate >= batchDate) {
+      setCopySourceError("Tanggal sumber harus lebih awal dari tanggal tujuan.");
+      return;
+    }
+    setCopySourceError("");
+    setCopyLoading(true);
+    setCopyGroups([]);
+
+    try {
+      const allRows: import("./history-copy").HistoryCopyRow[] = [];
+      let from = 0;
+      const limit = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from("delivery_points")
+          .select("id, employee_id, employee_nama, zone_id, role")
+          .eq("tanggal", copySourceDate)
+          .order("id")
+          .range(from, from + limit - 1);
+
+        if (error) { setCopySourceError(error.message); break; }
+        if (!data || data.length === 0) { hasMore = false; break; }
+
+        allRows.push(...(data as import("./history-copy").HistoryCopyRow[]));
+        from += limit;
+        if (data.length < limit) hasMore = false;
+      }
+
+      if (allRows.length === 0) {
+        setCopySourceError("Tidak ada data pada tanggal tersebut.");
+        setCopyLoading(false);
+        return;
+      }
+
+      // Get existing DB keys for target date
+      const { data: existingDb } = await supabase
+        .from("delivery_points")
+        .select("employee_id, zone_id, role")
+        .eq("tanggal", batchDate);
+
+      const existingDbKeys = new Set<string>();
+      existingDb?.forEach((r) => {
+        existingDbKeys.add(duplicateKey(r.employee_id, r.zone_id, r.role));
+      });
+
+      const groups = groupByZone(
+        allRows,
+        employeeMeta,
+        zones, // ZoneLite[] → { id, nama } diserap; color diabaikan
+        getExistingBatchKeys(),
+        existingDbKeys,
+      );
+      setCopyGroups(groups);
+    } catch (err) {
+      setCopySourceError(err instanceof Error ? err.message : "Gagal memuat data.");
+    } finally {
+      setCopyLoading(false);
+    }
+  };
+
+  const handleCopySelection = (zoneIdx: number, rowIdx: number | null, selected: boolean) => {
+    setCopyGroups((prev) => prev.map((g, gi) => {
+      if (gi !== zoneIdx) return g;
+      if (rowIdx === null) {
+        return { ...g, selected: selected, rows: g.rows.map((r) => ({ ...r, selected })) };
+      }
+      const newRows = g.rows.map((r, ri) => ri === rowIdx ? { ...r, selected } : r);
+      const allSelected = newRows.length > 0 && newRows.every((r) => r.selected);
+      return { ...g, rows: newRows, selected: allSelected };
+    }));
+  };
+
+  const executeCopy = () => {
+    const selectedItems: HistoryRowItem[] = [];
+    copyGroups.forEach((g) => g.rows.forEach((r) => { if (r.selected) selectedItems.push(r); }));
+
+    if (selectedItems.length === 0) return;
+
+    const { merged, copied, skipped } = mergeIntoWorksheet(batchRows, selectedItems, nextRowKey);
+
+    setBatchRows(merged as BatchRow[]);
+    setBatchSearch("");
+    setShowCopyHistory(false);
+
+    const msg = `${copied} baris disalin.`;
+    const skipMsg = skipped > 0 ? ` ${skipped} dilewati (duplikat/tidak tersedia).` : "";
+    showToast("success", "Riwayat Disalin", msg + skipMsg);
   };
 
   /** Tambah n baris kosong di akhir tabel. */
@@ -2445,6 +2559,9 @@ export default function IncomePage() {
                   <button type="button" onClick={removeBlankRows} className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-danger hover:bg-danger-light px-2 py-1 rounded-md transition-colors">
                     <RotateCcw className="w-3 h-3" /><span className="sm:hidden">Kosong</span><span className="hidden sm:inline">Hapus Kosong</span>
                   </button>
+                  <button type="button" onClick={openCopyHistory} className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-primary hover:bg-primary-light px-2 py-1 rounded-md transition-colors min-h-[36px] sm:min-h-auto">
+                    <Clock className="w-3 h-3" /><span className="sm:hidden">Salin</span><span className="hidden sm:inline">Salin Riwayat</span>
+                  </button>
                 </div>
               </div>
 
@@ -2870,6 +2987,139 @@ export default function IncomePage() {
                       )}
                     </Button>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══ COPY HISTORY MODAL ═══ */}
+      {showCopyHistory && (
+        <Portal>
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowCopyHistory(false)} />
+            <div className="relative w-full max-w-2xl bg-card sm:rounded-2xl shadow-2xl animate-slide-up sm:animate-scale-in flex flex-col overflow-hidden"
+              style={{ maxHeight: "calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))" }}>
+              {/* Header */}
+              <div className="flex-shrink-0 flex items-center justify-between gap-2 border-b border-border px-4 py-3 sm:px-5">
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">Salin Riwayat</h3>
+                  <p className="text-[11px] text-muted-foreground">Copy pegawai & posisi dari tanggal sebelumnya</p>
+                </div>
+                <button onClick={() => setShowCopyHistory(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Source date selector */}
+              <div className="flex-shrink-0 flex items-center gap-2 border-b border-border/50 px-4 py-3 sm:px-5">
+                <label className="text-[11px] font-medium text-muted-foreground whitespace-nowrap">Tanggal Sumber</label>
+                <div className="w-[140px] sm:w-44">
+                  <DatePicker
+                    value={copySourceDate}
+                    onChange={(val) => { setCopySourceDate(val); setCopyGroups([]); setCopySourceError(""); }}
+                    placeholder="Pilih tanggal"
+                    className="h-9 gap-1.5 rounded-lg px-2 py-0 text-xs sm:h-auto sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm"
+                  />
+                </div>
+                <button
+                  onClick={fetchHistoryData}
+                  disabled={!copySourceDate || !batchDate || copySourceDate >= batchDate || copyLoading}
+                  className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                >
+                  {copyLoading ? "Memuat..." : "Muat"}
+                </button>
+              </div>
+
+              {/* Error / Empty */}
+              {copySourceError && (
+                <div className="flex-shrink-0 px-4 py-2 sm:px-5">
+                  <p className="text-[11px] font-medium text-danger">{copySourceError}</p>
+                </div>
+              )}
+
+              {/* Zone groups */}
+              <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-2 sm:px-5">
+                {copyGroups.length === 0 && !copyLoading && !copySourceError && (
+                  <p className="text-center text-[12px] text-muted-foreground py-8">
+                    Pilih tanggal sumber lalu tekan Muat.
+                  </p>
+                )}
+                {copyGroups.map((group, gi) => {
+                  const eligibleCount = group.rows.filter((r) => r.eligible).length;
+                  const selectedCount = group.rows.filter((r) => r.selected).length;
+                  return (
+                    <div key={group.zone_id} className="mb-3 rounded-xl border border-border overflow-hidden">
+                      {/* Zone header */}
+                      <div className="flex items-center gap-2 px-3 py-2.5 bg-muted/30 border-b border-border/50">
+                        <input
+                          type="checkbox"
+                          checked={group.selected}
+                          onChange={(e) => handleCopySelection(gi, null, e.target.checked)}
+                          className="w-4 h-4 rounded border-muted-foreground/30 accent-primary flex-shrink-0"
+                        />
+                        <span className="flex-1 text-[13px] font-semibold text-foreground truncate">{group.zone_nama}</span>
+                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">{selectedCount}/{eligibleCount} dipilih</span>
+                      </div>
+                      {/* Rows */}
+                      {group.rows.map((row, ri) => (
+                        <label key={row.id} className={cn(
+                          "flex items-center gap-2 px-3 py-2 transition-colors cursor-pointer",
+                          ri < group.rows.length - 1 && "border-b border-border/30",
+                          !row.eligible && "opacity-50",
+                        )}>
+                          <input
+                            type="checkbox"
+                            checked={row.selected}
+                            disabled={!row.eligible}
+                            onChange={(e) => handleCopySelection(gi, ri, e.target.checked)}
+                            className="w-4 h-4 rounded border-muted-foreground/30 accent-primary flex-shrink-0"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[12px] font-medium text-foreground truncate block">
+                              {row.current_employee_nama || row.employee_nama_snapshot || "(Tanpa nama)"}
+                            </span>
+                            {row.ineligible_reason && (
+                              <span className="text-[10px] text-muted-foreground">{row.ineligible_reason}</span>
+                            )}
+                          </div>
+                          <span className={cn(
+                            "text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0",
+                            row.role === "Driver"
+                              ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                              : "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+                          )}>
+                            {row.role === "Driver" ? "D" : "H"}
+                          </span>
+                          {row.in_worksheet && (
+                            <span className="text-[9px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">Sudah ada</span>
+                          )}
+                          {row.in_target_db && (
+                            <span className="text-[9px] text-warning bg-warning/10 px-1.5 py-0.5 rounded shrink-0">Duplikat tujuan</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Footer */}
+              <div className="flex-shrink-0 flex items-center justify-between gap-2 border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
+                <p className="text-[11px] text-muted-foreground">
+                  {(() => { const c = copyGroups.reduce((s, g) => s + g.rows.filter((r) => r.selected).length, 0); return `${c} baris dipilih`; })()}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setShowCopyHistory(false)}>Batal</Button>
+                  <Button
+                    size="sm"
+                    icon={Check}
+                    onClick={executeCopy}
+                    disabled={!copyGroups.some((g) => g.rows.some((r) => r.selected))}
+                  >
+                    {(() => { const c = copyGroups.reduce((s, g) => s + g.rows.filter((r) => r.selected).length, 0); return `Salin${c > 0 ? ` ${c}` : ""}`; })()}
+                  </Button>
                 </div>
               </div>
             </div>
