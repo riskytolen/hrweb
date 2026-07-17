@@ -1403,12 +1403,12 @@ export default function IncomePage() {
               <Button variant="outline" icon={FileText} size="sm" onClick={() => setShowReport(true)}>Laporan Detail</Button>
               <Button variant="outline" icon={CalendarDays} size="sm" onClick={openCalendar}>Mode Kalender</Button>
               {canInput && <Button variant="outline" icon={User} size="sm" onClick={openSingle}>Input Tunggal</Button>}
-              {canInput && <Button icon={Users} size="sm" onClick={openBatch}>Input Bulk</Button>}
+              {canInput && <Button variant="outline" icon={Users} size="sm" onClick={openBatch}>Input Bulk</Button>}
             </div>
             {/* Mobile: primary action + dropdown menu */}
             <div className="flex sm:hidden items-center gap-1.5">
               {canInput && <Button variant="outline" icon={User} size="sm" onClick={openSingle} className="min-h-[44px]">Tunggal</Button>}
-              {canInput && <Button icon={Users} size="sm" onClick={openBatch} className="min-h-[44px]">Bulk</Button>}
+              {canInput && <Button variant="outline" icon={Users} size="sm" onClick={openBatch} className="min-h-[44px]">Bulk</Button>}
               <_HeaderMenu
                 onShowReport={() => setShowReport(true)}
                 onOpenCalendar={openCalendar}
