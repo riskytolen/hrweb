@@ -692,6 +692,11 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
   return (
     <Portal>
+      <style>{`
+        @media (max-width: 639px) {
+          .mobile-zoom-inner { width: 200%; zoom: 0.5; }
+        }
+      `}</style>
       <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
         {/* ── Header ── */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-card via-card to-primary/[0.03]">
@@ -961,7 +966,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                       </span>
                     </div>
                   </div>
-                  <div className="overflow-x-auto">
+                  <div className="overflow-hidden sm:overflow-x-auto">
+                    <div className="mobile-zoom-inner">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-border bg-muted/20">
@@ -1010,6 +1016,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                         </tr>
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1050,7 +1057,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                   </div>
 
                   {/* Table */}
-                  <div className="overflow-x-auto">
+                  <div className="overflow-hidden sm:overflow-x-auto">
+                    <div className="mobile-zoom-inner">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-border bg-muted/20">
@@ -1115,7 +1123,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                         </div>
                                         <p className="text-[11px] text-muted-foreground">{row.daily_details.length} hari</p>
                                       </div>
-                                      <div className="overflow-x-auto">
+                                      <div className="overflow-hidden sm:overflow-x-auto">
+                                        <div className="mobile-zoom-inner">
                                         <table className="w-full">
                                           <thead>
                                             <tr className="border-b border-border/70 bg-muted/10">
@@ -1144,6 +1153,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                             ))}
                                           </tbody>
                                         </table>
+                                        </div>
                                       </div>
                                     </div>
                                   </td>
@@ -1164,6 +1174,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                         </tr>
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1178,7 +1189,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
             /* ═══ TAB: RINGKASAN ═══ */
             <div className="space-y-4">
               <div className="bg-card rounded-2xl border border-border overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="overflow-hidden sm:overflow-x-auto">
+                  <div className="mobile-zoom-inner">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-border bg-muted/20">
@@ -1199,6 +1211,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               </div>
 
