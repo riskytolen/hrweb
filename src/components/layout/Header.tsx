@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from "react";
 
 import {
-  Bell,
   Search,
   Menu,
   ChevronDown,
@@ -19,55 +18,25 @@ interface HeaderProps {
   onMenuToggle: () => void;
 }
 
-const notifications = [
-  {
-    id: 1,
-    title: "Pengajuan cuti baru",
-    desc: "Ahmad Fauzi mengajukan cuti 3 hari",
-    time: "5 menit lalu",
-    unread: true,
-  },
-  {
-    id: 2,
-    title: "Pegawai baru bergabung",
-    desc: "Siti Nurhaliza - Divisi Marketing",
-    time: "1 jam lalu",
-    unread: true,
-  },
-  {
-    id: 3,
-    title: "Penggajian diproses",
-    desc: "Gaji bulan Maret - 248 pegawai",
-    time: "3 jam lalu",
-    unread: false,
-  },
-];
-
 export default function Header({ onMenuToggle }: HeaderProps) {
-  const [showNotif, setShowNotif] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const unreadCount = notifications.filter((n) => n.unread).length;
   const { theme, toggleTheme } = useTheme();
   const { profile, signOut } = useAuth();
 
-  const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
   // Tutup dropdown saat klik di luar
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as Node;
-      if (showNotif && notifRef.current && !notifRef.current.contains(target)) {
-        setShowNotif(false);
-      }
       if (showProfile && profileRef.current && !profileRef.current.contains(target)) {
         setShowProfile(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showNotif, showProfile]);
+  }, [showProfile]);
 
   const displayName = profile?.nama || "User";
   const displayEmail = profile?.email || "";
@@ -123,68 +92,6 @@ export default function Header({ onMenuToggle }: HeaderProps) {
           )} />
         </button>
 
-        {/* Notifications */}
-        <div className="relative" ref={notifRef}>
-          <button
-            onClick={() => {
-              setShowNotif(!showNotif);
-              setShowProfile(false);
-            }}
-            className="relative p-2.5 rounded-xl hover:bg-muted text-muted-foreground"
-          >
-            <Bell className="w-5 h-5" />
-            {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-danger text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse-soft">
-                {unreadCount}
-              </span>
-            )}
-          </button>
-
-          {showNotif && (
-            <div className="absolute right-0 top-full mt-2 w-80 bg-card rounded-2xl shadow-lg border border-border overflow-hidden animate-scale-in">
-              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                <h3 className="font-semibold text-sm text-foreground">Notifikasi</h3>
-                <span className="text-xs text-primary font-medium cursor-pointer hover:underline">
-                  Tandai semua dibaca
-                </span>
-              </div>
-              <div className="max-h-80 overflow-y-auto">
-                {notifications.map((notif) => (
-                  <div
-                    key={notif.id}
-                    className={cn(
-                      "px-4 py-3 hover:bg-muted/50 cursor-pointer border-b border-border/50 last:border-0",
-                      notif.unread && "bg-primary-light/30"
-                    )}
-                  >
-                    <div className="flex items-start gap-3">
-                      {notif.unread && (
-                        <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate text-foreground">
-                          {notif.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {notif.desc}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground/60 mt-1">
-                          {notif.time}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="px-4 py-2.5 border-t border-border text-center">
-                <span className="text-xs text-primary font-medium cursor-pointer hover:underline">
-                  Lihat semua notifikasi
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Divider */}
         <div className="w-px h-8 bg-border mx-1" />
 
@@ -193,7 +100,6 @@ export default function Header({ onMenuToggle }: HeaderProps) {
           <button
             onClick={() => {
               setShowProfile(!showProfile);
-              setShowNotif(false);
             }}
             className="flex items-center gap-3 p-1.5 pr-3 rounded-xl hover:bg-muted"
           >
