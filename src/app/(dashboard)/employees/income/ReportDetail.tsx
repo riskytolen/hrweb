@@ -15,6 +15,10 @@ import {
   User,
   Hash,
   Wallet,
+  Filter,
+  Check,
+  CheckCheck,
+  RotateCcw,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
@@ -22,6 +26,7 @@ import Portal from "@/components/ui/Portal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase, type DbDeliveryPoint, type NonActivePeriod } from "@/lib/supabase";
+import { useAuth } from "@/components/AuthProvider";
 
 type DeliveryQueryRow = DbDeliveryPoint & {
   pegawai?: { nama: string | null; tanggal_bergabung: string | null; tanggal_keluar: string | null; non_active_periods: NonActivePeriod[] | null } | null;
@@ -161,6 +166,7 @@ function isPegawaiActiveOnDate(
 }
 
 export default function ReportDetail({ show, onClose, zones, dStatuses }: ReportDetailProps) {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [dateMode, setDateMode] = useState<"periode" | "custom">("periode");
   const [reportTab, setReportTab] = useState<"zona" | "pegawai" | "ringkasan">("zona");
@@ -192,7 +198,14 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const [ringkasanRows, setRingkasanRows] = useState<RingkasanRow[]>([]);
   const [expandedDailyKey, setExpandedDailyKey] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [showEmployeeFilter, setShowEmployeeFilter] = useState(false);
+  const [draftEmployeeIds, setDraftEmployeeIds] = useState<string[]>([]);
+  const [employeeFilterSearch, setEmployeeFilterSearch] = useState("");
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLDivElement>(null);
 
   // Grand totals (from all rows, tab-independent)
   const grandTotalTitik = reportRows.reduce((s, r) => s + r.total_titik, 0);
@@ -231,6 +244,49 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   useEffect(() => {
     if (show) fetchReport();
   }, [show, fetchReport]);
+
+  // ─── Load saved employee filter preference ───
+  useEffect(() => {
+    if (!show || !user) return;
+    setPreferencesLoaded(false);
+    (async () => {
+      const { data } = await supabase
+        .from("user_ui_preferences")
+        .select("value")
+        .eq("user_id", user.id)
+        .eq("preference_key", "employees.income.summary.employee_filter")
+        .maybeSingle();
+      if (data?.value && Array.isArray((data.value as Record<string, unknown>).employeeIds)) {
+        setSelectedEmployeeIds((data.value as Record<string, string[]>).employeeIds);
+      }
+      setPreferencesLoaded(true);
+    })();
+  }, [show, user]);
+
+  // ─── Save employee filter preference when applied ───
+  const saveEmployeeFilter = useCallback(async (ids: string[]) => {
+    if (!user) return;
+    setPreferencesSaving(true);
+    const value = ids.length > 0 ? { employeeIds: ids } : {};
+    await supabase
+      .from("user_ui_preferences")
+      .upsert(
+        { user_id: user.id, preference_key: "employees.income.summary.employee_filter", value },
+        { onConflict: "user_id, preference_key" },
+      );
+    setPreferencesSaving(false);
+  }, [user]);
+
+  // Close filter popover on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+        setShowEmployeeFilter(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   // ─── Process raw data into ReportRow[], then group both ways ───
   const processData = (data: DeliveryQueryRow[]) => {
@@ -398,9 +454,10 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     }))
     .filter((g) => g.rows.length > 0);
 
-  const filteredRingkasanRows = ringkasanRows.filter((r) =>
-    r.employee_nama.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredRingkasanRows = ringkasanRows.filter((r) => {
+    if (selectedEmployeeIds.length > 0 && !selectedEmployeeIds.includes(r.employee_id)) return false;
+    return r.employee_nama.toLowerCase().includes(search.toLowerCase());
+  });
 
   const filteredTotalTitik = reportTab === "zona"
     ? filteredZoneGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0)
@@ -872,6 +929,113 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
             <div className="h-6 w-px bg-border hidden sm:block" />
 
+            {/* Employee filter (Ringkasan only) */}
+            {reportTab === "ringkasan" && (
+              <div ref={filterRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftEmployeeIds([...selectedEmployeeIds]);
+                    setEmployeeFilterSearch("");
+                    setShowEmployeeFilter(!showEmployeeFilter);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border",
+                    selectedEmployeeIds.length > 0
+                      ? "bg-primary/10 text-primary border-primary/30"
+                      : "bg-muted text-muted-foreground border-border hover:text-foreground"
+                  )}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  <span className="hidden xs:inline">
+                    {selectedEmployeeIds.length > 0 ? `${selectedEmployeeIds.length} pegawai` : "Semua Pegawai"}
+                  </span>
+                </button>
+
+                {showEmployeeFilter && (
+                  <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-1.5 w-72 sm:w-80 bg-card rounded-xl border border-border shadow-xl z-20 overflow-hidden animate-scale-in">
+                    <div className="p-3 border-b border-border">
+                      <div className="flex items-center gap-2 bg-muted rounded-lg px-2.5 py-1.5">
+                        <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                        <input
+                          type="text"
+                          placeholder="Cari pegawai..."
+                          value={employeeFilterSearch}
+                          onChange={(e) => setEmployeeFilterSearch(e.target.value)}
+                          className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/50 text-foreground"
+                        />
+                      </div>
+                    </div>
+                    <div className="max-h-60 overflow-y-auto divide-y divide-border/50">
+                      {ringkasanRows
+                        .filter((r) => r.employee_nama.toLowerCase().includes(employeeFilterSearch.toLowerCase()))
+                        .map((r) => (
+                          <label
+                            key={r.employee_id}
+                            className="flex items-center gap-2.5 px-3.5 py-2.5 hover:bg-muted/30 transition-colors cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={draftEmployeeIds.includes(r.employee_id)}
+                              onChange={() => {
+                                setDraftEmployeeIds((prev) =>
+                                  prev.includes(r.employee_id)
+                                    ? prev.filter((id) => id !== r.employee_id)
+                                    : [...prev, r.employee_id]
+                                );
+                              }}
+                              className="w-4 h-4 rounded border-border text-primary focus:ring-primary/30"
+                            />
+                            <span className="text-xs font-medium text-foreground break-words min-w-0 flex-1">{r.employee_nama}</span>
+                          </label>
+                        ))}
+                      {ringkasanRows.filter((r) => r.employee_nama.toLowerCase().includes(employeeFilterSearch.toLowerCase())).length === 0 && (
+                        <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">
+                          Tidak ada pegawai yang cocok
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-2 p-3 border-t border-border bg-muted/20">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraftEmployeeIds([]);
+                          setEmployeeFilterSearch("");
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Reset
+                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowEmployeeFilter(false);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setSelectedEmployeeIds(draftEmployeeIds);
+                            await saveEmployeeFilter(draftEmployeeIds);
+                            setShowEmployeeFilter(false);
+                          }}
+                          disabled={preferencesSaving}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold text-white bg-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        >
+                          {preferencesSaving ? "Menyimpan..." : "Terapkan"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Search */}
             <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[150px] sm:min-w-[200px] max-w-full sm:max-w-[320px] w-full sm:w-auto">
               <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
@@ -895,7 +1059,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               </div>
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium">Total Pendapatan</p>
-                <p className="text-sm font-bold text-foreground">{loading ? "..." : formatCurrency(search ? filteredTotalPendapatan : grandTotalPendapatan)}</p>
+                <p className="text-sm font-bold text-foreground">{loading ? "..." : formatCurrency(reportTab === "ringkasan" ? filteredTotalPendapatan : (search ? filteredTotalPendapatan : grandTotalPendapatan))}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 px-3 py-2 bg-card rounded-xl border border-border">
@@ -904,7 +1068,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               </div>
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium">Total Titik</p>
-                <p className="text-sm font-bold text-foreground">{loading ? "..." : formatNumber(search ? filteredTotalTitik : grandTotalTitik)}</p>
+                <p className="text-sm font-bold text-foreground">{loading ? "..." : formatNumber(reportTab === "ringkasan" ? filteredTotalTitik : (search ? filteredTotalTitik : grandTotalTitik))}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 px-3 py-2 bg-card rounded-xl border border-border">
@@ -942,7 +1106,11 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
           ) : !hasData ? (
             <div className="flex flex-col items-center justify-center py-24">
               <FileText className="w-12 h-12 text-muted-foreground/20 mb-3" />
-              <p className="text-sm text-muted-foreground">Tidak ada data untuk periode ini</p>
+              <p className="text-sm text-muted-foreground">
+                {reportTab === "ringkasan" && selectedEmployeeIds.length > 0
+                  ? "Tidak ada data yang cocok dengan filter pegawai"
+                  : "Tidak ada data untuk periode ini"}
+              </p>
               <p className="text-xs text-muted-foreground/60 mt-1">Coba ubah rentang tanggal atau kata kunci pencarian</p>
             </div>
           ) : reportTab === "zona" ? (
@@ -1216,8 +1384,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
               {/* Grand Total */}
               <GrandTotalCard
-                totalTitik={search ? filteredTotalTitik : grandTotalTitik}
-                totalPendapatan={search ? filteredTotalPendapatan : grandTotalPendapatan}
+                totalTitik={filteredTotalTitik}
+                totalPendapatan={filteredTotalPendapatan}
               />
             </div>
           )}

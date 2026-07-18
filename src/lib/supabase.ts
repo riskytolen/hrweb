@@ -637,3 +637,10 @@ export interface DbGaVehicleDocument {
   // joined
   files?: DbGaVehicleDocumentFile[];
 }
+
+export interface DbUserUiPreference {
+  user_id: string;
+  preference_key: string;
+  value: Record<string, unknown>;
+  updated_at: string;
+}
