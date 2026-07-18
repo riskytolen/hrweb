@@ -2607,7 +2607,7 @@ export default function IncomePage() {
                             "transition-all duration-200 relative border-b border-border/30",
                             isDragging
                               ? "opacity-30 scale-[0.98] bg-primary/5"
-                              : !isDropTarget && (isDuplicate ? "bg-danger/[0.06]" : isDbDuplicate ? "bg-warning/[0.08]" : isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/40"),
+                              : !isDropTarget && (isDuplicate ? (idx % 2 === 0 ? "bg-danger/[0.06]" : "bg-danger/[0.10]") : isDbDuplicate ? (idx % 2 === 0 ? "bg-warning/[0.08]" : "bg-warning/[0.12]") : isComplete ? (idx % 2 === 0 ? "bg-success/[0.06]" : "bg-success/[0.10]") : isIncomplete ? (idx % 2 === 0 ? "bg-danger/[0.04]" : "bg-danger/[0.08]") : (idx % 2 === 0 ? "" : "bg-muted/[0.12] hover:bg-muted/40")),
                           )}
                           style={isDropTarget ? { boxShadow: "inset 0 3px 0 0 var(--color-primary, #3b82f6)" } : undefined}
                         >
@@ -2788,17 +2788,17 @@ export default function IncomePage() {
                           <tr key={row.rowKey}
                             className={cn(
                               "border-b border-border/30 transition-colors",
-                              isDuplicate ? "bg-danger/[0.06]" : isDbDuplicate ? "bg-warning/[0.08]" : isComplete ? "bg-success/[0.06]" : isIncomplete ? "bg-danger/[0.04]" : "hover:bg-muted/30"
+                              isDuplicate ? (idx % 2 === 0 ? "bg-danger/[0.06]" : "bg-danger/[0.10]") : isDbDuplicate ? (idx % 2 === 0 ? "bg-warning/[0.08]" : "bg-warning/[0.12]") : isComplete ? (idx % 2 === 0 ? "bg-success/[0.06]" : "bg-success/[0.10]") : isIncomplete ? (idx % 2 === 0 ? "bg-danger/[0.04]" : "bg-danger/[0.08]") : (idx % 2 === 0 ? "" : "bg-muted/[0.12] hover:bg-muted/30")
                             )}
                           >
                             {/* Sticky: # */}
-                            <td className="sticky left-0 z-10 bg-card px-1.5 py-1.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                            <td className="sticky left-0 z-10 px-1.5 py-1.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]" style={{ background: 'inherit' }}>
                               <span className={cn("text-[11px] font-mono font-bold", isComplete ? "text-success" : isIncomplete ? "text-danger" : "text-muted-foreground")}>
                                 {idx + 1}
                               </span>
                             </td>
                             {/* Sticky: Nama */}
-                            <td className="sticky left-9 z-10 bg-card px-1.5 py-1.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]">
+                            <td className="sticky left-9 z-10 px-1.5 py-1.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)]" style={{ background: 'inherit' }}>
                               <div className="min-w-[148px] space-y-1">
                                 <Select
                                   value={row.employee_id || ""}
