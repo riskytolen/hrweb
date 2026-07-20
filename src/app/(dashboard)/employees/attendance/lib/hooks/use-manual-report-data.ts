@@ -16,7 +16,6 @@ export type ManualReportItem = {
   status: string;
   jam_masuk: string;
   durasi_telat: number;
-  denda: number;
   catatan: string | null;
   alasan_manual: string | null;
 };
@@ -34,7 +33,6 @@ export type ManualReportGroup = {
   alpha: number;
   cuti: number;
   libur: number;
-  totalDenda: number;
   items: ManualReportItem[];
 };
 
@@ -58,7 +56,6 @@ export function useManualReportData(
       status: string;
       jam_masuk: string;
       durasi_telat: number;
-      denda: number;
       catatan: string | null;
       alasan_manual: string | null;
       pegawai?: { nama: string } | null;
@@ -70,7 +67,7 @@ export function useManualReportData(
     while (hasMore) {
       const { data, error } = await supabase
         .from("attendance_records")
-        .select("id, employee_id, tanggal, status, jam_masuk, durasi_telat, denda, catatan, alasan_manual, pegawai(nama), divisions(nama, color)")
+        .select("id, employee_id, tanggal, status, jam_masuk, durasi_telat, catatan, alasan_manual, pegawai(nama), divisions(nama, color)")
         .eq("is_manual", true)
         .gte("tanggal", period.start)
         .lte("tanggal", period.end)
@@ -92,7 +89,6 @@ export function useManualReportData(
         status: r.status,
         jam_masuk: r.jam_masuk,
         durasi_telat: r.durasi_telat,
-        denda: r.denda,
         catatan: r.catatan,
         alasan_manual: r.alasan_manual,
       }))
@@ -116,13 +112,11 @@ export function useManualReportData(
           divisionNama: it.divisionNama,
           divisionColor: it.divisionColor,
           total: 0, hadir: 0, telat: 0, izin: 0, sakit: 0, alpha: 0, cuti: 0, libur: 0,
-          totalDenda: 0,
           items: [],
         };
         map.set(it.employee_id, g);
       }
       g.total++;
-      g.totalDenda += it.denda;
       switch (it.status) {
         case "Hadir": g.hadir++; break;
         case "Terlambat": g.telat++; break;

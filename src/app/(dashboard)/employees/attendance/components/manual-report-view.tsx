@@ -3,23 +3,22 @@
 import { useMemo, useState } from "react";
 import {
   Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Filter, Download, FileText,
-  Clock, Users, PenTool,
+  Users, PenTool,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
 import Pagination from "@/components/ui/Pagination";
 import { SkeletonTable } from "@/components/ui/Skeleton";
-import { cn, formatCurrency } from "@/lib/utils";
-import {
-  SUMMARY_PAGE_SIZE,
-} from "../lib/attendance-constants";
+import { cn } from "@/lib/utils";
 import { STATUS_OPTIONS } from "../lib/attendance-status";
 import { getSummaryPeriodRange, getSummaryCurrentPeriodKey } from "../lib/attendance-helpers";
-import { useManualReportData, type ManualReportGroup } from "../lib/hooks/use-manual-report-data";
+import { useManualReportData } from "../lib/hooks/use-manual-report-data";
 import { useDropdown } from "../lib/hooks/use-click-outside";
 import type { EmployeeLite } from "../lib/attendance-types";
 
-type SortKey = "nama" | "total" | "denda";
+type SortKey = "nama" | "total";
+
+const PAGE_SIZE = 100;
 
 type ManualReportViewProps = {
   employees: EmployeeLite[];
@@ -42,18 +41,10 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
     [dateMode, periodKey, customStart, customEnd],
   );
 
-  const dateLabel = useMemo(() => {
-    if (!period.start || !period.end) return "";
-    const s = new Date(period.start + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-    const e = new Date(period.end + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-    return `${s} – ${e}`;
-  }, [period.start, period.end]);
-
   const { groups, loading } = useManualReportData(period, employees);
 
   const totalManual = useMemo(() => groups.reduce((s, g) => s + g.total, 0), [groups]);
   const pegawaiTerdampak = groups.length;
-  const totalDendaAll = useMemo(() => groups.reduce((s, g) => s + g.totalDenda, 0), [groups]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -64,7 +55,6 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
       switch (sortBy) {
         case "nama": return a.employeeNama.localeCompare(b.employeeNama);
         case "total": return b.total - a.total;
-        case "denda": return b.totalDenda - a.totalDenda;
         default: return 0;
       }
     });
@@ -72,7 +62,7 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
   }, [groups, search, sortBy]);
 
   const paged = useMemo(
-    () => filtered.slice((page - 1) * SUMMARY_PAGE_SIZE, page * SUMMARY_PAGE_SIZE),
+    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [filtered, page],
   );
 
@@ -89,9 +79,13 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
 
   const statusColor = (s: string) => STATUS_OPTIONS.find((o) => o.value === s)?.color || "#6b7280";
 
+  const toggleExpand = (empId: string) => {
+    setExpandedId((prev) => prev === empId ? null : empId);
+  };
+
   const handleExportCSV = () => {
     if (filtered.length === 0) return;
-    const rows: string[] = ["Pegawai,Divisi,Tanggal,Status,Jam Masuk,Durasi Telat,Denda,Alasan Manual,Catatan"];
+    const rows: string[] = ["Pegawai,Divisi,Tanggal,Status,Jam Masuk,Durasi Telat,Alasan Manual,Catatan"];
     for (const g of filtered) {
       for (const it of g.items) {
         rows.push([
@@ -101,14 +95,11 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
           it.status,
           it.jam_masuk || "-",
           it.durasi_telat || "",
-          it.denda,
           `"${it.alasan_manual || ""}"`,
           `"${it.catatan || ""}"`,
         ].join(","));
       }
-      rows.push([`"${g.employeeNama} — SUBTOTAL"`, "", "", "", "", "", g.totalDenda, "", ""].join(","));
     }
-    rows.push(["GRAND TOTAL", "", "", "", "", "", totalDendaAll, "", ""].join(","));
     const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -134,27 +125,19 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
     doc.text(`Dicetak: ${new Date().toLocaleString("id-ID")}`, pw / 2, 27, { align: "center" });
     const body: (string | number)[][] = [];
     for (const g of filtered) {
-      body.push([g.employeeNama, "DIVISI", g.divisionNama, "", "", "", "", ""]);
+      body.push([g.employeeNama, g.divisionNama, "", "", "", ""]);
       for (const it of g.items) {
-        body.push(["", "", it.tanggal, it.status, it.jam_masuk ? it.jam_masuk.slice(0, 5) : "-", it.durasi_telat || "", it.denda, it.alasan_manual || ""]);
+        body.push(["", it.tanggal, it.status, it.jam_masuk ? it.jam_masuk.slice(0, 5) : "-", it.durasi_telat || "", it.alasan_manual || ""]);
       }
-      body.push([`SUBTOTAL ${g.employeeNama}`, "", "", "", "", "", g.totalDenda, ""]);
     }
-    body.push(["GRAND TOTAL", "", "", "", "", "", totalDendaAll, ""]);
     autoTable(doc, {
       startY: 33,
-      head: [["Pegawai", "", "Divisi", "Tanggal", "Status", "Jam Masuk", "Telat", "Denda", "Alasan Manual"]],
+      head: [["Pegawai", "Divisi", "Tanggal", "Status", "Jam Masuk", "Telat", "Alasan Manual"]],
       body,
       theme: "grid",
       headStyles: { fillColor: [245, 158, 11], fontSize: 8, fontStyle: "bold", halign: "center" },
       bodyStyles: { fontSize: 7 },
       margin: { left: 10, right: 10 },
-      didParseCell: (data) => {
-        if (data.row.index === body.length - 1) {
-          data.cell.styles.fillColor = [255, 243, 224];
-          data.cell.styles.fontStyle = "bold";
-        }
-      },
     });
     doc.save(`Report_Manual_${period.start}_${period.end}.pdf`);
     exportMenu.close();
@@ -232,15 +215,10 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
               sortBy === "total" ? "bg-warning/10 text-warning ring-1 ring-warning/20" : "text-muted-foreground hover:bg-muted")}>
             <PenTool className="w-3 h-3" />Terbanyak Manual
           </button>
-          <button onClick={() => setSortBy("denda")}
-            className={cn("flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all",
-              sortBy === "denda" ? "bg-warning/10 text-warning ring-1 ring-warning/20" : "text-muted-foreground hover:bg-muted")}>
-            <Clock className="w-3 h-3" />Denda Terbesar
-          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="bg-card rounded-2xl border border-border p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -265,18 +243,6 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
           </div>
           <p className="text-[10px] text-muted-foreground mt-2">pegawai dengan absen manual</p>
         </div>
-        <div className="bg-card rounded-2xl border border-border p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Denda</p>
-              <p className="text-2xl font-bold text-foreground mt-1">{loading ? "-" : formatCurrency(totalDendaAll)}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-danger/10 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-danger" />
-            </div>
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-2">dari absen manual periode ini</p>
-        </div>
       </div>
 
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
@@ -294,18 +260,23 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 py-3 w-14">A</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 py-3 w-14">C</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 py-3 w-14">L</th>
-                <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 w-28">Denda</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 py-3 w-12"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={5} cols={12} /> : paged.length === 0 ? (
-                <tr><td colSpan={12} className="text-center py-10 text-sm text-muted-foreground">Tidak ada absen manual di periode ini.</td></tr>
+              {loading ? <SkeletonTable rows={5} cols={11} /> : paged.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-10 text-sm text-muted-foreground">Tidak ada absen manual di periode ini.</td></tr>
               ) : paged.map((g, idx) => {
                 const isExpanded = expandedId === g.employee_id;
                 return (
                   <tr key={g.employee_id}>
-                    <td className="px-4 py-3 text-sm font-semibold text-foreground">{g.employeeNama}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-foreground cursor-pointer hover:text-warning transition-colors"
+                      onClick={() => toggleExpand(g.employee_id)}>
+                      <span className="inline-flex items-center gap-1.5">
+                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-warning" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                        {g.employeeNama}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${g.divisionColor}15`, color: g.divisionColor }}>
                         <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: g.divisionColor }} />
@@ -320,10 +291,9 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
                     <td className="px-3 py-3 text-center text-xs font-medium text-danger">{g.alpha || "-"}</td>
                     <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Cuti") }}>{g.cuti || "-"}</td>
                     <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Libur") }}>{g.libur || "-"}</td>
-                    <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">{g.totalDenda > 0 ? formatCurrency(g.totalDenda) : "-"}</td>
                     <td className="px-3 py-3 text-center">
                       {g.items.length > 0 && (
-                        <button onClick={() => setExpandedId(isExpanded ? null : g.employee_id)}
+                        <button onClick={() => toggleExpand(g.employee_id)}
                           className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                           {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
@@ -346,7 +316,6 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
                     <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Status</th>
                     <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Jam</th>
                     <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-16">Telat</th>
-                    <th className="text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-24">Denda</th>
                     <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">Alasan Manual</th>
                     <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">Catatan</th>
                   </tr>
@@ -365,7 +334,6 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
                       </td>
                       <td className="px-3 py-2 text-center text-xs text-foreground">{it.jam_masuk ? it.jam_masuk.slice(0, 5) : "-"}</td>
                       <td className="px-3 py-2 text-center text-xs text-muted-foreground">{it.durasi_telat || "-"}</td>
-                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums">{it.denda > 0 ? formatCurrency(it.denda) : "-"}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{it.alasan_manual || "-"}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground max-w-[200px] truncate" title={it.catatan || ""}>{it.catatan || "-"}</td>
                     </tr>
@@ -377,9 +345,9 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
         </div>
       </div>
 
-      {filtered.length > SUMMARY_PAGE_SIZE && (
+      {filtered.length > PAGE_SIZE && (
         <div className="flex justify-center">
-          <Pagination currentPage={page} totalItems={filtered.length} pageSize={SUMMARY_PAGE_SIZE} onPageChange={setPage} />
+          <Pagination currentPage={page} totalItems={filtered.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
         </div>
       )}
     </div>
