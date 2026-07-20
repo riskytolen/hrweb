@@ -69,11 +69,11 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
   );
 
   const statusByEmp = useMemo(() => {
-    const m = new Map<string, Map<string, { status: string; color: string }>>();
+    const m = new Map<string, Map<string, { status: string; color: string; is_manual: boolean; alasan_manual: string | null }>>();
     visibleRecords.forEach((r) => {
       if (!m.has(r.employee_id)) m.set(r.employee_id, new Map());
       const sc = STATUS_OPTIONS.find((s) => s.value === r.status);
-      m.get(r.employee_id)!.set(r.tanggal, { status: r.status, color: sc?.color || "#6b7280" });
+      m.get(r.employee_id)!.set(r.tanggal, { status: r.status, color: sc?.color || "#6b7280", is_manual: r.is_manual, alasan_manual: r.alasan_manual });
     });
     return m;
   }, [visibleRecords]);
@@ -90,6 +90,11 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
     return m;
   }, [visibleRecords]);
 
+  const manualCount = useMemo(
+    () => visibleRecords.filter((r) => r.is_manual).length,
+    [visibleRecords],
+  );
+
   return (
     <Portal>
       <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
@@ -104,6 +109,15 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
                 <span><strong className="text-foreground">{emps.length}</strong> pegawai</span>
                 <span className="w-1 h-1 rounded-full bg-border" />
                 <span><strong className="text-foreground">{visibleRecords.length}</strong> entri</span>
+                {manualCount > 0 && (
+                  <>
+                    <span className="w-1 h-1 rounded-full bg-border" />
+                    <span className="inline-flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+                      <strong className="text-warning">{manualCount}</strong> manual
+                    </span>
+                  </>
+                )}
                 {Array.from(statusBreakdown.entries()).map(([nama, { count, color }]) => (
                   <span key={nama} className="inline-flex items-center gap-1">
                     <span className="w-1 h-1 rounded-full bg-border" />
@@ -188,10 +202,15 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
                             isToday ? "bg-primary-light" : isWeekend ? "bg-danger-light" : isOdd ? "bg-muted" : "bg-card",
                             "group-hover:brightness-95")}>
                             {entry ? (
-                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[10px] font-bold text-white"
+                              <span className="relative inline-flex items-center justify-center w-7 h-7 rounded-md text-[10px] font-bold text-white"
                                 style={{ backgroundColor: entry.color }}
-                                title={`${emp.nama} — ${entry.status} (${d.dateStr})`}>
+                                title={`${emp.nama} — ${entry.status}${entry.is_manual ? ` (Manual${entry.alasan_manual ? `: ${entry.alasan_manual}` : ""})` : ""} (${d.dateStr})`}>
                                 {entry.status.charAt(0)}
+                                {entry.is_manual && (
+                                  <span className="absolute -top-1 -right-1 w-3 h-3 flex items-center justify-center rounded-full bg-warning text-white text-[7px] font-bold leading-none shadow-sm">
+                                    M
+                                  </span>
+                                )}
                               </span>
                             ) : (
                               <span className="inline-block w-7 h-7 rounded-md text-[10px] text-muted-foreground/30 leading-7">—</span>
@@ -215,6 +234,13 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
               <span>{s.label}</span>
             </div>
           ))}
+          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <span className="relative inline-flex items-center justify-center w-5 h-5 rounded-md text-[9px] font-bold text-white bg-gray-500">
+              S
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 flex items-center justify-center rounded-full bg-warning text-white text-[6px] font-bold leading-none shadow-sm">M</span>
+            </span>
+            <span>= Input Manual Admin</span>
+          </div>
         </div>
       </div>
     </Portal>

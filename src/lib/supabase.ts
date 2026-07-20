@@ -310,6 +310,10 @@ export interface DbAttendanceRecord {
   status_pulang: "Tepat" | "Cepat" | "Lupa Pulang" | null;
   /** Total durasi lembur (menit) yang sudah disetujui untuk hari ini. */
   durasi_lembur_menit: number;
+  /** True jika record diinput manual oleh admin (bukan auto-gen). */
+  is_manual: boolean;
+  /** Alasan input manual (wajib diisi saat is_manual = true). */
+  alasan_manual: string | null;
   created_at: string;
   updated_at: string;
   // joined
