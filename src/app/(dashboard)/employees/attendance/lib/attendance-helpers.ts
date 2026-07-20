@@ -20,6 +20,10 @@ export type EmployeeActivityLite = {
   non_active_periods?: NonActivePeriod[] | null;
 };
 
+export function isBackOfficeDivision(name: string | null | undefined): boolean {
+  return (name || "").trim().toLowerCase() === "back office";
+}
+
 /**
  * Get local date string YYYY-MM-DD (timezone safe — pakai local time, bukan UTC).
  * Penting untuk konsistensi antara client timezone dan server-side date filter.

@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { SUMMARY_FETCH_PAGE_SIZE } from "../attendance-constants";
+import { isBackOfficeDivision } from "../attendance-helpers";
 import type { EmployeeLite } from "../attendance-types";
 
 export type ManualReportItem = {
@@ -80,20 +81,22 @@ export function useManualReportData(
       hasMore = data.length === SUMMARY_FETCH_PAGE_SIZE;
       from += SUMMARY_FETCH_PAGE_SIZE;
     }
-    const mapped: ManualReportItem[] = allData.map((r) => ({
-      id: r.id,
-      employee_id: r.employee_id,
-      employeeNama: r.pegawai?.nama || r.employee_id,
-      divisionNama: r.divisions?.nama || "-",
-      divisionColor: r.divisions?.color || "#6b7280",
-      tanggal: r.tanggal,
-      status: r.status,
-      jam_masuk: r.jam_masuk,
-      durasi_telat: r.durasi_telat,
-      denda: r.denda,
-      catatan: r.catatan,
-      alasan_manual: r.alasan_manual,
-    }));
+    const mapped: ManualReportItem[] = allData
+      .map((r) => ({
+        id: r.id,
+        employee_id: r.employee_id,
+        employeeNama: r.pegawai?.nama || r.employee_id,
+        divisionNama: r.divisions?.nama || "-",
+        divisionColor: r.divisions?.color || "#6b7280",
+        tanggal: r.tanggal,
+        status: r.status,
+        jam_masuk: r.jam_masuk,
+        durasi_telat: r.durasi_telat,
+        denda: r.denda,
+        catatan: r.catatan,
+        alasan_manual: r.alasan_manual,
+      }))
+      .filter((item) => !isBackOfficeDivision(item.divisionNama));
     setItems(mapped);
     setLoading(false);
   }, [period.start, period.end]);

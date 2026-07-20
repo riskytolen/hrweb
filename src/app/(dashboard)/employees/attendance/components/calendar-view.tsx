@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Search, X, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import Portal from "@/components/ui/Portal";
 import { cn } from "@/lib/utils";
-import { getCalPeriod, getSummaryCurrentPeriodKey, isEmployeeActiveInPeriod, localDateStr } from "../lib/attendance-helpers";
+import { getCalPeriod, getSummaryCurrentPeriodKey, isBackOfficeDivision, isEmployeeActiveInPeriod, localDateStr } from "../lib/attendance-helpers";
 import { STATUS_OPTIONS } from "../lib/attendance-status";
 import { useCalendarData } from "../lib/hooks/use-calendar-data";
 import type { EmployeeLite } from "../lib/attendance-types";
@@ -69,11 +69,11 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
   );
 
   const statusByEmp = useMemo(() => {
-    const m = new Map<string, Map<string, { status: string; color: string; is_manual: boolean; alasan_manual: string | null }>>();
+    const m = new Map<string, Map<string, { status: string; color: string; showManualBadge: boolean; alasan_manual: string | null }>>();
     visibleRecords.forEach((r) => {
       if (!m.has(r.employee_id)) m.set(r.employee_id, new Map());
       const sc = STATUS_OPTIONS.find((s) => s.value === r.status);
-      m.get(r.employee_id)!.set(r.tanggal, { status: r.status, color: sc?.color || "#6b7280", is_manual: r.is_manual, alasan_manual: r.alasan_manual });
+      m.get(r.employee_id)!.set(r.tanggal, { status: r.status, color: sc?.color || "#6b7280", showManualBadge: r.is_manual && !isBackOfficeDivision(r.divisionNama), alasan_manual: r.alasan_manual });
     });
     return m;
   }, [visibleRecords]);
@@ -91,7 +91,7 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
   }, [visibleRecords]);
 
   const manualCount = useMemo(
-    () => visibleRecords.filter((r) => r.is_manual).length,
+    () => visibleRecords.filter((r) => r.is_manual && !isBackOfficeDivision(r.divisionNama)).length,
     [visibleRecords],
   );
 
@@ -204,9 +204,9 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
                             {entry ? (
                               <span className="relative inline-flex items-center justify-center w-7 h-7 rounded-md text-[10px] font-bold text-white"
                                 style={{ backgroundColor: entry.color }}
-                                title={`${emp.nama} — ${entry.status}${entry.is_manual ? ` (Manual${entry.alasan_manual ? `: ${entry.alasan_manual}` : ""})` : ""} (${d.dateStr})`}>
+                                title={`${emp.nama} — ${entry.status}${entry.showManualBadge ? ` (Manual${entry.alasan_manual ? `: ${entry.alasan_manual}` : ""})` : ""} (${d.dateStr})`}>
                                 {entry.status.charAt(0)}
-                                {entry.is_manual && (
+                                {entry.showManualBadge && (
                                   <span className="absolute -top-1 -right-1 w-3 h-3 flex items-center justify-center rounded-full bg-warning text-white text-[7px] font-bold leading-none shadow-sm">
                                     M
                                   </span>
