@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, Fragment } from "react";
 import {
   Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, CalendarDays, Filter, Download, FileText,
   Users, PenTool,
@@ -269,79 +269,82 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
               ) : paged.map((g, idx) => {
                 const isExpanded = expandedId === g.employee_id;
                 return (
-                  <tr key={g.employee_id}>
-                    <td className="px-4 py-3 text-sm font-semibold text-foreground cursor-pointer hover:text-warning transition-colors"
-                      onClick={() => toggleExpand(g.employee_id)}>
-                      <span className="inline-flex items-center gap-1.5">
-                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-warning" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
-                        {g.employeeNama}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${g.divisionColor}15`, color: g.divisionColor }}>
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: g.divisionColor }} />
-                        {g.divisionNama}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-center text-sm font-bold text-foreground">{g.total}</td>
-                    <td className="px-3 py-3 text-center text-xs font-medium text-success">{g.hadir || "-"}</td>
-                    <td className="px-3 py-3 text-center text-xs font-medium text-danger">{g.telat || "-"}</td>
-                    <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Izin") }}>{g.izin || "-"}</td>
-                    <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Sakit") }}>{g.sakit || "-"}</td>
-                    <td className="px-3 py-3 text-center text-xs font-medium text-danger">{g.alpha || "-"}</td>
-                    <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Cuti") }}>{g.cuti || "-"}</td>
-                    <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Libur") }}>{g.libur || "-"}</td>
-                    <td className="px-3 py-3 text-center">
-                      {g.items.length > 0 && (
-                        <button onClick={() => toggleExpand(g.employee_id)}
-                          className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                  <Fragment key={g.employee_id}>
+                    <tr>
+                      <td className="px-4 py-3 text-sm font-semibold text-foreground cursor-pointer hover:text-warning transition-colors"
+                        onClick={() => toggleExpand(g.employee_id)}>
+                        <span className="inline-flex items-center gap-1.5">
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-warning" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                          {g.employeeNama}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md" style={{ backgroundColor: `${g.divisionColor}15`, color: g.divisionColor }}>
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: g.divisionColor }} />
+                          {g.divisionNama}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-center text-sm font-bold text-foreground">{g.total}</td>
+                      <td className="px-3 py-3 text-center text-xs font-medium text-success">{g.hadir || "-"}</td>
+                      <td className="px-3 py-3 text-center text-xs font-medium text-danger">{g.telat || "-"}</td>
+                      <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Izin") }}>{g.izin || "-"}</td>
+                      <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Sakit") }}>{g.sakit || "-"}</td>
+                      <td className="px-3 py-3 text-center text-xs font-medium text-danger">{g.alpha || "-"}</td>
+                      <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Cuti") }}>{g.cuti || "-"}</td>
+                      <td className="px-3 py-3 text-center text-xs font-medium" style={{ color: statusColor("Libur") }}>{g.libur || "-"}</td>
+                      <td className="px-3 py-3 text-center">
+                        {g.items.length > 0 && (
+                          <button onClick={() => toggleExpand(g.employee_id)}
+                            className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr key={`detail-${g.employee_id}`} className="bg-muted/30">
+                        <td colSpan={11} className="px-0 py-0">
+                          <div className="animate-slide-down">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="border-b border-border/50 bg-muted/50">
+                                  <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2 w-28">Tanggal</th>
+                                  <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Status</th>
+                                  <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Jam</th>
+                                  <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-16">Telat</th>
+                                  <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">Alasan Manual</th>
+                                  <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">Catatan</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border/30">
+                                {g.items.map((it) => (
+                                  <tr key={it.id} className="hover:bg-muted/30">
+                                    <td className="px-4 py-2 text-xs text-foreground">
+                                      {new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
+                                        style={{ backgroundColor: statusColor(it.status) }}>
+                                        {it.status}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-center text-xs text-foreground">{it.jam_masuk ? it.jam_masuk.slice(0, 5) : "-"}</td>
+                                    <td className="px-3 py-2 text-center text-xs text-muted-foreground">{it.durasi_telat || "-"}</td>
+                                    <td className="px-3 py-2 text-xs text-muted-foreground">{it.alasan_manual || "-"}</td>
+                                    <td className="px-3 py-2 text-xs text-muted-foreground max-w-[200px] truncate" title={it.catatan || ""}>{it.catatan || "-"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>
           </table>
-        </div>
-
-        <div className="border-t border-border">
-          {paged.filter((g) => expandedId === g.employee_id).map((g) => (
-            <div key={`detail-${g.employee_id}`} className="bg-muted/30 border-b border-border/50 animate-slide-down">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border/50 bg-muted/50">
-                    <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-2 w-28">Tanggal</th>
-                    <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Status</th>
-                    <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Jam</th>
-                    <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-16">Telat</th>
-                    <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">Alasan Manual</th>
-                    <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">Catatan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/30">
-                  {g.items.map((it) => (
-                    <tr key={it.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-2 text-xs text-foreground">
-                        {new Date(it.tanggal + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
-                          style={{ backgroundColor: statusColor(it.status) }}>
-                          {it.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-center text-xs text-foreground">{it.jam_masuk ? it.jam_masuk.slice(0, 5) : "-"}</td>
-                      <td className="px-3 py-2 text-center text-xs text-muted-foreground">{it.durasi_telat || "-"}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{it.alasan_manual || "-"}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground max-w-[200px] truncate" title={it.catatan || ""}>{it.catatan || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
         </div>
       </div>
 
