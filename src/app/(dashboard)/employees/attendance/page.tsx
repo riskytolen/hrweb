@@ -69,10 +69,6 @@ export default function AttendancePage() {
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           canInput={canInput}
-          hasRecords={records.length > 0}
-          exportMenu={table.exportMenu}
-          onExportPDF={table.exportPDF}
-          onExportCSV={table.exportCSV}
           onOpenOffDay={openOffDay}
           onAddAbsen={openAdd}
           toast={toast}
@@ -95,6 +91,10 @@ export default function AttendancePage() {
             paged={table.paged}
             statusCounts={table.statusCounts}
             totalDenda={table.totalDenda}
+            hasRecords={records.length > 0}
+            exportMenu={table.exportMenu}
+            onExportPDF={table.exportPDF}
+            onExportCSV={table.exportCSV}
             onDateChange={setDateFilter}
             onEdit={openEdit}
             onDelete={(row) => deleteConfirmRef.current?.open({ id: row.id, nama: `${row.employeeNama} (${row.tanggal})` })}

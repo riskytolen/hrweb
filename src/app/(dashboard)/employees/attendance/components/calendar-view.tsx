@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Search, X, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { Search, X, ChevronLeft, ChevronRight, CalendarDays, Download } from "lucide-react";
 import Portal from "@/components/ui/Portal";
 import { cn } from "@/lib/utils";
 import { getCalPeriod, getSummaryCurrentPeriodKey, isBackOfficeDivision, isEmployeeActiveInPeriod, localDateStr } from "../lib/attendance-helpers";
@@ -95,6 +95,75 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
     [visibleRecords],
   );
 
+  const calendarExportPDF = useCallback(async () => {
+    const { default: jsPDF } = await import("jspdf");
+    const { default: autoTable } = await import("jspdf-autotable");
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pw = doc.internal.pageSize.getWidth();
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Kalender Absensi - ${period.label}`, pw / 2, 15, { align: "center" });
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.text(`${emps.length} pegawai, ${visibleRecords.length} entri`, pw / 2, 21, { align: "center" });
+
+    const BLOCK_SIZE = 14;
+    let startY = 28;
+    const allEmps = emps;
+    const statusMap = statusByEmp;
+
+    for (let i = 0; i < dates.length; i += BLOCK_SIZE) {
+      const blockDates = dates.slice(i, i + BLOCK_SIZE);
+      const headers = ["Pegawai", ...blockDates.map((d) => String(d.day))];
+      const body = allEmps.map((emp) => {
+        const empMap = statusMap.get(emp.id);
+        return [
+          emp.nama,
+          ...blockDates.map((d) => {
+            const entry = empMap?.get(d.dateStr);
+            return entry ? entry.status.charAt(0) : "-";
+          }),
+        ];
+      });
+      autoTable(doc, {
+        startY,
+        head: [headers],
+        body,
+        theme: "grid",
+        headStyles: { fillColor: [59, 130, 246], fontSize: 7, fontStyle: "bold", halign: "center" },
+        bodyStyles: { fontSize: 7 },
+        columnStyles: { 0: { cellWidth: 40, fontStyle: "bold" } },
+        margin: { left: 10, right: 10 },
+      });
+      startY = (doc as any).lastAutoTable.finalY + 8;
+    }
+
+    const legendY = startY + 3;
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("Legenda:", 14, legendY);
+    const STATUS_OPTIONS_LITE = [
+      { label: "Hadir", color: "#22c55e" },
+      { label: "Terlambat", color: "#eab308" },
+      { label: "Izin", color: "#3b82f6" },
+      { label: "Sakit", color: "#a855f7" },
+      { label: "Alpha", color: "#ef4444" },
+      { label: "Libur", color: "#6b7280" },
+      { label: "Cuti", color: "#06b6d4" },
+      { label: "M=Manual", color: "#f59e0b" },
+    ];
+    let lx = 30;
+    STATUS_OPTIONS_LITE.forEach((s) => {
+      doc.setFillColor(s.color);
+      doc.rect(lx, legendY - 2, 4, 4, "F");
+      doc.setFont("helvetica", "normal");
+      doc.text(s.label, lx + 6, legendY + 1);
+      lx += doc.getTextWidth(s.label) + 14;
+    });
+
+    doc.save(`Kalender_Absensi_${periodKey}.pdf`);
+  }, [period, periodKey, dates, emps, visibleRecords, statusByEmp]);
+
   return (
     <Portal>
       <div className="fixed inset-0 z-50 bg-background flex flex-col animate-fade-in">
@@ -134,6 +203,9 @@ export function CalendarView({ employees, onClose }: CalendarViewProps) {
               <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => setSearch(e.target.value)}
                 className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
             </div>
+            <button onClick={calendarExportPDF} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-muted text-muted-foreground hover:text-foreground transition-colors">
+              <Download className="w-3.5 h-3.5" />Export PDF
+            </button>
             <div className="flex items-center bg-muted rounded-xl p-1">
               <button onClick={() => setPeriodKey((k) => shiftMonth(k, -1))} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
               <span className="text-xs font-bold text-foreground px-3 min-w-[220px] text-center">{period.label}</span>

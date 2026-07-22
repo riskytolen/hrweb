@@ -7,6 +7,7 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { MIN_DATE, PAGE_SIZE } from "../lib/attendance-constants";
 import { NO_JAM_STATUSES, STATUS_OPTIONS, type StatusOption } from "../lib/attendance-status";
 import { addDays, getDeadlineTime } from "../lib/attendance-helpers";
+import { ExportMenuButton } from "./export-menu-button";
 import type { AttendanceRow } from "../lib/attendance-types";
 
 type AttendanceTableProps = {
@@ -24,6 +25,10 @@ type AttendanceTableProps = {
   paged: AttendanceRow[];
   statusCounts: Record<string, number>;
   totalDenda: number;
+  hasRecords: boolean;
+  exportMenu: { open: boolean; ref: React.RefObject<HTMLDivElement | null>; toggle: () => void };
+  onExportPDF: () => void;
+  onExportCSV: () => void;
   onDateChange: (v: string) => void;
   onEdit: (row: AttendanceRow) => void;
   onDelete: (row: AttendanceRow) => void;
@@ -44,6 +49,10 @@ export function AttendanceTable({
   paged,
   statusCounts,
   totalDenda,
+  hasRecords,
+  exportMenu,
+  onExportPDF,
+  onExportCSV,
   onDateChange,
   onEdit,
   onDelete,
@@ -76,6 +85,14 @@ export function AttendanceTable({
             <input type="text" placeholder="Cari nama atau divisi..." value={search} onChange={(e) => setSearch(e.target.value)}
               className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
           </div>
+          <ExportMenuButton
+            menuRef={exportMenu.ref}
+            open={exportMenu.open}
+            onToggle={exportMenu.toggle}
+            onExportPDF={onExportPDF}
+            onExportCSV={onExportCSV}
+            disabled={!hasRecords}
+          />
         </div>
 
         <div className="flex items-center gap-2 mt-2.5 flex-wrap">
