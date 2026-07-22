@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -143,7 +142,6 @@ const allSections: MenuSection[] = [
 
 export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const { isSuperAdmin, hasPermission, isLoading, profile } = useAuth();
 
   // Filter section/entries berdasarkan permission user
@@ -261,7 +259,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
             collapsed ? "justify-center px-2" : "px-3 gap-2",
           )}
         >
-          <Link
+          <a
             href="/employees"
             className={cn(
               "flex items-center gap-2.5 min-w-0",
@@ -278,7 +276,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                 <p className="text-[9px] font-medium text-blue-300/60 uppercase tracking-[0.18em]">HRM System</p>
               </div>
             )}
-          </Link>
+          </a>
 
           {/* Desktop collapse toggle */}
           {!collapsed && (
@@ -338,7 +336,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                     const LinkIcon = entry.icon;
                     return (
                       <div key={entry.key} className="relative group/trigger">
-                        <Link
+                        <a
                           href={entry.href}
                           onClick={onMobileClose}
                           className={cn(
@@ -377,7 +375,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                           {!collapsed && isActive && (
                             <span className="w-1 h-1 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex-shrink-0" />
                           )}
-                        </Link>
+                        </a>
 
                         {collapsed && (
                           <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-md shadow-xl ring-1 ring-white/10 opacity-0 invisible group-hover/trigger:opacity-100 group-hover/trigger:visible whitespace-nowrap z-50 transition-opacity">
@@ -398,39 +396,56 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                     <div key={group.key}>
                       {/* Group trigger */}
                       <div className="relative group/trigger">
-                        <button
-                          onClick={() => {
-                            if (collapsed) {
-                              onMobileClose();
-                              router.push(group.items[0].href);
-                            } else {
-                              toggleGroup(group.key);
-                            }
-                          }}
-                          className={cn(
-                            "w-full flex items-center rounded-lg transition-colors group/btn",
-                            collapsed
-                              ? "justify-center h-10 w-10 mx-auto"
-                              : "gap-2.5 px-2 py-1.5",
-                            isGroupActive
-                              ? "text-white bg-white/[0.05]"
-                              : "text-slate-400 hover:text-white hover:bg-white/[0.04]",
-                          )}
-                        >
-                          {/* Icon */}
-                          <div
-                            className={cn(
-                              "flex items-center justify-center flex-shrink-0 w-7 h-7 rounded-md transition-colors",
-                              isGroupActive
-                                ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/20"
-                                : "bg-white/[0.04] text-slate-400 group-hover/btn:bg-white/[0.07] group-hover/btn:text-slate-200",
-                            )}
-                          >
-                            <GroupIcon className="w-[15px] h-[15px]" strokeWidth={2} />
-                          </div>
-
-                          {!collapsed && (
-                            <>
+                        {collapsed ? (
+                          <>
+                            <a
+                              href={group.items[0].href}
+                              onClick={onMobileClose}
+                              className={cn(
+                                "w-full flex items-center rounded-lg transition-colors group/btn",
+                                "justify-center h-10 w-10 mx-auto",
+                                isGroupActive
+                                  ? "text-white bg-white/[0.05]"
+                                  : "text-slate-400 hover:text-white hover:bg-white/[0.04]",
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "flex items-center justify-center flex-shrink-0 w-7 h-7 rounded-md transition-colors",
+                                  isGroupActive
+                                    ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/20"
+                                    : "bg-white/[0.04] text-slate-400 group-hover/btn:bg-white/[0.07] group-hover/btn:text-slate-200",
+                                )}
+                              >
+                                <GroupIcon className="w-[15px] h-[15px]" strokeWidth={2} />
+                              </div>
+                            </a>
+                            <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-md shadow-xl ring-1 ring-white/10 opacity-0 invisible group-hover/trigger:opacity-100 group-hover/trigger:visible whitespace-nowrap z-50 transition-opacity">
+                              {group.label}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => toggleGroup(group.key)}
+                              className={cn(
+                                "w-full flex items-center rounded-lg transition-colors group/btn",
+                                "gap-2.5 px-2 py-1.5",
+                                isGroupActive
+                                  ? "text-white bg-white/[0.05]"
+                                  : "text-slate-400 hover:text-white hover:bg-white/[0.04]",
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "flex items-center justify-center flex-shrink-0 w-7 h-7 rounded-md transition-colors",
+                                  isGroupActive
+                                    ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-400/20"
+                                    : "bg-white/[0.04] text-slate-400 group-hover/btn:bg-white/[0.07] group-hover/btn:text-slate-200",
+                                )}
+                              >
+                                <GroupIcon className="w-[15px] h-[15px]" strokeWidth={2} />
+                              </div>
                               <span
                                 className={cn(
                                   "flex-1 text-left text-[12.5px] truncate",
@@ -445,15 +460,8 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                                   isOpen && "rotate-180",
                                 )}
                               />
-                            </>
-                          )}
-                        </button>
-
-                        {/* Tooltip saat collapsed */}
-                        {collapsed && (
-                          <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-medium rounded-md shadow-xl ring-1 ring-white/10 opacity-0 invisible group-hover/trigger:opacity-100 group-hover/trigger:visible whitespace-nowrap z-50 transition-opacity">
-                            {group.label}
-                          </div>
+                            </button>
+                          </>
                         )}
                       </div>
 
@@ -489,7 +497,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                                   {isActive && (
                                     <span className="absolute -left-[15px] top-1/2 -translate-y-1/2 h-[18px] w-[2px] rounded-r-full bg-gradient-to-b from-blue-400 to-cyan-400" />
                                   )}
-                                  <Link
+                                  <a
                                     href={item.href}
                                     onClick={onMobileClose}
                                     className={cn(
@@ -507,7 +515,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                                       strokeWidth={2}
                                     />
                                     <span className="truncate">{item.name}</span>
-            </Link>
+                                  </a>
                                 </li>
                               );
                             })}
