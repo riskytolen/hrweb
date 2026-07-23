@@ -65,4 +65,49 @@ export type SummaryRow = {
   total: number;
 };
 
+export type AnalysisMetrics = {
+  hadir: number;
+  terlambat: number;
+  izin: number;
+  sakit: number;
+  alpha: number;
+  libur: number;
+  cuti: number;
+  total: number;
+};
+
+export type AnalysisDivisiItem = AnalysisMetrics & {
+  divisionId: number;
+  divisionNama: string;
+  divisionColor: string;
+};
+
+export type AnalysisIndividuItem = AnalysisMetrics & {
+  employee_id: string;
+  nama: string;
+  divisionNama: string;
+  divisionColor: string;
+};
+
+export type DailyTrend = {
+  date: string;
+  hadir: number;
+  terlambat: number;
+  izin: number;
+  sakit: number;
+  alpha: number;
+  libur: number;
+  cuti: number;
+};
+
+export type FilteredRecords = {
+  employee_id: string;
+  division_id: number;
+  nama: string;
+  divisionNama: string;
+  divisionColor: string;
+  status: string;
+  tanggal: string;
+};
+
 export type { PenaltyLite };

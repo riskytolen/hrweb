@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 
-export type AttendanceViewMode = "tabel" | "kalender" | "ringkasan" | "denda" | "manual-report";
+export type AttendanceViewMode = "tabel" | "kalender" | "ringkasan" | "denda" | "manual-report" | "analisa";
 
 /**
  * Filter & pagination state untuk table view.
