@@ -346,7 +346,7 @@ export default function IncomePage() {
   // ─── Edit single row ───
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ zone_id: 0, role: "Driver", jumlah_titik: "", status_id: 0, catatan: "" });
+  const [editForm, setEditForm] = useState({ tanggal: "", employee_id: "", zone_id: 0, role: "Driver", jumlah_titik: "", status_id: 0, catatan: "" });
   const [editError, setEditError] = useState("");
 
   const [showReport, setShowReport] = useState(false);
@@ -887,6 +887,8 @@ export default function IncomePage() {
   // ─── Edit single ───
   const openEdit = (row: DeliveryRow) => {
     setEditForm({
+      tanggal: row.tanggal,
+      employee_id: row.employee_id || "",
       zone_id: row.zone_id,
       role: row.role,
       jumlah_titik: String(row.jumlah_titik),
@@ -899,10 +901,16 @@ export default function IncomePage() {
   };
 
   const handleEditSave = async () => {
-    if (!editingId || !hasPointInput(editForm.jumlah_titik) || !editForm.zone_id) return;
+    if (!editingId || !editForm.tanggal || !editForm.employee_id || !hasPointInput(editForm.jumlah_titik) || !editForm.zone_id) return;
     setEditError("");
     const row = deliveries.find((d) => d.id === editingId);
     if (!row) return;
+
+    const selectedEmp = employees.find((e) => e.id === editForm.employee_id);
+    if (!selectedEmp) {
+      setEditError("Pegawai tidak ditemukan.");
+      return;
+    }
 
     // Cek duplikat: apakah ada data lain dengan pegawai + nama titik + posisi + tanggal yang sama
     let dupQuery = supabase
@@ -910,21 +918,28 @@ export default function IncomePage() {
       .select("id")
       .eq("zone_id", editForm.zone_id)
       .eq("role", editForm.role)
-      .eq("tanggal", row.tanggal)
+      .eq("tanggal", editForm.tanggal)
+      .eq("employee_id", editForm.employee_id)
       .neq("id", editingId)
       .limit(1);
-    dupQuery = row.employee_id ? dupQuery.eq("employee_id", row.employee_id) : dupQuery.is("employee_id", null);
     const { data: existing } = await dupQuery;
 
     if (existing && existing.length > 0) {
-      setEditError(`Data ${row.employeeNama} dengan nama titik dan posisi ini sudah ada di tanggal ${row.tanggal}.`);
+      setEditError(`Data ${selectedEmp.nama} dengan nama titik dan posisi ini sudah ada di tanggal ${editForm.tanggal}.`);
       return;
     }
 
     // Re-lookup rate
     const { data: rateData } = await supabase.from("point_rates").select("rate_per_point").eq("zone_id", editForm.zone_id).eq("role", editForm.role).eq("status", "Aktif").single();
 
+    const pegawaiBerubah = row.employee_id !== editForm.employee_id;
+    const tanggalBerubah = row.tanggal !== editForm.tanggal;
+    const perluRefresh = pegawaiBerubah || tanggalBerubah;
+
     const updatePayload = {
+      tanggal: editForm.tanggal,
+      employee_id: editForm.employee_id,
+      employee_nama: selectedEmp.nama,
       zone_id: editForm.zone_id,
       role: editForm.role,
       jumlah_titik: parsePointInput(editForm.jumlah_titik),
@@ -933,39 +948,58 @@ export default function IncomePage() {
       catatan: editForm.catatan || null,
     };
 
-    const { data: updated, error: updateError } = await supabase
+    const { error: updateError } = await supabase
       .from("delivery_points")
       .update(updatePayload)
-      .eq("id", editingId)
-      .select("*, pegawai(nama), delivery_zones(nama, color), delivery_statuses(nama, kode, color)")
-      .single();
+      .eq("id", editingId);
 
-    if (updateError || !updated) {
-      showToast("error", "Gagal Memperbarui", updateError?.message || "Gagal mendapat data terbaru.");
+    if (updateError) {
+      showToast("error", "Gagal Memperbarui", updateError.message);
       return;
     }
 
-    // Update state lokal langsung tanpa re-fetch (menjaga urutan)
-    const mappedRow: DeliveryRow = {
-      ...updated,
-      employeeNama: updated.pegawai?.nama || updated.employee_nama || updated.employee_id || "?",
-      zoneNama: updated.delivery_zones?.nama || "-",
-      zoneColor: updated.delivery_zones?.color || "#3b82f6",
-      statusNama: updated.delivery_statuses?.nama || undefined,
-      statusColor: updated.delivery_statuses?.color || undefined,
-    };
-    setDeliveries((prev) => prev.map((d) => d.id === editingId ? mappedRow : d));
+    if (perluRefresh) {
+      await fetchDeliveries();
+    } else {
+      const updatedRow: DeliveryRow = {
+        ...row,
+        ...updatePayload,
+        role: updatePayload.role as "Driver" | "Helper",
+        employeeNama: selectedEmp.nama,
+        zoneNama: row.zoneNama,
+        zoneColor: row.zoneColor,
+        statusNama: row.statusNama,
+        statusColor: row.statusColor,
+      };
+      setDeliveries((prev) => prev.map((d) => d.id === editingId ? updatedRow : d));
+    }
+
+    const labelParts = [`Rekap titik`];
+    if (pegawaiBerubah) labelParts.push(`${row.employeeNama} → ${selectedEmp.nama}`);
+    else labelParts.push(selectedEmp.nama);
+    if (tanggalBerubah) labelParts.push(`(${row.tanggal} → ${editForm.tanggal})`);
+    else labelParts.push(`(${row.tanggal})`);
+    const entityLabel = labelParts.join(" ");
 
     await logAudit({
       supabase,
       action: "update",
       entityType: "delivery_points",
       entityId: editingId,
-      entityLabel: `Rekap titik ${row.employeeNama} (${row.tanggal})`,
+      entityLabel,
       oldData: { ...row } as unknown as Record<string, unknown>,
       newData: { ...row, ...updatePayload } as unknown as Record<string, unknown>,
+      metadata: {
+        ...(pegawaiBerubah ? { employee_lama: row.employee_id, employee_baru: editForm.employee_id } : {}),
+        ...(tanggalBerubah ? { tanggal_lama: row.tanggal, tanggal_baru: editForm.tanggal } : {}),
+      },
     });
-    showToast("success", "Data Diperbarui", "Input titik telah disimpan.");
+
+    const msgParts: string[] = [];
+    if (pegawaiBerubah) msgParts.push("pegawai diubah");
+    if (tanggalBerubah) msgParts.push("tanggal dipindahkan");
+    const msg = msgParts.length > 0 ? msgParts.join(" & ") : "diperbarui";
+    showToast("success", "Data Diperbarui", `Input titik telah ${msg}.`);
     setShowEditForm(false);
   };
 
@@ -3196,6 +3230,23 @@ export default function IncomePage() {
                   </div>
                 )}
                 <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal</label>
+                  <DatePicker value={editForm.tanggal} onChange={(val) => { setEditForm({ ...editForm, tanggal: val }); setEditError(""); }} placeholder="Pilih tanggal" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Pegawai</label>
+                  <Select
+                    value={editForm.employee_id}
+                    onChange={(val) => { setEditForm({ ...editForm, employee_id: val }); setEditError(""); }}
+                    options={employees.map((e) => ({
+                      value: e.id,
+                      label: e.status === "Training" ? `${e.nama}  • Training` : e.nama,
+                    }))}
+                    placeholder="Pilih pegawai"
+                    searchable
+                  />
+                </div>
+                <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Titik</label>
                   <Select
                     value={String(editForm.zone_id)}
@@ -3234,7 +3285,7 @@ export default function IncomePage() {
               </div>
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
                 <Button variant="outline" size="sm" onClick={() => setShowEditForm(false)}>Batal</Button>
-                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!hasPointInput(editForm.jumlah_titik) || !editForm.zone_id}>Simpan</Button>
+                <Button size="sm" icon={Check} onClick={handleEditSave} disabled={!editForm.tanggal || !editForm.employee_id || !hasPointInput(editForm.jumlah_titik) || !editForm.zone_id}>Simpan</Button>
               </div>
             </div>
           </div>
