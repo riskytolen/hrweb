@@ -28,6 +28,7 @@ import RouteGuard from "@/components/RouteGuard";
 
 const PAGE_SIZE = 50;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const VEHICLE_PHOTO_BUCKET = "ga-vehicle-photos";
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
 const DETAIL_FIELDS = [
@@ -205,6 +206,15 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+async function uploadVehiclePhoto(vehicleId: number, file: File) {
+  const timestamp = Date.now();
+  const path = `vehicles/${vehicleId}/${timestamp}-${sanitizeFileName(file.name)}`;
+  const { error } = await supabase.storage.from(VEHICLE_PHOTO_BUCKET).upload(path, file, { upsert: false });
+  if (error) throw new Error(error.message);
+  const { data } = supabase.storage.from(VEHICLE_PHOTO_BUCKET).getPublicUrl(path);
+  return { photo_url: `${data.publicUrl}?t=${timestamp}`, photo_path: path };
+}
+
 function formatFileSize(size?: number | null): string {
   if (!size) return "-";
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
@@ -277,6 +287,9 @@ export default function DataMobilPage() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [vehiclePhotoFile, setVehiclePhotoFile] = useState<File | null>(null);
+  const [vehiclePhotoPreview, setVehiclePhotoPreview] = useState("");
+  const [removeVehiclePhoto, setRemoveVehiclePhoto] = useState(false);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; unit: string } | null>(null);
   const [detailVehicle, setDetailVehicle] = useState<DbGaVehicle | null>(null);
@@ -321,6 +334,35 @@ export default function DataMobilPage() {
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
   }, [showForm, detailVehicle, deleteConfirm, docModalVehicle, previewMedia]);
+
+  useEffect(() => {
+    return () => {
+      if (vehiclePhotoPreview.startsWith("blob:")) URL.revokeObjectURL(vehiclePhotoPreview);
+    };
+  }, [vehiclePhotoPreview]);
+
+  const resetVehiclePhotoState = useCallback((preview = "") => {
+    setVehiclePhotoFile(null);
+    setVehiclePhotoPreview(preview);
+    setRemoveVehiclePhoto(false);
+  }, []);
+
+  const handleVehiclePhotoSelect = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setFormError("Foto unit harus berupa file gambar.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      setFormError("Ukuran foto unit maksimal 5 MB.");
+      return;
+    }
+    setFormError("");
+    setVehiclePhotoFile(file);
+    setVehiclePhotoPreview(URL.createObjectURL(file));
+    setRemoveVehiclePhoto(false);
+  };
 
   const fetchVehicles = useCallback(async () => {
     const { data, error } = await supabase
@@ -742,6 +784,7 @@ export default function DataMobilPage() {
     setForm(makeEmptyForm());
     setEditingId(null);
     setFormError("");
+    resetVehiclePhotoState();
     setShowForm(true);
   };
 
@@ -765,6 +808,7 @@ export default function DataMobilPage() {
     });
     setEditingId(v.id);
     setFormError("");
+    resetVehiclePhotoState(v.photo_url || "");
     setShowForm(true);
   };
 
@@ -803,16 +847,43 @@ export default function DataMobilPage() {
     try {
       if (editingId) {
         const { data: oldRow } = await supabase.from("ga_vehicles").select("*").eq("id", editingId).maybeSingle();
-        const { error } = await supabase.from("ga_vehicles").update(payload).eq("id", editingId);
+        const oldVehicle = oldRow as DbGaVehicle | null;
+        let finalPayload: Record<string, unknown> = { ...payload };
+        let newPhotoPath: string | null = null;
+        let photoAdded = false;
+        let photoReplaced = false;
+        let photoRemoved = false;
+
+        if (vehiclePhotoFile) {
+          const uploaded = await uploadVehiclePhoto(editingId, vehiclePhotoFile);
+          newPhotoPath = uploaded.photo_path;
+          finalPayload = { ...finalPayload, ...uploaded };
+          photoAdded = !oldVehicle?.photo_path;
+          photoReplaced = Boolean(oldVehicle?.photo_path);
+        } else if (removeVehiclePhoto && oldVehicle?.photo_path) {
+          finalPayload = { ...finalPayload, photo_url: null, photo_path: null };
+          photoRemoved = true;
+        }
+
+        const { error } = await supabase.from("ga_vehicles").update(finalPayload).eq("id", editingId);
         if (error) {
+          if (newPhotoPath) await supabase.storage.from(VEHICLE_PHOTO_BUCKET).remove([newPhotoPath]);
           if (error.message.includes("unique") || error.message.includes("duplicate")) setFormError(`Unit "${payload.unit}" sudah digunakan.`);
           else setFormError(error.message);
           setFormSaving(false);
           return;
         }
+
+        if ((photoReplaced || photoRemoved) && oldVehicle?.photo_path) {
+          await supabase.storage.from(VEHICLE_PHOTO_BUCKET).remove([oldVehicle.photo_path]);
+        }
+
         await logAudit({
           supabase, action: "update", entityType: "ga_vehicles", entityId: String(editingId),
-          entityLabel: payload.unit, oldData: oldRow as Record<string, unknown>, newData: payload,
+          entityLabel: payload.unit,
+          oldData: oldRow as Record<string, unknown>,
+          newData: finalPayload,
+          metadata: { photo_added: photoAdded, photo_replaced: photoReplaced, photo_removed: photoRemoved },
         });
         showToast("success", "Data Mobil Diperbarui", `Unit ${payload.unit} berhasil diperbarui.`);
       } else {
@@ -823,13 +894,34 @@ export default function DataMobilPage() {
           setFormSaving(false);
           return;
         }
+        let photoPayload: { photo_url: string; photo_path: string } | null = null;
+        let photoWarning = "";
+
+        if (vehiclePhotoFile && inserted?.id) {
+          try {
+            const uploaded = await uploadVehiclePhoto(inserted.id, vehiclePhotoFile);
+            const { error: photoUpdateError } = await supabase.from("ga_vehicles").update(uploaded).eq("id", inserted.id);
+            if (photoUpdateError) {
+              await supabase.storage.from(VEHICLE_PHOTO_BUCKET).remove([uploaded.photo_path]);
+              photoWarning = ` Foto gagal disimpan: ${photoUpdateError.message}`;
+            } else {
+              photoPayload = uploaded;
+            }
+          } catch (photoErr) {
+            photoWarning = ` Foto gagal diupload: ${photoErr instanceof Error ? photoErr.message : "Terjadi kesalahan."}`;
+          }
+        }
+
         await logAudit({
           supabase, action: "create", entityType: "ga_vehicles", entityId: String(inserted?.id || ""),
-          entityLabel: payload.unit, newData: payload,
+          entityLabel: payload.unit,
+          newData: { ...payload, ...(photoPayload || {}) },
+          metadata: { photo_added: Boolean(photoPayload) },
         });
-        showToast("success", "Data Mobil Ditambahkan", `Unit ${payload.unit} berhasil disimpan.`);
+        showToast("success", "Data Mobil Ditambahkan", `Unit ${payload.unit} berhasil disimpan.${photoWarning}`);
       }
       setShowForm(false);
+      resetVehiclePhotoState();
       await fetchVehicles();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Terjadi kesalahan.");
@@ -844,6 +936,8 @@ export default function DataMobilPage() {
     const { data: oldRow } = await supabase.from("ga_vehicles").select("*").eq("id", deleteConfirm.id).maybeSingle();
     const { error } = await supabase.from("ga_vehicles").delete().eq("id", deleteConfirm.id);
     if (error) { showToast("error", "Gagal Menghapus", error.message); setDeleting(false); return; }
+    const oldPhotoPath = (oldRow as DbGaVehicle | null)?.photo_path;
+    if (oldPhotoPath) await supabase.storage.from(VEHICLE_PHOTO_BUCKET).remove([oldPhotoPath]);
     await logAudit({
       supabase, action: "delete", entityType: "ga_vehicles", entityId: String(deleteConfirm.id),
       entityLabel: deleteConfirm.unit, oldData: oldRow as Record<string, unknown>,
@@ -1089,8 +1183,12 @@ export default function DataMobilPage() {
         </div>
 
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-[92px_1fr] gap-3 items-center">
-          <div className="h-24 rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center border border-primary/10">
-            <Truck className="w-12 h-12 text-primary/70" />
+          <div className="h-24 overflow-hidden rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center border border-primary/10">
+            {vehicle.photo_url ? (
+              <img src={vehicle.photo_url} alt={`Foto unit ${vehicle.unit}`} className="h-full w-full object-cover" />
+            ) : (
+              <Truck className="w-12 h-12 text-primary/70" />
+            )}
           </div>
           <div className="grid grid-cols-3 gap-1">
             {renderVehicleDocumentMetric(vehicle, "KIR", statuses.KIR)}
@@ -1296,6 +1394,39 @@ export default function DataMobilPage() {
                 </div>
                 <div className="flex-1 overflow-y-auto p-5 space-y-3">
                   {formError && <div className="bg-danger/10 border border-danger/30 rounded-xl px-3 py-2.5 text-xs text-danger">{formError}</div>}
+                  <div className="rounded-2xl border border-border bg-muted/20 p-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-24 w-32 flex-shrink-0 overflow-hidden rounded-2xl border border-border bg-card flex items-center justify-center">
+                        {vehiclePhotoPreview ? (
+                          <img src={vehiclePhotoPreview} alt="Preview foto unit" className="h-full w-full object-cover" />
+                        ) : (
+                          <Truck className="h-10 w-10 text-muted-foreground/30" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-foreground">Foto Unit</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">Gunakan foto depan/samping unit agar mudah dikenali di card. Maksimal 5 MB.</p>
+                        {removeVehiclePhoto && <p className="mt-1 text-[10px] font-semibold text-danger">Foto lama akan dihapus saat disimpan.</p>}
+                        {vehiclePhotoFile && <p className="mt-1 truncate text-[10px] font-semibold text-success">{vehiclePhotoFile.name}</p>}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-primary/90">
+                            <Upload className="h-3.5 w-3.5" />
+                            {vehiclePhotoPreview ? "Ganti Foto" : "Upload Foto"}
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => { handleVehiclePhotoSelect(e.target.files); e.target.value = ""; }} />
+                          </label>
+                          {vehiclePhotoPreview && (
+                            <button
+                              type="button"
+                              onClick={() => { setVehiclePhotoFile(null); setVehiclePhotoPreview(""); setRemoveVehiclePhoto(true); }}
+                              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-danger/40 hover:text-danger"
+                            >
+                              Hapus Foto
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">UNIT *</label>
@@ -1405,6 +1536,16 @@ export default function DataMobilPage() {
                   <button onClick={() => setDetailVehicle(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                  <div className="h-56 overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center">
+                    {detailVehicle.photo_url ? (
+                      <img src={detailVehicle.photo_url} alt={`Foto unit ${detailVehicle.unit}`} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="text-center">
+                        <Truck className="mx-auto h-16 w-16 text-primary/40" />
+                        <p className="mt-2 text-xs font-semibold text-muted-foreground">Belum ada foto unit</p>
+                      </div>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {DETAIL_FIELDS.map((f) => {
                       const value = detailVehicle[f.key] || "-";

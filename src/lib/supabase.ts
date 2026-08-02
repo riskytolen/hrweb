@@ -594,6 +594,8 @@ export interface DbGaVehicle {
   volume: string | null;
   tonase: string | null;
   suhu: string | null;
+  photo_url: string | null;
+  photo_path: string | null;
   kir_required: boolean;
   stnk_required: boolean;
   pajak_required: boolean;
