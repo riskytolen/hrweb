@@ -650,3 +650,97 @@ export interface DbUserUiPreference {
   value: Record<string, unknown>;
   updated_at: string;
 }
+
+// ─── Finance Module (standalone) ───
+
+export interface DbFinanceCompanySettings {
+  id: number;
+  company_name: string;
+  address: string | null;
+  npwp: string | null;
+  phone: string | null;
+  email: string | null;
+  ppn_default: number;
+  initial_cash_balance: number;
+  logo_url: string | null;
+  logo_path: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export interface DbFinanceClient {
+  id: number;
+  contact_name: string;
+  company_name: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFinanceInvoice {
+  id: number;
+  invoice_no: string;
+  invoice_date: string;
+  due_date: string | null;
+  client_id: number | null;
+  description: string | null;
+  subtotal: number;
+  ppn_percent: number;
+  ppn_amount: number;
+  total_amount: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  client?: DbFinanceClient | null;
+}
+
+export interface DbFinanceInvoicePayment {
+  id: number;
+  invoice_id: number;
+  payment_date: string;
+  amount: number;
+  method: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFinanceExpenseCategory {
+  id: number;
+  name: string;
+  color: string;
+  sort_order: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFinanceExpense {
+  id: number;
+  expense_date: string;
+  category_id: number | null;
+  description: string;
+  vendor: string | null;
+  method: string | null;
+  amount: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  category?: DbFinanceExpenseCategory | null;
+}
+
+export interface DbFinanceCashAdjustment {
+  id: number;
+  adjustment_date: string;
+  type: "Masuk" | "Keluar";
+  amount: number;
+  description: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}

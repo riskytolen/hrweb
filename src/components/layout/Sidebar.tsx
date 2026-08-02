@@ -30,6 +30,13 @@ import {
   Truck,
   HardDrive,
   X,
+  LineChart,
+  ReceiptText,
+  PiggyBank,
+  Landmark,
+  TrendingUpDown,
+  PieChart,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -115,6 +122,21 @@ const allSections: MenuSection[] = [
         items: [
           { name: "Petty Cash", href: "/general-affair/petty-cash", icon: Wallet, permission: "petty-cash" },
           { name: "Data Mobil", href: "/general-affair/data-mobil", icon: Truck, permission: "data-mobil" },
+        ],
+      },
+      {
+        kind: "group",
+        key: "finance",
+        label: "Finance",
+        icon: PiggyBank,
+        basePath: "/finance",
+        items: [
+          { name: "Dashboard", href: "/finance", icon: LineChart, permission: "finance" },
+          { name: "Pendapatan", href: "/finance/pendapatan", icon: ReceiptText, permission: "finance" },
+          { name: "Pengeluaran", href: "/finance/pengeluaran", icon: TrendingUpDown, permission: "finance" },
+          { name: "Arus Kas", href: "/finance/arus-kas", icon: Landmark, permission: "finance" },
+          { name: "Laba Rugi", href: "/finance/laba-rugi", icon: PieChart, permission: "finance" },
+          { name: "Pengaturan", href: "/finance/pengaturan", icon: SlidersHorizontal, permission: "finance" },
         ],
       },
     ],

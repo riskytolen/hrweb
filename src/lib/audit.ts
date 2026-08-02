@@ -59,7 +59,14 @@ export type AuditEntityType =
   | "petty_cash_units"
   | "ga_vehicles"
   | "ga_vehicle_documents"
-  | "ga_vehicle_document_settings";
+  | "ga_vehicle_document_settings"
+  | "finance_company_settings"
+  | "finance_clients"
+  | "finance_invoices"
+  | "finance_invoice_payments"
+  | "finance_expense_categories"
+  | "finance_expenses"
+  | "finance_cash_adjustments";
 
 export interface AuditLogParams {
   supabase: SupabaseClient;
@@ -226,6 +233,13 @@ export function entityLabel(entityType: string): string {
     ga_vehicles: "Data Mobil",
     ga_vehicle_documents: "Dokumen Kendaraan",
     ga_vehicle_document_settings: "Pengaturan Dokumen Kendaraan",
+    finance_company_settings: "Pengaturan Finance",
+    finance_clients: "Klien Finance",
+    finance_invoices: "Invoice Finance",
+    finance_invoice_payments: "Pembayaran Invoice",
+    finance_expense_categories: "Kategori Pengeluaran",
+    finance_expenses: "Pengeluaran Finance",
+    finance_cash_adjustments: "Penyesuaian Kas",
   };
   return labels[entityType] ?? entityType;
 }
