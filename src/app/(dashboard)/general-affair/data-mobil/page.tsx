@@ -28,7 +28,7 @@ import RouteGuard from "@/components/RouteGuard";
 
 const PAGE_SIZE = 50;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
-const VEHICLE_PHOTO_BUCKET = "ga-vehicle-photos";
+const VEHICLE_PHOTO_BUCKET = "ga-vehicle-docs";
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
 const DETAIL_FIELDS = [
@@ -208,7 +208,7 @@ function sanitizeFileName(name: string): string {
 
 async function uploadVehiclePhoto(vehicleId: number, file: File) {
   const timestamp = Date.now();
-  const path = `vehicles/${vehicleId}/${timestamp}-${sanitizeFileName(file.name)}`;
+  const path = `vehicle-photos/${vehicleId}/${timestamp}-${sanitizeFileName(file.name)}`;
   const { error } = await supabase.storage.from(VEHICLE_PHOTO_BUCKET).upload(path, file, { upsert: false });
   if (error) throw new Error(error.message);
   const { data } = supabase.storage.from(VEHICLE_PHOTO_BUCKET).getPublicUrl(path);
