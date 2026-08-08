@@ -165,17 +165,17 @@ export default function WorksheetSheetFullscreen({
     gaji_pokok: "GAPOK",
     pendapatan_titik: "GAPOK+TITIK",
     lembur: "LEMBUR",
-    extra_job: "EXTRA JOB BIAYA",
+    extra_job: "EXTRA JOB",
     uang_makan: "UANG MAKAN",
-    insentif: "INSENTIVE BIAYA",
+    insentif: "INSENTIF",
     tunjangan_jabatan: "TJH JABATAN",
     transport: "TRANSPORT",
-    tunjangan_lain: "TUNJANGAN LAIN LAIN",
-    tambahan_lain: "TAMBAHAN LAIN LAIN",
+    tunjangan_lain: "TUNJANGAN LAIN",
+    tambahan_lain: "TAMBAHAN LAIN",
     koperasi: "KOPERASI",
-    pinjaman_perusahaan: "PINJAMAN PERUSAHAAN BIAYA",
-    potongan_absen: "POTONGAN ABSEN BIAYA",
-    potongan_lain: "POTONGAN LAIN BIAYA",
+    pinjaman_perusahaan: "PINJAMAN PERUSAHAAN",
+    potongan_absen: "POTONGAN ABSEN",
+    potongan_lain: "POTONGAN LAIN",
     jht: "JHT",
     bpjs_kesehatan: "BPJS KES",
   };
@@ -450,9 +450,10 @@ export default function WorksheetSheetFullscreen({
                   <th
                     key={c.key}
                     style={getColumnStyle(c)}
+                    title={c.label}
                     className={cn(
                       c.width,
-                      "h-7 px-1 py-1 text-[10px] font-bold uppercase tracking-wider whitespace-nowrap text-center leading-tight",
+                      "px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden",
                       headerGridBorder,
                       groupBg,
                       FROZEN_COLS.has(c.key) && "sticky z-[70]",
