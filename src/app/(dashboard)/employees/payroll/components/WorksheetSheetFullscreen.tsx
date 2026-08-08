@@ -232,6 +232,7 @@ export default function WorksheetSheetFullscreen({
   const potonganCols = SHEET_COLS.filter((c) => c.group === "potongan");
   const leadingInfoCols = SHEET_COLS.filter((c) => ["_no", "_nik", "_nama", "_jabatan", "_status"].includes(c.key));
   const aksiCol = SHEET_COLS.find((c) => c.key === "_aksi");
+  const nettoCol = SHEET_COLS.find((c) => c.key === "_netto");
 
   const getResolvedColumnWidth = (col: SheetCol): number =>
     col.key === "_nama" ? nameColumnWidth : getColumnWidth(col);
@@ -429,22 +430,24 @@ export default function WorksheetSheetFullscreen({
                 PENGELUARAN/POTONGAN
               </th>
               {/* Netto group */}
-              <th className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black bg-[#b4c6e7] border-r border-b border-dotted border-slate-500/80 text-center leading-tight">
-                NETTO INCOME
-              </th>
+              {nettoCol && (
+                <th rowSpan={2} style={getColumnStyle(nettoCol)} className="px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden text-black bg-[#b4c6e7] border-r border-b border-dotted border-slate-500/80 align-middle">
+                  NETTO INCOME
+                </th>
+              )}
               {/* Rekening group */}
               <th colSpan={3} className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black bg-[#d9d9d9] border-r border-b border-dotted border-slate-500/80 text-center leading-tight">
                 REKENING
               </th>
               {aksiCol && (
-                <th style={getColumnStyle(aksiCol)} className={cn("h-6 px-1 py-0 text-[9px] font-bold uppercase tracking-wider bg-[#a6a6a6] text-black border-l border-dotted border-l-slate-500/80 leading-tight", headerGridBorder)}>
+                <th rowSpan={2} style={getColumnStyle(aksiCol)} className={cn("px-1 py-1 text-[9px] font-bold uppercase tracking-wider text-center align-middle bg-[#a6a6a6] text-black border-l border-dotted border-l-slate-500/80 leading-tight", headerGridBorder)}>
                   Aksi
                 </th>
               )}
             </tr>
             {/* Row 2: Individual columns */}
             <tr className="border-b border-dotted border-slate-500/80">
-              {SHEET_COLS.map((c) => {
+              {SHEET_COLS.filter((c) => c.key !== "_netto" && c.key !== "_aksi").map((c) => {
                 const groupBg = `${GROUP_HEADER_COLORS[c.group] ?? "bg-[#d9d9d9]"} text-black`;
                 return (
                   <th
