@@ -361,7 +361,7 @@ export default function WorksheetSheetFullscreen({
       </div>
 
       {/* ── Table wrapper ── */}
-      <div ref={tableRef} className="flex-1 overflow-auto bg-white [scrollbar-gutter:stable]">
+      <div ref={tableRef} className="payroll-sheet-scrollbar flex-1 overflow-auto bg-white [scrollbar-gutter:stable]">
         <table className="w-max min-w-full border-separate border-spacing-0 bg-white text-slate-950">
           <colgroup>
             {SHEET_COLS.map((c) => {
@@ -680,6 +680,33 @@ export default function WorksheetSheetFullscreen({
           )}
         </table>
       </div>
+
+      <style jsx>{`
+        :global(.payroll-sheet-scrollbar) {
+          scrollbar-width: auto;
+          scrollbar-color: #94a3b8 #e2e8f0;
+        }
+
+        :global(.payroll-sheet-scrollbar::-webkit-scrollbar) {
+          width: 10px;
+          height: 14px;
+        }
+
+        :global(.payroll-sheet-scrollbar::-webkit-scrollbar-track) {
+          background: #e2e8f0;
+          border-radius: 9999px;
+        }
+
+        :global(.payroll-sheet-scrollbar::-webkit-scrollbar-thumb) {
+          background: #94a3b8;
+          border: 2px solid #e2e8f0;
+          border-radius: 9999px;
+        }
+
+        :global(.payroll-sheet-scrollbar::-webkit-scrollbar-thumb:hover) {
+          background: #64748b;
+        }
+      `}</style>
     </div>
   );
 }
