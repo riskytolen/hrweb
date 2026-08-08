@@ -180,7 +180,7 @@ export default function WorksheetSheetFullscreen({
     bpjs_kesehatan: "BPJS KES",
   };
   const SHEET_COLS: SheetCol[] = [
-    { label: "DRIVER", key: "_no", group: "info", width: "w-[48px]", editable: false },
+    { label: "NO", key: "_no", group: "info", width: "w-[48px]", editable: false },
     { label: "ID", key: "_nik", group: "info", width: "w-[110px]", editable: false },
     { label: "NAMA", key: "_nama", group: "info", width: "w-auto", editable: false },
     { label: "STATUS", key: "_jabatan", group: "info", width: "w-32", editable: false },
@@ -411,14 +411,14 @@ export default function WorksheetSheetFullscreen({
             <tr className="border-b border-dotted border-slate-500/80">
               {/* Info group */}
               {leadingInfoCols.map((c) => (
-                <th key={c.key} style={getColumnStyle(c)} className={cn(
+                <th key={c.key} rowSpan={2} style={getColumnStyle(c)} title={c.label} className={cn(
                   c.width,
-                   "h-6 px-1 py-0 text-[9px] font-bold uppercase tracking-wider bg-[#a6a6a6] text-black leading-tight",
-                   headerGridBorder,
+                  "px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden align-middle bg-[#a6a6a6] text-black",
+                  headerGridBorder,
                   FROZEN_COLS.has(c.key) && "sticky z-[70]",
                   frozenDivider(c.key),
                 )}>
-                  {c.label === "Aksi" ? "" : ""}
+                  {c.label}
                 </th>
               ))}
               {/* Pendapatan group */}
@@ -447,7 +447,7 @@ export default function WorksheetSheetFullscreen({
             </tr>
             {/* Row 2: Individual columns */}
             <tr className="border-b border-dotted border-slate-500/80">
-              {SHEET_COLS.filter((c) => c.key !== "_netto" && c.key !== "_aksi").map((c) => {
+              {SHEET_COLS.filter((c) => !FROZEN_COLS.has(c.key) && c.key !== "_netto" && c.key !== "_aksi").map((c) => {
                 const groupBg = `${GROUP_HEADER_COLORS[c.group] ?? "bg-[#d9d9d9]"} text-black`;
                 return (
                   <th
