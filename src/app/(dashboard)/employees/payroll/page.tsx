@@ -1439,42 +1439,64 @@ export default function PayrollPage() {
     return { totalPendapatan, totalPotongan, netto: totalPendapatan - totalPotongan };
   };
 
-  const buildWsUpdatePayload = (id: number, vals: Record<string, number>) => {
+  const buildWsUpdatePayload = (id: number, vals: Record<string, number>, ket?: Record<string, string>) => {
     const payload: Record<string, number | string | null> = {};
     PENDAPATAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
     POTONGAN_FIELDS.filter((f) => !f.readonly).forEach((f) => { payload[f.key] = vals[f.key] || 0; });
-    const ket = wsKeterangan[id];
-    if (ket) {
+    const keterangan = ket ?? wsKeterangan[id];
+    if (keterangan) {
       [...PENDAPATAN_FIELDS, ...POTONGAN_FIELDS].forEach((f) => {
-        if (f.keteranganKey) payload[f.keteranganKey] = ket[f.keteranganKey] || null;
+        if (f.keteranganKey) payload[f.keteranganKey] = keterangan[f.keteranganKey] || null;
       });
     }
     return payload;
   };
 
-  const handleWsSaveRow = async (id: number) => {
-    if (!wsChangedCells.has(id)) return;
-    if (!canEdit) {
-      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit worksheet.");
+const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const wsSavingRowsRef = useRef<Set<number>>(new Set());
+
+  const wsLiveRef = useRef({ wsData, wsChangedCells, wsKeterangan, payrolls, canEdit });
+  wsLiveRef.current = { wsData, wsChangedCells, wsKeterangan, payrolls, canEdit };
+
+  useEffect(() => {
+    return () => {
+      wsSaveTimersRef.current.forEach((t) => clearTimeout(t));
+      wsSaveTimersRef.current.clear();
+    };
+  }, []);
+
+  const flushWsSaveRow = async (id: number, silent: boolean) => {
+    const live = wsLiveRef.current;
+    if (!live.wsChangedCells.has(id)) return;
+    if (!live.canEdit) {
+      if (!silent) showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit worksheet.");
       return;
     }
-    const vals = wsData[id];
+    if (wsSavingRowsRef.current.has(id)) {
+      const timer = setTimeout(() => flushWsSaveRow(id, silent), 400);
+      wsSaveTimersRef.current.set(id, timer);
+      return;
+    }
+    const vals = live.wsData[id];
     if (!vals) return;
 
-    const row = payrolls.find((p) => p.id === id);
+    const row = live.payrolls.find((p) => p.id === id);
     const status = row?.status;
     if (!status || status === "Final") {
-      showToast("error", "Slip Terkunci", "Slip Final tidak dapat diedit.");
+      if (!silent) showToast("error", "Slip Terkunci", "Slip Final tidak dapat diedit.");
       return;
     }
 
-    const changedCellCount = wsChangedCells.get(id)?.size || 0;
+    const savedCells = new Set(live.wsChangedCells.get(id) ?? []);
+    const changedCellCount = savedCells.size;
+    wsSavingRowsRef.current.add(id);
     setWsSaving(true);
     const { error } = await supabase
       .from("payrolls")
-      .update(buildWsUpdatePayload(id, vals))
+      .update(buildWsUpdatePayload(id, vals, live.wsKeterangan[id]))
       .eq("id", id)
       .eq("status", status);
+    wsSavingRowsRef.current.delete(id);
     setWsSaving(false);
 
     if (error) {
@@ -1498,14 +1520,41 @@ export default function PayrollPage() {
 
     setWsChangedCells((prev) => {
       const next = new Map(prev);
-      next.delete(id);
+      const cur = next.get(id);
+      if (!cur) return next;
+      const remaining = new Set([...cur].filter((c) => !savedCells.has(c)));
+      if (remaining.size > 0) next.set(id, remaining);
+      else next.delete(id);
       return next;
     });
-    showToast("success", `${statusLabel} Disimpan`, `${row?.pegawaiNama || "Pegawai"} berhasil diperbarui.`);
 
-    if (wsChangedCells.size === 1) {
-      await fetchPayrolls();
+    if (!silent) {
+      showToast("success", `${statusLabel} Disimpan`, `${row?.pegawaiNama || "Pegawai"} berhasil diperbarui.`);
+      if (live.wsChangedCells.size === 1) {
+        await fetchPayrolls();
+      }
     }
+  };
+
+  const handleWsSaveRow = (id: number): Promise<void> => {
+    flushWsSaveRow(id, false);
+    return Promise.resolve();
+  };
+
+  /** Autosave silent: Enter (immediate) atau pindah sel (debounce 450ms). */
+  const handleWsAutoSave = (id: number, immediate: boolean) => {
+    const existing = wsSaveTimersRef.current.get(id);
+    if (existing) clearTimeout(existing);
+    wsSaveTimersRef.current.delete(id);
+    if (immediate) {
+      flushWsSaveRow(id, true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      wsSaveTimersRef.current.delete(id);
+      flushWsSaveRow(id, true);
+    }, 450);
+    wsSaveTimersRef.current.set(id, timer);
   };
 
   const handleWsRefreshSources = async () => {
@@ -2016,6 +2065,7 @@ export default function PayrollPage() {
         handleWsKeteranganChange={handleWsKeteranganChange}
         wsKeterangan={wsKeterangan}
         handleWsSaveRow={handleWsSaveRow}
+        handleWsAutoSave={handleWsAutoSave}
         isCellChanged={isCellChanged}
         wsComputeTotals={wsComputeTotals}
         exportSlipPDF={exportSlipPDF}
@@ -2385,6 +2435,7 @@ export default function PayrollPage() {
             handleWsKeteranganChange={handleWsKeteranganChange}
             wsKeterangan={wsKeterangan}
             handleWsSaveRow={handleWsSaveRow}
+            handleWsAutoSave={handleWsAutoSave}
             handleWsRefreshSources={handleWsRefreshSources}
             initWsData={initWsData}
             isCellChanged={isCellChanged}

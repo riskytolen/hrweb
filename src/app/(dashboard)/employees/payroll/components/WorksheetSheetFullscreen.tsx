@@ -33,6 +33,7 @@ interface WorksheetSheetFullscreenProps {
   handleWsKeteranganChange: (id: number, fieldKey: string, value: string) => void;
   wsKeterangan: Record<number, Record<string, string>>;
   handleWsSaveRow: (id: number) => Promise<void>;
+  handleWsAutoSave: (id: number, immediate: boolean) => void;
   isCellChanged: (id: number, field: string) => boolean;
   wsComputeTotals: (id: number) => { totalPendapatan: number; totalPotongan: number; netto: number };
   exportSlipPDF: (row: PayrollRow) => void;
@@ -81,6 +82,7 @@ export default function WorksheetSheetFullscreen({
   handleWsKeteranganChange,
   wsKeterangan,
   handleWsSaveRow,
+  handleWsAutoSave,
   isCellChanged,
   wsComputeTotals,
   exportSlipPDF,
@@ -283,6 +285,26 @@ export default function WorksheetSheetFullscreen({
 
   const getGrandNetto = () => formatCurrency(displayedRows.reduce((s, r) => s + wsComputeTotals(r.id).netto, 0));
 
+  const cellRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const registerCellRef = (rowId: number, colKey: string) => (el: HTMLInputElement | null) => {
+    const key = `${rowId}|${colKey}`;
+    if (el) cellRefs.current.set(key, el);
+    else cellRefs.current.delete(key);
+  };
+
+  /** Enter: pindah ke sel dengan kolom yang sama di baris berikutnya (seperti spreadsheet). */
+  const focusNextRowCell = (rowId: number, colKey: string) => {
+    const idx = displayedRows.findIndex((r) => r.id === rowId);
+    if (idx < 0 || idx >= displayedRows.length - 1) return;
+    const nextId = displayedRows[idx + 1].id;
+    const el = cellRefs.current.get(`${nextId}|${colKey}`);
+    if (el && !el.readOnly) {
+      el.scrollIntoView({ block: "nearest", behavior: "auto" });
+      el.focus();
+      el.select();
+    }
+  };
+
   const cellInput = (row: PayrollRow, col: SheetCol) => {
     const vals = wsData[row.id];
     if (!vals) return null;
@@ -296,10 +318,17 @@ export default function WorksheetSheetFullscreen({
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
-            if (!wsSaving && !isReadOnly && col.editable) handleWsSaveRow(row.id);
+            if (!isReadOnly && col.editable) {
+              handleWsAutoSave(row.id, true);
+              focusNextRowCell(row.id, col.key);
+            }
           }
         }}
+        onBlur={() => {
+          if (!isReadOnly && col.editable) handleWsAutoSave(row.id, false);
+        }}
         readOnly={!col.editable || isReadOnly}
+        ref={registerCellRef(row.id, col.key)}
         className={cn(
           "w-full text-right text-[11px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-950 placeholder:text-slate-400 transition-all leading-tight",
           (!col.editable || isReadOnly) && "!bg-transparent text-slate-700 cursor-default border-transparent",
@@ -543,10 +572,17 @@ export default function WorksheetSheetFullscreen({
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  if (!wsSaving && !isReadOnly && c.editable) handleWsSaveRow(row.id);
+                                  if (!isReadOnly && c.editable) {
+                                    handleWsAutoSave(row.id, true);
+                                    focusNextRowCell(row.id, c.key);
+                                  }
                                 }
                               }}
+                              onBlur={() => {
+                                if (!isReadOnly && c.editable) handleWsAutoSave(row.id, false);
+                              }}
                               readOnly={!c.editable || isReadOnly}
+                              ref={registerCellRef(row.id, c.key)}
                               className={cn(
                                 "w-full text-[10px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-700 placeholder:text-slate-400 transition-all leading-tight",
                                 (!c.editable || isReadOnly) && "!bg-transparent text-slate-600 cursor-default border-transparent",
@@ -591,10 +627,17 @@ export default function WorksheetSheetFullscreen({
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  if (!wsSaving && !isReadOnly && c.editable) handleWsSaveRow(row.id);
+                                  if (!isReadOnly && c.editable) {
+                                    handleWsAutoSave(row.id, true);
+                                    focusNextRowCell(row.id, c.key);
+                                  }
                                 }
                               }}
+                              onBlur={() => {
+                                if (!isReadOnly && c.editable) handleWsAutoSave(row.id, false);
+                              }}
                               readOnly={!c.editable || isReadOnly}
+                              ref={registerCellRef(row.id, c.key)}
                               className={cn(
                                 "w-full text-[10px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-700 placeholder:text-slate-400 transition-all leading-tight",
                                 (!c.editable || isReadOnly) && "!bg-transparent text-slate-600 cursor-default border-transparent",

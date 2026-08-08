@@ -48,6 +48,7 @@ interface WorksheetEditorProps {
   handleWsKeteranganChange: (id: number, fieldKey: string, value: string) => void;
   wsKeterangan: Record<number, Record<string, string>>;
   handleWsSaveRow: (id: number) => Promise<void>;
+  handleWsAutoSave: (id: number, immediate: boolean) => void;
   handleWsRefreshSources: () => Promise<void>;
   initWsData: (rows: PayrollRow[]) => void;
   isCellChanged: (id: number, field: string) => boolean;
@@ -84,6 +85,7 @@ export default function WorksheetEditor({
   handleWsKeteranganChange,
   wsKeterangan,
   handleWsSaveRow,
+  handleWsAutoSave,
   handleWsRefreshSources,
   initWsData,
   isCellChanged,
@@ -95,6 +97,42 @@ export default function WorksheetEditor({
   onOpenBatchFill,
   canEdit,
 }: WorksheetEditorProps) {
+  const cellRefs = React.useRef<Map<string, HTMLInputElement>>(new Map());
+  const edPendingFocus = React.useRef<{ rowId: number; colKey: string } | null>(null);
+
+  React.useEffect(() => {
+    if (!edPendingFocus.current) return;
+    const t = setTimeout(() => {
+      const target = edPendingFocus.current;
+      edPendingFocus.current = null;
+      if (!target) return;
+      const el = cellRefs.current.get(`${target.rowId}|${target.colKey}`);
+      if (el && !el.readOnly) {
+        el.scrollIntoView({ block: "center", behavior: "auto" });
+        el.focus();
+        el.select();
+      }
+    }, 60);
+    return () => clearTimeout(t);
+  }, [wsExpandedId]);
+
+  /** Enter: pindah ke field yang sama di baris berikutnya (baris itu di-ekspansi dulu). */
+  const focusNextRowField = (rowId: number, colKey: string) => {
+    const idx = filtered.findIndex((r) => r.id === rowId);
+    if (idx < 0 || idx >= filtered.length - 1) return;
+    const next = filtered[idx + 1];
+    const el = cellRefs.current.get(`${next.id}|${colKey}`);
+    if (el && !el.readOnly) {
+      edPendingFocus.current = { rowId: next.id, colKey };
+      setWsExpandedId(next.id);
+    }
+  };
+
+  const registerCellRef = (rowId: number, colKey: string) => (el: HTMLInputElement | null) => {
+    const key = `${rowId}|${colKey}`;
+    if (el) cellRefs.current.set(key, el);
+    else cellRefs.current.delete(key);
+  };
   return (
     <div className="bg-card rounded-2xl border border-border overflow-hidden">
       {/* ── Header ── */}
@@ -269,10 +307,17 @@ export default function WorksheetEditor({
                                             onKeyDown={(e) => {
                                               if (e.key === "Enter") {
                                                 e.preventDefault();
-                                                if (!wsSaving && canEdit) handleWsSaveRow(row.id);
+                                                if (canEdit) {
+                                                  handleWsAutoSave(row.id, true);
+                                                  focusNextRowField(row.id, f.key);
+                                                }
                                               }
                                             }}
+                                            onBlur={() => {
+                                              if (canEdit) handleWsAutoSave(row.id, false);
+                                            }}
                                             readOnly={!canEdit}
+                                            ref={registerCellRef(row.id, f.key)}
                                             className={cn(
                                               "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
                                               !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
@@ -295,10 +340,17 @@ export default function WorksheetEditor({
                                           onKeyDown={(e) => {
                                             if (e.key === "Enter") {
                                               e.preventDefault();
-                                              if (!wsSaving && canEdit) handleWsSaveRow(row.id);
+                                              if (canEdit) {
+                                                handleWsAutoSave(row.id, true);
+                                                focusNextRowField(row.id, f.keteranganKey!);
+                                              }
                                             }
                                           }}
+                                          onBlur={() => {
+                                            if (canEdit) handleWsAutoSave(row.id, false);
+                                          }}
                                           readOnly={!canEdit}
+                                          ref={registerCellRef(row.id, f.keteranganKey!)}
                                           className={cn(
                                             "w-full text-[10px] px-2 py-1 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
                                             !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
@@ -390,10 +442,17 @@ export default function WorksheetEditor({
                                             onKeyDown={(e) => {
                                               if (e.key === "Enter") {
                                                 e.preventDefault();
-                                                if (!wsSaving && canEdit) handleWsSaveRow(row.id);
+                                                if (canEdit) {
+                                                  handleWsAutoSave(row.id, true);
+                                                  focusNextRowField(row.id, f.key);
+                                                }
                                               }
                                             }}
+                                            onBlur={() => {
+                                              if (canEdit) handleWsAutoSave(row.id, false);
+                                            }}
                                             readOnly={!canEdit}
+                                            ref={registerCellRef(row.id, f.key)}
                                             className={cn(
                                               "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
                                               !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
@@ -416,10 +475,17 @@ export default function WorksheetEditor({
                                           onKeyDown={(e) => {
                                             if (e.key === "Enter") {
                                               e.preventDefault();
-                                              if (!wsSaving && canEdit) handleWsSaveRow(row.id);
+                                              if (canEdit) {
+                                                handleWsAutoSave(row.id, true);
+                                                focusNextRowField(row.id, f.keteranganKey!);
+                                              }
                                             }
                                           }}
+                                          onBlur={() => {
+                                            if (canEdit) handleWsAutoSave(row.id, false);
+                                          }}
                                           readOnly={!canEdit}
+                                          ref={registerCellRef(row.id, f.keteranganKey!)}
                                           className={cn(
                                             "w-full text-[10px] px-2 py-1 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
                                             !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
