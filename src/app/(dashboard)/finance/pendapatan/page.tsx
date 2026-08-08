@@ -50,6 +50,7 @@ export default function FinancePendapatanPage() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [clients, setClients] = useState<DbFinanceClient[]>([]);
+  const [ppnDefault, setPpnDefault] = useState(0);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Semua");
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -100,10 +101,11 @@ export default function FinancePendapatanPage() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: invData }, { data: payData }, { data: clData }] = await Promise.all([
+      const [{ data: invData }, { data: payData }, { data: clData }, { data: settingsData }] = await Promise.all([
         supabase.from("finance_invoices").select("*, client:finance_clients(*)").order("invoice_date", { ascending: false }).order("id", { ascending: false }),
         supabase.from("finance_invoice_payments").select("*, invoice:finance_invoices(id, invoice_no, total_amount)").order("payment_date", { ascending: false }).order("id", { ascending: false }),
         supabase.from("finance_clients").select("*").order("company_name", { ascending: true }),
+        supabase.from("finance_company_settings").select("ppn_default").eq("id", 1).maybeSingle(),
       ]);
       if (invData) {
         const payMap = new Map<number, DbFinanceInvoicePayment[]>();
@@ -119,6 +121,7 @@ export default function FinancePendapatanPage() {
       }
       if (payData) setPayments(payData as PaymentRow[]);
       if (clData) setClients(clData as DbFinanceClient[]);
+      if (settingsData) setPpnDefault(Number(settingsData.ppn_default) || 0);
     } catch {
       addToast("error", "Gagal memuat data pendapatan.");
     } finally {
@@ -140,7 +143,7 @@ export default function FinancePendapatanPage() {
       .filter((n) => n.startsWith(`INV-${monthPrefix}`))
       .map((n) => parseInt(n.split("-").pop() || "0", 10))
       .reduce((a, b) => Math.max(a, b), 0);
-    setInvForm({ invoice_no: generateInvoiceNo(localDateStr(), last), invoice_date: localDateStr(), due_date: "", client_id: clients[0]?.id || 0, description: "", subtotal: 0, ppn_percent: 0, notes: "" });
+    setInvForm({ invoice_no: generateInvoiceNo(localDateStr(), last), invoice_date: localDateStr(), due_date: "", client_id: clients[0]?.id || 0, description: "", subtotal: 0, ppn_percent: ppnDefault, notes: "" });
     setShowInvForm(true);
   };
 
