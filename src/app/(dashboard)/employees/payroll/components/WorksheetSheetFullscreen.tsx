@@ -139,11 +139,18 @@ export default function WorksheetSheetFullscreen({
 
   // ─── Group header colors ───
   const GROUP_HEADER_COLORS: Record<string, string> = {
-    info: "bg-[#a6a6a6]",
-    pendapatan: "bg-[#c6efce]",
-    potongan: "bg-[#ffc7ce]",
-    netto: "bg-[#b4c6e7]",
-    rekening: "bg-[#d9d9d9]",
+    info: "bg-[#1f2937] text-white",
+    pendapatan: "bg-[#047857] text-white",
+    potongan: "bg-[#be123c] text-white",
+    netto: "bg-[#1d4ed8] text-white",
+    rekening: "bg-[#475569] text-white",
+  };
+  const COLUMN_HEADER_COLORS: Record<string, string> = {
+    info: "bg-[#e2e8f0] text-[#334155]",
+    pendapatan: "bg-[#d1fae5] text-[#065f46]",
+    potongan: "bg-[#ffe4e6] text-[#9f1239]",
+    netto: "bg-[#dbeafe] text-[#1e40af]",
+    rekening: "bg-[#e2e8f0] text-[#334155]",
   };
 
   // Lock body scroll + Esc handler
@@ -250,9 +257,9 @@ export default function WorksheetSheetFullscreen({
 
   const isKeteranganCol = (key: string) => key.endsWith("_keterangan");
   const gridBorder = "border-r border-b border-dotted border-slate-500/80";
-  const headerGridBorder = "border-r border-b border-dotted border-slate-500/80";
+  const headerGridBorder = "border-r border-b border-slate-400/60";
   const footerGridBorder = "border-r border-t border-dotted border-slate-500/80";
-  const frozenDivider = (key: string) => key === "_status" && "border-r-2 border-dotted border-r-slate-600";
+  const frozenDivider = (key: string) => key === "_status" && "border-r-2 border-solid border-r-slate-600";
 
   const getCellValue = (row: PayrollRow, col: SheetCol): string => {
     if (col.key === "_no") return "";
@@ -408,12 +415,13 @@ export default function WorksheetSheetFullscreen({
           {/* ── Group header row ── */}
           <thead className="sticky top-0 z-50 shadow-[0_3px_10px_-6px_rgba(15,23,42,0.8)]">
             {/* Row 1: Group labels */}
-            <tr className="border-b border-dotted border-slate-500/80">
+            <tr className="border-b border-slate-400/60">
               {/* Info group */}
               {leadingInfoCols.map((c) => (
                 <th key={c.key} rowSpan={2} style={getColumnStyle(c)} title={c.label} className={cn(
                   c.width,
-                  "px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden align-middle bg-[#a6a6a6] text-black",
+                  "px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden align-middle",
+                  GROUP_HEADER_COLORS.info,
                   headerGridBorder,
                   FROZEN_COLS.has(c.key) && "sticky z-[70]",
                   frozenDivider(c.key),
@@ -422,33 +430,33 @@ export default function WorksheetSheetFullscreen({
                 </th>
               ))}
               {/* Pendapatan group */}
-              <th colSpan={pendapatanCols.length} className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black bg-[#c6efce] border-r border-b border-dotted border-slate-500/80 text-center leading-tight">
+              <th colSpan={pendapatanCols.length} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#047857] text-white border-r border-b border-slate-400/60 text-center leading-tight">
                 PENDAPATAN
               </th>
               {/* Potongan group */}
-              <th colSpan={potonganCols.length} className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black bg-[#ffc7ce] border-r border-b border-dotted border-slate-500/80 text-center leading-tight">
+              <th colSpan={potonganCols.length} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#be123c] text-white border-r border-b border-slate-400/60 text-center leading-tight">
                 PENGELUARAN/POTONGAN
               </th>
               {/* Netto group */}
               {nettoCol && (
-                <th rowSpan={2} style={getColumnStyle(nettoCol)} className="px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden text-black bg-[#b4c6e7] border-r border-b border-dotted border-slate-500/80 align-middle">
+                <th rowSpan={2} style={getColumnStyle(nettoCol)} className="px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden bg-[#1d4ed8] text-white border-r border-b border-slate-400/60 align-middle">
                   NETTO INCOME
                 </th>
               )}
               {/* Rekening group */}
-              <th colSpan={3} className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black bg-[#d9d9d9] border-r border-b border-dotted border-slate-500/80 text-center leading-tight">
+              <th colSpan={3} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#475569] text-white border-r border-b border-slate-400/60 text-center leading-tight">
                 REKENING
               </th>
               {aksiCol && (
-                <th rowSpan={2} style={getColumnStyle(aksiCol)} className={cn("px-1 py-1 text-[9px] font-bold uppercase tracking-wider text-center align-middle bg-[#a6a6a6] text-black border-l border-dotted border-l-slate-500/80 leading-tight", headerGridBorder)}>
+                <th rowSpan={2} style={getColumnStyle(aksiCol)} className={cn("px-1 py-1 text-[9px] font-bold uppercase tracking-wider text-center align-middle bg-[#334155] text-white border-l border-solid border-l-slate-400/60 leading-tight", headerGridBorder)}>
                   Aksi
                 </th>
               )}
             </tr>
             {/* Row 2: Individual columns */}
-            <tr className="border-b border-dotted border-slate-500/80">
+            <tr className="border-b border-slate-400/60">
               {SHEET_COLS.filter((c) => !FROZEN_COLS.has(c.key) && c.key !== "_netto" && c.key !== "_aksi").map((c) => {
-                const groupBg = `${GROUP_HEADER_COLORS[c.group] ?? "bg-[#d9d9d9]"} text-black`;
+                const groupBg = COLUMN_HEADER_COLORS[c.group] ?? "bg-[#e2e8f0] text-[#334155]";
                 return (
                   <th
                     key={c.key}
