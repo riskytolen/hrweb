@@ -266,6 +266,12 @@ export default function WorksheetEditor({
                                             onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
                                             placeholder="0"
                                             onClick={(e) => e.stopPropagation()}
+                                            onKeyDown={(e) => {
+                                              if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                if (!wsSaving && canEdit) handleWsSaveRow(row.id);
+                                              }
+                                            }}
                                             readOnly={!canEdit}
                                             className={cn(
                                               "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
@@ -286,6 +292,12 @@ export default function WorksheetEditor({
                                           onChange={(e) => handleWsKeteranganChange(row.id, f.keteranganKey!, e.target.value)}
                                           placeholder="Keterangan..."
                                           onClick={(e) => e.stopPropagation()}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                              e.preventDefault();
+                                              if (!wsSaving && canEdit) handleWsSaveRow(row.id);
+                                            }
+                                          }}
                                           readOnly={!canEdit}
                                           className={cn(
                                             "w-full text-[10px] px-2 py-1 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
@@ -375,6 +387,12 @@ export default function WorksheetEditor({
                                             onChange={(e) => handleWsChange(row.id, f.key, e.target.value)}
                                             placeholder="0"
                                             onClick={(e) => e.stopPropagation()}
+                                            onKeyDown={(e) => {
+                                              if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                if (!wsSaving && canEdit) handleWsSaveRow(row.id);
+                                              }
+                                            }}
                                             readOnly={!canEdit}
                                             className={cn(
                                               "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
@@ -395,6 +413,12 @@ export default function WorksheetEditor({
                                           onChange={(e) => handleWsKeteranganChange(row.id, f.keteranganKey!, e.target.value)}
                                           placeholder="Keterangan..."
                                           onClick={(e) => e.stopPropagation()}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                              e.preventDefault();
+                                              if (!wsSaving && canEdit) handleWsSaveRow(row.id);
+                                            }
+                                          }}
                                           readOnly={!canEdit}
                                           className={cn(
                                             "w-full text-[10px] px-2 py-1 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",

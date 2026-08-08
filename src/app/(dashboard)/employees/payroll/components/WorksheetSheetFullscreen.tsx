@@ -293,6 +293,12 @@ export default function WorksheetSheetFullscreen({
         onChange={(e) => handleWsChange(row.id, col.key, e.target.value)}
         placeholder="0"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (!wsSaving && !isReadOnly && col.editable) handleWsSaveRow(row.id);
+          }
+        }}
         readOnly={!col.editable || isReadOnly}
         className={cn(
           "w-full text-right text-[11px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-950 placeholder:text-slate-400 transition-all leading-tight",
@@ -534,6 +540,12 @@ export default function WorksheetSheetFullscreen({
                               onChange={(e) => handleWsKeteranganChange(row.id, c.key, e.target.value)}
                               placeholder="Ket."
                               onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  if (!wsSaving && !isReadOnly && c.editable) handleWsSaveRow(row.id);
+                                }
+                              }}
                               readOnly={!c.editable || isReadOnly}
                               className={cn(
                                 "w-full text-[10px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-700 placeholder:text-slate-400 transition-all leading-tight",
@@ -576,6 +588,12 @@ export default function WorksheetSheetFullscreen({
                               onChange={(e) => handleWsKeteranganChange(row.id, c.key, e.target.value)}
                               placeholder="Ket."
                               onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  if (!wsSaving && !isReadOnly && c.editable) handleWsSaveRow(row.id);
+                                }
+                              }}
                               readOnly={!c.editable || isReadOnly}
                               className={cn(
                                 "w-full text-[10px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-700 placeholder:text-slate-400 transition-all leading-tight",
