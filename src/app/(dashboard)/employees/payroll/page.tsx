@@ -64,12 +64,6 @@ const CUT_OFF_DAY = 7;
 const SUPABASE_PAGE_SIZE = 1000;
 const PAYROLL_PERIOD_STORAGE_KEY = "hrweb.payroll.periodKey";
 
-/** Field input manual (bukan autorecomputed) yang boleh disalin antar periode. */
-const MANUAL_INPUT_FIELDS: FieldDef[] = [
-  ...PENDAPATAN_FIELDS.filter((f) => !f.readonly),
-  ...POTONGAN_FIELDS.filter((f) => !f.readonly),
-];
-
 type SupabasePagedResult<T> = {
   data: T[] | null;
   error: { message?: string } | null;
@@ -2421,80 +2415,33 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         return;
       }
 
-      // ── Ambil input manual periode sumber (status Final) ──
-      const selectColumns = [...new Set([
-        "employee_id",
-        ...MANUAL_INPUT_FIELDS.map((f) => f.key),
-        ...MANUAL_INPUT_FIELDS.map((f) => f.keteranganKey).filter((k): k is string => Boolean(k)),
-      ])];
-      const { data: prevRows, error: prevErr } = await supabase
-        .from("payrolls")
-        .select(selectColumns.join(","))
-        .eq("periode", prevKey)
-        .eq("status", "Final");
-      if (prevErr || !prevRows) {
-        showToast("error", "Gagal Memuat Data Sumber", (prevErr as { message?: string } | null)?.message || "Data periode sebelumnya tidak dapat dimuat.");
+      // RPC transaksional: salin hanya field manual yang masih kosong, tanpa menyentuh kolom generated.
+      const { data: copyResult, error: copyErr } = await supabase.rpc(
+        "copy_payroll_manual_inputs_from_previous",
+        { p_target_period: periodKey, p_source_period: prevKey }
+      );
+      if (copyErr) {
+        const msg = copyErr.message || "";
+        if (msg.includes("source_period_empty")) {
+          showToast("error", "Periode Sumber Belum Diproses", `Periode ${formatPeriodLabel(prevKey)} belum memiliki data payroll. Input manual tidak dapat disalin.`);
+        } else if (msg.includes("source_period_has_worksheet")) {
+          showToast("error", "Periode Sumber Belum Selesai", `Periode ${formatPeriodLabel(prevKey)} masih memiliki Worksheet. Finalisasi seluruh slip terlebih dahulu.`);
+        } else if (msg.includes("source_period_has_draft")) {
+          showToast("error", "Periode Sumber Belum Final", `Periode ${formatPeriodLabel(prevKey)} masih memiliki slip Draft. Finalisasi seluruh slip sebelum menyalin input.`);
+        } else {
+          showToast("error", "Gagal Menyalin", copyErr.message || "Input manual tidak dapat disalin dari periode sebelumnya.");
+        }
         return;
       }
-      const prevMap = new Map<string, Record<string, number | string | null>>();
-      prevRows.forEach((r) => {
-        const rec = r as unknown as Record<string, number | string | null>;
-        if (typeof rec.employee_id === "string") prevMap.set(rec.employee_id, rec);
-      });
 
-      // ── Isi field manual target yang masih kosong dari sumber (match by employee_id) ──
-      let updated = 0;
-      let failed = 0;
-      let tanpaSumber = 0;
-      let sudahTerisi = 0;
-      for (const row of worksheetRows) {
-        const prev = prevMap.get(row.employee_id);
-        if (!prev) {
-          tanpaSumber += 1;
-          continue;
-        }
-
-        const tgt = row as unknown as Record<string, unknown>;
-        const payload: Record<string, number | string | null> = {};
-        const values: Record<string, number> = {};
-        [...PENDAPATAN_FIELDS, ...POTONGAN_FIELDS].forEach((f) => {
-          values[f.key] = Number(tgt[f.key] || 0);
-        });
-
-        MANUAL_INPUT_FIELDS.forEach((f) => {
-          if (f.keteranganKey) {
-            const targetKet = tgt[f.keteranganKey];
-            const sourceKet = prev[f.keteranganKey];
-            if (!targetKet && sourceKet) payload[f.keteranganKey] = String(sourceKet);
-            return;
-          }
-          const targetVal = Number(tgt[f.key] || 0);
-          const sourceVal = Number(prev[f.key] || 0);
-          if (targetVal === 0 && sourceVal > 0) {
-            payload[f.key] = sourceVal;
-            values[f.key] = sourceVal;
-          }
-        });
-
-        if (Object.keys(payload).length === 0) {
-          sudahTerisi += 1;
-          continue;
-        }
-
-        const totalPendapatan = PENDAPATAN_FIELDS.reduce((s, f) => s + values[f.key], 0);
-        const totalPotongan = POTONGAN_FIELDS.reduce((s, f) => s + values[f.key], 0);
-        payload.total_pendapatan = totalPendapatan;
-        payload.total_potongan = totalPotongan;
-        payload.netto = totalPendapatan - totalPotongan;
-
-        const { error } = await supabase
-          .from("payrolls")
-          .update(payload)
-          .eq("id", row.id)
-          .eq("status", "Worksheet");
-        if (error) failed += 1;
-        else updated += 1;
-      }
+      const stats = (Array.isArray(copyResult) ? copyResult[0] : copyResult) as {
+        updated_count?: number;
+        without_source_count?: number;
+        unchanged_count?: number;
+      } | null;
+      const updated = Number(stats?.updated_count || 0);
+      const tanpaSumber = Number(stats?.without_source_count || 0);
+      const sudahTerisi = Number(stats?.unchanged_count || 0);
 
       if (updated > 0) {
         await logAudit({
@@ -2506,6 +2453,8 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
             periode: periodKey,
             periode_sumber: prevKey,
             jumlah_slip: updated,
+            jumlah_tanpa_sumber: tanpaSumber,
+            jumlah_tanpa_perubahan: sudahTerisi,
           },
         });
       }
@@ -2514,14 +2463,15 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       setWsLemburBreakdown({});
       await Promise.all([fetchEmployees(), fetchPayrolls()]);
 
-      if (failed > 0) {
-        showToast("error", "Sebagian Gagal", `${updated} slip berhasil disalin, ${failed} slip gagal diperbarui.`);
-      } else if (updated === 0 && sudahTerisi === worksheetRows.length) {
+      if (updated === 0 && tanpaSumber > 0 && sudahTerisi === 0) {
+        showToast("error", "Tidak Ada Data Sumber Cocok", `${tanpaSumber} pegawai Worksheet tidak memiliki payroll Final pada periode sumber.`);
+      } else if (updated === 0 && sudahTerisi > 0) {
         showToast("success", "Tidak Ada Perubahan", "Seluruh input manual pada periode ini sudah terisi.");
       } else {
         const parts: string[] = [];
         if (updated > 0) parts.push(`${updated} slip diperbarui dari periode sebelumnya`);
         if (tanpaSumber > 0) parts.push(`${tanpaSumber} pegawai tidak memiliki data di periode sumber`);
+        if (sudahTerisi > 0) parts.push(`${sudahTerisi} slip sudah terisi`);
         showToast("success", "Input Manual Disalin", parts.length > 0 ? `${parts.join(", ")}.` : "Tidak ada perubahan yang dilakukan.");
       }
     } catch (e) {
