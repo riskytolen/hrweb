@@ -543,6 +543,7 @@ export default function PayrollPage() {
           catatan: null,
           extra_job_keterangan: null,
           insentif_keterangan: null,
+          koperasi_keterangan: null,
           pinjaman_perusahaan_keterangan: null,
           potongan_lain_keterangan: null,
         };
@@ -2326,6 +2327,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
           catatan: null,
           extra_job_keterangan: null,
           insentif_keterangan: null,
+          koperasi_keterangan: null,
           pinjaman_perusahaan_keterangan: null,
           potongan_lain_keterangan: null,
           last_recomputed_at: new Date().toISOString(),

@@ -20,7 +20,7 @@ export const PENDAPATAN_FIELDS: FieldDef[] = [
 ];
 
 export const POTONGAN_FIELDS: FieldDef[] = [
-  { key: "koperasi", label: "Koperasi" },
+  { key: "koperasi", label: "Koperasi", keteranganKey: "koperasi_keterangan" },
   { key: "pinjaman_perusahaan", label: "Pinjaman Perusahaan", keteranganKey: "pinjaman_perusahaan_keterangan" },
   { key: "potongan_absen", label: "Potongan Absen", readonly: true },
   { key: "potongan_lain", label: "Potongan Lain", keteranganKey: "potongan_lain_keterangan" },

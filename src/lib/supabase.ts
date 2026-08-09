@@ -185,6 +185,7 @@ export interface DbPayroll {
   total_pendapatan: number;
   // Potongan
   koperasi: number;
+  koperasi_keterangan: string | null;
   pinjaman_perusahaan: number;
   pinjaman_perusahaan_keterangan: string | null;
   potongan_absen: number;
