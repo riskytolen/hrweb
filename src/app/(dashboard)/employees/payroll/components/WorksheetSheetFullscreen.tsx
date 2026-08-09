@@ -149,6 +149,8 @@ export default function WorksheetSheetFullscreen({
   const [selectMode, setSelectMode] = useState(false);
   const [selIds, setSelIds] = useState<Set<string>>(new Set());
   const selAnchor = useRef<string | null>(null);
+  /** Row yang diklik terakhir (highlight biru). */
+  const [activeRowId, setActiveRowId] = useState<number | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [groupNama, setGroupNama] = useState("");
   const [groupWarna, setGroupWarna] = useState("#3b82f6");
@@ -969,22 +971,26 @@ export default function WorksheetSheetFullscreen({
               const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null } | undefined;
               const g = groupById(groupOf(row.employee_id));
               const isSelected = selIds.has(row.employee_id);
-              const rowBg = isChanged ? "bg-amber-50" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
-              const frozenBg = isChanged ? "bg-amber-50" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
+              const isActive = activeRowId === row.id;
+              const rowBg = isChanged ? "bg-amber-50" : isActive ? "bg-blue-100" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
+              const frozenBg = isChanged ? "bg-amber-50" : isActive ? "bg-blue-100" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
               return (
                 <tr
                   key={row.id}
                   onClick={(e) => {
-                    if (selectMode && !(e.target as HTMLElement).closest("button, input, a")) toggleSelect(row.employee_id, e.shiftKey, idx);
+                    if ((e.target as HTMLElement).closest("button, input, a")) return;
+                    setActiveRowId(row.id);
+                    if (selectMode) toggleSelect(row.employee_id, e.shiftKey, idx);
                   }}
                   onDragOver={(e) => handleRowDragOver(e, idx)}
                   onDrop={(e) => handleRowDrop(e, row, idx)}
                   onDragEnd={resetDrag}
                   className={cn(
-                    "border-b border-dotted border-slate-500/80 text-slate-950 transition-colors",
+                    "border-b border-dotted border-slate-500/80 text-slate-950 transition-colors cursor-pointer",
                     rowBg,
                     dragActive && dragIdx === idx && "opacity-50",
                     dragIndicator(idx),
+                    isActive && "shadow-[inset_0_0_0_1.5px_rgba(37,99,235,0.45)]",
                     isSelected && "!bg-blue-50/80",
                   )}
                 >

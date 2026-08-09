@@ -99,6 +99,8 @@ export default function WorksheetEditor({
 }: WorksheetEditorProps) {
   const cellRefs = React.useRef<Map<string, HTMLInputElement>>(new Map());
   const edPendingFocus = React.useRef<{ rowId: number; colKey: string } | null>(null);
+  /** Row yang diklik terakhir (highlight biru). */
+  const [edActiveRowId, setEdActiveRowId] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     if (!edPendingFocus.current) return;
@@ -228,16 +230,21 @@ export default function WorksheetEditor({
               const isChanged = wsChangedCells.has(row.id);
               const changedCellCount = wsChangedCells.get(row.id)?.size || 0;
               const isEven = idx % 2 === 0;
+              const isActiveRow = edActiveRowId === row.id;
               return (
                 <React.Fragment key={row.id}>
                   {/* Main row */}
                   <tr
                     className={cn(
                       "border-b transition-colors cursor-pointer",
-                      isChanged ? "bg-amber-50/60 dark:bg-amber-500/[0.04] border-amber-200/50 dark:border-amber-500/10" : isEven ? "bg-card border-border/40" : "bg-muted/20 border-border/40",
-                      wsExpandedId === row.id ? "border-b-0" : "hover:bg-primary/[0.03]"
+                      isChanged ? "bg-amber-50/60 dark:bg-amber-500/[0.04] border-amber-200/50 dark:border-amber-500/10" : isActiveRow ? "bg-blue-50 dark:bg-blue-500/[0.08] border-blue-200/60 dark:border-blue-500/15" : isEven ? "bg-card border-border/40" : "bg-muted/20 border-border/40",
+                      wsExpandedId === row.id ? "border-b-0" : "hover:bg-primary/[0.03]",
+                      isActiveRow && "shadow-[inset_3px_0_0_0_rgba(37,99,235,0.55)]",
                     )}
-                    onClick={() => setWsExpandedId(wsExpandedId === row.id ? null : row.id)}
+                    onClick={() => {
+                      setEdActiveRowId(row.id);
+                      setWsExpandedId(wsExpandedId === row.id ? null : row.id);
+                    }}
                   >
                     <td className="px-4 py-3 text-[10px] text-muted-foreground">{idx + 1}</td>
                     <td className="px-4 py-3">
