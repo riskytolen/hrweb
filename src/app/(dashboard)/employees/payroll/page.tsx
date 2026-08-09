@@ -11,7 +11,6 @@ import {
   ChevronRight,
   Users,
   FileText,
-  FileSpreadsheet,
   Download,
   Trash2,
   Zap,
@@ -52,7 +51,7 @@ import BreakdownAbsen, { type AbsenItem } from "./components/BreakdownAbsen";
 import BreakdownLembur, { type LemburItem } from "./components/BreakdownLembur";
 import WorksheetEditor from "./components/WorksheetEditor";
 import WorksheetSheetFullscreen from "./components/WorksheetSheetFullscreen";
-import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type FieldDef, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
+import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
@@ -1082,124 +1081,7 @@ export default function PayrollPage() {
     setSelectedIds(new Set());
   };
 
-// ─── Export Excel (xlsx) ───
-  const groupNameOf = useCallback((employeeId: string): string => {
-    const gid = employeeGroups.get(employeeId);
-    if (gid === undefined) return "";
-    return groups.find((g) => g.id === gid)?.nama ?? "";
-  }, [groups, employeeGroups]);
-
-  const exportExcel = async (rowsToExport: PayrollRow[] = orderedPayrolls, scopeLabel?: string) => {
-    if (rowsToExport.length === 0) {
-      showToast("error", "Tidak Ada Data", "Tidak ada slip untuk di-export.");
-      return;
-    }
-    try {
-      const XLSX = await import("xlsx");
-      const periodLabel = formatPeriodLabel(periodKey);
-      const filenameScope = scopeLabel ? `${scopeLabel}_` : "Slip_Gaji_";
-      const filename = `${filenameScope}${periodLabel.replace(/\s/g, "_")}.xlsx`;
-
-      const flatHeaders = (fields: FieldDef[]): string[] =>
-        fields.flatMap((f) => f.keteranganKey ? [f.label, `Ket. ${f.label}`] : [f.label]);
-      const flatValues = (p: PayrollRow, fields: FieldDef[]): (string | number)[] =>
-        fields.flatMap((f) => f.keteranganKey
-          ? [(p as unknown as Record<string, number>)[f.key] || 0, (p as unknown as Record<string, string | null>)[f.keteranganKey] || ""]
-          : [(p as unknown as Record<string, number>)[f.key] || 0]
-        );
-      const flatTotals = (fields: FieldDef[]): (string | number)[] =>
-        fields.flatMap((f) => f.keteranganKey
-          ? [rowsToExport.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0), ""]
-          : [rowsToExport.reduce((s, p) => s + ((p as unknown as Record<string, number>)[f.key] || 0), 0)]
-        );
-
-      const headers = [
-        "No", "ID Pegawai", "Nama", "Kelompok", "Periode",
-        ...flatHeaders(PENDAPATAN_FIELDS),
-        "Total Pendapatan",
-        ...flatHeaders(POTONGAN_FIELDS),
-        "Total Potongan",
-        "Netto", "Status", "Catatan",
-      ];
-
-      const rows = rowsToExport.map((p, idx) => [
-        idx + 1,
-        p.employee_id,
-        p.pegawaiNama || "-",
-        groupNameOf(p.employee_id),
-        periodLabel,
-        ...flatValues(p, PENDAPATAN_FIELDS),
-        p.total_pendapatan,
-        ...flatValues(p, POTONGAN_FIELDS),
-        p.total_potongan,
-        p.netto,
-        p.status,
-        p.catatan || "",
-      ]);
-
-      // Total row
-      const totalRow = [
-        "", "", "TOTAL", "", "",
-        ...flatTotals(PENDAPATAN_FIELDS),
-        rowsToExport.reduce((s, p) => s + p.total_pendapatan, 0),
-        ...flatTotals(POTONGAN_FIELDS),
-        rowsToExport.reduce((s, p) => s + p.total_potongan, 0),
-        rowsToExport.reduce((s, p) => s + p.netto, 0),
-        "", "",
-      ];
-
-      const wsData = [headers, ...rows, [], totalRow];
-      const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-      // Auto width column heuristic
-      const colWidths = headers.map((h, i) => {
-        let max = String(h).length;
-        rows.forEach((r) => {
-          const v = String(r[i] ?? "");
-          if (v.length > max) max = v.length;
-        });
-        return { wch: Math.min(Math.max(max + 2, 8), 30) };
-      });
-      ws["!cols"] = colWidths;
-
-      // Format Rupiah: kolom angka mulai setelah kolom identitas (No, ID, Nama, Kelompok, Periode)
-      // Excel format: "#,##0"
-      const rupCols: number[] = [];
-      for (let i = 5; i < headers.length - 2; i++) rupCols.push(i);
-      const range = XLSX.utils.decode_range(ws["!ref"]!);
-      for (let R = 1; R <= range.e.r; ++R) {
-        for (const C of rupCols) {
-          const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
-          const cell = ws[cellRef];
-          if (cell && typeof cell.v === "number") {
-            cell.z = "#,##0";
-          }
-        }
-      }
-
-      // Freeze header
-      ws["!freeze"] = { xSplit: 3, ySplit: 1 };
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Slip Gaji");
-      XLSX.writeFile(wb, filename);
-
-      showToast("success", "Export Excel", `${rowsToExport.length} slip diekspor ke ${filename}.`);
-
-      await logAudit({
-        supabase,
-        action: "export",
-        entityType: "payrolls",
-        entityLabel: `Export Excel ${periodLabel}`,
-        metadata: { periode: periodKey, jumlah_slip: rowsToExport.length, filename, scope: scopeLabel || "semua" },
-      });
-    } catch (err) {
-      console.error("[Payroll] Export Excel failed:", err);
-      showToast("error", "Gagal Export", err instanceof Error ? err.message : "Tidak dapat membuat file Excel.");
-    }
-  };
-
-  // ─── Export CSV Gaji Pokok ───
+// ─── Export CSV Gaji Pokok ───
   const exportGapokCsv = async () => {
     const data = gapokFiltered;
     if (data.length === 0) {
@@ -1254,188 +1136,6 @@ export default function PayrollPage() {
       console.error("[Payroll] Export CSV Gaji Pokok failed:", err);
       showToast("error", "Gagal Export", err instanceof Error ? err.message : "Tidak dapat membuat file CSV.");
     }
-  };
-
-  // ─── Export PDF slip gaji ───
-  const exportSlipPDF = async (payroll: PayrollRow) => {
-    const { default: jsPDF } = await import("jspdf");
-    const { default: autoTable } = await import("jspdf-autotable");
-
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 15;
-
-    // ── Company header ──
-    doc.setFontSize(18);
-    doc.setFont("helvetica", "bold");
-    doc.text("JAMSLOGISTIC", pageWidth / 2, 20, { align: "center" });
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text("Slip Gaji Karyawan", pageWidth / 2, 26, { align: "center" });
-
-    // Separator line
-    doc.setDrawColor(59, 130, 246);
-    doc.setLineWidth(0.8);
-    doc.line(margin, 30, pageWidth - margin, 30);
-
-    // ── Employee info ──
-    const peg = payroll.pegawai;
-    let y = 38;
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.text("Informasi Karyawan", margin, y);
-    y += 6;
-    doc.setFont("helvetica", "normal");
-
-    const infoLeft = [
-      ["Nama", payroll.pegawaiNama || "-"],
-      ["ID Pegawai", payroll.employee_id],
-      ["Jabatan", payroll.pegawaiJabatan || "-"],
-    ];
-    const infoRight = [
-      ["Periode", formatPeriodLabel(payroll.periode)],
-      ["Bank", peg?.bank || "-"],
-      ["No. Rekening", peg?.no_rekening || "-"],
-    ];
-
-    infoLeft.forEach(([label, val], i) => {
-      doc.setFont("helvetica", "normal");
-      doc.text(`${label}`, margin, y + i * 5);
-      doc.text(":", margin + 30, y + i * 5);
-      doc.setFont("helvetica", "bold");
-      doc.text(`${val}`, margin + 33, y + i * 5);
-    });
-
-    infoRight.forEach(([label, val], i) => {
-      doc.setFont("helvetica", "normal");
-      doc.text(`${label}`, pageWidth / 2 + 10, y + i * 5);
-      doc.text(":", pageWidth / 2 + 40, y + i * 5);
-      doc.setFont("helvetica", "bold");
-      doc.text(`${val}`, pageWidth / 2 + 43, y + i * 5);
-    });
-
-    y += 20;
-
-    // ── Pendapatan table ──
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("PENDAPATAN", margin, y);
-    y += 2;
-
-    const pendapatanData: (string | number)[][] = [];
-    PENDAPATAN_FIELDS.forEach((f) => {
-      pendapatanData.push([f.label, formatCurrency((payroll as unknown as Record<string, number>)[f.key] || 0)]);
-      if (f.keteranganKey) {
-        const ket = (payroll as unknown as Record<string, string | null>)[f.keteranganKey];
-        if (ket) pendapatanData.push([`   Ket: ${ket}`, ""]);
-      }
-    });
-    pendapatanData.push(["Total Pendapatan", formatCurrency(payroll.total_pendapatan)]);
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Komponen", "Jumlah"]],
-      body: pendapatanData,
-      theme: "grid",
-      headStyles: { fillColor: [59, 130, 246], fontSize: 8, fontStyle: "bold" },
-      bodyStyles: { fontSize: 8 },
-      columnStyles: {
-        0: { cellWidth: 80 },
-        1: { halign: "right", cellWidth: 60 },
-      },
-      didParseCell: (data) => {
-        if (data.row.index === pendapatanData.length - 1) {
-          data.cell.styles.fontStyle = "bold";
-          data.cell.styles.fillColor = [219, 234, 254];
-        }
-      },
-      margin: { left: margin, right: margin },
-    });
-
-    y = ((doc as unknown as Record<string, Record<string, number>>).lastAutoTable?.finalY ?? y + 50) + 8;
-
-    // ── Potongan table ──
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("POTONGAN", margin, y);
-    y += 2;
-
-    const potonganData: (string | number)[][] = [];
-    POTONGAN_FIELDS.forEach((f) => {
-      potonganData.push([f.label, formatCurrency((payroll as unknown as Record<string, number>)[f.key] || 0)]);
-      if (f.keteranganKey) {
-        const ket = (payroll as unknown as Record<string, string | null>)[f.keteranganKey];
-        if (ket) potonganData.push([`   Ket: ${ket}`, ""]);
-      }
-    });
-    potonganData.push(["Total Potongan", formatCurrency(payroll.total_potongan)]);
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Komponen", "Jumlah"]],
-      body: potonganData,
-      theme: "grid",
-      headStyles: { fillColor: [239, 68, 68], fontSize: 8, fontStyle: "bold" },
-      bodyStyles: { fontSize: 8 },
-      columnStyles: {
-        0: { cellWidth: 80 },
-        1: { halign: "right", cellWidth: 60 },
-      },
-      didParseCell: (data) => {
-        if (data.row.index === potonganData.length - 1) {
-          data.cell.styles.fontStyle = "bold";
-          data.cell.styles.fillColor = [254, 226, 226];
-        }
-      },
-      margin: { left: margin, right: margin },
-    });
-
-    y = ((doc as unknown as Record<string, Record<string, number>>).lastAutoTable?.finalY ?? y + 40) + 10;
-
-    // ── Netto ──
-    doc.setFillColor(16, 185, 129);
-    doc.roundedRect(margin, y, pageWidth - margin * 2, 12, 2, 2, "F");
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(255, 255, 255);
-    doc.text("GAJI BERSIH (NETTO)", margin + 5, y + 8);
-    doc.text(formatCurrency(payroll.netto), pageWidth - margin - 5, y + 8, { align: "right" });
-    doc.setTextColor(0, 0, 0);
-
-    y += 22;
-
-    // ── Catatan ──
-    if (payroll.catatan) {
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "italic");
-      doc.text(`Catatan: ${payroll.catatan}`, margin, y);
-      y += 8;
-    }
-
-    // ── Signature area ──
-    y = Math.max(y + 10, 230);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-
-    const sigLeftX = margin + 15;
-    const sigRightX = pageWidth - margin - 50;
-
-    doc.text("Diterima oleh,", sigLeftX, y);
-    doc.text("Disetujui oleh,", sigRightX, y);
-
-    y += 25;
-    doc.setFont("helvetica", "bold");
-    doc.text(payroll.pegawaiNama || "-", sigLeftX, y);
-    doc.text("HRD Jamslogistic", sigRightX, y);
-
-    y += 3;
-    doc.setFont("helvetica", "normal");
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.3);
-    doc.line(sigLeftX - 5, y, sigLeftX + 40, y);
-    doc.line(sigRightX - 5, y, sigRightX + 40, y);
-
-    doc.save(`Slip_Gaji_${payroll.employee_id}_${payroll.periode}.pdf`);
   };
 
   // ─── Worksheet helpers ───
@@ -2555,8 +2255,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         handleWsSaveRow={handleWsSaveRow}
         handleWsAutoSave={handleWsAutoSave}
         isCellChanged={isCellChanged}
-        wsComputeTotals={wsComputeTotals}
-        exportSlipPDF={exportSlipPDF}
+wsComputeTotals={wsComputeTotals}
         setDeleteConfirm={setDeleteConfirm}
         setBuatSlipConfirm={activeMainTab === "worksheet" ? setBuatSlipConfirm : undefined}
         onCopyInputs={() => {
@@ -2593,26 +2292,6 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
           <div className="flex items-center gap-2">
             {activeTab === "slip" && (
               <>
-                <Button
-                  variant="outline"
-                  icon={FileSpreadsheet}
-                  size="sm"
-                  onClick={() => activeMainTab === "laporan" ? exportExcel(filtered, "Laporan_Final") : exportExcel()}
-                  disabled={activeMainTab === "laporan" ? filtered.length === 0 : payrolls.length === 0}
-                >
-                  Export Excel
-                </Button>
-                <Button variant="outline" icon={Download} size="sm" onClick={() => {
-                  const finalSlips = orderedPayrolls.filter((p) => p.status === "Final");
-                  if (finalSlips.length === 0) {
-                    showToast("error", "Tidak Ada Slip Final", "Belum ada slip gaji berstatus Final untuk di-export.");
-                    return;
-                  }
-                  finalSlips.forEach((p) => exportSlipPDF(p));
-                  showToast("success", "Export PDF", `${finalSlips.length} slip gaji sedang di-download.`);
-                }}>
-                  Export PDF
-                </Button>
                 <Button variant="outline" icon={FileText} size="sm" onClick={() => {
                   if (wsChangedCells.size > 0) setComputeWorksheetConfirm(true);
                   else handleComputeWorksheet();
@@ -2948,7 +2627,6 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
             isCellChanged={isCellChanged}
             wsComputeTotals={wsComputeTotals}
             setWsExpandedId={setWsExpandedId}
-            exportSlipPDF={exportSlipPDF}
             setDeleteConfirm={setDeleteConfirm}
             setBuatSlipConfirm={setBuatSlipConfirm}
             onOpenBatchFill={() => { setBatchField(""); setBatchValue(""); setShowBatchFill(true); }}
@@ -2973,21 +2651,6 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                 <p className="text-[10px] text-muted-foreground mt-0.5">Rekap read-only untuk slip yang sudah difinalkan</p>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" icon={FileSpreadsheet} size="sm" onClick={() => exportExcel(filtered, "Laporan_Final")} disabled={filtered.length === 0}>
-                Excel Final
-              </Button>
-              <Button variant="outline" icon={Download} size="sm" onClick={() => {
-                if (filtered.length === 0) {
-                  showToast("error", "Tidak Ada Slip Final", "Belum ada slip Final untuk di-export.");
-                  return;
-                }
-                filtered.forEach((p) => exportSlipPDF(p));
-                showToast("success", "Export PDF", `${filtered.length} slip final sedang di-download.`);
-              }} disabled={filtered.length === 0}>
-                PDF Final
-              </Button>
-            </div>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-5 border-b border-border bg-muted/20">
@@ -3008,14 +2671,13 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                   <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Potongan</th>
                   <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Netto Transfer</th>
                   <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
-                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-20">PDF</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
                 {loading ? (
-                  <SkeletonTable rows={6} cols={8} />
+                  <SkeletonTable rows={6} cols={7} />
                 ) : paged.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-16 text-sm text-muted-foreground">
+                  <tr><td colSpan={7} className="text-center py-16 text-sm text-muted-foreground">
                     <div className="flex flex-col items-center gap-2">
                       <BarChart3 className="w-10 h-10 text-muted-foreground/20" />
                       <p>Belum ada laporan Final</p>
@@ -3040,11 +2702,6 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                       <td className="px-5 py-3.5 text-right text-sm font-semibold text-danger tabular-nums">{formatCurrency(row.total_potongan)}</td>
                       <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground tabular-nums">{formatCurrency(row.netto)}</td>
                       <td className="px-5 py-3.5 text-center"><FinalPillBadge /></td>
-                      <td className="px-5 py-3.5 text-center">
-                        <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary" title="Download PDF">
-                          <Download className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
                     </tr>
                   );
                 })}
@@ -3215,9 +2872,6 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                           <RotateCcw className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary" title="Download PDF">
-                        <Download className="w-3.5 h-3.5" />
-                      </button>
                       {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger" title="Hapus">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>}
@@ -3696,14 +3350,6 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                   >
                     Hapus
                   </Button>}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    icon={Download}
-                    onClick={() => exportSlipPDF(selectedPayroll)}
-                  >
-                    PDF
-                  </Button>
                 </div>
                 <div className="flex items-center gap-2">
                   {/* Tombol Kembalikan ke Draft hanya untuk super admin (Final) */}

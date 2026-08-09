@@ -6,7 +6,6 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  Download,
   Trash2,
   Zap,
   TrendingDown,
@@ -55,7 +54,6 @@ interface WorksheetEditorProps {
   wsComputeTotals: (id: number) => { totalPendapatan: number; totalPotongan: number; netto: number };
   setWsExpandedId: (id: number | null) => void;
 
-  exportSlipPDF: (row: PayrollRow) => void;
   setDeleteConfirm: (v: { id: number; nama: string } | null) => void;
   setBuatSlipConfirm: (v: { ids: number[]; mode: "single" | "bulk" } | null) => void;
   onOpenBatchFill: () => void;
@@ -91,7 +89,6 @@ export default function WorksheetEditor({
   isCellChanged,
   wsComputeTotals,
   setWsExpandedId,
-  exportSlipPDF,
   setDeleteConfirm,
   setBuatSlipConfirm,
   onOpenBatchFill,
@@ -267,9 +264,6 @@ export default function WorksheetEditor({
                             <FileCheck className="w-3 h-3" />
                           </button>
                         )}
-                        <button onClick={() => exportSlipPDF(row)} className="p-1.5 rounded-lg hover:bg-primary-light text-muted-foreground hover:text-primary transition-colors" title="PDF">
-                          <Download className="w-3 h-3" />
-                        </button>
                         {canEdit && <button onClick={() => setDeleteConfirm({ id: row.id, nama: row.pegawaiNama || row.employee_id })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors" title="Hapus">
                           <Trash2 className="w-3 h-3" />
                         </button>}

@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from "react"
 import {
   X,
   CreditCard,
-  Download,
   FileCheck,
   Trash2,
   Loader2,
@@ -45,7 +44,6 @@ interface WorksheetSheetFullscreenProps {
   handleWsAutoSave: (id: number, immediate: boolean) => void;
   isCellChanged: (id: number, field: string) => boolean;
   wsComputeTotals: (id: number) => { totalPendapatan: number; totalPotongan: number; netto: number };
-  exportSlipPDF: (row: PayrollRow) => void;
   setDeleteConfirm: (v: { id: number; nama: string } | null) => void;
   setBuatSlipConfirm: ((v: { ids: number[]; mode: "single" | "bulk" } | null) => void) | undefined;
   onCopyInputs: () => void;
@@ -107,7 +105,6 @@ export default function WorksheetSheetFullscreen({
   handleWsAutoSave,
   isCellChanged,
   wsComputeTotals,
-  exportSlipPDF,
   setDeleteConfirm,
   setBuatSlipConfirm,
   onCopyInputs,
@@ -1051,13 +1048,6 @@ export default function WorksheetSheetFullscreen({
                                 <FileCheck className="w-2.5 h-2.5" />
                               </button>
                             )}
-                            <button
-                              onClick={() => exportSlipPDF(row)}
-                              className="p-0.5 rounded-sm text-slate-500 hover:bg-blue-50 hover:text-blue-700"
-                              title="PDF"
-                            >
-                              <Download className="w-2.5 h-2.5" />
-                            </button>
                             {!isReadOnly && canEdit && (
                               <button
                                 onClick={() => setDeleteConfirm?.({ id: row.id, nama: row.pegawaiNama || row.employee_id })}
