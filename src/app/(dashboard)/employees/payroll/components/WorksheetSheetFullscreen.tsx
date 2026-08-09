@@ -354,6 +354,15 @@ export default function WorksheetSheetFullscreen({
 
   const isCopied = (kind: "col" | "row", key: string) => copyFlash?.kind === kind && copyFlash.key === key;
 
+  const getPayrollValue = (rowId: number, key: string): number => {
+    const vals = wsData[rowId];
+    return vals ? vals[key] || 0 : 0;
+  };
+
+  const getGapokTitikTotal = (rowId: number): number => {
+    return getPayrollValue(rowId, "gaji_pokok") + getPayrollValue(rowId, "pendapatan_titik");
+  };
+
   /** Nilai mentah (tanpa format Rp/ribuan) agar dikenali Excel sebagai angka. */
   const getRawCellText = (row: PayrollRow, col: SheetCol, idx: number): string => {
     const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; status?: string } | undefined;
@@ -363,6 +372,7 @@ export default function WorksheetSheetFullscreen({
       case "_nama": return row.pegawaiNama || "";
       case "_jabatan": return row.pegawaiJabatan || "-";
       case "_status": return peg?.status || "-";
+      case "_total_gapok_titik": return String(getGapokTitikTotal(row.id));
       case "_total_pend": return String(wsComputeTotals(row.id).totalPendapatan);
       case "_total_pot": return String(wsComputeTotals(row.id).totalPotongan);
       case "_netto": return String(wsComputeTotals(row.id).netto);
@@ -372,8 +382,7 @@ export default function WorksheetSheetFullscreen({
       case "_aksi": return "";
       default:
         if (isKeteranganCol(col.key)) return wsKeterangan[row.id]?.[col.key] || "";
-        const vals = wsData[row.id];
-        return vals ? String(vals[col.key] || 0) : "0";
+        return String(getPayrollValue(row.id, col.key));
     }
   };
 
@@ -470,7 +479,7 @@ export default function WorksheetSheetFullscreen({
   type SheetCol = { label: string; key: string; group: "info" | "pendapatan" | "potongan" | "netto" | "rekening"; width: string; editable: boolean };
   const sheetLabels: Record<string, string> = {
     gaji_pokok: "GAPOK",
-    pendapatan_titik: "GAPOK+TITIK",
+    pendapatan_titik: "TITIK",
     lembur: "LEMBUR",
     extra_job: "EXTRA JOB",
     uang_makan: "UANG MAKAN",
@@ -500,6 +509,13 @@ export default function WorksheetSheetFullscreen({
         width: f.key === "gaji_pokok" || f.key === "pendapatan_titik" ? "w-28" : f.key === "lembur" ? "w-28" : "w-24",
         editable: !f.readonly && !READONLY_KEYS.has(f.key),
       }];
+      if (f.key === "pendapatan_titik") cols.push({
+        label: "TOTAL",
+        key: "_total_gapok_titik",
+        group: "pendapatan" as const,
+        width: "w-28",
+        editable: false,
+      });
       if (f.keteranganKey) cols.push({
         label: "KET",
         key: f.keteranganKey,
@@ -509,7 +525,7 @@ export default function WorksheetSheetFullscreen({
       });
       return cols;
     }),
-    { label: "TOTAL", key: "_total_pend", group: "pendapatan", width: "w-28", editable: false },
+    { label: "TOTAL PENDAPATAN", key: "_total_pend", group: "pendapatan", width: "w-32", editable: false },
     ...POTONGAN_FIELDS.filter((f) => f.key !== "total_potongan").flatMap((f) => {
       const cols: SheetCol[] = [{
         label: sheetLabels[f.key] ?? f.label.toUpperCase(),
@@ -592,6 +608,7 @@ export default function WorksheetSheetFullscreen({
     if (col.key === "_nama") return row.pegawaiNama || "";
     if (col.key === "_jabatan") return row.pegawaiJabatan || "-";
     if (col.key === "_status") return (row.pegawai as { status?: string } | undefined)?.status || "-";
+    if (col.key === "_total_gapok_titik") return formatCurrency(getGapokTitikTotal(row.id));
     if (col.key === "_total_pend") return formatCurrency(wsComputeTotals(row.id).totalPendapatan);
     if (col.key === "_total_pot") return formatCurrency(wsComputeTotals(row.id).totalPotongan);
     if (col.key === "_netto") return formatCurrency(wsComputeTotals(row.id).netto);
@@ -599,17 +616,17 @@ export default function WorksheetSheetFullscreen({
     if (col.key === "_no_rek") return (row.pegawai as { no_rekening?: string | null })?.no_rekening || "-";
     if (col.key === "_an") return (row.pegawai as { nama_rekening?: string | null })?.nama_rekening || "-";
     if (col.key === "_aksi") return "";
-    const vals = wsData[row.id];
-    return vals ? formatCurrency(vals[col.key] || 0) : "0";
+    return formatCurrency(getPayrollValue(row.id, col.key));
   };
 
   const getCellNumeric = (row: PayrollRow, col: SheetCol): number => {
-    const vals = wsData[row.id];
-    return vals ? vals[col.key] || 0 : 0;
+    if (col.key === "_total_gapok_titik") return getGapokTitikTotal(row.id);
+    return getPayrollValue(row.id, col.key);
   };
 
   const getGrandTotal = (col: SheetCol): string => {
     if (col.group === "info" || col.group === "rekening" || col.group === "netto") return "";
+    if (col.key === "_total_gapok_titik") return formatCurrency(displayedRows.reduce((s, r) => s + getGapokTitikTotal(r.id), 0));
     if (col.key === "_total_pend") return formatCurrency(displayedRows.reduce((s, r) => s + wsComputeTotals(r.id).totalPendapatan, 0));
     if (col.key === "_total_pot") return formatCurrency(displayedRows.reduce((s, r) => s + wsComputeTotals(r.id).totalPotongan, 0));
     if (isKeteranganCol(col.key)) return "";
@@ -1150,7 +1167,7 @@ export default function WorksheetSheetFullscreen({
                         </td>
                       );
                     }
-                    if (c.group === "pendapatan" && c.key !== "_total_pend") {
+                    if (c.group === "pendapatan" && c.key !== "_total_gapok_titik" && c.key !== "_total_pend") {
                       if (isKeteranganCol(c.key)) {
                         return (
                           <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-0.5 py-0.5", gridBorder)}>
@@ -1195,6 +1212,13 @@ export default function WorksheetSheetFullscreen({
                               {isNum ? formatCurrency(getCellNumeric(row, c)) : getCellValue(row, c)}
                             </span>
                           )}
+                        </td>
+                      );
+                    }
+                    if (c.key === "_total_gapok_titik") {
+                      return (
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[11px] font-bold text-slate-950 tabular-nums bg-[#eefcf4] leading-tight", gridBorder)}>
+                          {getCellValue(row, c)}
                         </td>
                       );
                     }
@@ -1299,6 +1323,13 @@ export default function WorksheetSheetFullscreen({
                   }
                   if (c.key === "_bank" || c.key === "_no_rek" || c.key === "_an" || c.key === "_aksi") {
                     return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky bottom-0 z-50 bg-slate-800", footerGridBorder)} />;
+                  }
+                  if (c.key === "_total_gapok_titik") {
+                    return (
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[11px] font-extrabold text-emerald-200 tabular-nums bg-slate-800 leading-tight sticky bottom-0 z-50", footerGridBorder)}>
+                        {getGrandTotal(c)}
+                      </td>
+                    );
                   }
                   if (c.key === "_total_pend") {
                     return (
