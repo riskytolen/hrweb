@@ -19,13 +19,14 @@ import {
   Check,
   CheckCheck,
   RotateCcw,
+  ClipboardList,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
 import Portal from "@/components/ui/Portal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
-import { supabase, type DbDeliveryPoint, type NonActivePeriod } from "@/lib/supabase";
+import { supabase, type DbAttendanceRecord, type DbDeliveryPoint, type NonActivePeriod } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 
 type DeliveryQueryRow = DbDeliveryPoint & {
@@ -37,6 +38,12 @@ type QueryError = { message: string };
 
 type ZoneLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
+
+type AttendanceLiteRow = {
+  employee_id: string;
+  status: DbAttendanceRecord["status"];
+  pegawai?: { nama: string | null }[] | null;
+};
 
 type ReportDailyDetail = {
   tanggal: string;
@@ -86,6 +93,23 @@ type RingkasanRow = {
   total_pendapatan: number;
 };
 
+type StatusAbsensiRow = {
+  employee_id: string;
+  employee_nama: string;
+  total_titik: number;
+  total_pendapatan: number;
+  attendance_counts: Record<string, number>;
+  delivery_counts: Record<string, number>;
+};
+
+/** Status absensi yang ditampilkan di laporan Status & Absensi (urutan tampilan). */
+const ABSENSI_STATUSES: readonly { nama: string; color: string }[] = [
+  { nama: "Alpha", color: "#6b7280" },
+  { nama: "Izin", color: "#3b82f6" },
+  { nama: "Cuti", color: "#8b5cf6" },
+  { nama: "Sakit", color: "#ef4444" },
+] as const;
+
 interface ReportDetailProps {
   show: boolean;
   onClose: () => void;
@@ -96,6 +120,33 @@ interface ReportDetailProps {
 const CUT_OFF_DAY = 8; // Periode mulai tanggal 8
 const DELIVERY_SELECT = "*, pegawai(nama, tanggal_bergabung, tanggal_keluar, non_active_periods), delivery_zones(nama, color), delivery_statuses(nama, kode, color)";
 const DELIVERY_FETCH_CHUNK_SIZE = 1000;
+const ATTENDANCE_FETCH_CHUNK_SIZE = 1000;
+
+async function fetchAttendanceStatusesInRange(start: string, end: string): Promise<{ data: AttendanceLiteRow[]; error: QueryError | null }> {
+  const rows: AttendanceLiteRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("attendance_records")
+      .select("employee_id, status, pegawai(nama)")
+      .gte("tanggal", start)
+      .lte("tanggal", end)
+      .order("tanggal", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + ATTENDANCE_FETCH_CHUNK_SIZE - 1);
+
+    if (error) return { data: rows, error };
+
+    const pageRows = (data || []) as AttendanceLiteRow[];
+    rows.push(...pageRows);
+
+    if (pageRows.length < ATTENDANCE_FETCH_CHUNK_SIZE) break;
+    from += ATTENDANCE_FETCH_CHUNK_SIZE;
+  }
+
+  return { data: rows, error: null };
+}
 
 async function fetchDeliveryRowsInRange(start: string, end: string): Promise<{ data: DeliveryQueryRow[]; error: QueryError | null }> {
   const rows: DeliveryQueryRow[] = [];
@@ -169,7 +220,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [dateMode, setDateMode] = useState<"periode" | "custom">("periode");
-  const [reportTab, setReportTab] = useState<"zona" | "pegawai" | "ringkasan">("zona");
+  const [reportTab, setReportTab] = useState<"zona" | "pegawai" | "ringkasan" | "statusabsensi">("zona");
 
   // Periode mode state
   const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
@@ -196,6 +247,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const [zoneGroups, setZoneGroups] = useState<ZoneGroup[]>([]);
   const [employeeGroups, setEmployeeGroups] = useState<EmployeeGroup[]>([]);
   const [ringkasanRows, setRingkasanRows] = useState<RingkasanRow[]>([]);
+  const [statusRows, setStatusRows] = useState<StatusAbsensiRow[]>([]);
+  const [deliveryStatusColumns, setDeliveryStatusColumns] = useState<{ nama: string; color: string }[]>([]);
   const [expandedDailyKey, setExpandedDailyKey] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
@@ -230,14 +283,17 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     if (!s || !e) return;
     setLoading(true);
 
-    const { data, error } = await fetchDeliveryRowsInRange(s, e);
+    const [deliveryRes, attendanceRes] = await Promise.all([
+      fetchDeliveryRowsInRange(s, e),
+      fetchAttendanceStatusesInRange(s, e),
+    ]);
 
-    if (error) {
+    if (deliveryRes.error) {
       setLoading(false);
       return;
     }
 
-    processData(data);
+    processData(deliveryRes.data, attendanceRes.error ? null : attendanceRes.data);
     setLoading(false);
   }, [dateMode, periodKey, customStart, customEnd]);
 
@@ -289,7 +345,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   }, []);
 
   // ─── Process raw data into ReportRow[], then group both ways ───
-  const processData = (data: DeliveryQueryRow[]) => {
+  const processData = (data: DeliveryQueryRow[], attendanceRows: AttendanceLiteRow[] | null) => {
     // Hanya proses baris yang pegawainya aktif pada tanggal tersebut
     const activeData = data.filter((d) => isPegawaiActiveOnDate(d.pegawai, d.tanggal));
     const map = new Map<string, {
@@ -430,6 +486,65 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
       .sort((a, b) => b.total_pendapatan - a.total_pendapatan || b.total_titik - a.total_titik || a.employee_nama.localeCompare(b.employee_nama));
     setRingkasanRows(rRows);
     setExpandedDailyKey(null);
+    buildStatusAbsensi(rows, attendanceRows);
+  };
+
+  // ─── Status & Absensi: agregasi per pegawai (riwayat titik ∪ absensi) ───
+  const buildStatusAbsensi = (rows: ReportRow[], attendanceRows: AttendanceLiteRow[] | null) => {
+    const map = new Map<string, StatusAbsensiRow>();
+    rows.forEach((r) => {
+      if (!map.has(r.employee_id)) {
+        map.set(r.employee_id, {
+          employee_id: r.employee_id,
+          employee_nama: r.employee_nama,
+          total_titik: 0,
+          total_pendapatan: 0,
+          attendance_counts: {},
+          delivery_counts: {},
+        });
+      }
+      const entry = map.get(r.employee_id)!;
+      entry.total_titik += r.total_titik;
+      entry.total_pendapatan += r.total_pendapatan;
+      r.status_summary.forEach((s) => {
+        entry.delivery_counts[s.nama] = (entry.delivery_counts[s.nama] || 0) + s.count;
+      });
+    });
+
+    if (attendanceRows) {
+      attendanceRows.forEach((a) => {
+        if (!map.has(a.employee_id)) {
+          map.set(a.employee_id, {
+            employee_id: a.employee_id,
+            employee_nama: a.pegawai?.[0]?.nama || a.employee_id || "?",
+            total_titik: 0,
+            total_pendapatan: 0,
+            attendance_counts: {},
+            delivery_counts: {},
+          });
+        }
+        const entry = map.get(a.employee_id)!;
+        entry.attendance_counts[a.status] = (entry.attendance_counts[a.status] || 0) + 1;
+      });
+    }
+
+    const saRows = Array.from(map.values()).sort(
+      (a, b) => b.total_pendapatan - a.total_pendapatan || b.total_titik - a.total_titik || a.employee_nama.localeCompare(b.employee_nama),
+    );
+    setStatusRows(saRows);
+
+    // Kolom status titik dinamis: status aktif dulu, lalu status lain yang muncul di data
+    const cols: { nama: string; color: string }[] = [];
+    const seen = new Set<string>();
+    dStatuses.forEach((s) => {
+      if (!seen.has(s.nama)) { seen.add(s.nama); cols.push({ nama: s.nama, color: s.color }); }
+    });
+    rows.forEach((r) =>
+      r.status_summary.forEach((s) => {
+        if (!seen.has(s.nama)) { seen.add(s.nama); cols.push({ nama: s.nama, color: s.color }); }
+      }),
+    );
+    setDeliveryStatusColumns(cols);
   };
 
   // ─── Filtered data (search) ───
@@ -459,6 +574,19 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     return r.employee_nama.toLowerCase().includes(search.toLowerCase());
   });
 
+  const filteredStatusRows = statusRows.filter((r) => {
+    if (selectedEmployeeIds.length > 0 && !selectedEmployeeIds.includes(r.employee_id)) return false;
+    return (
+      r.employee_nama.toLowerCase().includes(search.toLowerCase()) ||
+      r.employee_id.toLowerCase().includes(search.toLowerCase())
+    );
+  });
+
+  const filterSourceRows = reportTab === "ringkasan" ? ringkasanRows : statusRows;
+
+  const filteredStatusTotalTitik = filteredStatusRows.reduce((s, r) => s + r.total_titik, 0);
+  const filteredStatusTotalPendapatan = filteredStatusRows.reduce((s, r) => s + r.total_pendapatan, 0);
+
   const filteredTotalTitik = reportTab === "zona"
     ? filteredZoneGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0)
     : reportTab === "pegawai"
@@ -472,7 +600,16 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
   const hasData = reportTab === "zona" ? filteredZoneGroups.length > 0
     : reportTab === "pegawai" ? filteredEmpGroups.length > 0
-    : filteredRingkasanRows.length > 0;
+    : reportTab === "ringkasan" ? filteredRingkasanRows.length > 0
+    : filteredStatusRows.length > 0;
+
+  // ─── Totals untuk summary cards & grand total (per tab aktif) ───
+  const displayedTotalTitik = reportTab === "ringkasan" ? filteredTotalTitik
+    : reportTab === "statusabsensi" ? filteredStatusTotalTitik
+    : (search ? filteredTotalTitik : grandTotalTitik);
+  const displayedTotalPendapatan = reportTab === "ringkasan" ? filteredTotalPendapatan
+    : reportTab === "statusabsensi" ? filteredStatusTotalPendapatan
+    : (search ? filteredTotalPendapatan : grandTotalPendapatan);
 
   // ─── Period text for export ───
   const periodeText = dateMode === "periode"
@@ -483,7 +620,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const exportCSV = () => {
     if (reportTab === "zona") exportCSVZona();
     else if (reportTab === "pegawai") exportCSVPegawai();
-    else exportCSVRingkasan();
+    else if (reportTab === "ringkasan") exportCSVRingkasan();
+    else exportCSVStatusAbsensi();
   };
 
   const exportCSVZona = () => {
@@ -543,6 +681,33 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     downloadCSV(csvRows, `Rekap_Titik_Ringkasan_${startDate}_${endDate}.csv`);
   };
 
+  const exportCSVStatusAbsensi = () => {
+    const headers = [
+      "ID Pegawai", "Pegawai",
+      ...ABSENSI_STATUSES.map((s) => s.nama),
+      ...deliveryStatusColumns.map((c) => c.nama),
+      "Total Titik", "Total Pendapatan",
+    ];
+    const csvRows = [headers.join(",")];
+
+    filteredStatusRows.forEach((r) => {
+      csvRows.push([
+        `"${r.employee_id}"`, `"${r.employee_nama}"`,
+        ...ABSENSI_STATUSES.map((s) => r.attendance_counts[s.nama] || 0),
+        ...deliveryStatusColumns.map((c) => r.delivery_counts[c.nama] || 0),
+        r.total_titik, r.total_pendapatan,
+      ].join(","));
+    });
+    csvRows.push([
+      `"GRAND TOTAL"`, "",
+      ...ABSENSI_STATUSES.map((s) => filteredStatusRows.reduce((sum, r) => sum + (r.attendance_counts[s.nama] || 0), 0)),
+      ...deliveryStatusColumns.map((c) => filteredStatusRows.reduce((sum, r) => sum + (r.delivery_counts[c.nama] || 0), 0)),
+      filteredStatusTotalTitik, filteredStatusTotalPendapatan,
+    ].join(","));
+
+    downloadCSV(csvRows, `Rekap_Status_Absensi_${startDate}_${endDate}.csv`);
+  };
+
   const downloadCSV = (csvRows: string[], filename: string) => {
     const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -558,7 +723,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const exportPDF = async () => {
     if (reportTab === "zona") await exportPDFZona();
     else if (reportTab === "pegawai") await exportPDFPegawai();
-    else await exportPDFRingkasan();
+    else if (reportTab === "ringkasan") await exportPDFRingkasan();
+    else await exportPDFStatusAbsensi();
   };
 
   const exportPDFZona = async () => {
@@ -745,6 +911,71 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     setShowExportMenu(false);
   };
 
+  const exportPDFStatusAbsensi = async () => {
+    const { default: jsPDF } = await import("jspdf");
+    const { default: autoTable } = await import("jspdf-autotable");
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text("Laporan Status & Absensi Pegawai", pageWidth / 2, 15, { align: "center" });
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Periode: ${periodeText}`, pageWidth / 2, 21, { align: "center" });
+
+    const headRow1: { content: string; rowSpan?: number; colSpan?: number; styles?: { halign?: "left" | "center" | "right" } }[] = [
+      { content: "#", rowSpan: 2, styles: { halign: "center" } },
+      { content: "ID Pegawai", rowSpan: 2 },
+      { content: "Pegawai", rowSpan: 2 },
+      { content: "Jumlah Absensi (hari)", colSpan: ABSENSI_STATUSES.length, styles: { halign: "center" } },
+      { content: "Status Rekap Titik (hari)", colSpan: deliveryStatusColumns.length, styles: { halign: "center" } },
+      { content: "Total Titik", rowSpan: 2, styles: { halign: "right" } },
+      { content: "Total Pendapatan", rowSpan: 2, styles: { halign: "right" } },
+    ];
+    const headRow2: { content: string; styles: { halign?: "left" | "center" | "right" } }[] = [
+      ...ABSENSI_STATUSES.map((s) => ({ content: s.nama, styles: { halign: "center" as const } })),
+      ...deliveryStatusColumns.map((c) => ({ content: c.nama, styles: { halign: "center" as const } })),
+    ];
+
+    const tableData = filteredStatusRows.map((r, idx) => [
+      String(idx + 1), r.employee_id, r.employee_nama,
+      ...ABSENSI_STATUSES.map((s) => String(r.attendance_counts[s.nama] || 0)),
+      ...deliveryStatusColumns.map((c) => String(r.delivery_counts[c.nama] || 0)),
+      formatNumber(r.total_titik), formatCurrency(r.total_pendapatan),
+    ]);
+    tableData.push([
+      "", "GRAND", "TOTAL",
+      ...ABSENSI_STATUSES.map((s) => String(filteredStatusRows.reduce((sum, r) => sum + (r.attendance_counts[s.nama] || 0), 0))),
+      ...deliveryStatusColumns.map((c) => String(filteredStatusRows.reduce((sum, r) => sum + (r.delivery_counts[c.nama] || 0), 0))),
+      formatNumber(filteredStatusTotalTitik), formatCurrency(filteredStatusTotalPendapatan),
+    ]);
+
+    autoTable(doc, {
+      startY: 28,
+      head: [headRow1, headRow2],
+      body: tableData,
+      theme: "grid",
+      headStyles: { fillColor: [139, 92, 246], fontSize: 7, fontStyle: "bold", halign: "center" },
+      bodyStyles: { fontSize: 7 },
+      columnStyles: {
+        0: { halign: "center", cellWidth: 8 },
+        4: { halign: "center", cellWidth: 12 },
+      },
+      didParseCell: (data) => {
+        if (data.row.index === tableData.length - 1) {
+          data.cell.styles.fontStyle = "bold";
+          data.cell.styles.fillColor = [243, 244, 246];
+        }
+      },
+      margin: { left: 10, right: 10 },
+    });
+
+    doc.save(`Rekap_Status_Absensi_${startDate}_${endDate}.pdf`);
+    setShowExportMenu(false);
+  };
+
   if (!show) return null;
 
   return (
@@ -765,7 +996,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
             <div>
               <h2 className="text-sm font-bold text-foreground">Laporan Detail Rekap Titik</h2>
               <p className="text-[10px] text-muted-foreground">
-                {reportTab === "zona" ? "Rekap titik per nama titik" : reportTab === "pegawai" ? "Rekap titik per pegawai" : "Ringkasan total per pegawai"} dalam periode tertentu
+                {reportTab === "zona" ? "Rekap titik per nama titik" : reportTab === "pegawai" ? "Rekap titik per pegawai" : reportTab === "ringkasan" ? "Ringkasan total per pegawai" : "Rekap jumlah absensi & status titik per pegawai"} dalam periode tertentu
               </p>
             </div>
           </div>
@@ -851,6 +1082,18 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                 <TrendingUp className="w-3 h-3" />
                 Ringkasan
               </button>
+              <button
+                onClick={() => setReportTab("statusabsensi")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
+                  reportTab === "statusabsensi"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <ClipboardList className="w-3 h-3" />
+                <span className="hidden xs:inline">Status &amp; </span>Absensi
+              </button>
             </div>
 
             <div className="h-6 w-px bg-border hidden sm:block" />
@@ -929,8 +1172,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
             <div className="h-6 w-px bg-border hidden sm:block" />
 
-            {/* Employee filter (Ringkasan only) */}
-            {reportTab === "ringkasan" && (
+            {/* Employee filter (Ringkasan & Status Absensi) */}
+            {(reportTab === "ringkasan" || reportTab === "statusabsensi") && (
               <div ref={filterRef} className="relative">
                 <button
                   type="button"
@@ -967,7 +1210,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                       </div>
                     </div>
                     <div className="max-h-60 overflow-y-auto divide-y divide-border/50">
-                      {ringkasanRows
+                      {filterSourceRows
                         .filter((r) => r.employee_nama.toLowerCase().includes(employeeFilterSearch.toLowerCase()))
                         .map((r) => (
                           <label
@@ -989,7 +1232,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                             <span className="text-xs font-medium text-foreground break-words min-w-0 flex-1">{r.employee_nama}</span>
                           </label>
                         ))}
-                      {ringkasanRows.filter((r) => r.employee_nama.toLowerCase().includes(employeeFilterSearch.toLowerCase())).length === 0 && (
+                      {filterSourceRows.filter((r) => r.employee_nama.toLowerCase().includes(employeeFilterSearch.toLowerCase())).length === 0 && (
                         <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">
                           Tidak ada pegawai yang cocok
                         </div>
@@ -1041,7 +1284,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
               <input
                 type="text"
-                placeholder={reportTab === "zona" ? "Cari pegawai..." : reportTab === "pegawai" ? "Cari pegawai atau nama titik..." : "Cari pegawai..."}
+                placeholder={reportTab === "zona" ? "Cari pegawai..." : reportTab === "pegawai" ? "Cari pegawai atau nama titik..." : reportTab === "ringkasan" ? "Cari pegawai..." : "Cari pegawai..."}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground"
@@ -1059,7 +1302,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               </div>
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium">Total Pendapatan</p>
-                <p className="text-sm font-bold text-foreground">{loading ? "..." : formatCurrency(reportTab === "ringkasan" ? filteredTotalPendapatan : (search ? filteredTotalPendapatan : grandTotalPendapatan))}</p>
+                <p className="text-sm font-bold text-foreground">{loading ? "..." : formatCurrency(displayedTotalPendapatan)}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 px-3 py-2 bg-card rounded-xl border border-border">
@@ -1068,7 +1311,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               </div>
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium">Total Titik</p>
-                <p className="text-sm font-bold text-foreground">{loading ? "..." : formatNumber(reportTab === "ringkasan" ? filteredTotalTitik : (search ? filteredTotalTitik : grandTotalTitik))}</p>
+                <p className="text-sm font-bold text-foreground">{loading ? "..." : formatNumber(displayedTotalTitik)}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 px-3 py-2 bg-card rounded-xl border border-border">
@@ -1077,7 +1320,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               </div>
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium">Pegawai</p>
-                <p className="text-sm font-bold text-foreground">{loading ? "..." : grandTotalPegawai}</p>
+                <p className="text-sm font-bold text-foreground">{loading ? "..." : reportTab === "statusabsensi" ? statusRows.length : grandTotalPegawai}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 px-3 py-2 bg-card rounded-xl border border-border">
@@ -1107,7 +1350,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
             <div className="flex flex-col items-center justify-center py-24">
               <FileText className="w-12 h-12 text-muted-foreground/20 mb-3" />
               <p className="text-sm text-muted-foreground">
-                {reportTab === "ringkasan" && selectedEmployeeIds.length > 0
+                {(reportTab === "ringkasan" || reportTab === "statusabsensi") && selectedEmployeeIds.length > 0
                   ? "Tidak ada data yang cocok dengan filter pegawai"
                   : "Tidak ada data untuk periode ini"}
               </p>
@@ -1352,7 +1595,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                 totalPendapatan={search ? filteredTotalPendapatan : grandTotalPendapatan}
               />
             </div>
-          ) : (
+          ) : reportTab === "ringkasan" ? (
             /* ═══ TAB: RINGKASAN ═══ */
             <div className="space-y-4">
               <div className="bg-card rounded-2xl border border-border overflow-hidden">
@@ -1386,6 +1629,101 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               <GrandTotalCard
                 totalTitik={filteredTotalTitik}
                 totalPendapatan={filteredTotalPendapatan}
+              />
+            </div>
+          ) : (
+            /* ═══ TAB: STATUS & ABSENSI ═══ */
+            <div className="space-y-4">
+              <div className="bg-card rounded-2xl border border-border overflow-hidden">
+                <div className="overflow-hidden sm:overflow-x-auto">
+                  <div className="mobile-zoom-inner">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/20">
+                          <th rowSpan={2} className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-10">#</th>
+                          <th rowSpan={2} className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 whitespace-nowrap">ID Pegawai</th>
+                          <th rowSpan={2} className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Pegawai</th>
+                          <th colSpan={ABSENSI_STATUSES.length} className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 border-l border-border">
+                            Jumlah Absensi (hari)
+                          </th>
+                          <th colSpan={deliveryStatusColumns.length} className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 border-l border-border">
+                            Status Rekap Titik (hari)
+                          </th>
+                          <th rowSpan={2} className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-28 whitespace-nowrap">Total Titik</th>
+                          <th rowSpan={2} className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36 whitespace-nowrap">Total Pendapatan</th>
+                        </tr>
+                        <tr className="border-b border-border bg-muted/20">
+                          {ABSENSI_STATUSES.map((s) => (
+                            <th key={s.nama} className="text-center text-[10px] font-bold px-3 py-2 border-l border-border" style={{ color: s.color }}>
+                              {s.nama}
+                            </th>
+                          ))}
+                          {deliveryStatusColumns.map((c) => (
+                            <th key={c.nama} className="text-center text-[10px] font-bold px-3 py-2 border-l border-border" style={{ color: c.color }}>
+                              {c.nama}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {filteredStatusRows.map((row, idx) => (
+                          <tr key={row.employee_id} className="hover:bg-muted/30 transition-colors">
+                            <td className="px-5 py-3 text-xs text-muted-foreground">{idx + 1}</td>
+                            <td className="px-3 py-3 text-xs text-muted-foreground font-mono break-all">{row.employee_id}</td>
+                            <td className="px-5 py-3"><p className="text-sm font-semibold text-foreground break-words whitespace-nowrap">{row.employee_nama}</p></td>
+                            {ABSENSI_STATUSES.map((s) => {
+                              const c = row.attendance_counts[s.nama] || 0;
+                              return (
+                                <td key={s.nama} className="px-3 py-3 text-center text-sm tabular-nums" style={c > 0 ? { color: s.color, fontWeight: 700 } : undefined}>
+                                  {c > 0 ? c : <span className="text-muted-foreground/40">-</span>}
+                                </td>
+                              );
+                            })}
+                            {deliveryStatusColumns.map((c) => {
+                              const n = row.delivery_counts[c.nama] || 0;
+                              return (
+                                <td key={c.nama} className="px-3 py-3 text-center text-sm tabular-nums" style={n > 0 ? { color: c.color, fontWeight: 700 } : undefined}>
+                                  {n > 0 ? n : <span className="text-muted-foreground/40">-</span>}
+                                </td>
+                              );
+                            })}
+                            <td className="px-5 py-3 text-right text-sm font-bold text-foreground tabular-nums">{formatNumber(row.total_titik)}</td>
+                            <td className="px-5 py-3 text-right text-sm font-semibold text-foreground tabular-nums">{formatCurrency(row.total_pendapatan)}</td>
+                          </tr>
+                        ))}
+                        <tr className="bg-muted/40 font-semibold">
+                          <td className="px-5 py-2.5" colSpan={3}>
+                            <span className="text-xs font-bold text-muted-foreground">Total</span>
+                          </td>
+                          {ABSENSI_STATUSES.map((s) => {
+                            const c = filteredStatusRows.reduce((sum, r) => sum + (r.attendance_counts[s.nama] || 0), 0);
+                            return (
+                              <td key={`t-${s.nama}`} className="px-3 py-2.5 text-center text-sm font-bold tabular-nums" style={{ color: s.color }}>
+                                {c > 0 ? c : <span className="text-muted-foreground/40">-</span>}
+                              </td>
+                            );
+                          })}
+                          {deliveryStatusColumns.map((c) => {
+                            const n = filteredStatusRows.reduce((sum, r) => sum + (r.delivery_counts[c.nama] || 0), 0);
+                            return (
+                              <td key={`t-${c.nama}`} className="px-3 py-2.5 text-center text-sm font-bold tabular-nums" style={{ color: c.color }}>
+                                {n > 0 ? n : <span className="text-muted-foreground/40">-</span>}
+                              </td>
+                            );
+                          })}
+                          <td className="px-5 py-2.5 text-right text-sm font-bold text-primary tabular-nums">{formatNumber(filteredStatusTotalTitik)}</td>
+                          <td className="px-5 py-2.5 text-right text-sm font-bold text-primary tabular-nums">{formatCurrency(filteredStatusTotalPendapatan)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grand Total */}
+              <GrandTotalCard
+                totalTitik={filteredStatusTotalTitik}
+                totalPendapatan={filteredStatusTotalPendapatan}
               />
             </div>
           )}
