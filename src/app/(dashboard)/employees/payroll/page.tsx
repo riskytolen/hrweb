@@ -155,6 +155,39 @@ function hasActiveDayInPeriod(emp: ActiveCheckEmp, periodStart: string, periodEn
 
 // ─── Pendapatan & Potongan field definitions & currency helpers — see ./constants.ts ───
 
+/** Pindahkan periode key "YYYY-MM" sebanyak `months` bulan (negatif = mundur). */
+function shiftPeriodKey(key: string, months: number): string {
+  const [y, m] = key.split("-").map(Number);
+  const d = new Date(y, m - 1 + months, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Ringkasan status payroll per periode, dipakai untuk validasi duplikat & urutan periode. */
+type PeriodState = {
+  total: number;
+  worksheet: number;
+  draft: number;
+  final: number;
+  duplicates: number;
+  error: string | null;
+};
+
+async function fetchPeriodState(periode: string): Promise<PeriodState> {
+  const { data, error } = await supabase
+    .from("payrolls")
+    .select("id, employee_id, status")
+    .eq("periode", periode);
+  if (error) return { total: 0, worksheet: 0, draft: 0, final: 0, duplicates: 0, error: error.message };
+  const rows = data || [];
+  const worksheet = rows.filter((r) => r.status === "Worksheet").length;
+  const draft = rows.filter((r) => r.status === "Draft").length;
+  const final = rows.filter((r) => r.status === "Final").length;
+  const seen = new Map<string, number>();
+  rows.forEach((r) => seen.set(r.employee_id, (seen.get(r.employee_id) || 0) + 1));
+  const duplicates = rows.length - seen.size;
+  return { total: rows.length, worksheet, draft, final, duplicates, error: null };
+}
+
 export default function PayrollPage() {
   const { user, getPermissionLevel, isSuperAdmin } = useAuth();
   const permLevel = getPermissionLevel("payroll");
@@ -224,6 +257,10 @@ export default function PayrollPage() {
   const [wsExpandedId, setWsExpandedId] = useState<number | null>(null);
   /** Loading state untuk computeWorksheet (auto-recompute) */
   const [wsComputing, setWsComputing] = useState(false);
+  /** Ref guard anti klik ganda / race condition saat hitung worksheet. */
+  const wsComputingRef = useRef(false);
+  /** Indikator validasi periode saat mencoba pindah ke periode berikutnya. */
+  const [nextChecking, setNextChecking] = useState(false);
   /** Konfirmasi dialog: buat slip dari worksheet */
   const [buatSlipConfirm, setBuatSlipConfirm] = useState<{ ids: number[]; mode: "single" | "bulk" } | null>(null);
   /** Trigger reload data setelah action (worksheet/draft/final) */
@@ -2095,36 +2132,90 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
   const finalCount = payrolls.filter((p) => p.status === "Final").length;
   const worksheetCount = payrolls.filter((p) => p.status === "Worksheet").length;
 
-  // ─── Period navigation ───
+  // ─── Periode navigation: berurutan (tidak boleh melompat) ───
   const prevPeriod = () => {
-    const [y, m] = periodKey.split("-").map(Number);
-    const prev = new Date(y, m - 2, 1);
-    setPeriodKey(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
-    setPage(1);
-  };
-  const nextPeriod = () => {
-    const [y, m] = periodKey.split("-").map(Number);
-    const next = new Date(y, m, 1);
-    setPeriodKey(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+    setPeriodKey(shiftPeriodKey(periodKey, -1));
     setPage(1);
   };
 
-  // ─── Compute Worksheet (auto-recompute) ───
+  /** Pindah ke periode berikutnya hanya jika seluruh payroll periode berjalan sudah Final. */
+  const nextPeriod = async () => {
+    if (nextChecking) return;
+    setNextChecking(true);
+    try {
+      const state = await fetchPeriodState(periodKey);
+      if (state.error) {
+        showToast("error", "Validasi Periode Gagal", "Status periode tidak dapat diperiksa. Perpindahan periode dibatalkan.");
+        return;
+      }
+      if (state.total === 0) {
+        showToast("error", "Periode Belum Diproses", `Periode ${formatPeriodLabel(periodKey)} belum memiliki data payroll. Hitung Worksheet terlebih dahulu sebelum melanjutkan.`);
+        return;
+      }
+      if (state.worksheet > 0) {
+        showToast("error", "Worksheet Belum Selesai", `Periode ${formatPeriodLabel(periodKey)} masih memiliki ${state.worksheet} Worksheet. Selesaikan dan finalisasi seluruh slip terlebih dahulu.`);
+        return;
+      }
+      if (state.draft > 0) {
+        showToast("error", "Periode Belum Final", `Periode ${formatPeriodLabel(periodKey)} masih memiliki ${state.draft} slip Draft. Finalisasi seluruh slip sebelum melanjutkan ke periode berikutnya.`);
+        return;
+      }
+      setPeriodKey(shiftPeriodKey(periodKey, 1));
+      setPage(1);
+    } finally {
+      setNextChecking(false);
+    }
+  };
+
+// ─── Compute Worksheet (auto-recompute) ───
   const handleComputeWorksheet = async (specificPeriod?: string) => {
     if (!canEdit) {
       showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin menghitung worksheet.");
       return;
     }
+    if (wsComputingRef.current) {
+      showToast("error", "Proses Sedang Berjalan", "Perhitungan worksheet masih berlangsung. Mohon tunggu sampai selesai.");
+      return;
+    }
+    wsComputingRef.current = true;
     const targetPeriod = specificPeriod || periodKey;
     setWsComputing(true);
     const genPeriod = getPeriodRange(targetPeriod);
     try {
-      // Hapus worksheet rows existing untuk periode ini
-      await supabase
-        .from("payrolls")
-        .delete()
-        .eq("periode", targetPeriod)
-        .eq("status", "Worksheet");
+      // ── Validasi 1: periode target belum boleh memiliki payroll (cegah duplikasi) ──
+      const targetState = await fetchPeriodState(targetPeriod);
+      if (targetState.error) {
+        showToast("error", "Validasi Gagal", "Data periode tidak dapat diverifikasi. Perhitungan dibatalkan dan tidak ada perubahan yang dilakukan.");
+        return;
+      }
+      if (targetState.total > 0) {
+        if (targetState.duplicates > 0) {
+          showToast("error", "Data Payroll Duplikat", `Ditemukan payroll ganda untuk pegawai pada periode ${formatPeriodLabel(targetPeriod)}. Perhitungan dibatalkan.`);
+        } else {
+          showToast("error", "Periode Sudah Memiliki Data", `Periode ${formatPeriodLabel(targetPeriod)} sudah memiliki ${targetState.total} baris payroll. Perhitungan dibatalkan agar tidak terjadi duplikasi. Gunakan “Refresh Sumber” untuk memperbarui data.`);
+        }
+        return;
+      }
+
+      // ── Validasi 2: periode sebelumnya harus seluruhnya Final (tidak boleh melompat) ──
+      const prevKey = shiftPeriodKey(targetPeriod, -1);
+      const prevState = await fetchPeriodState(prevKey);
+      if (prevState.error) {
+        showToast("error", "Validasi Gagal", `Data periode sebelumnya (${formatPeriodLabel(prevKey)}) tidak dapat diverifikasi. Perhitungan dibatalkan.`);
+        return;
+      }
+      if (prevState.total === 0) {
+        if (!isSuperAdmin) {
+          showToast("error", "Periode Belum Diproses", `Periode ${formatPeriodLabel(prevKey)} belum memiliki data payroll. Hitung dan finalisasi periode sebelumnya terlebih dahulu, atau minta Super Admin menetapkan periode awal.`);
+          return;
+        }
+      } else if (prevState.worksheet > 0) {
+        showToast("error", "Worksheet Belum Selesai", `Periode ${formatPeriodLabel(prevKey)} masih memiliki ${prevState.worksheet} Worksheet. Selesaikan dan finalisasi seluruh slip terlebih dahulu.`);
+        return;
+      } else if (prevState.draft > 0) {
+        showToast("error", "Periode Belum Final", `Periode ${formatPeriodLabel(prevKey)} masih memiliki ${prevState.draft} slip Draft. Finalisasi seluruh slip terlebih dahulu.`);
+        return;
+      }
 
       // 1. Fetch semua pegawai. Gaji pokok selalu mengikuti master pegawai.
       const { data: allEmps, error: empErr } = await supabase
@@ -2270,8 +2361,10 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       setReloadKey((k) => k + 1);
     } catch (e) {
       showToast("error", "Error", (e as Error).message);
+    } finally {
+      wsComputingRef.current = false;
+      setWsComputing(false);
     }
-    setWsComputing(false);
   };
 
   // ─── Buat Slip dari Worksheet (Worksheet → Draft) ───
@@ -2397,7 +2490,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                   Export PDF
                 </Button>
                 <Button variant="outline" icon={FileText} size="sm" onClick={() => {
-                  if (worksheetCount > 0 || wsChangedCells.size > 0) setComputeWorksheetConfirm(true);
+                  if (wsChangedCells.size > 0) setComputeWorksheetConfirm(true);
                   else handleComputeWorksheet();
                 }} disabled={wsComputing || loading || !canEdit}>
                   {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
@@ -2414,8 +2507,8 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
               <span className="text-xs font-bold text-foreground px-2.5 min-w-[200px] text-center whitespace-nowrap">{period.label}</span>
-              <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors">
-                <ChevronRight className="w-3.5 h-3.5" />
+              <button onClick={nextPeriod} disabled={nextChecking} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40">
+                {nextChecking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
               </button>
             </div>
             {activeTab === "gapok" && (
@@ -3542,7 +3635,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         }}
         description={
           <div className="space-y-1.5">
-            <p>Worksheet periode ini akan dihapus lalu dibuat ulang dari data absensi, titik, lembur, dan gaji pokok terbaru.</p>
+            <p>Worksheet periode ini akan dihitung ulang dari data absensi, titik, lembur, dan gaji pokok terbaru. Perhitungan otomatis dibatalkan jika periode ini sudah memiliki data payroll atau periode sebelumnya belum seluruhnya Final.</p>
             {wsChangedCells.size > 0 && (
               <p className="font-semibold text-warning">Ada {wsRowsChanged} baris perubahan yang belum disimpan. Simpan dulu jika ingin mempertahankan edit manual.</p>
             )}
