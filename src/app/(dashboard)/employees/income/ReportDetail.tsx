@@ -241,6 +241,12 @@ function formatDisplayDate(dateStr: string): string {
   return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 }
 
+/** Format jam DB (07:30:00 / 02:47:32.134861) ke HH:mm. */
+function formatClockTime(value: string | null | undefined): string {
+  if (!value) return "-";
+  return value.slice(0, 5);
+}
+
 function isInNonActivePeriod(dateStr: string, periods: NonActivePeriod[] | null | undefined): boolean {
   if (!periods || periods.length === 0) return false;
   return periods.some((p) => dateStr >= p.from && dateStr <= p.to);
@@ -1864,8 +1870,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                                           {d.status}
                                                         </span>
                                                       </td>
-                                                      <td className="px-3 py-2 text-center text-xs text-foreground tabular-nums whitespace-nowrap">{d.jam_masuk || <span className="text-muted-foreground/40 italic">-</span>}</td>
-                                                      <td className="px-3 py-2 text-center text-xs text-foreground tabular-nums whitespace-nowrap">{d.jam_pulang || <span className="text-muted-foreground/40 italic">-</span>}</td>
+                                                      <td className="px-3 py-2 text-center text-xs text-foreground tabular-nums whitespace-nowrap">{formatClockTime(d.jam_masuk)}</td>
+                                                      <td className="px-3 py-2 text-center text-xs text-foreground tabular-nums whitespace-nowrap">{formatClockTime(d.jam_pulang)}</td>
                                                       <td className="px-3 py-2 text-xs text-muted-foreground break-words">{d.catatan || <span className="text-muted-foreground/40 italic">-</span>}</td>
                                                     </tr>
                                                   );
