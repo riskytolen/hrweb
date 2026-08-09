@@ -14,6 +14,9 @@ import {
   Search,
   GripVertical,
   CheckCircle2,
+  Copy,
+  Check,
+  AlertTriangle,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, formatInputCurrency, type PayrollRow } from "../constants";
@@ -184,6 +187,80 @@ export default function WorksheetSheetFullscreen({
     }
   };
 
+  // ─── Copy per kolom / per baris (TSV agar paste ke Excel/Spreadsheet) ───
+  const [copyFlash, setCopyFlash] = useState<{ kind: "col" | "row"; key: string } | null>(null);
+  const [copyError, setCopyError] = useState(false);
+
+  useEffect(() => {
+    if (!copyFlash) return;
+    const t = setTimeout(() => setCopyFlash(null), 1500);
+    return () => clearTimeout(t);
+  }, [copyFlash]);
+
+  useEffect(() => {
+    if (!copyError) return;
+    const t = setTimeout(() => setCopyError(false), 2500);
+    return () => clearTimeout(t);
+  }, [copyError]);
+
+  const copyToClipboard = async (text: string, kind: "col" | "row", key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch {
+        setCopyError(true);
+        return;
+      }
+    }
+    setCopyFlash({ kind, key });
+  };
+
+  const isCopied = (kind: "col" | "row", key: string) => copyFlash?.kind === kind && copyFlash.key === key;
+
+  /** Nilai mentah (tanpa format Rp/ribuan) agar dikenali Excel sebagai angka. */
+  const getRawCellText = (row: PayrollRow, col: SheetCol, idx: number): string => {
+    const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; status?: string } | undefined;
+    switch (col.key) {
+      case "_no": return String(idx + 1);
+      case "_nik": return row.employee_id;
+      case "_nama": return row.pegawaiNama || "";
+      case "_jabatan": return row.pegawaiJabatan || "-";
+      case "_status": return peg?.status || "-";
+      case "_total_pend": return String(wsComputeTotals(row.id).totalPendapatan);
+      case "_total_pot": return String(wsComputeTotals(row.id).totalPotongan);
+      case "_netto": return String(wsComputeTotals(row.id).netto);
+      case "_bank": return peg?.bank || "-";
+      case "_no_rek": return peg?.no_rekening || "-";
+      case "_an": return peg?.nama_rekening || "-";
+      case "_aksi": return "";
+      default:
+        if (isKeteranganCol(col.key)) return wsKeterangan[row.id]?.[col.key] || "";
+        const vals = wsData[row.id];
+        return vals ? String(vals[col.key] || 0) : "0";
+    }
+  };
+
+  const copyColumn = (col: SheetCol) => {
+    const lines = [col.label, ...displayedRows.map((r, i) => getRawCellText(r, col, i))];
+    copyToClipboard(lines.join("\n"), "col", col.key);
+  };
+
+  const copyRow = (row: PayrollRow, idx: number) => {
+    const cols = SHEET_COLS.filter((c) => c.key !== "_aksi");
+    const header = cols.map((c) => c.label).join("\t");
+    const values = cols.map((c) => getRawCellText(row, c, idx)).join("\t");
+    copyToClipboard(`${header}\n${values}`, "row", String(row.id));
+  };
+
   const nameColumnWidth = useMemo(() => {
     const longestNameLength = filtered.reduce(
       (longest, row) => Math.max(longest, Array.from(row.pegawaiNama?.trim() || "").length),
@@ -311,6 +388,24 @@ export default function WorksheetSheetFullscreen({
   const leadingInfoCols = SHEET_COLS.filter((c) => ["_no", "_nik", "_nama", "_jabatan", "_status"].includes(c.key));
   const aksiCol = SHEET_COLS.find((c) => c.key === "_aksi");
   const nettoCol = SHEET_COLS.find((c) => c.key === "_netto");
+
+  /** Tombol copy pada header kolom. */
+  const HeaderCopyButton = ({ col }: { col: SheetCol }) => {
+    const copied = isCopied("col", col.key);
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); copyColumn(col); }}
+        title={copied ? "Kolom tersalin!" : `Salin kolom ${col.label} (TSV)`}
+        className={cn(
+          "inline-flex items-center justify-center rounded-sm p-0.5 align-middle transition-colors",
+          copied ? "text-emerald-400 bg-emerald-100/30" : "text-current/60 opacity-70 hover:opacity-100 hover:text-current hover:bg-white/20",
+        )}
+      >
+        {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      </button>
+    );
+  };
 
   const getResolvedColumnWidth = (col: SheetCol): number =>
     col.key === "_nama" ? nameColumnWidth : getColumnWidth(col);
@@ -450,6 +545,12 @@ export default function WorksheetSheetFullscreen({
                 {orderSaving ? "Menyimpan urutan..." : "Urutan tersimpan"}
               </div>
             )}
+            {copyError && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-semibold bg-rose-50 text-rose-700">
+                <AlertTriangle className="w-3 h-3" />
+                Gagal menyalin ke clipboard
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center bg-muted rounded-xl p-0.5">
@@ -516,6 +617,7 @@ export default function WorksheetSheetFullscreen({
                   frozenDivider(c.key),
                 )}>
                   {c.label}
+                  <HeaderCopyButton col={c} />
                 </th>
               ))}
               {/* Pendapatan group */}
@@ -529,6 +631,7 @@ export default function WorksheetSheetFullscreen({
               {/* Netto group */}
               {nettoCol && (
                 <th rowSpan={2} style={getColumnStyle(nettoCol)} className="px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden bg-[#1d4ed8] text-white border-r border-b border-slate-400/60 align-middle">
+                  <HeaderCopyButton col={nettoCol} />
                   NETTO INCOME
                 </th>
               )}
@@ -561,6 +664,7 @@ export default function WorksheetSheetFullscreen({
                     )}
                   >
                     {c.label}
+                    <HeaderCopyButton col={c} />
                   </th>
                 );
               })}
@@ -596,9 +700,20 @@ export default function WorksheetSheetFullscreen({
                 >
                   {SHEET_COLS.map((c) => {
                       if (c.key === "_aksi") {
+                      const rowCopied = isCopied("row", String(row.id));
                       return (
                         <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-0.5 py-0.5", gridBorder)}>
                           <div className="flex items-center justify-center gap-0.5">
+                            <button
+                              onClick={() => copyRow(row, idx)}
+                              className={cn(
+                                "p-0.5 rounded-sm transition-colors",
+                                rowCopied ? "text-emerald-600 bg-emerald-50" : "text-slate-500 hover:bg-blue-50 hover:text-blue-700"
+                              )}
+                              title={rowCopied ? "Baris tersalin!" : "Salin baris (TSV)"}
+                            >
+                              {rowCopied ? <Check className="w-2.5 h-2.5" /> : <Copy className="w-2.5 h-2.5" />}
+                            </button>
                             {!isReadOnly && canEdit && setBuatSlipConfirm && mode === "Worksheet" && (
                               <button
                                 onClick={() => setBuatSlipConfirm({ ids: [row.id], mode: "single" })}
