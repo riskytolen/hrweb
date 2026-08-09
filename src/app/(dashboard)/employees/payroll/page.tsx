@@ -31,7 +31,6 @@ import {
   ShieldCheck,
   Lock,
   Maximize2,
-  Copy,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -2558,6 +2557,14 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         exportSlipPDF={exportSlipPDF}
         setDeleteConfirm={setDeleteConfirm}
         setBuatSlipConfirm={activeMainTab === "worksheet" ? setBuatSlipConfirm : undefined}
+        onCopyInputs={() => {
+          if (wsChangedCells.size > 0) {
+            showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan. Simpan atau reset sebelum menyalin input dari periode sebelumnya.");
+            return;
+          }
+          setCopyInputsConfirm(true);
+        }}
+        copyInputsBusy={copyInputsBusy}
         canEdit={canEdit}
         mode={activeMainTab === "laporan" ? "Final" : (activeMainTab.charAt(0).toUpperCase() + activeMainTab.slice(1)) as "Worksheet" | "Draft" | "Final"}
         orderSaving={orderSaving}
@@ -2610,17 +2617,6 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                 }} disabled={wsComputing || loading || !canEdit}>
                   {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
                 </Button>
-                {activeMainTab === "worksheet" && worksheetCount > 0 && (
-                  <Button variant="outline" icon={Copy} size="sm" onClick={() => {
-                    if (wsChangedCells.size > 0) {
-                      showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan. Simpan atau reset sebelum menyalin input dari periode sebelumnya.");
-                      return;
-                    }
-                    setCopyInputsConfirm(true);
-                  }} disabled={copyInputsBusy || loading || !canEdit}>
-                    {copyInputsBusy ? "Menyalin..." : "Salin Input Periode Lalu"}
-                  </Button>
-                )}
                 {activeMainTab !== "laporan" && (
                   <Button variant="outline" icon={Maximize2} size="sm" onClick={() => setSheetMode(true)}>
                     Spreadsheet

@@ -48,6 +48,8 @@ interface WorksheetSheetFullscreenProps {
   exportSlipPDF: (row: PayrollRow) => void;
   setDeleteConfirm: (v: { id: number; nama: string } | null) => void;
   setBuatSlipConfirm: ((v: { ids: number[]; mode: "single" | "bulk" } | null) => void) | undefined;
+  onCopyInputs: () => void;
+  copyInputsBusy: boolean;
   canEdit: boolean;
   mode: "Worksheet" | "Draft" | "Final";
   orderSaving: boolean;
@@ -108,6 +110,8 @@ export default function WorksheetSheetFullscreen({
   exportSlipPDF,
   setDeleteConfirm,
   setBuatSlipConfirm,
+  onCopyInputs,
+  copyInputsBusy,
   canEdit,
   mode,
   orderSaving,
@@ -721,6 +725,17 @@ export default function WorksheetSheetFullscreen({
               >
                 <MousePointerClick className="w-3.5 h-3.5" />
                 {selectMode ? "Selesai Pilih" : "Pilih Baris"}
+              </button>
+            )}
+            {mode === "Worksheet" && canEdit && (
+              <button
+                onClick={onCopyInputs}
+                disabled={copyInputsBusy || wsSaving}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Salin input manual dari periode sebelumnya"
+              >
+                {copyInputsBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
+                <span className="hidden md:inline">{copyInputsBusy ? "Menyalin..." : "Salin Input Lalu"}</span>
               </button>
             )}
             <div className="flex items-center bg-muted rounded-xl p-0.5">
