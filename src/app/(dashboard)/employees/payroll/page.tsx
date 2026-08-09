@@ -39,7 +39,7 @@ import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
-import { supabase, type DbPayroll, type DbPegawai, type NonActivePeriod } from "@/lib/supabase";
+import { supabase, type DbPayroll, type DbPegawai, type NonActivePeriod, type DbPayrollGroup, type DbPayrollEmployeeGroup } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -176,6 +176,12 @@ export default function PayrollPage() {
   const [payrollOrder, setPayrollOrder] = useState<Map<string, number>>(new Map());
   const [orderSaving, setOrderSaving] = useState(false);
   const [orderSavedTick, setOrderSavedTick] = useState(0);
+  /** Kelompok pegawai (payroll_groups, diurutkan sort_order) */
+  const [groups, setGroups] = useState<DbPayrollGroup[]>([]);
+  /** Map employee_id → group_id (payroll_employee_groups) */
+  const [employeeGroups, setEmployeeGroups] = useState<Map<string, number>>(new Map());
+  const [groupSaving, setGroupSaving] = useState(false);
+  const [groupSavedTick, setGroupSavedTick] = useState(0);
 
   // ─── Generate modal ───
   const [showGenerate, setShowGenerate] = useState(false);
@@ -305,6 +311,18 @@ export default function PayrollPage() {
     if (data) setPayrollOrder(new Map((data as { employee_id: string; sort_order: number }[]).map((d) => [d.employee_id, d.sort_order])));
   };
 
+  // ─── Fetch payroll groups ───
+  const fetchPayrollGroups = async () => {
+    const [gRes, mRes] = await Promise.all([
+      supabase.from("payroll_groups").select("*").order("sort_order", { ascending: true }),
+      supabase.from("payroll_employee_groups").select("employee_id, group_id"),
+    ]);
+    if (gRes.error) { showToast("error", "Gagal Memuat Kelompok", gRes.error.message); return; }
+    if (mRes.error) { showToast("error", "Gagal Memuat Kelompok", mRes.error.message); return; }
+    if (gRes.data) setGroups((gRes.data as DbPayrollGroup[]).filter((g) => g.status === "Aktif"));
+    if (mRes.data) setEmployeeGroups(new Map((mRes.data as DbPayrollEmployeeGroup[]).map((m) => [m.employee_id, m.group_id])));
+  };
+
   // ─── Fetch payrolls ───
   const fetchPayrolls = useCallback(async () => {
     const { data, error } = await supabase
@@ -327,7 +345,7 @@ export default function PayrollPage() {
   }, [periodKey, showToast]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchPayrolls(), fetchPayrollOrder()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchPayrolls(), fetchPayrollOrder(), fetchPayrollGroups()]).then(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -616,24 +634,20 @@ export default function PayrollPage() {
   const computedTotalPotongan = POTONGAN_FIELDS.reduce((sum, f) => sum + (editForm[f.key] || 0), 0);
   const computedNetto = computedTotalPendapatan - computedTotalPotongan;
 
-// ─── Urutan tampilan global (payroll_employee_order) ───
-  const orderedPayrolls = useMemo(() => {
-    const orderOf = (empId: string) => payrollOrder.get(empId);
-    return [...payrolls].sort((a, b) => {
-      const oa = orderOf(a.employee_id);
-      const ob = orderOf(b.employee_id);
-      if (oa === undefined && ob === undefined) {
-        return (a.pegawaiNama || a.employee_id).localeCompare(b.pegawaiNama || b.employee_id, "id");
-      }
-      if (oa === undefined) return 1; // tanpa urutan = paling bawah
-      if (ob === undefined) return -1;
-      if (oa !== ob) return oa - ob;
-      return (a.pegawaiNama || a.employee_id).localeCompare(b.pegawaiNama || b.employee_id, "id");
-    });
-  }, [payrolls, payrollOrder]);
-
-  const orderedEmployees = useMemo(() => {
+// ─── Urutan tampilan global (payroll_employee_order + kelompok) ───
+  /** Urutkan pegawai: kelompok berprioritas sort_order, di dalam kelompok ikut payroll_order, tanpa kelompok di paling bawah. */
+  const orderedEmployeeIds = useMemo(() => {
+    const groupRank = new Map(groups.map((g, i) => [g.id, i]));
+    const rankOf = (empId: string): number => {
+      const gid = employeeGroups.get(empId);
+      if (gid === undefined) return Infinity;
+      const r = groupRank.get(gid);
+      return r === undefined ? Infinity : r;
+    };
     return [...employees].sort((a, b) => {
+      const ra = rankOf(a.id);
+      const rb = rankOf(b.id);
+      if (ra !== rb) return ra - rb;
       const oa = payrollOrder.get(a.id);
       const ob = payrollOrder.get(b.id);
       if (oa === undefined && ob === undefined) return a.nama.localeCompare(b.nama, "id");
@@ -641,8 +655,32 @@ export default function PayrollPage() {
       if (ob === undefined) return -1;
       if (oa !== ob) return oa - ob;
       return a.nama.localeCompare(b.nama, "id");
+    }).map((e) => e.id);
+  }, [employees, groups, employeeGroups, payrollOrder]);
+
+  const orderedPayrolls = useMemo(() => {
+    const posById = new Map(orderedEmployeeIds.map((id, i) => [id, i]));
+    return [...payrolls].sort((a, b) => {
+      const pa = posById.get(a.employee_id);
+      const pb = posById.get(b.employee_id);
+      if (pa !== undefined && pb !== undefined) return pa - pb;
+      if (pa === undefined && pb === undefined) {
+        return (a.pegawaiNama || a.employee_id).localeCompare(b.pegawaiNama || b.employee_id, "id");
+      }
+      return pa === undefined ? 1 : -1;
     });
-  }, [employees, payrollOrder]);
+  }, [payrolls, orderedEmployeeIds]);
+
+  const orderedEmployees = useMemo(() => {
+    const posById = new Map(orderedEmployeeIds.map((id, i) => [id, i]));
+    return [...employees].sort((a, b) => {
+      const pa = posById.get(a.id);
+      const pb = posById.get(b.id);
+      if (pa !== undefined && pb !== undefined) return pa - pb;
+      if (pa === undefined && pb === undefined) return a.nama.localeCompare(b.nama, "id");
+      return pa === undefined ? 1 : -1;
+    });
+  }, [employees, orderedEmployeeIds]);
 
   const getRowsForMainTab = useCallback((tab: "worksheet" | "draft" | "final" | "laporan" = activeMainTab) => {
     if (tab === "laporan") return orderedPayrolls.filter((p) => p.status === "Final");
@@ -1002,7 +1040,13 @@ export default function PayrollPage() {
     setSelectedIds(new Set());
   };
 
-  // ─── Export Excel (xlsx) ───
+// ─── Export Excel (xlsx) ───
+  const groupNameOf = useCallback((employeeId: string): string => {
+    const gid = employeeGroups.get(employeeId);
+    if (gid === undefined) return "";
+    return groups.find((g) => g.id === gid)?.nama ?? "";
+  }, [groups, employeeGroups]);
+
   const exportExcel = async (rowsToExport: PayrollRow[] = orderedPayrolls, scopeLabel?: string) => {
     if (rowsToExport.length === 0) {
       showToast("error", "Tidak Ada Data", "Tidak ada slip untuk di-export.");
@@ -1028,7 +1072,7 @@ export default function PayrollPage() {
         );
 
       const headers = [
-        "No", "ID Pegawai", "Nama", "Periode",
+        "No", "ID Pegawai", "Nama", "Kelompok", "Periode",
         ...flatHeaders(PENDAPATAN_FIELDS),
         "Total Pendapatan",
         ...flatHeaders(POTONGAN_FIELDS),
@@ -1040,6 +1084,7 @@ export default function PayrollPage() {
         idx + 1,
         p.employee_id,
         p.pegawaiNama || "-",
+        groupNameOf(p.employee_id),
         periodLabel,
         ...flatValues(p, PENDAPATAN_FIELDS),
         p.total_pendapatan,
@@ -1052,7 +1097,7 @@ export default function PayrollPage() {
 
       // Total row
       const totalRow = [
-        "", "", "TOTAL", "",
+        "", "", "TOTAL", "", "",
         ...flatTotals(PENDAPATAN_FIELDS),
         rowsToExport.reduce((s, p) => s + p.total_pendapatan, 0),
         ...flatTotals(POTONGAN_FIELDS),
@@ -1075,10 +1120,10 @@ export default function PayrollPage() {
       });
       ws["!cols"] = colWidths;
 
-      // Format Rupiah: column 4 sampai sebelum status (kolom angka)
+      // Format Rupiah: kolom angka mulai setelah kolom identitas (No, ID, Nama, Kelompok, Periode)
       // Excel format: "#,##0"
       const rupCols: number[] = [];
-      for (let i = 4; i < headers.length - 2; i++) rupCols.push(i);
+      for (let i = 5; i < headers.length - 2; i++) rupCols.push(i);
       const range = XLSX.utils.decode_range(ws["!ref"]!);
       for (let R = 1; R <= range.e.r; ++R) {
         for (const C of rupCols) {
@@ -1599,33 +1644,197 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     wsSaveTimersRef.current.set(id, timer);
   };
 
-  /** Reorder global: pindahkan `movedId` sebelum/sesudah `targetId` (optimistic + upsert). */
+  /** Reorder global: pindahkan `movedId` sebelum/sesudah `targetId` (optimistic + upsert).
+   *  Group-aware: pegawai yang dipindah mengikuti grup target (masuk/keluar grup otomatis). */
   const handleReorderRow = useCallback((movedId: string, targetId: string, placement: "before" | "after") => {
-    if (!canEdit || orderSaving) return;
+    if (!canEdit || orderSaving || groupSaving) return;
     if (movedId === targetId) return;
-    const canonical = orderedEmployees.map((e) => e.id);
+    const canonical = orderedEmployeeIds;
     if (!canonical.includes(movedId) || !canonical.includes(targetId)) return;
     const next = canonical.filter((id) => id !== movedId);
     const tIdx = next.indexOf(targetId);
     if (tIdx < 0) return;
     next.splice(placement === "after" ? tIdx + 1 : tIdx, 0, movedId);
 
-    const prevMap = payrollOrder;
+    // Group pegawai pindah mengikuti grup target; tanpa grup = bukan anggota grup mana pun.
+    const prevGroups = employeeGroups;
+    const movedGroup = employeeGroups.get(movedId);
+    const targetGroup = employeeGroups.get(targetId);
+    const nextGroups = new Map(prevGroups);
+    if (movedGroup !== targetGroup) {
+      if (targetGroup === undefined) nextGroups.delete(movedId);
+      else nextGroups.set(movedId, targetGroup);
+    }
+
+    const prevOrder = payrollOrder;
     setPayrollOrder(new Map(next.map((id, i) => [id, i + 1])));
+    setEmployeeGroups(nextGroups);
     setOrderSaving(true);
-    supabase
+    persistOrderAndMembership(next, nextGroups, prevGroups).then(() => {
+      setOrderSaving(false);
+      setOrderSavedTick((t) => t + 1);
+    }).catch(() => {
+      setOrderSaving(false);
+      setPayrollOrder(prevOrder);
+      setEmployeeGroups(prevGroups);
+      showToast("error", "Gagal Menyimpan Urutan", "Perubahan urutan dibatalkan.");
+    });
+  }, [canEdit, orderSaving, groupSaving, orderedEmployeeIds, employeeGroups, payrollOrder, showToast]);
+
+  /** Pindahkan pegawai ke kelompok tertentu (atau null = keluar dari kelompok), tanpa mengubah urutan global lain. */
+  const handleMoveToGroup = useCallback((movedId: string, groupId: number | null) => {
+    if (!canEdit || orderSaving || groupSaving) return;
+    const prevGroups = employeeGroups;
+    const nextGroups = new Map(prevGroups);
+    if (groupId === null) nextGroups.delete(movedId);
+    else nextGroups.set(movedId, groupId);
+    if (nextGroups.get(movedId) === prevGroups.get(movedId)) return;
+
+    setEmployeeGroups(nextGroups);
+    setGroupSaving(true);
+    persistMembershipOnly(nextGroups, prevGroups).then(() => {
+      setGroupSaving(false);
+      setGroupSavedTick((t) => t + 1);
+    }).catch(() => {
+      setGroupSaving(false);
+      setEmployeeGroups(prevGroups);
+      showToast("error", "Gagal Menyimpan Kelompok", "Perubahan kelompok dibatalkan.");
+    });
+  }, [canEdit, orderSaving, groupSaving, employeeGroups, showToast]);
+
+  /** Buat kelompok baru dengan anggota terpilih (urutan sesuai tampilan saat ini). */
+  const handleCreateGroup = useCallback(async (nama: string, warna: string, memberIds: string[]) => {
+    if (!canEdit || memberIds.length === 0 || !nama.trim()) return false;
+    try {
+      const { data: newGroup, error: err1 } = await supabase
+        .from("payroll_groups")
+        .insert({ nama: nama.trim(), warna, sort_order: groups.length + 1 })
+        .select()
+        .single();
+      if (err1) throw err1;
+      const gid = (newGroup as DbPayrollGroup).id;
+      const { error: err2 } = await supabase
+        .from("payroll_employee_groups")
+        .upsert(memberIds.map((id, i) => ({ employee_id: id, group_id: gid, member_sort_order: i + 1 })), { onConflict: "employee_id" });
+      if (err2) throw err2;
+      const prevGroups = employeeGroups;
+      const nextGroups = new Map(prevGroups);
+      memberIds.forEach((id) => nextGroups.set(id, gid));
+      setGroups((prev) => [...prev, { ...newGroup } as DbPayrollGroup].sort((a, b) => a.sort_order - b.sort_order));
+      setEmployeeGroups(nextGroups);
+      setGroupSavedTick((t) => t + 1);
+      return true;
+    } catch (err) {
+      showToast("error", "Gagal Membuat Kelompok", err instanceof Error ? err.message : "Terjadi kesalahan.");
+      return false;
+    }
+  }, [canEdit, groups, employeeGroups, showToast]);
+
+  /** Hapus kelompok (anggota otomatis keluar). */
+  const handleDeleteGroup = useCallback((groupId: number) => {
+    if (!canEdit) return;
+    const prevGroups = employeeGroups;
+    const prevGroupsList = groups;
+    setGroups((prev) => prev.filter((g) => g.id !== groupId));
+    setEmployeeGroups((prev) => {
+      const next = new Map(prev);
+      const toDelete = [...next.entries()].filter(([, gid]) => gid === groupId).map(([id]) => id);
+      toDelete.forEach((id) => next.delete(id));
+      return next;
+    });
+    setGroupSaving(true);
+    supabase.from("payroll_groups").delete().eq("id", groupId).then(({ error }) => {
+      setGroupSaving(false);
+      if (error) {
+        setGroups(prevGroupsList);
+        setEmployeeGroups(prevGroups);
+        showToast("error", "Gagal Menghapus Kelompok", error.message);
+      } else {
+        setGroupSavedTick((t) => t + 1);
+      }
+    });
+  }, [canEdit, groups, employeeGroups, showToast]);
+
+  // ─── Helper persistensi order + keanggotaan grup ───
+  /** Tulis ulang payroll_employee_order + payroll_employee_groups (bulk upsert atomik). */
+  const persistOrderAndMembership = useCallback(async (
+    orderIds: string[],
+    nextGroups: Map<string, number>,
+    prevGroups: Map<string, number>,
+  ) => {
+    const { error: errOrder } = await supabase
       .from("payroll_employee_order")
-      .upsert(next.map((id, i) => ({ employee_id: id, sort_order: i + 1 })), { onConflict: "employee_id" })
+      .upsert(orderIds.map((id, i) => ({ employee_id: id, sort_order: i + 1 })), { onConflict: "employee_id" });
+    if (errOrder) throw errOrder;
+    const removedIds = [...prevGroups.keys()].filter((id) => !nextGroups.has(id));
+    if (removedIds.length > 0) {
+      const { error: errDelete } = await supabase
+        .from("payroll_employee_groups")
+        .delete()
+        .in("employee_id", removedIds);
+      if (errDelete) throw errDelete;
+    }
+    // member_sort_order = urutan tampilan di dalam kelompok (nilai fallback; urutan utama tetap payroll_employee_order).
+    const members = [...nextGroups.entries()].map(([employee_id, group_id]) => ({
+      employee_id,
+      group_id,
+      member_sort_order: orderIds.indexOf(employee_id) + 1,
+    }));
+    if (members.length === 0) return;
+    const { error: errMember } = await supabase
+      .from("payroll_employee_groups")
+      .upsert(members, { onConflict: "employee_id" });
+    if (errMember) throw errMember;
+  }, []);
+
+  /** Tulis payroll_employee_groups saja (pindah grup tanpa ubah urutan global). */
+  const persistMembershipOnly = useCallback(async (nextGroups: Map<string, number>, prevGroups: Map<string, number>) => {
+    const members = [...nextGroups.entries()].map(([employee_id, group_id]) => ({
+      employee_id,
+      group_id,
+      member_sort_order: orderedEmployeeIds.indexOf(employee_id) + 1,
+    }));
+    const { error: errUpsert } = await supabase
+      .from("payroll_employee_groups")
+      .upsert(members, { onConflict: "employee_id" });
+    if (errUpsert) throw errUpsert;
+    const removedIds = [...prevGroups.keys()].filter((id) => !nextGroups.has(id));
+    if (removedIds.length > 0) {
+      const { error: errDelete } = await supabase
+        .from("payroll_employee_groups")
+        .delete()
+        .in("employee_id", removedIds);
+      if (errDelete) throw errDelete;
+    }
+  }, [orderedEmployeeIds]);
+
+  /** Reorder prioritas kelompok (drag header kelompok). */
+  const handleReorderGroups = useCallback((fromId: number, toId: number) => {
+    if (!canEdit || groupSaving) return;
+    if (fromId === toId) return;
+    const prev = groups;
+    const next = [...groups];
+    const fromIdx = next.findIndex((g) => g.id === fromId);
+    const toIdx = next.findIndex((g) => g.id === toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, prev[fromIdx]);
+    const withOrder = next.map((g, i) => ({ ...g, sort_order: i + 1 }));
+    setGroups(withOrder);
+    setGroupSaving(true);
+    supabase
+      .from("payroll_groups")
+      .upsert(withOrder.map((g) => ({ id: g.id, sort_order: g.sort_order })), { onConflict: "id" })
       .then(({ error }) => {
-        setOrderSaving(false);
+        setGroupSaving(false);
         if (error) {
-          setPayrollOrder(prevMap);
-          showToast("error", "Gagal Menyimpan Urutan", error.message);
+          setGroups(prev);
+          showToast("error", "Gagal Menyimpan Prioritas", error.message);
         } else {
-          setOrderSavedTick((t) => t + 1);
+          setGroupSavedTick((t) => t + 1);
         }
       });
-  }, [canEdit, orderSaving, orderedEmployees, payrollOrder, showToast]);
+  }, [canEdit, groupSaving, groups, showToast]);
 
   const handleWsRefreshSources = async () => {
     if (!canEdit) {
@@ -2146,6 +2355,14 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         orderSaving={orderSaving}
         orderSavedTick={orderSavedTick}
         handleReorderRow={handleReorderRow}
+        groups={groups}
+        employeeGroups={employeeGroups}
+        handleMoveToGroup={handleMoveToGroup}
+        handleCreateGroup={handleCreateGroup}
+        handleDeleteGroup={handleDeleteGroup}
+        handleReorderGroups={handleReorderGroups}
+        groupSaving={groupSaving}
+        groupSavedTick={groupSavedTick}
         onClose={() => setSheetMode(false)}
       />
     )}

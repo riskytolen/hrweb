@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import {
   X,
   CreditCard,
@@ -17,9 +17,13 @@ import {
   Copy,
   Check,
   AlertTriangle,
+  Users,
+  Plus,
+  MousePointerClick,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, formatInputCurrency, type PayrollRow } from "../constants";
+import type { DbPayrollGroup } from "@/lib/supabase";
 
 type WsBreakdownAbsen = { telat: number; alpha: number; lainnya: number; items: { tanggal: string; status: string; denda: number; durasi_telat: number | null }[] } | null;
 type WsBreakdownLembur = { total: number; items: { tanggal: string; jam_mulai: string; jam_selesai: string; durasi_menit: number; rate_per_jam: number; total_lembur: number; alasan: string | null }[] } | null;
@@ -49,6 +53,14 @@ interface WorksheetSheetFullscreenProps {
   orderSaving: boolean;
   orderSavedTick: number;
   handleReorderRow: (movedId: string, targetId: string, placement: "before" | "after") => void;
+  groups: DbPayrollGroup[];
+  employeeGroups: Map<string, number>;
+  handleMoveToGroup: (movedId: string, groupId: number | null) => void;
+  handleCreateGroup: (nama: string, warna: string, memberIds: string[]) => Promise<boolean>;
+  handleDeleteGroup: (groupId: number) => void;
+  handleReorderGroups: (fromId: number, toId: number) => void;
+  groupSaving: boolean;
+  groupSavedTick: number;
   onClose: () => void;
 }
 
@@ -101,6 +113,14 @@ export default function WorksheetSheetFullscreen({
   orderSaving,
   orderSavedTick,
   handleReorderRow,
+  groups,
+  employeeGroups,
+  handleMoveToGroup,
+  handleCreateGroup,
+  handleDeleteGroup,
+  handleReorderGroups,
+  groupSaving,
+  groupSavedTick,
   onClose,
 }: WorksheetSheetFullscreenProps) {
   const tableRef = useRef<HTMLDivElement>(null);
@@ -115,7 +135,7 @@ export default function WorksheetSheetFullscreen({
 
   // ─── Search ───
   const [searchQuery, setSearchQuery] = useState("");
-  const displayedRows = useMemo(() => {
+  const searchedRows = useMemo(() => {
     if (!searchQuery.trim()) return filtered;
     const q = searchQuery.toLowerCase();
     return filtered.filter((r) =>
@@ -124,14 +144,90 @@ export default function WorksheetSheetFullscreen({
     );
   }, [filtered, searchQuery]);
 
+  // ─── Kelompok pegawai ───
+  const [groupFilter, setGroupFilter] = useState<"all" | "ungrouped" | number>("all");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selIds, setSelIds] = useState<Set<string>>(new Set());
+  const selAnchor = useRef<string | null>(null);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [groupNama, setGroupNama] = useState("");
+  const [groupWarna, setGroupWarna] = useState("#3b82f6");
+  const [groupSavedFlash, setGroupSavedFlash] = useState(false);
+  /** Band header yang sedang di-drag (reorder prioritas kelompok). */
+  const [dragGroupId, setDragGroupId] = useState<number | null>(null);
+  const [dragOverGroupId, setDragOverGroupId] = useState<number | null>(null);
+
+  const canGroupEdit = canEdit && !groupSaving;
+
+  useEffect(() => {
+    if (groupSavedTick === 0) return;
+    setGroupSavedFlash(true);
+    const t = setTimeout(() => setGroupSavedFlash(false), 2000);
+    return () => clearTimeout(t);
+  }, [groupSavedTick]);
+
+  const groupOf = (empId: string): number | null => employeeGroups.get(empId) ?? null;
+  const groupById = (gid: number | null) => gid === null ? null : groups.find((g) => g.id === gid) ?? null;
+
+  /** Baris tampil setelah filter kelompok di-clip: "all" | "ungrouped" | groupId. */
+  const displayedRows = useMemo(() => {
+    if (groupFilter === "all") return searchedRows;
+    if (groupFilter === "ungrouped") return searchedRows.filter((r) => !employeeGroups.has(r.employee_id));
+    return searchedRows.filter((r) => employeeGroups.get(r.employee_id) === groupFilter);
+  }, [searchedRows, groupFilter, employeeGroups]);
+
+  /** Kelompok yang muncul di render (urut sesuai tampilan), plus band "Belum Dikelompokkan" jika ada anggota. */
+  const visibleGroupOrder = useMemo(() => {
+    const ids = new Set<number>();
+    let hasUngrouped = false;
+    searchedRows.forEach((r) => {
+      const gid = employeeGroups.get(r.employee_id);
+      if (gid === undefined) hasUngrouped = true;
+      else ids.add(gid);
+    });
+    const ordered = groups.filter((g) => ids.has(g.id));
+    return { orderedGroupIds: ordered.map((g) => g.id), hasUngrouped };
+  }, [searchedRows, employeeGroups, groups]);
+
+  const groupCount = useCallback((gid: number | null) => {
+    if (gid === null) return searchedRows.filter((r) => !employeeGroups.has(r.employee_id)).length;
+    return searchedRows.filter((r) => employeeGroups.get(r.employee_id) === gid).length;
+  }, [searchedRows, employeeGroups]);
+
+  const totalPerGroup = useCallback((gid: number | null) => {
+    let sum = 0;
+    searchedRows.filter((r) => (gid === null ? !employeeGroups.has(r.employee_id) : employeeGroups.get(r.employee_id) === gid))
+      .forEach((r) => { sum += wsComputeTotals(r.id).netto; });
+    return sum;
+  }, [searchedRows, employeeGroups, wsComputeTotals]);
+
+  // ─── Pilih baris (mode kelompok) ───
+  const toggleSelect = (empId: string, shift: boolean, idx: number) => {
+    setSelIds((prev) => {
+      const next = new Set(prev);
+      if (shift && selAnchor.current) {
+        const anchorIdx = displayedRows.findIndex((r) => r.employee_id === selAnchor.current);
+        if (anchorIdx >= 0) {
+          const [lo, hi] = anchorIdx < idx ? [anchorIdx, idx] : [idx, anchorIdx];
+          for (let i = lo; i <= hi; i++) next.add(displayedRows[i].employee_id);
+        }
+      } else if (next.has(empId)) next.delete(empId);
+      else next.add(empId);
+      selAnchor.current = shift ? selAnchor.current : empId;
+      return next;
+    });
+  };
+
+  const clearSelection = () => { setSelIds(new Set()); selAnchor.current = null; };
+
   // ─── Urutan baris (drag / keyboard) ───
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"before" | "after">("before");
   const [orderSavedFlash, setOrderSavedFlash] = useState(false);
-  const canReorder = canEdit && !orderSaving;
+  const canReorder = canEdit && !orderSaving && !groupSaving;
   const dragActive = dragIdx !== null;
-  const canDragNow = canEdit && !orderSaving && !searchQuery.trim();
+  const canDragNow = canEdit && !orderSaving && !groupSaving && !searchQuery.trim() && !selectMode;
 
   useEffect(() => {
     if (orderSavedTick === 0) return;
@@ -140,7 +236,33 @@ export default function WorksheetSheetFullscreen({
     return () => clearTimeout(t);
   }, [orderSavedTick]);
 
-  const resetDrag = () => { setDragIdx(null); setDragOverIdx(null); setDragOverPosition("before"); };
+  const resetDrag = () => { setDragIdx(null); setDragOverIdx(null); setDragOverPosition("before"); setDragGroupId(null); setDragOverGroupId(null); };
+
+  /** Group band diklik = drop target: pindahkan pegawai KE kelompok ini, atau reorder prioritas bila drop band lain. */
+  const handleBandDragOver = (e: React.DragEvent, gid: number | null) => {
+    if (!dragActive && dragGroupId === null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverGroupId(gid);
+  };
+
+  const handleBandDrop = (e: React.DragEvent, gid: number | null, ignore = false) => {
+    e.preventDefault();
+    if (!ignore) {
+      // Drop band kelompok lain di atas band ini = reorder prioritas kelompok.
+      if (dragGroupId !== null && gid !== null && dragGroupId !== gid) {
+        handleReorderGroups(dragGroupId, gid);
+        resetDrag();
+        return;
+      }
+      // Drop pegawai ke band = pindahkan masuk kelompok (atau keluar jika band "Tanpa Kelompok").
+      if (dragIdx !== null && dragIdx < displayedRows.length) {
+        const moved = displayedRows[dragIdx];
+        if (moved) handleMoveToGroup(moved.employee_id, gid);
+      }
+    }
+    resetDrag();
+  };
 
   const handleDragStart = (e: React.DragEvent, idx: number) => {
     if (searchQuery.trim() || !canReorder) return;
@@ -256,10 +378,34 @@ export default function WorksheetSheetFullscreen({
 
   const copyRow = (row: PayrollRow, idx: number) => {
     const cols = SHEET_COLS.filter((c) => c.key !== "_aksi");
-    const header = cols.map((c) => c.label).join("\t");
-    const values = cols.map((c) => getRawCellText(row, c, idx)).join("\t");
+    const header = [...cols.map((c) => c.label), "KELOMPOK"].join("\t");
+    const values = [...cols.map((c) => getRawCellText(row, c, idx)), groupById(groupOf(row.employee_id))?.nama ?? ""].join("\t");
     copyToClipboard(`${header}\n${values}`, "row", String(row.id));
   };
+
+  /** Item render: band kelompok & baris pegawai (band disisipkan saat ganti kelompok). */
+  const renderItems = useMemo(() => {
+    type Item = { kind: "band"; gid: number | null } | { kind: "row"; row: PayrollRow; idx: number };
+    const items: Item[] = [];
+    if (groupFilter === "all") {
+      let cur: number | null = null;
+      let first = true;
+      displayedRows.forEach((row, idx) => {
+        const gid = employeeGroups.get(row.employee_id) ?? null;
+        if (first || gid !== cur) {
+          items.push({ kind: "band", gid });
+          cur = gid;
+          first = false;
+        }
+        items.push({ kind: "row", row, idx });
+      });
+    } else {
+      const gid = groupFilter === "ungrouped" ? null : groupFilter;
+      if (displayedRows.length > 0) items.push({ kind: "band", gid });
+      displayedRows.forEach((row, idx) => items.push({ kind: "row", row, idx }));
+    }
+    return items;
+  }, [displayedRows, groupFilter, employeeGroups]);
 
   const nameColumnWidth = useMemo(() => {
     const longestNameLength = filtered.reduce(
@@ -545,6 +691,15 @@ export default function WorksheetSheetFullscreen({
                 {orderSaving ? "Menyimpan urutan..." : "Urutan tersimpan"}
               </div>
             )}
+            {(groupSaving || groupSavedFlash) && (
+              <div className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-semibold transition-colors",
+                groupSaving ? "bg-blue-50 text-blue-700" : "bg-emerald-50 text-emerald-700"
+              )}>
+                {groupSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                {groupSaving ? "Menyimpan kelompok..." : "Kelompok tersimpan"}
+              </div>
+            )}
             {copyError && (
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-semibold bg-rose-50 text-rose-700">
                 <AlertTriangle className="w-3 h-3" />
@@ -553,6 +708,19 @@ export default function WorksheetSheetFullscreen({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {canEdit && (
+              <button
+                onClick={() => { setSelectMode((v) => !v); clearSelection(); }}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold transition-colors",
+                  selectMode ? "bg-blue-600 text-white shadow-sm shadow-blue-600/30" : "bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                )}
+                title={selectMode ? "Keluar dari mode pilih baris" : "Pilih beberapa baris untuk membuat kelompok"}
+              >
+                <MousePointerClick className="w-3.5 h-3.5" />
+                {selectMode ? "Selesai Pilih" : "Pilih Baris"}
+              </button>
+            )}
             <div className="flex items-center bg-muted rounded-xl p-0.5">
             <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronLeft className="w-3.5 h-3.5" /></button>
             <span className="text-[11px] font-bold text-foreground px-2.5 min-w-[200px] text-center whitespace-nowrap">{period.label}</span>
@@ -591,6 +759,49 @@ export default function WorksheetSheetFullscreen({
             <X className="w-3.5 h-3.5" /> Keluar Fullscreen
           </button>
         </div>
+      </div>
+
+      {/* ── Chip filter kelompok ── */}
+      <div className="flex items-center gap-1.5 px-5 py-1.5 border-b border-border bg-card flex-shrink-0 overflow-x-auto payroll-group-chips">
+        <button
+          onClick={() => setGroupFilter("all")}
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap transition-colors border",
+            groupFilter === "all" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300",
+          )}
+        >
+          <Users className="w-3 h-3" /> Semua <span className="opacity-70">({searchedRows.length})</span>
+        </button>
+        {groups.map((g) => {
+          const cnt = groupCount(g.id);
+          if (cnt === 0) return null;
+          return (
+            <button
+              key={g.id}
+              onClick={() => setGroupFilter(g.id)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap transition-colors border",
+                groupFilter === g.id ? "text-white border-transparent" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300",
+              )}
+              style={groupFilter === g.id ? { backgroundColor: g.warna } : undefined}
+            >
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: g.warna }} />
+              {g.nama} <span className="opacity-70">({cnt})</span>
+            </button>
+          );
+        })}
+        {visibleGroupOrder.hasUngrouped && (
+          <button
+            onClick={() => setGroupFilter("ungrouped")}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap transition-colors border",
+              groupFilter === "ungrouped" ? "bg-slate-400 text-white border-slate-400" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300",
+            )}
+          >
+            <span className="w-2 h-2 rounded-full bg-slate-400" />
+            Tanpa Kelompok <span className="opacity-70">({groupCount(null)})</span>
+          </button>
+        )}
       </div>
 
       {/* ── Table wrapper ── */}
@@ -673,21 +884,99 @@ export default function WorksheetSheetFullscreen({
 
           {/* ── Body ── */}
           <tbody>
-            {displayedRows.length === 0 ? (
+            {renderItems.length === 0 ? (
               <tr><td colSpan={SHEET_COLS.length} className="bg-white text-center py-24 text-sm text-slate-500">
                 <CreditCard className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                 {searchQuery ? "Tidak ada pegawai yang cocok dengan pencarian" : "Belum ada data untuk periode ini"}
               </td></tr>
-            ) : displayedRows.map((row, idx) => {
+            ) : renderItems.map((item) => {
+              // Band kelompok = pemisah antar kelompok, sekaligus drop-zone masuk/keluar kelompok + drag prioritas.
+              if (item.kind === "band") {
+                const g = groupById(item.gid);
+                const cnt = groupCount(item.gid);
+                const net = totalPerGroup(item.gid);
+                const isBandOver = dragOverGroupId === item.gid && (dragActive || dragGroupId !== null);
+                return (
+                  <tr
+                    key={`band-${item.gid ?? "ungrouped"}`}
+                    onDragOver={(e) => handleBandDragOver(e, item.gid)}
+                    onDrop={(e) => handleBandDrop(e, item.gid)}
+                    onDragEnd={resetDrag}
+                    className={cn(
+                      "border-b border-dotted border-slate-400/80 transition-colors",
+                      isBandOver ? "ring-2 ring-blue-500/70 ring-inset" : "",
+                    )}
+                  >
+                    <td colSpan={SHEET_COLS.length} className="px-2 py-1.5 leading-tight" style={{ backgroundColor: g ? `${g.warna}1A` : "rgba(100,116,139,0.14)" }}>
+                      <div className="flex items-center gap-2">
+                        {g && canGroupEdit ? (
+                          <button
+                            type="button"
+                            draggable={canGroupEdit}
+                            onDragStart={(e) => {
+                              if (!canGroupEdit) return;
+                              setDragGroupId(g.id);
+                              e.dataTransfer.effectAllowed = "move";
+                            }}
+                            onDragEnd={resetDrag}
+                            title="Seret untuk mengubah prioritas kelompok"
+                            className="p-0.5 rounded-sm text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-grab active:cursor-grabbing"
+                          >
+                            <GripVertical className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <span className="w-3.5" />
+                        )}
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: g ? g.warna : "#94a3b8" }} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-700">
+                          {groupFilter === "all" ? `${g ? g.nama : "Belum Dikelompokkan"}` : (g ? g.nama : "Belum Dikelompokkan")}
+                        </span>
+                        <span className="text-[10px] font-semibold text-slate-500 tabular-nums">
+                          {cnt} pegawai · Netto {formatCurrency(net)}
+                        </span>
+                        {groupFilter === "all" && item.gid !== null && (
+                          <span className="text-[9px] text-slate-400 italic ml-1 hidden 2xl:inline">
+                            {item.gid === null ? "" : "Drag pegawai ke sini untuk masuk kelompok ini"}
+                          </span>
+                        )}
+                        <div className="ml-auto flex items-center gap-1">
+                          {g && canGroupEdit && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Hapus kelompok "${g.nama}"? Seluruh anggotanya akan kembali ke "Belum Dikelompokkan".`)) {
+                                  handleDeleteGroup(g.id);
+                                  setGroupFilter("all");
+                                }
+                              }}
+                              title={`Hapus kelompok ${g.nama}`}
+                              className="p-0.5 rounded-sm text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }
+              const row = item.row;
+              const idx = item.idx;
               const vals = wsData[row.id] || {};
               const computed = wsComputeTotals(row.id);
               const isChanged = wsChangedCells.has(row.id);
               const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null } | undefined;
+              const g = groupById(groupOf(row.employee_id));
+              const isSelected = selIds.has(row.employee_id);
               const rowBg = isChanged ? "bg-amber-50" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
               const frozenBg = isChanged ? "bg-amber-50" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
               return (
                 <tr
                   key={row.id}
+                  onClick={(e) => {
+                    if (selectMode && !(e.target as HTMLElement).closest("button, input, a")) toggleSelect(row.employee_id, e.shiftKey, idx);
+                  }}
                   onDragOver={(e) => handleRowDragOver(e, idx)}
                   onDrop={(e) => handleRowDrop(e, row, idx)}
                   onDragEnd={resetDrag}
@@ -696,6 +985,7 @@ export default function WorksheetSheetFullscreen({
                     rowBg,
                     dragActive && dragIdx === idx && "opacity-50",
                     dragIndicator(idx),
+                    isSelected && "!bg-blue-50/80",
                   )}
                 >
                   {SHEET_COLS.map((c) => {
@@ -764,7 +1054,19 @@ export default function WorksheetSheetFullscreen({
                           className={cn(c.width, "px-1 py-0.5 text-[10px] text-slate-600 text-center sticky z-30 leading-tight", frozenBg, gridBorder)}
                         >
                           <div className="flex items-center justify-center gap-0.5">
-                            {canEdit && (
+                            {selectMode && canEdit ? (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); toggleSelect(row.employee_id, e.shiftKey, idx); }}
+                                className={cn(
+                                  "w-4 h-4 rounded border flex items-center justify-center transition-colors",
+                                  isSelected ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 bg-white hover:border-blue-400",
+                                )}
+                                title={isSelected ? "Batalkan pilihan" : "Pilih baris"}
+                              >
+                                {isSelected && <Check className="w-3 h-3" />}
+                              </button>
+                            ) : canEdit ? (
                               <button
                                 type="button"
                                 draggable={canDragNow}
@@ -774,11 +1076,13 @@ export default function WorksheetSheetFullscreen({
                                 onClick={(e) => e.stopPropagation()}
                                 disabled={!canReorder}
                                 title={
-                                  searchQuery.trim()
-                                    ? "Hapus pencarian untuk mengubah urutan"
-                                    : orderSaving
-                                      ? "Menyimpan urutan..."
-                                      : "Ubah urutan (seret atau gunakan panah atas/bawah)"
+                                  selectMode
+                                    ? "Keluar dari mode pilih baris untuk mengubah urutan"
+                                    : searchQuery.trim()
+                                      ? "Hapus pencarian untuk mengubah urutan"
+                                      : orderSaving || groupSaving
+                                        ? "Menyimpan..."
+                                        : "Ubah urutan (seret atau gunakan panah atas/bawah)"
                                 }
                                 className={cn(
                                   "rounded-sm p-0.5 transition-colors outline-none",
@@ -789,7 +1093,7 @@ export default function WorksheetSheetFullscreen({
                               >
                                 <GripVertical className="w-3.5 h-3.5" />
                               </button>
-                            )}
+                            ) : null}
                             <span className="tabular-nums leading-tight">{idx + 1}</span>
                           </div>
                         </td>
@@ -798,7 +1102,10 @@ export default function WorksheetSheetFullscreen({
                     if (c.key === "_nama") {
                       return (
                         <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 sticky z-30", frozenBg, gridBorder, frozenDivider(c.key))}>
-                          <p className="text-[11px] font-semibold text-slate-950 truncate leading-tight">{row.pegawaiNama}</p>
+                          <div className="flex items-center gap-1 min-w-0">
+                            {g && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: g.warna }} title={g.nama} />}
+                            <p className="text-[11px] font-semibold text-slate-950 truncate leading-tight flex-1 min-w-0">{row.pegawaiNama}</p>
+                          </div>
                         </td>
                       );
                     }
@@ -1004,6 +1311,123 @@ export default function WorksheetSheetFullscreen({
           )}
         </table>
       </div>
+
+      {/* ── Floating action bar: seleksi baris ── */}
+      {selectMode && selIds.size > 0 && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white shadow-2xl shadow-slate-900/40 border border-slate-700">
+          <span className="text-[11px] font-bold tabular-nums mr-1">{selIds.size} terpilih</span>
+          {canEdit && (
+            <button
+              onClick={() => { setShowCreateGroup(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-500 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" /> Buat Kelompok
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (window.confirm(`Hapus ${selIds.size} baris terpilih dari kelompoknya?`)) {
+                selIds.forEach((empId) => handleMoveToGroup(empId, null));
+                clearSelection();
+              }
+            }}
+            disabled={!canEdit || groupSaving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-700 hover:bg-slate-600 transition-colors disabled:opacity-40"
+            title="Keluarkan pegawai terpilih dari kelompoknya (menjadi Tanpa Kelompok)"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Hapus dari Kelompok
+          </button>
+          <button
+            onClick={clearSelection}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-700 hover:bg-slate-600 transition-colors"
+          >
+            Bersihkan
+          </button>
+        </div>
+      )}
+
+      {/* ── Modal: Buat Kelompok ── */}
+      {showCreateGroup && (
+        <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowCreateGroup(false)}>
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Users className="w-4 h-4 text-blue-600" /> Buat Kelompok Baru
+              </h3>
+              <button onClick={() => setShowCreateGroup(false)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-500">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-600 block mb-1.5">Nama Kelompok</label>
+                <input
+                  type="text"
+                  value={groupNama}
+                  onChange={(e) => setGroupNama(e.target.value)}
+                  placeholder="cth: DRIVER SENIOR"
+                  autoFocus
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 placeholder:text-slate-400"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-600 block mb-1.5">Warna Kelompok</label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#64748b"].map((warna) => (
+                    <button
+                      key={warna}
+                      onClick={() => setGroupWarna(warna)}
+                      className={cn(
+                        "w-7 h-7 rounded-full transition-transform",
+                        groupWarna === warna ? "ring-2 ring-offset-2 ring-slate-900 scale-110" : "hover:scale-105",
+                      )}
+                      style={{ backgroundColor: warna }}
+                      title={warna}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5">
+                <p className="text-[10px] font-semibold text-slate-500 mb-1">
+                  {selIds.size} pegawai akan masuk kelompok ini:
+                </p>
+                <p className="text-[11px] text-slate-700 font-medium truncate">
+                  {displayedRows.filter((r) => selIds.has(r.employee_id)).slice(0, 4).map((r) => r.pegawaiNama).join(", ")}
+                  {selIds.size > 4 ? ` +${selIds.size - 4} lainnya` : ""}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowCreateGroup(false)}
+                  className="flex-1 px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={() => {
+                    const memberIds = displayedRows.filter((r) => selIds.has(r.employee_id)).map((r) => r.employee_id);
+                    void handleCreateGroup(groupNama, groupWarna, memberIds).then((ok) => {
+                      if (ok) {
+                        setShowCreateGroup(false);
+                        setGroupNama("");
+                        clearSelection();
+                      }
+                    });
+                  }}
+                  disabled={!groupNama.trim() || groupSaving || selIds.size === 0}
+                  className="flex-1 px-4 py-2 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {groupSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  Buat Kelompok
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         :global(.payroll-sheet-scrollbar) {

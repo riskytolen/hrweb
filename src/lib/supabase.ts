@@ -15,6 +15,25 @@ export interface DbPayrollEmployeeOrder {
   updated_at: string;
 }
 
+export interface DbPayrollGroup {
+  id: number;
+  nama: string;
+  warna: string;
+  sort_order: number;
+  status: "Aktif" | "Tidak Aktif";
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbPayrollEmployeeGroup {
+  employee_id: string;
+  group_id: number;
+  member_sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Inclusive date range for a historical non-active period (used by `pegawai.non_active_periods`). */
 export interface NonActivePeriod {
   from: string;
