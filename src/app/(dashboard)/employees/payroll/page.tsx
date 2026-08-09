@@ -31,6 +31,7 @@ import {
   ShieldCheck,
   Lock,
   Maximize2,
+  Copy,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -62,6 +63,12 @@ const PAYROLL_PAGE_SIZE = 100;
 const CUT_OFF_DAY = 7;
 const SUPABASE_PAGE_SIZE = 1000;
 const PAYROLL_PERIOD_STORAGE_KEY = "hrweb.payroll.periodKey";
+
+/** Field input manual (bukan autorecomputed) yang boleh disalin antar periode. */
+const MANUAL_INPUT_FIELDS: FieldDef[] = [
+  ...PENDAPATAN_FIELDS.filter((f) => !f.readonly),
+  ...POTONGAN_FIELDS.filter((f) => !f.readonly),
+];
 
 type SupabasePagedResult<T> = {
   data: T[] | null;
@@ -285,6 +292,10 @@ export default function PayrollPage() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [singleFinalConfirm, setSingleFinalConfirm] = useState<PayrollRow | null>(null);
   const [computeWorksheetConfirm, setComputeWorksheetConfirm] = useState(false);
+  /** Konfirmasi salin input manual dari periode sebelumnya */
+  const [copyInputsConfirm, setCopyInputsConfirm] = useState(false);
+  const [copyInputsBusy, setCopyInputsBusy] = useState(false);
+  const copyInputsRef = useRef(false);
 
   // ─── Delete confirm ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -2367,6 +2378,160 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     }
   };
 
+  // ─── Salin input manual dari periode sebelumnya (isi yang masih kosong) ───
+  const handleCopyInputsFromPrev = async () => {
+    if (!canEdit) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin mengubah worksheet.");
+      return;
+    }
+    if (copyInputsRef.current) {
+      showToast("error", "Proses Sedang Berjalan", "Penyalinan input manual masih berlangsung. Mohon tunggu sampai selesai.");
+      return;
+    }
+    if (wsChangedCells.size > 0) {
+      showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan. Simpan atau reset sebelum menyalin input dari periode sebelumnya.");
+      return;
+    }
+    const worksheetRows = payrolls.filter((p) => p.status === "Worksheet");
+    if (worksheetRows.length === 0) {
+      showToast("error", "Tidak Ada Worksheet", "Tidak ada baris Worksheet pada periode ini untuk disalin. Hitung Worksheet terlebih dahulu.");
+      return;
+    }
+
+    copyInputsRef.current = true;
+    setCopyInputsBusy(true);
+    try {
+      // ── Validasi: periode sumber (sebelumnya) harus seluruhnya Final ──
+      const prevKey = shiftPeriodKey(periodKey, -1);
+      const prevState = await fetchPeriodState(prevKey);
+      if (prevState.error) {
+        showToast("error", "Validasi Gagal", `Data periode ${formatPeriodLabel(prevKey)} tidak dapat diverifikasi. Penyalinan dibatalkan.`);
+        return;
+      }
+      if (prevState.total === 0) {
+        showToast("error", "Periode Sumber Belum Diproses", `Periode ${formatPeriodLabel(prevKey)} belum memiliki data payroll. Input manual tidak dapat disalin.`);
+        return;
+      }
+      if (prevState.worksheet > 0) {
+        showToast("error", "Periode Sumber Belum Selesai", `Periode ${formatPeriodLabel(prevKey)} masih memiliki ${prevState.worksheet} Worksheet. Finalisasi seluruh slip terlebih dahulu.`);
+        return;
+      }
+      if (prevState.draft > 0) {
+        showToast("error", "Periode Sumber Belum Final", `Periode ${formatPeriodLabel(prevKey)} masih memiliki ${prevState.draft} slip Draft. Finalisasi seluruh slip sebelum menyalin input.`);
+        return;
+      }
+
+      // ── Ambil input manual periode sumber (status Final) ──
+      const selectColumns = [...new Set([
+        "employee_id",
+        ...MANUAL_INPUT_FIELDS.map((f) => f.key),
+        ...MANUAL_INPUT_FIELDS.map((f) => f.keteranganKey).filter((k): k is string => Boolean(k)),
+      ])];
+      const { data: prevRows, error: prevErr } = await supabase
+        .from("payrolls")
+        .select(selectColumns.join(","))
+        .eq("periode", prevKey)
+        .eq("status", "Final");
+      if (prevErr || !prevRows) {
+        showToast("error", "Gagal Memuat Data Sumber", (prevErr as { message?: string } | null)?.message || "Data periode sebelumnya tidak dapat dimuat.");
+        return;
+      }
+      const prevMap = new Map<string, Record<string, number | string | null>>();
+      prevRows.forEach((r) => {
+        const rec = r as unknown as Record<string, number | string | null>;
+        if (typeof rec.employee_id === "string") prevMap.set(rec.employee_id, rec);
+      });
+
+      // ── Isi field manual target yang masih kosong dari sumber (match by employee_id) ──
+      let updated = 0;
+      let failed = 0;
+      let tanpaSumber = 0;
+      let sudahTerisi = 0;
+      for (const row of worksheetRows) {
+        const prev = prevMap.get(row.employee_id);
+        if (!prev) {
+          tanpaSumber += 1;
+          continue;
+        }
+
+        const tgt = row as unknown as Record<string, unknown>;
+        const payload: Record<string, number | string | null> = {};
+        const values: Record<string, number> = {};
+        [...PENDAPATAN_FIELDS, ...POTONGAN_FIELDS].forEach((f) => {
+          values[f.key] = Number(tgt[f.key] || 0);
+        });
+
+        MANUAL_INPUT_FIELDS.forEach((f) => {
+          if (f.keteranganKey) {
+            const targetKet = tgt[f.keteranganKey];
+            const sourceKet = prev[f.keteranganKey];
+            if (!targetKet && sourceKet) payload[f.keteranganKey] = String(sourceKet);
+            return;
+          }
+          const targetVal = Number(tgt[f.key] || 0);
+          const sourceVal = Number(prev[f.key] || 0);
+          if (targetVal === 0 && sourceVal > 0) {
+            payload[f.key] = sourceVal;
+            values[f.key] = sourceVal;
+          }
+        });
+
+        if (Object.keys(payload).length === 0) {
+          sudahTerisi += 1;
+          continue;
+        }
+
+        const totalPendapatan = PENDAPATAN_FIELDS.reduce((s, f) => s + values[f.key], 0);
+        const totalPotongan = POTONGAN_FIELDS.reduce((s, f) => s + values[f.key], 0);
+        payload.total_pendapatan = totalPendapatan;
+        payload.total_potongan = totalPotongan;
+        payload.netto = totalPendapatan - totalPotongan;
+
+        const { error } = await supabase
+          .from("payrolls")
+          .update(payload)
+          .eq("id", row.id)
+          .eq("status", "Worksheet");
+        if (error) failed += 1;
+        else updated += 1;
+      }
+
+      if (updated > 0) {
+        await logAudit({
+          supabase,
+          action: "update",
+          entityType: "payrolls",
+          entityLabel: `Salin input manual ${formatPeriodLabel(periodKey)}`,
+          metadata: {
+            periode: periodKey,
+            periode_sumber: prevKey,
+            jumlah_slip: updated,
+          },
+        });
+      }
+
+      setWsAbsenBreakdown({});
+      setWsLemburBreakdown({});
+      await Promise.all([fetchEmployees(), fetchPayrolls()]);
+
+      if (failed > 0) {
+        showToast("error", "Sebagian Gagal", `${updated} slip berhasil disalin, ${failed} slip gagal diperbarui.`);
+      } else if (updated === 0 && sudahTerisi === worksheetRows.length) {
+        showToast("success", "Tidak Ada Perubahan", "Seluruh input manual pada periode ini sudah terisi.");
+      } else {
+        const parts: string[] = [];
+        if (updated > 0) parts.push(`${updated} slip diperbarui dari periode sebelumnya`);
+        if (tanpaSumber > 0) parts.push(`${tanpaSumber} pegawai tidak memiliki data di periode sumber`);
+        showToast("success", "Input Manual Disalin", parts.length > 0 ? `${parts.join(", ")}.` : "Tidak ada perubahan yang dilakukan.");
+      }
+    } catch (e) {
+      showToast("error", "Gagal Menyalin", e instanceof Error ? e.message : "Gagal menyalin input dari periode sebelumnya.");
+    } finally {
+      copyInputsRef.current = false;
+      setCopyInputsBusy(false);
+    }
+  };
+
   // ─── Buat Slip dari Worksheet (Worksheet → Draft) ───
   const handleBuatSlip = async (ids: number[]) => {
     if (ids.length === 0) return;
@@ -2495,6 +2660,17 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                 }} disabled={wsComputing || loading || !canEdit}>
                   {wsComputing ? "Menghitung..." : "Hitung Worksheet"}
                 </Button>
+                {activeMainTab === "worksheet" && worksheetCount > 0 && (
+                  <Button variant="outline" icon={Copy} size="sm" onClick={() => {
+                    if (wsChangedCells.size > 0) {
+                      showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan. Simpan atau reset sebelum menyalin input dari periode sebelumnya.");
+                      return;
+                    }
+                    setCopyInputsConfirm(true);
+                  }} disabled={copyInputsBusy || loading || !canEdit}>
+                    {copyInputsBusy ? "Menyalin..." : "Salin Input Periode Lalu"}
+                  </Button>
+                )}
                 {activeMainTab !== "laporan" && (
                   <Button variant="outline" icon={Maximize2} size="sm" onClick={() => setSheetMode(true)}>
                     Spreadsheet
@@ -3639,6 +3815,26 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
             {wsChangedCells.size > 0 && (
               <p className="font-semibold text-warning">Ada {wsRowsChanged} baris perubahan yang belum disimpan. Simpan dulu jika ingin mempertahankan edit manual.</p>
             )}
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={copyInputsConfirm}
+        title="Salin Input Manual dari Periode Sebelumnya?"
+        variant="default"
+        confirmLabel="Ya, Salin"
+        loading={copyInputsBusy}
+        onCancel={() => setCopyInputsConfirm(false)}
+        onConfirm={() => {
+          setCopyInputsConfirm(false);
+          handleCopyInputsFromPrev();
+        }}
+        description={
+          <div className="space-y-1.5">
+            <p>Input manual yang <strong>masih kosong</strong> di Worksheet periode <strong>{formatPeriodLabel(periodKey)}</strong> akan diisi dari slip Final periode {formatPeriodLabel(shiftPeriodKey(periodKey, -1))}.</p>
+            <p>Nilai otomatis (titik, absensi, lembur, gaji pokok) dan input manual yang sudah terisi <strong>tidak akan ditimpa</strong>.</p>
+            <p>Sumber harus berstatus <strong>Final</strong> agar dapat disalin.</p>
           </div>
         }
       />
