@@ -1263,45 +1263,45 @@ export default function WorksheetSheetFullscreen({
 
           {/* ── Footer: Grand Total ── */}
           {displayedRows.length > 0 && (
-            <tfoot className="sticky bottom-0 z-10">
+            <tfoot className="[&_td]:[position:sticky] [&_td]:bottom-0 [&_td]:z-50">
               <tr className="border-t border-dotted border-slate-500/80 bg-slate-800 text-white shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.25)]">
                 {SHEET_COLS.map((c) => {
-                  if (c.key === "_no") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky z-40 bg-slate-800", footerGridBorder)} />;
+                  if (c.key === "_no") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky bottom-0 z-50 bg-slate-800", footerGridBorder)} />;
                   if (c.key === "_nama") return (
-                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky z-40 bg-slate-800", footerGridBorder, frozenDivider(c.key))}>
+                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky bottom-0 z-50 bg-slate-800", footerGridBorder, frozenDivider(c.key))}>
                       <p className="text-[10px] font-bold text-white uppercase tracking-wider leading-tight">Grand Total</p>
                     </td>
                   );
-                  if (c.key === "_nik") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky z-40 bg-slate-800", footerGridBorder)} />;
+                  if (c.key === "_nik") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky bottom-0 z-50 bg-slate-800", footerGridBorder)} />;
                   if (c.key === "_jabatan" || c.key === "_status") {
-                    return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky z-40 bg-slate-800", footerGridBorder, frozenDivider(c.key))} />;
+                    return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky bottom-0 z-50 bg-slate-800", footerGridBorder, frozenDivider(c.key))} />;
                   }
                   if (c.key === "_bank" || c.key === "_no_rek" || c.key === "_an" || c.key === "_aksi") {
-                    return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 bg-slate-800", footerGridBorder)} />;
+                    return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky bottom-0 z-50 bg-slate-800", footerGridBorder)} />;
                   }
                   if (c.key === "_total_pend") {
                     return (
-                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[11px] font-extrabold text-emerald-300 tabular-nums bg-slate-800 leading-tight", footerGridBorder)}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[11px] font-extrabold text-emerald-300 tabular-nums bg-slate-800 leading-tight sticky bottom-0 z-50", footerGridBorder)}>
                         {getGrandTotal(c)}
                       </td>
                     );
                   }
                   if (c.key === "_total_pot") {
                     return (
-                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[11px] font-extrabold text-rose-300 tabular-nums bg-slate-800 leading-tight", footerGridBorder)}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[11px] font-extrabold text-rose-300 tabular-nums bg-slate-800 leading-tight sticky bottom-0 z-50", footerGridBorder)}>
                         {getGrandTotal(c)}
                       </td>
                     );
                   }
                   if (c.key === "_netto") {
                     return (
-                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[12px] font-extrabold text-blue-300 tabular-nums bg-slate-800 leading-tight", footerGridBorder)}>
+                      <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[12px] font-extrabold text-blue-300 tabular-nums bg-slate-800 leading-tight sticky bottom-0 z-50", footerGridBorder)}>
                         {getGrandNetto()}
                       </td>
                     );
                   }
                   return (
-                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[11px] font-bold text-white tabular-nums bg-slate-800 leading-tight", footerGridBorder)}>
+                    <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 text-right text-[11px] font-bold text-white tabular-nums bg-slate-800 leading-tight sticky bottom-0 z-50", footerGridBorder)}>
                       {getGrandTotal(c)}
                     </td>
                   );
