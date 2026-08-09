@@ -40,8 +40,13 @@ type ZoneLite = { id: number; nama: string; color: string };
 type StatusLite = { id: number; nama: string; kode: string; color: string };
 
 type AttendanceLiteRow = {
+  id: number;
   employee_id: string;
+  tanggal: string;
   status: DbAttendanceRecord["status"];
+  jam_masuk: string | null;
+  jam_pulang: string | null;
+  catatan: string | null;
   pegawai?: { nama: string | null }[] | null;
 };
 
@@ -100,6 +105,30 @@ type StatusAbsensiRow = {
   total_pendapatan: number;
   attendance_counts: Record<string, number>;
   delivery_counts: Record<string, number>;
+  attendance_details: AbsensiDetail[];
+  delivery_details: TitikDetail[];
+};
+
+/** Satu record absensi per pegawai (untuk panel detail baris). */
+type AbsensiDetail = {
+  tanggal: string;
+  status: DbAttendanceRecord["status"];
+  jam_masuk: string | null;
+  jam_pulang: string | null;
+  catatan: string | null;
+};
+
+/** Satu record delivery_points per pegawai (untuk panel detail baris). */
+type TitikDetail = {
+  tanggal: string;
+  zone_nama: string;
+  zone_color: string;
+  role: "Driver" | "Helper";
+  status_nama?: string;
+  status_color?: string;
+  jumlah_titik: number;
+  total_pendapatan: number;
+  catatan: string | null;
 };
 
 /** Status absensi yang ditampilkan di laporan Status & Absensi (urutan tampilan). */
@@ -109,6 +138,17 @@ const ABSENSI_STATUSES: readonly { nama: string; color: string }[] = [
   { nama: "Cuti", color: "#8b5cf6" },
   { nama: "Sakit", color: "#ef4444" },
 ] as const;
+
+/** Warna semua status absensi (termasuk Hadir/Terlambat/Libur) untuk panel detail. */
+const ATTENDANCE_STATUS_COLORS: Record<DbAttendanceRecord["status"], string> = {
+  Hadir: "#10b981",
+  Terlambat: "#f59e0b",
+  Izin: "#3b82f6",
+  Sakit: "#ef4444",
+  Alpha: "#6b7280",
+  Libur: "#8b5cf6",
+  Cuti: "#8b5cf6",
+};
 
 interface ReportDetailProps {
   show: boolean;
@@ -129,7 +169,7 @@ async function fetchAttendanceStatusesInRange(start: string, end: string): Promi
   while (true) {
     const { data, error } = await supabase
       .from("attendance_records")
-      .select("employee_id, status, pegawai(nama)")
+      .select("id, employee_id, tanggal, status, jam_masuk, jam_pulang, catatan, pegawai(nama)")
       .gte("tanggal", start)
       .lte("tanggal", end)
       .order("tanggal", { ascending: true })
@@ -250,6 +290,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const [statusRows, setStatusRows] = useState<StatusAbsensiRow[]>([]);
   const [deliveryStatusColumns, setDeliveryStatusColumns] = useState<{ nama: string; color: string }[]>([]);
   const [expandedDailyKey, setExpandedDailyKey] = useState<string | null>(null);
+  const [expandedStatusEmployeeId, setExpandedStatusEmployeeId] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [showEmployeeFilter, setShowEmployeeFilter] = useState(false);
@@ -486,11 +527,11 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
       .sort((a, b) => b.total_pendapatan - a.total_pendapatan || b.total_titik - a.total_titik || a.employee_nama.localeCompare(b.employee_nama));
     setRingkasanRows(rRows);
     setExpandedDailyKey(null);
-    buildStatusAbsensi(rows, attendanceRows);
+    buildStatusAbsensi(activeData, rows, attendanceRows);
   };
 
   // ─── Status & Absensi: agregasi per pegawai (riwayat titik ∪ absensi) ───
-  const buildStatusAbsensi = (rows: ReportRow[], attendanceRows: AttendanceLiteRow[] | null) => {
+  const buildStatusAbsensi = (activeData: DeliveryQueryRow[], rows: ReportRow[], attendanceRows: AttendanceLiteRow[] | null) => {
     const map = new Map<string, StatusAbsensiRow>();
     rows.forEach((r) => {
       if (!map.has(r.employee_id)) {
@@ -501,6 +542,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
           total_pendapatan: 0,
           attendance_counts: {},
           delivery_counts: {},
+          attendance_details: [],
+          delivery_details: [],
         });
       }
       const entry = map.get(r.employee_id)!;
@@ -521,17 +564,61 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
             total_pendapatan: 0,
             attendance_counts: {},
             delivery_counts: {},
+            attendance_details: [],
+            delivery_details: [],
           });
         }
         const entry = map.get(a.employee_id)!;
         entry.attendance_counts[a.status] = (entry.attendance_counts[a.status] || 0) + 1;
+        entry.attendance_details.push({
+          tanggal: a.tanggal,
+          status: a.status,
+          jam_masuk: a.jam_masuk,
+          jam_pulang: a.jam_pulang,
+          catatan: a.catatan,
+        });
       });
     }
 
-    const saRows = Array.from(map.values()).sort(
+    activeData.forEach((d) => {
+      const empId = d.employee_id || "unknown";
+      if (!map.has(empId)) {
+        map.set(empId, {
+          employee_id: empId,
+          employee_nama: d.pegawai?.nama || d.employee_nama || empId || "?",
+          total_titik: 0,
+          total_pendapatan: 0,
+          attendance_counts: {},
+          delivery_counts: {},
+          attendance_details: [],
+          delivery_details: [],
+        });
+      }
+      const entry = map.get(empId)!;
+      entry.delivery_details.push({
+        tanggal: d.tanggal,
+        zone_nama: d.delivery_zones?.nama || "-",
+        zone_color: d.delivery_zones?.color || "#3b82f6",
+        role: d.role,
+        status_nama: d.delivery_statuses?.nama || undefined,
+        status_color: d.delivery_statuses?.color || undefined,
+        jumlah_titik: d.jumlah_titik,
+        total_pendapatan: d.total,
+        catatan: d.catatan || null,
+      });
+    });
+
+    const saRows = Array.from(map.values()).map((r) => {
+      r.attendance_details.sort((a, b) => b.tanggal.localeCompare(a.tanggal));
+      r.delivery_details.sort(
+        (a, b) => b.tanggal.localeCompare(a.tanggal) || a.zone_nama.localeCompare(b.zone_nama) || a.role.localeCompare(b.role),
+      );
+      return r;
+    }).sort(
       (a, b) => b.total_pendapatan - a.total_pendapatan || b.total_titik - a.total_titik || a.employee_nama.localeCompare(b.employee_nama),
     );
     setStatusRows(saRows);
+    setExpandedStatusEmployeeId(null);
 
     // Kolom status titik dinamis: status aktif dulu, lalu status lain yang muncul di data
     const cols: { nama: string; color: string }[] = [];
@@ -1637,63 +1724,229 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               <div className="bg-card rounded-2xl border border-border overflow-hidden">
                 <div className="overflow-hidden sm:overflow-x-auto">
                   <div className="mobile-zoom-inner">
-                    <table className="w-full">
+                    <table className="w-full min-w-[720px]">
                       <thead>
-                        <tr className="border-b border-border bg-muted/20">
-                          <th rowSpan={2} className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-10">#</th>
+                        <tr className="border-b border-border">
+                          <th rowSpan={2} className="sticky left-0 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-10 bg-card border-r border-border">#</th>
+                          <th rowSpan={2} className="sticky left-10 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 min-w-[160px] bg-card border-r border-border">Pegawai</th>
                           <th rowSpan={2} className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 whitespace-nowrap">ID Pegawai</th>
-                          <th rowSpan={2} className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5">Pegawai</th>
-                          <th colSpan={ABSENSI_STATUSES.length} className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 border-l border-border">
+                          <th colSpan={ABSENSI_STATUSES.length + 1} className="text-center text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-l-2 border-l-blue-200 dark:border-l-blue-500/30">
                             Jumlah Absensi (hari)
                           </th>
-                          <th colSpan={deliveryStatusColumns.length} className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 border-l border-border">
-                            Status Rekap Titik (hari)
+                          {deliveryStatusColumns.length > 0 && (
+                            <th colSpan={deliveryStatusColumns.length} className="text-center text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300 border-l-2 border-l-violet-200 dark:border-l-violet-500/30">
+                              Status Titik (hari)
+                            </th>
+                          )}
+                          <th colSpan={2} className="text-center text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-l-2 border-l-emerald-200 dark:border-l-emerald-500/30">
+                            Rekap
                           </th>
-                          <th rowSpan={2} className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-28 whitespace-nowrap">Total Titik</th>
-                          <th rowSpan={2} className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-5 py-2.5 w-36 whitespace-nowrap">Total Pendapatan</th>
                         </tr>
                         <tr className="border-b border-border bg-muted/20">
                           {ABSENSI_STATUSES.map((s) => (
-                            <th key={s.nama} className="text-center text-[10px] font-bold px-3 py-2 border-l border-border" style={{ color: s.color }}>
+                            <th key={s.nama} className="text-center text-[10px] font-bold px-3 py-2" style={{ color: s.color }}>
                               {s.nama}
                             </th>
                           ))}
+                          <th className="text-center text-[10px] font-bold px-3 py-2 text-foreground">Total Absen</th>
                           {deliveryStatusColumns.map((c) => (
-                            <th key={c.nama} className="text-center text-[10px] font-bold px-3 py-2 border-l border-border" style={{ color: c.color }}>
+                            <th key={c.nama} className="text-center text-[10px] font-bold px-3 py-2" style={{ color: c.color }}>
                               {c.nama}
                             </th>
                           ))}
+                          <th className="text-right text-[10px] font-bold text-foreground uppercase tracking-wider px-4 py-2 whitespace-nowrap">Total Titik</th>
+                          <th className="text-right text-[10px] font-bold text-foreground uppercase tracking-wider px-4 py-2 whitespace-nowrap">Total Pendapatan</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/50">
-                        {filteredStatusRows.map((row, idx) => (
-                          <tr key={row.employee_id} className="hover:bg-muted/30 transition-colors">
-                            <td className="px-5 py-3 text-xs text-muted-foreground">{idx + 1}</td>
-                            <td className="px-3 py-3 text-xs text-muted-foreground font-mono break-all">{row.employee_id}</td>
-                            <td className="px-5 py-3"><p className="text-sm font-semibold text-foreground break-words whitespace-nowrap">{row.employee_nama}</p></td>
-                            {ABSENSI_STATUSES.map((s) => {
-                              const c = row.attendance_counts[s.nama] || 0;
-                              return (
-                                <td key={s.nama} className="px-3 py-3 text-center text-sm tabular-nums" style={c > 0 ? { color: s.color, fontWeight: 700 } : undefined}>
-                                  {c > 0 ? c : <span className="text-muted-foreground/40">-</span>}
+                        {filteredStatusRows.map((row, idx) => {
+                          const isExpanded = expandedStatusEmployeeId === row.employee_id;
+                          const totalAbsen = ABSENSI_STATUSES.reduce((sum, s) => sum + (row.attendance_counts[s.nama] || 0), 0);
+                          return (
+                            <Fragment key={row.employee_id}>
+                              <tr
+                                role="button"
+                                aria-expanded={isExpanded}
+                                onClick={() => setExpandedStatusEmployeeId(isExpanded ? null : row.employee_id)}
+                                className={cn("group cursor-pointer transition-colors", isExpanded ? "bg-primary/[0.04]" : "hover:bg-muted/30")}
+                              >
+                                <td className="sticky left-0 z-10 bg-card group-hover:bg-muted/30 px-4 py-3 text-center border-r border-border/50">
+                                  <ChevronDown className={cn("w-3.5 h-3.5 mx-auto text-muted-foreground transition-transform flex-shrink-0", isExpanded && "rotate-180 text-primary")} />
                                 </td>
-                              );
-                            })}
-                            {deliveryStatusColumns.map((c) => {
-                              const n = row.delivery_counts[c.nama] || 0;
-                              return (
-                                <td key={c.nama} className="px-3 py-3 text-center text-sm tabular-nums" style={n > 0 ? { color: c.color, fontWeight: 700 } : undefined}>
-                                  {n > 0 ? n : <span className="text-muted-foreground/40">-</span>}
+                                <td className="sticky left-10 z-10 bg-card group-hover:bg-muted/30 px-4 py-3 border-r border-border/50">
+                                  <p className={cn("text-sm font-semibold break-words whitespace-nowrap", isExpanded ? "text-primary" : "text-foreground")}>
+                                    {idx + 1}. {row.employee_nama}
+                                  </p>
                                 </td>
-                              );
-                            })}
-                            <td className="px-5 py-3 text-right text-sm font-bold text-foreground tabular-nums">{formatNumber(row.total_titik)}</td>
-                            <td className="px-5 py-3 text-right text-sm font-semibold text-foreground tabular-nums">{formatCurrency(row.total_pendapatan)}</td>
-                          </tr>
-                        ))}
+                                <td className="px-3 py-3 text-xs text-muted-foreground font-mono break-all">{row.employee_id}</td>
+                                {ABSENSI_STATUSES.map((s) => {
+                                  const c = row.attendance_counts[s.nama] || 0;
+                                  return (
+                                    <td key={s.nama} className="px-3 py-3 text-center text-sm tabular-nums" style={c > 0 ? { color: s.color, fontWeight: 700 } : undefined}>
+                                      {c > 0 ? c : <span className="text-muted-foreground/40">-</span>}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-3 text-center text-sm font-bold text-foreground tabular-nums">
+                                  {totalAbsen > 0 ? totalAbsen : <span className="text-muted-foreground/40">-</span>}
+                                </td>
+                                {deliveryStatusColumns.map((c) => {
+                                  const n = row.delivery_counts[c.nama] || 0;
+                                  return (
+                                    <td key={c.nama} className="px-3 py-3 text-center text-sm tabular-nums" style={n > 0 ? { color: c.color, fontWeight: 700 } : undefined}>
+                                      {n > 0 ? n : <span className="text-muted-foreground/40">-</span>}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-4 py-3 text-right text-sm font-bold text-foreground tabular-nums">{formatNumber(row.total_titik)}</td>
+                                <td className="px-4 py-3 text-right text-sm font-semibold text-foreground tabular-nums">{formatCurrency(row.total_pendapatan)}</td>
+                              </tr>
+                              {isExpanded && (
+                                <tr>
+                                  <td colSpan={3 + ABSENSI_STATUSES.length + 1 + deliveryStatusColumns.length + 2} className="px-3 sm:px-5 py-4 bg-primary/[0.02]">
+                                    <div className="rounded-xl border border-border bg-card overflow-hidden animate-fade-in">
+                                      {/* Ringkasan pegawai */}
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 border-b border-border bg-muted/30">
+                                        <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center">
+                                          <User className="w-3 h-3 text-primary" />
+                                        </div>
+                                        <p className="text-xs font-bold text-foreground">{row.employee_nama}</p>
+                                        <span className="text-[10px] text-muted-foreground font-mono">{row.employee_id}</span>
+                                        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                                            Absen: {totalAbsen} hari
+                                          </span>
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+                                            Catat Titik: {row.delivery_details.length} kali
+                                          </span>
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                            {formatNumber(row.total_titik)} titik
+                                          </span>
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                            {formatCurrency(row.total_pendapatan)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="grid gap-4 lg:grid-cols-2 p-3 sm:p-4">
+                                        {/* ── Detail Absensi ── */}
+                                        <div>
+                                          <div className="flex items-center justify-between gap-3 px-3 py-2 mb-2">
+                                            <div className="flex items-center gap-2">
+                                              <Calendar className="w-3.5 h-3.5 text-primary" />
+                                              <p className="text-xs font-bold text-foreground">Detail Absensi</p>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground">{row.attendance_details.length} hari</p>
+                                          </div>
+                                          <div className="sm:overflow-x-auto">
+                                            <table className="w-full min-w-[420px]">
+                                              <thead>
+                                                <tr className="border-b border-border/70 bg-muted/10">
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Tanggal</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-24">Status</th>
+                                                  <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Masuk</th>
+                                                  <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Pulang</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Catatan</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-border/50">
+                                                {row.attendance_details.length === 0 && (
+                                                  <tr>
+                                                    <td colSpan={5} className="px-3 py-5 text-center text-xs text-muted-foreground italic">Tidak ada data absensi pada periode ini</td>
+                                                  </tr>
+                                                )}
+                                                {row.attendance_details.map((d, di) => {
+                                                  const color = ATTENDANCE_STATUS_COLORS[d.status];
+                                                  return (
+                                                    <tr key={`${d.tanggal}-${di}`}>
+                                                      <td className="px-3 py-2 text-xs font-medium text-foreground whitespace-nowrap">{formatDisplayDate(d.tanggal)}</td>
+                                                      <td className="px-3 py-2">
+                                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap" style={{ backgroundColor: `${color}20`, color }}>
+                                                          {d.status}
+                                                        </span>
+                                                      </td>
+                                                      <td className="px-3 py-2 text-center text-xs text-foreground tabular-nums whitespace-nowrap">{d.jam_masuk || <span className="text-muted-foreground/40 italic">-</span>}</td>
+                                                      <td className="px-3 py-2 text-center text-xs text-foreground tabular-nums whitespace-nowrap">{d.jam_pulang || <span className="text-muted-foreground/40 italic">-</span>}</td>
+                                                      <td className="px-3 py-2 text-xs text-muted-foreground break-words">{d.catatan || <span className="text-muted-foreground/40 italic">-</span>}</td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+
+                                        {/* ── Detail Status Titik ── */}
+                                        <div>
+                                          <div className="flex items-center justify-between gap-3 px-3 py-2 mb-2">
+                                            <div className="flex items-center gap-2">
+                                              <ClipboardList className="w-3.5 h-3.5 text-primary" />
+                                              <p className="text-xs font-bold text-foreground">Detail Status Titik</p>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground">{row.delivery_details.length} catatan</p>
+                                          </div>
+                                          <div className="sm:overflow-x-auto">
+                                            <table className="w-full min-w-[480px]">
+                                              <thead>
+                                                <tr className="border-b border-border/70 bg-muted/10">
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Tanggal</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Nama Titik</th>
+                                                  <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Posisi</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-28">Status</th>
+                                                  <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Titik</th>
+                                                  <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-28">Pendapatan</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Catatan</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-border/50">
+                                                {row.delivery_details.length === 0 && (
+                                                  <tr>
+                                                    <td colSpan={7} className="px-3 py-5 text-center text-xs text-muted-foreground italic">Tidak ada riwayat titik pada periode ini</td>
+                                                  </tr>
+                                                )}
+                                                {row.delivery_details.map((d, di) => (
+                                                  <tr key={`${d.tanggal}-${di}`}>
+                                                    <td className="px-3 py-2 text-xs font-medium text-foreground whitespace-nowrap">{formatDisplayDate(d.tanggal)}</td>
+                                                    <td className="px-3 py-2">
+                                                      <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground break-words whitespace-nowrap">
+                                                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: d.zone_color }} />
+                                                        {d.zone_nama}
+                                                      </p>
+                                                    </td>
+                                                    <td className="px-3 py-2 text-center">
+                                                      <span className={cn("text-[9px] font-bold px-2 py-0.5 rounded-lg whitespace-nowrap",
+                                                        d.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
+                                                      )}>{d.role}</span>
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                      {d.status_nama ? (
+                                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap" style={{ backgroundColor: `${d.status_color || "#6b7280"}20`, color: d.status_color || "#6b7280" }}>
+                                                          {d.status_nama}
+                                                        </span>
+                                                      ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-right text-xs font-bold text-foreground tabular-nums whitespace-nowrap">{formatNumber(d.jumlah_titik)}</td>
+                                                    <td className="px-3 py-2 text-right text-xs font-semibold text-foreground tabular-nums whitespace-nowrap">{formatCurrency(d.total_pendapatan)}</td>
+                                                    <td className="px-3 py-2 text-xs text-muted-foreground break-words">{d.catatan || <span className="text-muted-foreground/40 italic">-</span>}</td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
                         <tr className="bg-muted/40 font-semibold">
-                          <td className="px-5 py-2.5" colSpan={3}>
+                          <td className="sticky left-0 z-10 bg-muted/40 px-4 py-2.5 text-center">
                             <span className="text-xs font-bold text-muted-foreground">Total</span>
+                          </td>
+                          <td className="sticky left-10 z-10 bg-muted/40 px-4 py-2.5 border-r border-border/50" colSpan={2}>
+                            <span className="text-xs font-bold text-muted-foreground">{filteredStatusRows.length} pegawai</span>
                           </td>
                           {ABSENSI_STATUSES.map((s) => {
                             const c = filteredStatusRows.reduce((sum, r) => sum + (r.attendance_counts[s.nama] || 0), 0);
@@ -1703,6 +1956,9 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                               </td>
                             );
                           })}
+                          <td className="px-3 py-2.5 text-center text-sm font-bold text-foreground tabular-nums">
+                            {ABSENSI_STATUSES.reduce((sum, s) => sum + (filteredStatusRows.reduce((ss, r) => ss + (r.attendance_counts[s.nama] || 0), 0)), 0)}
+                          </td>
                           {deliveryStatusColumns.map((c) => {
                             const n = filteredStatusRows.reduce((sum, r) => sum + (r.delivery_counts[c.nama] || 0), 0);
                             return (
@@ -1711,8 +1967,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                               </td>
                             );
                           })}
-                          <td className="px-5 py-2.5 text-right text-sm font-bold text-primary tabular-nums">{formatNumber(filteredStatusTotalTitik)}</td>
-                          <td className="px-5 py-2.5 text-right text-sm font-bold text-primary tabular-nums">{formatCurrency(filteredStatusTotalPendapatan)}</td>
+                          <td className="px-4 py-2.5 text-right text-sm font-bold text-primary tabular-nums">{formatNumber(filteredStatusTotalTitik)}</td>
+                          <td className="px-4 py-2.5 text-right text-sm font-bold text-primary tabular-nums">{formatCurrency(filteredStatusTotalPendapatan)}</td>
                         </tr>
                       </tbody>
                     </table>
