@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from "react"
 import {
   X,
   CreditCard,
+  Columns3,
   FileCheck,
   Trash2,
   Loader2,
@@ -66,6 +67,16 @@ interface WorksheetSheetFullscreenProps {
 
 const READONLY_KEYS = new Set(["gaji_pokok", "pendapatan_titik", "lembur", "potongan_absen"]);
 const FROZEN_COLS = new Set(["_no", "_nik", "_nama", "_jabatan", "_status"]);
+const REQUIRED_VISIBLE_COLUMN_KEYS = new Set(["_no", "_nama"]);
+const COLUMN_VISIBILITY_STORAGE_PREFIX = "hrweb.payroll.sheet.hiddenColumns";
+const COLUMN_GROUP_LABELS: Record<string, string> = {
+  info: "Identitas",
+  pendapatan: "Pendapatan",
+  potongan: "Potongan",
+  netto: "Netto",
+  rekening: "Rekening",
+  aksi: "Aksi",
+};
 const NAME_COLUMN_MIN_WIDTH = 180;
 const NAME_COLUMN_CHAR_WIDTH = 8;
 const NAME_COLUMN_PADDING = 24;
@@ -152,6 +163,13 @@ export default function WorksheetSheetFullscreen({
   const selAnchor = useRef<string | null>(null);
   /** Row yang diklik terakhir (highlight biru). */
   const [activeRowId, setActiveRowId] = useState<number | null>(null);
+  const activeRowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
+  const registerActiveRowRef = useCallback((rowId: number) => (el: HTMLTableRowElement | null) => {
+    if (el) activeRowRefs.current.set(rowId, el);
+    else activeRowRefs.current.delete(rowId);
+  }, []);
+  const [showColumnPanel, setShowColumnPanel] = useState(false);
+  const [hiddenColumnKeys, setHiddenColumnKeys] = useState<Set<string>>(new Set());
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [groupNama, setGroupNama] = useState("");
   const [groupWarna, setGroupWarna] = useState("#3b82f6");
@@ -389,7 +407,7 @@ export default function WorksheetSheetFullscreen({
   };
 
   const copyRow = (row: PayrollRow, idx: number) => {
-    const cols = SHEET_COLS.filter((c) => c.key !== "_aksi");
+    const cols = visibleSheetCols.filter((c) => c.key !== "_aksi");
     const header = [...cols.map((c) => c.label), "KELOMPOK"].join("\t");
     const values = [...cols.map((c) => getRawCellText(row, c, idx)), groupById(groupOf(row.employee_id))?.nama ?? ""].join("\t");
     copyToClipboard(`${header}\n${values}`, "row", String(row.id));
@@ -430,19 +448,6 @@ export default function WorksheetSheetFullscreen({
     );
   }, [filtered]);
 
-  const frozenLeftPx = useMemo(() => {
-    const noWidth = FIXED_COLUMN_WIDTHS._no;
-    const nikWidth = FIXED_COLUMN_WIDTHS._nik;
-    const jabatanWidth = FIXED_COLUMN_WIDTHS._jabatan;
-    return {
-      _no: 0,
-      _nik: noWidth,
-      _nama: noWidth + nikWidth,
-      _jabatan: noWidth + nikWidth + nameColumnWidth,
-      _status: noWidth + nikWidth + nameColumnWidth + jabatanWidth,
-    };
-  }, [nameColumnWidth]);
-
   // ─── Group header colors ───
   const GROUP_HEADER_COLORS: Record<string, string> = {
     info: "bg-[#1f2937] text-white",
@@ -459,18 +464,41 @@ export default function WorksheetSheetFullscreen({
     rekening: "bg-[#e2e8f0] text-[#334155]",
   };
 
-  // Lock body scroll + Esc handler
+  // Lock body scroll + keyboard shortcuts that should not interfere with cell inputs.
   useEffect(() => {
     document.body.style.overflow = "hidden";
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+
+      const target = e.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
+      if (displayedRows.length === 0) return;
+
+      e.preventDefault();
+      const currentIdx = activeRowId === null ? -1 : displayedRows.findIndex((r) => r.id === activeRowId);
+      const nextIdx = currentIdx < 0
+        ? (e.key === "ArrowUp" ? displayedRows.length - 1 : 0)
+        : e.key === "ArrowUp"
+          ? Math.max(0, currentIdx - 1)
+          : Math.min(displayedRows.length - 1, currentIdx + 1);
+      const nextRow = displayedRows[nextIdx];
+      if (!nextRow) return;
+
+      setActiveRowId(nextRow.id);
+      requestAnimationFrame(() => {
+        activeRowRefs.current.get(nextRow.id)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      });
     };
     window.addEventListener("keydown", handler);
     return () => {
       document.body.style.overflow = "";
       window.removeEventListener("keydown", handler);
     };
-  }, [onClose]);
+  }, [activeRowId, displayedRows, onClose]);
 
   // Column definition: label, key, group, width, editable
   type SheetCol = { label: string; key: string; group: "info" | "pendapatan" | "potongan" | "netto" | "rekening"; width: string; editable: boolean };
@@ -548,11 +576,79 @@ export default function WorksheetSheetFullscreen({
     { label: "AKSI", key: "_aksi", group: "info", width: "w-24", editable: false },
   ];
 
-  const pendapatanCols = SHEET_COLS.filter((c) => c.group === "pendapatan");
-  const potonganCols = SHEET_COLS.filter((c) => c.group === "potongan");
-  const leadingInfoCols = SHEET_COLS.filter((c) => ["_no", "_nik", "_nama", "_jabatan", "_status"].includes(c.key));
-  const aksiCol = SHEET_COLS.find((c) => c.key === "_aksi");
-  const nettoCol = SHEET_COLS.find((c) => c.key === "_netto");
+  const columnVisibilityStorageKey = `${COLUMN_VISIBILITY_STORAGE_PREFIX}.${mode}`;
+
+  useEffect(() => {
+    const allColumnKeys = new Set(SHEET_COLS.map((c) => c.key));
+    try {
+      const raw = window.localStorage.getItem(columnVisibilityStorageKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      const next = new Set(
+        Array.isArray(parsed)
+          ? parsed.filter((key): key is string => typeof key === "string" && allColumnKeys.has(key) && !REQUIRED_VISIBLE_COLUMN_KEYS.has(key))
+          : [],
+      );
+      setHiddenColumnKeys(next);
+    } catch {
+      setHiddenColumnKeys(new Set());
+    }
+    setShowColumnPanel(false);
+  }, [columnVisibilityStorageKey]);
+
+  const persistHiddenColumnKeys = (next: Set<string>) => {
+    try {
+      window.localStorage.setItem(columnVisibilityStorageKey, JSON.stringify([...next]));
+    } catch {
+      // Ignore storage failures; visibility still works for the current session.
+    }
+  };
+
+  const toggleColumnVisibility = (key: string) => {
+    if (REQUIRED_VISIBLE_COLUMN_KEYS.has(key)) return;
+    setHiddenColumnKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      persistHiddenColumnKeys(next);
+      return next;
+    });
+  };
+
+  const showAllColumns = () => {
+    const next = new Set<string>();
+    setHiddenColumnKeys(next);
+    persistHiddenColumnKeys(next);
+  };
+
+  const visibleSheetCols = SHEET_COLS.filter((c) => !hiddenColumnKeys.has(c.key));
+  const visibleFrozenCols = visibleSheetCols.filter((c) => FROZEN_COLS.has(c.key));
+  const frozenLeftPx = useMemo(() => {
+    const left: Record<string, number> = {};
+    let offset = 0;
+    visibleFrozenCols.forEach((col) => {
+      left[col.key] = offset;
+      offset += col.key === "_nama" ? nameColumnWidth : getColumnWidth(col);
+    });
+    return left;
+  }, [nameColumnWidth, visibleFrozenCols]);
+  const lastFrozenColKey = visibleFrozenCols[visibleFrozenCols.length - 1]?.key;
+
+  const columnConfigGroups = [
+    { key: "info", label: COLUMN_GROUP_LABELS.info, columns: SHEET_COLS.filter((c) => c.group === "info" && c.key !== "_aksi") },
+    { key: "pendapatan", label: COLUMN_GROUP_LABELS.pendapatan, columns: SHEET_COLS.filter((c) => c.group === "pendapatan") },
+    { key: "potongan", label: COLUMN_GROUP_LABELS.potongan, columns: SHEET_COLS.filter((c) => c.group === "potongan") },
+    { key: "netto", label: COLUMN_GROUP_LABELS.netto, columns: SHEET_COLS.filter((c) => c.group === "netto") },
+    { key: "rekening", label: COLUMN_GROUP_LABELS.rekening, columns: SHEET_COLS.filter((c) => c.group === "rekening") },
+    { key: "aksi", label: COLUMN_GROUP_LABELS.aksi, columns: SHEET_COLS.filter((c) => c.key === "_aksi") },
+  ].filter((group) => group.columns.length > 0);
+  const hiddenColumnCount = hiddenColumnKeys.size;
+
+  const pendapatanCols = visibleSheetCols.filter((c) => c.group === "pendapatan");
+  const potonganCols = visibleSheetCols.filter((c) => c.group === "potongan");
+  const rekeningCols = visibleSheetCols.filter((c) => c.group === "rekening");
+  const leadingInfoCols = visibleSheetCols.filter((c) => ["_no", "_nik", "_nama", "_jabatan", "_status"].includes(c.key));
+  const aksiCol = visibleSheetCols.find((c) => c.key === "_aksi");
+  const nettoCol = visibleSheetCols.find((c) => c.key === "_netto");
 
   /** Tombol copy pada header kolom. */
   const HeaderCopyButton = ({ col }: { col: SheetCol }) => {
@@ -590,7 +686,7 @@ export default function WorksheetSheetFullscreen({
   const gridBorder = "border-r border-b border-dotted border-slate-500/80";
   const headerGridBorder = "border-r border-b border-slate-400/60";
   const footerGridBorder = "border-r border-t border-dotted border-slate-500/80";
-  const frozenDivider = (key: string) => key === "_status" && "border-r-2 border-solid border-r-slate-600";
+  const frozenDivider = (key: string) => key === lastFrozenColKey && "border-r-2 border-solid border-r-slate-600";
 
   const dragIndicator = (idx: number) => {
     if (dragIdx === null || dragOverIdx !== idx) return "";
@@ -752,6 +848,80 @@ export default function WorksheetSheetFullscreen({
                 <span className="hidden md:inline">{copyInputsBusy ? "Menyalin..." : "Salin Input Lalu"}</span>
               </button>
             )}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowColumnPanel((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold transition-colors",
+                  showColumnPanel ? "bg-slate-800 text-white shadow-sm shadow-slate-800/20" : "bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                )}
+                title="Atur kolom yang tampil"
+              >
+                <Columns3 className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Atur Kolom</span>
+                {hiddenColumnCount > 0 && (
+                  <span className={cn(
+                    "text-[9px] font-bold px-1.5 py-0.5 rounded-full tabular-nums",
+                    showColumnPanel ? "bg-white/20 text-white" : "bg-slate-800 text-white",
+                  )}>
+                    {hiddenColumnCount}
+                  </span>
+                )}
+              </button>
+              {showColumnPanel && (
+                <div className="absolute right-0 top-full mt-2 z-[95] w-[380px] max-h-[72vh] overflow-auto rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-2xl shadow-slate-900/20">
+                  <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-slate-100 bg-white px-4 py-3">
+                    <div>
+                      <p className="text-xs font-extrabold uppercase tracking-wider text-slate-900">Atur Kolom</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500">NO dan NAMA selalu tampil. Pengaturan tersimpan per mode.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={showAllColumns}
+                      disabled={hiddenColumnCount === 0}
+                      className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-50 disabled:text-slate-300 disabled:hover:bg-transparent"
+                    >
+                      Tampilkan Semua
+                    </button>
+                  </div>
+                  <div className="space-y-3 px-4 py-3">
+                    {columnConfigGroups.map((group) => (
+                      <div key={group.key}>
+                        <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">{group.label}</p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {group.columns.map((col) => {
+                            const required = REQUIRED_VISIBLE_COLUMN_KEYS.has(col.key);
+                            const checked = !hiddenColumnKeys.has(col.key);
+                            return (
+                              <label
+                                key={col.key}
+                                className={cn(
+                                  "flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-[11px] font-semibold transition-colors",
+                                  checked ? "border-slate-200 bg-slate-50 text-slate-800" : "border-slate-100 bg-white text-slate-400",
+                                  !required && "cursor-pointer hover:border-blue-200 hover:bg-blue-50/60",
+                                  required && "cursor-not-allowed",
+                                )}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={required}
+                                  onChange={() => toggleColumnVisibility(col.key)}
+                                  className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                                />
+                                <span className="min-w-0 flex-1 truncate">{col.label}</span>
+                                {required && <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-500">Wajib</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="flex items-center bg-muted rounded-xl p-0.5">
             <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronLeft className="w-3.5 h-3.5" /></button>
             <span className="text-[11px] font-bold text-foreground px-2.5 min-w-[200px] text-center whitespace-nowrap">{period.label}</span>
@@ -839,7 +1009,7 @@ export default function WorksheetSheetFullscreen({
       <div ref={tableRef} className="payroll-sheet-scrollbar flex-1 overflow-auto bg-white [scrollbar-gutter:stable]">
         <table className="w-max min-w-full border-separate border-spacing-0 bg-white text-slate-950">
           <colgroup>
-            {SHEET_COLS.map((c) => {
+            {visibleSheetCols.map((c) => {
               const width = getResolvedColumnWidth(c);
               return <col key={c.key} style={{ width, minWidth: width, maxWidth: width }} />;
             })}
@@ -863,13 +1033,17 @@ export default function WorksheetSheetFullscreen({
                 </th>
               ))}
               {/* Pendapatan group */}
-              <th colSpan={pendapatanCols.length} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#047857] text-white border-r border-b border-slate-400/60 text-center leading-tight">
-                PENDAPATAN
-              </th>
+              {pendapatanCols.length > 0 && (
+                <th colSpan={pendapatanCols.length} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#047857] text-white border-r border-b border-slate-400/60 text-center leading-tight">
+                  PENDAPATAN
+                </th>
+              )}
               {/* Potongan group */}
-              <th colSpan={potonganCols.length} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#be123c] text-white border-r border-b border-slate-400/60 text-center leading-tight">
-                PENGELUARAN/POTONGAN
-              </th>
+              {potonganCols.length > 0 && (
+                <th colSpan={potonganCols.length} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#be123c] text-white border-r border-b border-slate-400/60 text-center leading-tight">
+                  PENGELUARAN/POTONGAN
+                </th>
+              )}
               {/* Netto group */}
               {nettoCol && (
                 <th rowSpan={2} style={getColumnStyle(nettoCol)} className="px-1 py-1 text-[10px] font-bold uppercase tracking-wider text-center leading-tight break-words overflow-hidden bg-[#1d4ed8] text-white border-r border-b border-slate-400/60 align-middle">
@@ -878,9 +1052,11 @@ export default function WorksheetSheetFullscreen({
                 </th>
               )}
               {/* Rekening group */}
-              <th colSpan={3} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#475569] text-white border-r border-b border-slate-400/60 text-center leading-tight">
-                REKENING
-              </th>
+              {rekeningCols.length > 0 && (
+                <th colSpan={rekeningCols.length} className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider bg-[#475569] text-white border-r border-b border-slate-400/60 text-center leading-tight">
+                  REKENING
+                </th>
+              )}
               {aksiCol && (
                 <th rowSpan={2} style={getColumnStyle(aksiCol)} className={cn("px-1 py-1 text-[9px] font-bold uppercase tracking-wider text-center align-middle bg-[#334155] text-white border-l border-solid border-l-slate-400/60 leading-tight", headerGridBorder)}>
                   Aksi
@@ -889,7 +1065,7 @@ export default function WorksheetSheetFullscreen({
             </tr>
             {/* Row 2: Individual columns */}
             <tr className="border-b border-slate-400/60">
-              {SHEET_COLS.filter((c) => !FROZEN_COLS.has(c.key) && c.key !== "_netto" && c.key !== "_aksi").map((c) => {
+              {visibleSheetCols.filter((c) => !FROZEN_COLS.has(c.key) && c.key !== "_netto" && c.key !== "_aksi").map((c) => {
                 const groupBg = COLUMN_HEADER_COLORS[c.group] ?? "bg-[#e2e8f0] text-[#334155]";
                 return (
                   <th
@@ -916,7 +1092,7 @@ export default function WorksheetSheetFullscreen({
           {/* ── Body ── */}
           <tbody>
             {renderItems.length === 0 ? (
-              <tr><td colSpan={SHEET_COLS.length} className="bg-white text-center py-24 text-sm text-slate-500">
+              <tr><td colSpan={visibleSheetCols.length} className="bg-white text-center py-24 text-sm text-slate-500">
                 <CreditCard className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                 {searchQuery ? "Tidak ada pegawai yang cocok dengan pencarian" : "Belum ada data untuk periode ini"}
               </td></tr>
@@ -938,7 +1114,7 @@ export default function WorksheetSheetFullscreen({
                       isBandOver ? "ring-2 ring-blue-500/70 ring-inset" : "",
                     )}
                   >
-                    <td colSpan={SHEET_COLS.length} className="px-2 py-1.5 leading-tight" style={{ backgroundColor: g ? `${g.warna}1A` : "rgba(100,116,139,0.14)" }}>
+                    <td colSpan={visibleSheetCols.length} className="px-2 py-1.5 leading-tight" style={{ backgroundColor: g ? `${g.warna}1A` : "rgba(100,116,139,0.14)" }}>
                       <div className="flex items-center gap-2">
                         {g && canGroupEdit ? (
                           <button
@@ -1001,11 +1177,12 @@ export default function WorksheetSheetFullscreen({
               const g = groupById(groupOf(row.employee_id));
               const isSelected = selIds.has(row.employee_id);
               const isActive = activeRowId === row.id;
-              const rowBg = isChanged ? "bg-amber-50" : isActive ? "bg-blue-100" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
-              const frozenBg = isChanged ? "bg-amber-50" : isActive ? "bg-blue-100" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
+              const rowBg = isActive ? "bg-blue-100" : isChanged ? "bg-amber-50" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
+              const frozenBg = isActive ? "bg-blue-100" : isChanged ? "bg-amber-50" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
               return (
                 <tr
                   key={row.id}
+                  ref={registerActiveRowRef(row.id)}
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest("button, input, a")) return;
                     setActiveRowId(row.id);
@@ -1023,7 +1200,7 @@ export default function WorksheetSheetFullscreen({
                     isSelected && "!bg-blue-50/80",
                   )}
                 >
-                  {SHEET_COLS.map((c) => {
+                  {visibleSheetCols.map((c) => {
                       if (c.key === "_aksi") {
                       const rowCopied = isCopied("row", String(row.id));
                       return (
@@ -1275,7 +1452,14 @@ export default function WorksheetSheetFullscreen({
                     }
                     if (c.key === "_netto") {
                       return (
-                        <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-right text-[12px] font-extrabold text-slate-950 tabular-nums bg-[#e6e6e6] leading-tight", gridBorder)}>
+                        <td key={c.key} style={getColumnStyle(c)} className={cn(
+                          c.width,
+                          "px-1 py-0.5 text-right text-[12px] font-extrabold tabular-nums leading-tight transition-colors",
+                          gridBorder,
+                          isActive
+                            ? "bg-blue-700 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.45)]"
+                            : "bg-[#e6e6e6] text-slate-950",
+                        )}>
                           {getCellValue(row, c)}
                         </td>
                       );
@@ -1300,7 +1484,7 @@ export default function WorksheetSheetFullscreen({
           {displayedRows.length > 0 && (
             <tfoot className="[&_td]:[position:sticky] [&_td]:bottom-0 [&_td]:z-50">
               <tr className="border-t border-dotted border-slate-500/80 bg-slate-800 text-white shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.25)]">
-                {SHEET_COLS.map((c) => {
+                {visibleSheetCols.map((c) => {
                   if (c.key === "_no") return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky bottom-0 z-50 bg-slate-800", footerGridBorder)} />;
                   if (c.key === "_nama") return (
                     <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-1 sticky bottom-0 z-50 bg-slate-800", footerGridBorder, frozenDivider(c.key))}>
