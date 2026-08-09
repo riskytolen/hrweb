@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Search,
   Calendar,
+  CalendarDays,
   TrendingUp,
   Users,
   User,
@@ -129,6 +130,41 @@ type TitikDetail = {
   jumlah_titik: number;
   total_pendapatan: number;
   catatan: string | null;
+};
+
+/** Satu record absensi per pegawai pada satu tanggal (panel detail baris tanggal). */
+type DateAbsenDetail = {
+  employee_id: string;
+  employee_nama: string;
+  status: DbAttendanceRecord["status"];
+  jam_masuk: string | null;
+  jam_pulang: string | null;
+  catatan: string | null;
+};
+
+/** Satu record delivery_points per pegawai pada satu tanggal (panel detail baris tanggal). */
+type DateTitikDetail = {
+  employee_id: string;
+  employee_nama: string;
+  zone_nama: string;
+  zone_color: string;
+  role: "Driver" | "Helper";
+  status_nama?: string;
+  status_color?: string;
+  jumlah_titik: number;
+  total_pendapatan: number;
+  catatan: string | null;
+};
+
+/** Baris laporan Per Tanggal: agregasi absensi ∪ status titik per tanggal. */
+type DateRow = {
+  tanggal: string;
+  attendance_counts: Record<string, number>;
+  delivery_counts: Record<string, number>;
+  total_titik: number;
+  total_pendapatan: number;
+  absensi_detail: DateAbsenDetail[];
+  titik_detail: DateTitikDetail[];
 };
 
 /** Status absensi yang ditampilkan di laporan Status & Absensi (urutan tampilan). */
@@ -256,6 +292,19 @@ function formatAbsensiJam(status: DbAttendanceRecord["status"], value: string | 
   return formatClockTime(value);
 }
 
+/** Baris kosong untuk tanggal tanpa data (tetap dimunculkan di laporan Per Tanggal). */
+function emptyDateRow(tanggal: string): DateRow {
+  return {
+    tanggal,
+    attendance_counts: {},
+    delivery_counts: {},
+    total_titik: 0,
+    total_pendapatan: 0,
+    absensi_detail: [],
+    titik_detail: [],
+  };
+}
+
 function isInNonActivePeriod(dateStr: string, periods: NonActivePeriod[] | null | undefined): boolean {
   if (!periods || periods.length === 0) return false;
   return periods.some((p) => dateStr >= p.from && dateStr <= p.to);
@@ -275,7 +324,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [dateMode, setDateMode] = useState<"periode" | "custom">("periode");
-  const [reportTab, setReportTab] = useState<"zona" | "pegawai" | "ringkasan" | "statusabsensi">("zona");
+  const [reportTab, setReportTab] = useState<"zona" | "pegawai" | "ringkasan" | "pertanggal" | "statusabsensi">("zona");
 
   // Periode mode state
   const [periodKey, setPeriodKey] = useState(getCurrentPeriodKey);
@@ -303,9 +352,11 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const [employeeGroups, setEmployeeGroups] = useState<EmployeeGroup[]>([]);
   const [ringkasanRows, setRingkasanRows] = useState<RingkasanRow[]>([]);
   const [statusRows, setStatusRows] = useState<StatusAbsensiRow[]>([]);
+  const [dateRows, setDateRows] = useState<DateRow[]>([]);
   const [deliveryStatusColumns, setDeliveryStatusColumns] = useState<{ nama: string; color: string }[]>([]);
   const [expandedDailyKey, setExpandedDailyKey] = useState<string | null>(null);
   const [expandedStatusEmployeeId, setExpandedStatusEmployeeId] = useState<string | null>(null);
+  const [expandedDateKey, setExpandedDateKey] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [showEmployeeFilter, setShowEmployeeFilter] = useState(false);
@@ -556,6 +607,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     setRingkasanRows(rRows);
     setExpandedDailyKey(null);
     buildStatusAbsensi(activeData, rows, attendanceRows);
+    buildPerTanggal(activeData, attendanceRows);
   };
 
   // ─── Status & Absensi: agregasi per pegawai (riwayat titik ∪ absensi) ───
@@ -662,6 +714,69 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     setDeliveryStatusColumns(cols);
   };
 
+  // ─── Per Tanggal: agregasi per tanggal (absensi ∪ riwayat titik) ───
+  const buildPerTanggal = (activeData: DeliveryQueryRow[], attendanceRows: AttendanceLiteRow[] | null) => {
+    const map = new Map<string, DateRow>();
+    const ensure = (tanggal: string): DateRow => {
+      let r = map.get(tanggal);
+      if (!r) {
+        r = emptyDateRow(tanggal);
+        map.set(tanggal, r);
+      }
+      return r;
+    };
+
+    if (attendanceRows) {
+      attendanceRows.forEach((a) => {
+        const r = ensure(a.tanggal);
+        r.attendance_counts[a.status] = (r.attendance_counts[a.status] || 0) + 1;
+        if (ABSENSI_FILTER_STATUSES.has(a.status)) {
+          r.absensi_detail.push({
+            employee_id: a.employee_id,
+            employee_nama: resolveEmployeeName(a.employee_id, a.pegawai?.[0]?.nama, null),
+            status: a.status,
+            jam_masuk: a.jam_masuk,
+            jam_pulang: a.jam_pulang,
+            catatan: a.catatan,
+          });
+        }
+      });
+    }
+
+    activeData.forEach((d) => {
+      const r = ensure(d.tanggal);
+      r.total_titik += d.jumlah_titik;
+      r.total_pendapatan += d.total;
+      const statusNama = d.delivery_statuses?.nama;
+      const empId = d.employee_id || "unknown";
+      if (statusNama) {
+        r.delivery_counts[statusNama] = (r.delivery_counts[statusNama] || 0) + 1;
+        r.titik_detail.push({
+          employee_id: empId,
+          employee_nama: resolveEmployeeName(empId, d.pegawai?.nama, d.employee_nama),
+          zone_nama: d.delivery_zones?.nama || "-",
+          zone_color: d.delivery_zones?.color || "#3b82f6",
+          role: d.role,
+          status_nama: statusNama,
+          status_color: d.delivery_statuses?.color || undefined,
+          jumlah_titik: d.jumlah_titik,
+          total_pendapatan: d.total,
+          catatan: d.catatan || null,
+        });
+      }
+    });
+
+    const rows = Array.from(map.values())
+      .map((r) => {
+        r.absensi_detail.sort((a, b) => a.employee_nama.localeCompare(b.employee_nama));
+        r.titik_detail.sort((a, b) => a.employee_nama.localeCompare(b.employee_nama) || a.zone_nama.localeCompare(b.zone_nama));
+        return r;
+      })
+      .sort((a, b) => a.tanggal.localeCompare(b.tanggal));
+    setDateRows(rows);
+    setExpandedDateKey(null);
+  };
+
   // ─── Filtered data (search) ───
   const filteredZoneGroups = zoneGroups
     .map((g) => ({
@@ -702,6 +817,40 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const filteredStatusTotalTitik = filteredStatusRows.reduce((s, r) => s + r.total_titik, 0);
   const filteredStatusTotalPendapatan = filteredStatusRows.reduce((s, r) => s + r.total_pendapatan, 0);
 
+  // ─── Per Tanggal: daftar tanggal kalender periode + agregat per tanggal ───
+  const calendarDates: string[] = [];
+  if (startDate && endDate) {
+    const cur = new Date(`${startDate}T00:00:00`);
+    const end = new Date(`${endDate}T00:00:00`);
+    let guard = 0;
+    while (cur <= end && guard < 548) {
+      calendarDates.push(localDateStr(cur));
+      cur.setDate(cur.getDate() + 1);
+      guard++;
+    }
+  }
+  const dateRowMap = new Map(dateRows.map((r) => [r.tanggal, r]));
+  const allDateRows: DateRow[] = Array.from(new Set([...calendarDates, ...dateRows.map((r) => r.tanggal)]))
+    .sort()
+    .map((t) => dateRowMap.get(t) || emptyDateRow(t));
+  const filteredDateRows = allDateRows.filter((r) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      r.tanggal.includes(q) ||
+      r.absensi_detail.some((d) => d.employee_nama.toLowerCase().includes(q)) ||
+      r.titik_detail.some((d) => d.employee_nama.toLowerCase().includes(q))
+    );
+  });
+  const filteredDateTotalTitik = filteredDateRows.reduce((s, r) => s + r.total_titik, 0);
+  const filteredDateTotalPendapatan = filteredDateRows.reduce((s, r) => s + r.total_pendapatan, 0);
+  const dateEmployeeCount = new Set(
+    dateRows.flatMap((r) => [
+      ...r.absensi_detail.map((d) => d.employee_id),
+      ...r.titik_detail.map((d) => d.employee_id),
+    ]),
+  ).size;
+
   const filteredTotalTitik = reportTab === "zona"
     ? filteredZoneGroups.reduce((s, g) => s + g.rows.reduce((ss, r) => ss + r.total_titik, 0), 0)
     : reportTab === "pegawai"
@@ -716,14 +865,17 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const hasData = reportTab === "zona" ? filteredZoneGroups.length > 0
     : reportTab === "pegawai" ? filteredEmpGroups.length > 0
     : reportTab === "ringkasan" ? filteredRingkasanRows.length > 0
+    : reportTab === "pertanggal" ? filteredDateRows.length > 0
     : filteredStatusRows.length > 0;
 
   // ─── Totals untuk summary cards & grand total (per tab aktif) ───
   const displayedTotalTitik = reportTab === "ringkasan" ? filteredTotalTitik
     : reportTab === "statusabsensi" ? filteredStatusTotalTitik
+    : reportTab === "pertanggal" ? filteredDateTotalTitik
     : (search ? filteredTotalTitik : grandTotalTitik);
   const displayedTotalPendapatan = reportTab === "ringkasan" ? filteredTotalPendapatan
     : reportTab === "statusabsensi" ? filteredStatusTotalPendapatan
+    : reportTab === "pertanggal" ? filteredDateTotalPendapatan
     : (search ? filteredTotalPendapatan : grandTotalPendapatan);
 
   // ─── Period text for export ───
@@ -736,6 +888,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     if (reportTab === "zona") exportCSVZona();
     else if (reportTab === "pegawai") exportCSVPegawai();
     else if (reportTab === "ringkasan") exportCSVRingkasan();
+    else if (reportTab === "pertanggal") exportCSVPerTanggal();
     else exportCSVStatusAbsensi();
   };
 
@@ -823,6 +976,37 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     downloadCSV(csvRows, `Rekap_Status_Absensi_${startDate}_${endDate}.csv`);
   };
 
+  const exportCSVPerTanggal = () => {
+    const headers = [
+      "Tanggal",
+      ...ABSENSI_STATUSES.map((s) => s.nama),
+      "Total Absen",
+      ...deliveryStatusColumns.map((c) => c.nama),
+      "Total Titik",
+      "Total Pendapatan",
+    ];
+    const csvRows = [headers.join(",")];
+
+    filteredDateRows.forEach((r) => {
+      csvRows.push([
+        `"${formatDisplayDate(r.tanggal)}"`,
+        ...ABSENSI_STATUSES.map((s) => r.attendance_counts[s.nama] || 0),
+        ABSENSI_STATUSES.reduce((sum, s) => sum + (r.attendance_counts[s.nama] || 0), 0),
+        ...deliveryStatusColumns.map((c) => r.delivery_counts[c.nama] || 0),
+        r.total_titik, r.total_pendapatan,
+      ].join(","));
+    });
+    csvRows.push([
+      `"TOTAL"`,
+      ...ABSENSI_STATUSES.map((s) => filteredDateRows.reduce((sum, r) => sum + (r.attendance_counts[s.nama] || 0), 0)),
+      ABSENSI_STATUSES.reduce((sum, s) => sum + (filteredDateRows.reduce((ss, r) => ss + (r.attendance_counts[s.nama] || 0), 0)), 0),
+      ...deliveryStatusColumns.map((c) => filteredDateRows.reduce((sum, r) => sum + (r.delivery_counts[c.nama] || 0), 0)),
+      filteredDateTotalTitik, filteredDateTotalPendapatan,
+    ].join(","));
+
+    downloadCSV(csvRows, `Rekap_Titik_PerTanggal_${startDate}_${endDate}.csv`);
+  };
+
   const downloadCSV = (csvRows: string[], filename: string) => {
     const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -839,6 +1023,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     if (reportTab === "zona") await exportPDFZona();
     else if (reportTab === "pegawai") await exportPDFPegawai();
     else if (reportTab === "ringkasan") await exportPDFRingkasan();
+    else if (reportTab === "pertanggal") await exportPDFPerTanggal();
     else await exportPDFStatusAbsensi();
   };
 
@@ -1091,6 +1276,76 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     setShowExportMenu(false);
   };
 
+  const exportPDFPerTanggal = async () => {
+    const { default: jsPDF } = await import("jspdf");
+    const { default: autoTable } = await import("jspdf-autotable");
+
+    const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text("Laporan Rekap Titik Per Tanggal", pageWidth / 2, 15, { align: "center" });
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Periode: ${periodeText}`, pageWidth / 2, 21, { align: "center" });
+
+    const perStatusAbsenTotals = ABSENSI_STATUSES.map((s) => filteredDateRows.reduce((sum, r) => sum + (r.attendance_counts[s.nama] || 0), 0));
+    const totalAbsenAll = perStatusAbsenTotals.reduce((sum, n) => sum + n, 0);
+    const perStatusTitikTotals = deliveryStatusColumns.map((c) => filteredDateRows.reduce((sum, r) => sum + (r.delivery_counts[c.nama] || 0), 0));
+
+    const headRow1: { content: string; rowSpan?: number; colSpan?: number; styles?: { halign?: "left" | "center" | "right" } }[] = [
+      { content: "#", rowSpan: 2, styles: { halign: "center" } },
+      { content: "Tanggal", rowSpan: 2 },
+      { content: "Jumlah Absensi (hari)", colSpan: ABSENSI_STATUSES.length + 1, styles: { halign: "center" } },
+      { content: "Status Rekap Titik (hari)", colSpan: deliveryStatusColumns.length, styles: { halign: "center" } },
+      { content: "Total Titik", rowSpan: 2, styles: { halign: "right" } },
+      { content: "Total Pendapatan", rowSpan: 2, styles: { halign: "right" } },
+    ];
+    const headRow2: { content: string; styles: { halign?: "left" | "center" | "right" } }[] = [
+      ...ABSENSI_STATUSES.map((s) => ({ content: s.nama, styles: { halign: "center" as const } })),
+      { content: "Total Absen", styles: { halign: "center" as const } },
+      ...deliveryStatusColumns.map((c) => ({ content: c.nama, styles: { halign: "center" as const } })),
+    ];
+
+    const tableData = filteredDateRows.map((r, idx) => [
+      String(idx + 1), formatDisplayDate(r.tanggal),
+      ...ABSENSI_STATUSES.map((s) => String(r.attendance_counts[s.nama] || 0)),
+      String(ABSENSI_STATUSES.reduce((sum, s) => sum + (r.attendance_counts[s.nama] || 0), 0)),
+      ...deliveryStatusColumns.map((c) => String(r.delivery_counts[c.nama] || 0)),
+      formatNumber(r.total_titik), formatCurrency(r.total_pendapatan),
+    ]);
+    tableData.push([
+      "", "TOTAL",
+      ...perStatusAbsenTotals.map(String),
+      String(totalAbsenAll),
+      ...perStatusTitikTotals.map(String),
+      formatNumber(filteredDateTotalTitik), formatCurrency(filteredDateTotalPendapatan),
+    ]);
+
+    autoTable(doc, {
+      startY: 28,
+      head: [headRow1, headRow2],
+      body: tableData,
+      theme: "grid",
+      headStyles: { fillColor: [59, 130, 246], fontSize: 7, fontStyle: "bold", halign: "center" },
+      bodyStyles: { fontSize: 7 },
+      columnStyles: {
+        0: { halign: "center", cellWidth: 8 },
+      },
+      didParseCell: (data) => {
+        if (data.row.index === tableData.length - 1) {
+          data.cell.styles.fontStyle = "bold";
+          data.cell.styles.fillColor = [243, 244, 246];
+        }
+      },
+      margin: { left: 10, right: 10 },
+    });
+
+    doc.save(`Rekap_Titik_PerTanggal_${startDate}_${endDate}.pdf`);
+    setShowExportMenu(false);
+  };
+
   if (!show) return null;
 
   return (
@@ -1111,7 +1366,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
             <div>
               <h2 className="text-sm font-bold text-foreground">Laporan Detail Rekap Titik</h2>
               <p className="text-[10px] text-muted-foreground">
-                {reportTab === "zona" ? "Rekap titik per nama titik" : reportTab === "pegawai" ? "Rekap titik per pegawai" : reportTab === "ringkasan" ? "Ringkasan total per pegawai" : "Rekap jumlah absensi & status titik per pegawai"} dalam periode tertentu
+                {reportTab === "zona" ? "Rekap titik per nama titik" : reportTab === "pegawai" ? "Rekap titik per pegawai" : reportTab === "ringkasan" ? "Ringkasan total per pegawai" : reportTab === "pertanggal" ? "Rekap jumlah absensi & status titik per tanggal" : "Rekap jumlah absensi & status titik per pegawai"} dalam periode tertentu
               </p>
             </div>
           </div>
@@ -1196,6 +1451,18 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               >
                 <TrendingUp className="w-3 h-3" />
                 Ringkasan
+              </button>
+              <button
+                onClick={() => setReportTab("pertanggal")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
+                  reportTab === "pertanggal"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <CalendarDays className="w-3 h-3" />
+                <span className="hidden xs:inline">Per </span>Tanggal
               </button>
               <button
                 onClick={() => setReportTab("statusabsensi")}
@@ -1399,7 +1666,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
               <input
                 type="text"
-                placeholder={reportTab === "zona" ? "Cari pegawai..." : reportTab === "pegawai" ? "Cari pegawai atau nama titik..." : reportTab === "ringkasan" ? "Cari pegawai..." : "Cari pegawai..."}
+                placeholder={reportTab === "zona" ? "Cari pegawai..." : reportTab === "pegawai" ? "Cari pegawai atau nama titik..." : reportTab === "ringkasan" ? "Cari pegawai..." : reportTab === "pertanggal" ? "Cari tanggal atau pegawai..." : "Cari pegawai..."}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50 text-foreground"
@@ -1435,7 +1702,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               </div>
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium">Pegawai</p>
-                <p className="text-sm font-bold text-foreground">{loading ? "..." : reportTab === "statusabsensi" ? statusRows.length : grandTotalPegawai}</p>
+                <p className="text-sm font-bold text-foreground">{loading ? "..." : reportTab === "statusabsensi" ? statusRows.length : reportTab === "pertanggal" ? dateEmployeeCount : grandTotalPegawai}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 px-3 py-2 bg-card rounded-xl border border-border">
@@ -1744,6 +2011,267 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
               <GrandTotalCard
                 totalTitik={filteredTotalTitik}
                 totalPendapatan={filteredTotalPendapatan}
+              />
+            </div>
+          ) : reportTab === "pertanggal" ? (
+            /* ═══ TAB: PER TANGGAL ═══ */
+            <div className="space-y-4">
+              <div className="bg-card rounded-2xl border border-border overflow-hidden">
+                <div className="overflow-hidden sm:overflow-x-auto">
+                  <div className="mobile-zoom-inner">
+                    <table className="w-full min-w-[720px]">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th rowSpan={2} className="sticky left-0 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-10 bg-card border-r border-border">#</th>
+                          <th rowSpan={2} className="sticky left-10 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 min-w-[160px] bg-card border-r border-border">Tanggal</th>
+                          <th colSpan={ABSENSI_STATUSES.length + 1} className="text-center text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-l-2 border-l-blue-200 dark:border-l-blue-500/30">
+                            Jumlah Absensi (hari)
+                          </th>
+                          {deliveryStatusColumns.length > 0 && (
+                            <th colSpan={deliveryStatusColumns.length} className="text-center text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300 border-l-2 border-l-violet-200 dark:border-l-violet-500/30">
+                              Status Titik (hari)
+                            </th>
+                          )}
+                          <th colSpan={2} className="text-center text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-l-2 border-l-emerald-200 dark:border-l-emerald-500/30">
+                            Rekap
+                          </th>
+                        </tr>
+                        <tr className="border-b border-border bg-muted/20">
+                          {ABSENSI_STATUSES.map((s) => (
+                            <th key={s.nama} className="text-center text-[10px] font-bold px-3 py-2" style={{ color: s.color }}>
+                              {s.nama}
+                            </th>
+                          ))}
+                          <th className="text-center text-[10px] font-bold px-3 py-2 text-foreground">Total Absen</th>
+                          {deliveryStatusColumns.map((c) => (
+                            <th key={c.nama} className="text-center text-[10px] font-bold px-3 py-2" style={{ color: c.color }}>
+                              {c.nama}
+                            </th>
+                          ))}
+                          <th className="text-right text-[10px] font-bold text-foreground uppercase tracking-wider px-4 py-2 whitespace-nowrap">Total Titik</th>
+                          <th className="text-right text-[10px] font-bold text-foreground uppercase tracking-wider px-4 py-2 whitespace-nowrap">Total Pendapatan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {filteredDateRows.map((row, idx) => {
+                          const isExpanded = expandedDateKey === row.tanggal;
+                          const totalAbsen = ABSENSI_STATUSES.reduce((sum, s) => sum + (row.attendance_counts[s.nama] || 0), 0);
+                          return (
+                            <Fragment key={row.tanggal}>
+                              <tr
+                                role="button"
+                                aria-expanded={isExpanded}
+                                onClick={() => setExpandedDateKey(isExpanded ? null : row.tanggal)}
+                                className={cn("group cursor-pointer transition-colors", isExpanded ? "bg-primary/[0.04]" : "hover:bg-muted/30")}
+                              >
+                                <td className="sticky left-0 z-10 bg-card group-hover:bg-muted/30 px-4 py-3 text-center border-r border-border/50">
+                                  <ChevronDown className={cn("w-3.5 h-3.5 mx-auto text-muted-foreground transition-transform flex-shrink-0", isExpanded && "rotate-180 text-primary")} />
+                                </td>
+                                <td className="sticky left-10 z-10 bg-card group-hover:bg-muted/30 px-4 py-3 border-r border-border/50">
+                                  <p className={cn("text-sm font-semibold break-words whitespace-nowrap", isExpanded ? "text-primary" : "text-foreground")}>
+                                    {idx + 1}. {formatDisplayDate(row.tanggal)}
+                                  </p>
+                                </td>
+                                {ABSENSI_STATUSES.map((s) => {
+                                  const c = row.attendance_counts[s.nama] || 0;
+                                  return (
+                                    <td key={s.nama} className="px-3 py-3 text-center text-sm tabular-nums" style={c > 0 ? { color: s.color, fontWeight: 700 } : undefined}>
+                                      {c > 0 ? c : <span className="text-muted-foreground/40">-</span>}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-3 text-center text-sm font-bold text-foreground tabular-nums">
+                                  {totalAbsen > 0 ? totalAbsen : <span className="text-muted-foreground/40">-</span>}
+                                </td>
+                                {deliveryStatusColumns.map((c) => {
+                                  const n = row.delivery_counts[c.nama] || 0;
+                                  return (
+                                    <td key={c.nama} className="px-3 py-3 text-center text-sm tabular-nums" style={n > 0 ? { color: c.color, fontWeight: 700 } : undefined}>
+                                      {n > 0 ? n : <span className="text-muted-foreground/40">-</span>}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-4 py-3 text-right text-sm font-bold text-foreground tabular-nums">{formatNumber(row.total_titik)}</td>
+                                <td className="px-4 py-3 text-right text-sm font-semibold text-foreground tabular-nums">{formatCurrency(row.total_pendapatan)}</td>
+                              </tr>
+                              {isExpanded && (
+                                <tr>
+                                  <td colSpan={2 + ABSENSI_STATUSES.length + 1 + deliveryStatusColumns.length + 2} className="px-3 sm:px-5 py-4 bg-primary/[0.02]">
+                                    <div className="rounded-xl border border-border bg-card overflow-hidden animate-fade-in">
+                                      {/* Ringkasan tanggal */}
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 border-b border-border bg-muted/30">
+                                        <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center">
+                                          <CalendarDays className="w-3 h-3 text-primary" />
+                                        </div>
+                                        <p className="text-xs font-bold text-foreground">{formatDisplayDate(row.tanggal)}</p>
+                                        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                                            Absen: {row.absensi_detail.length} pegawai
+                                          </span>
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+                                            Status: {row.titik_detail.length} catatan
+                                          </span>
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                            {formatNumber(row.total_titik)} titik
+                                          </span>
+                                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+                                            {formatCurrency(row.total_pendapatan)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="grid gap-4 lg:grid-cols-2 p-3 sm:p-4">
+                                        {/* ── Absen per pegawai ── */}
+                                        <div>
+                                          <div className="flex items-center justify-between gap-3 px-3 py-2 mb-2">
+                                            <div className="flex items-center gap-2">
+                                              <Calendar className="w-3.5 h-3.5 text-primary" />
+                                              <p className="text-xs font-bold text-foreground">Detail Absensi</p>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground">{row.absensi_detail.length} pegawai</p>
+                                          </div>
+                                          <div className="sm:overflow-x-auto">
+                                            <table className="w-full min-w-[420px]">
+                                              <thead>
+                                                <tr className="border-b border-border/70 bg-muted/10">
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Pegawai</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-24">Status</th>
+                                                  <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Masuk</th>
+                                                  <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Pulang</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Catatan</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-border/50">
+                                                {row.absensi_detail.length === 0 && (
+                                                  <tr>
+                                                    <td colSpan={5} className="px-3 py-5 text-center text-xs text-muted-foreground italic">Tidak ada absensi alpha/izin/cuti/sakit pada tanggal ini</td>
+                                                  </tr>
+                                                )}
+                                                {row.absensi_detail.map((d, di) => {
+                                                  const color = ATTENDANCE_STATUS_COLORS[d.status];
+                                                  return (
+                                                    <tr key={`${d.employee_id}-${di}`}>
+                                                      <td className="px-3 py-2 text-xs font-semibold text-foreground break-words whitespace-nowrap">{d.employee_nama}</td>
+                                                      <td className="px-3 py-2">
+                                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap" style={{ backgroundColor: `${color}20`, color }}>
+                                                          {d.status}
+                                                        </span>
+                                                      </td>
+                                                      <td className="px-3 py-2 text-center text-xs text-foreground tabular-nums whitespace-nowrap">{formatAbsensiJam(d.status, d.jam_masuk)}</td>
+                                                      <td className="px-3 py-2 text-center text-xs text-foreground tabular-nums whitespace-nowrap">{formatAbsensiJam(d.status, d.jam_pulang)}</td>
+                                                      <td className="px-3 py-2 text-xs text-muted-foreground break-words">{d.catatan || <span className="text-muted-foreground/40 italic">-</span>}</td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+
+                                        {/* ── Status titik per pegawai ── */}
+                                        <div>
+                                          <div className="flex items-center justify-between gap-3 px-3 py-2 mb-2">
+                                            <div className="flex items-center gap-2">
+                                              <ClipboardList className="w-3.5 h-3.5 text-primary" />
+                                              <p className="text-xs font-bold text-foreground">Detail Status Titik</p>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground">{row.titik_detail.length} catatan</p>
+                                          </div>
+                                          <div className="sm:overflow-x-auto">
+                                            <table className="w-full min-w-[480px]">
+                                              <thead>
+                                                <tr className="border-b border-border/70 bg-muted/10">
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Pegawai</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Nama Titik</th>
+                                                  <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Posisi</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-28">Status</th>
+                                                  <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Titik</th>
+                                                  <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-28">Pendapatan</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Catatan</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-border/50">
+                                                {row.titik_detail.length === 0 && (
+                                                  <tr>
+                                                    <td colSpan={7} className="px-3 py-5 text-center text-xs text-muted-foreground italic">Tidak ada catatan titik berstatus pada tanggal ini</td>
+                                                  </tr>
+                                                )}
+                                                {row.titik_detail.map((d, di) => (
+                                                  <tr key={`${d.employee_id}-${di}`}>
+                                                    <td className="px-3 py-2 text-xs font-semibold text-foreground break-words whitespace-nowrap">{d.employee_nama}</td>
+                                                    <td className="px-3 py-2">
+                                                      <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground break-words whitespace-nowrap">
+                                                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: d.zone_color }} />
+                                                        {d.zone_nama}
+                                                      </p>
+                                                    </td>
+                                                    <td className="px-3 py-2 text-center">
+                                                      <span className={cn("text-[9px] font-bold px-2 py-0.5 rounded-lg whitespace-nowrap",
+                                                        d.role === "Driver" ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400" : "bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400"
+                                                      )}>{d.role}</span>
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                      {d.status_nama ? (
+                                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap" style={{ backgroundColor: `${d.status_color || "#6b7280"}20`, color: d.status_color || "#6b7280" }}>
+                                                          {d.status_nama}
+                                                        </span>
+                                                      ) : <span className="text-xs text-muted-foreground italic">-</span>}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-right text-xs font-bold text-foreground tabular-nums whitespace-nowrap">{formatNumber(d.jumlah_titik)}</td>
+                                                    <td className="px-3 py-2 text-right text-xs font-semibold text-foreground tabular-nums whitespace-nowrap">{formatCurrency(d.total_pendapatan)}</td>
+                                                    <td className="px-3 py-2 text-xs text-muted-foreground break-words">{d.catatan || <span className="text-muted-foreground/40 italic">-</span>}</td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                        <tr className="bg-muted/40 font-semibold">
+                          <td className="sticky left-0 z-10 bg-muted/40 px-4 py-2.5 text-center">
+                            <span className="text-xs font-bold text-muted-foreground">Total</span>
+                          </td>
+                          <td className="sticky left-10 z-10 bg-muted/40 px-4 py-2.5 border-r border-border/50">
+                            <span className="text-xs font-bold text-muted-foreground">{filteredDateRows.length} hari</span>
+                          </td>
+                          {ABSENSI_STATUSES.map((s) => {
+                            const c = filteredDateRows.reduce((sum, r) => sum + (r.attendance_counts[s.nama] || 0), 0);
+                            return (
+                              <td key={`t-${s.nama}`} className="px-3 py-2.5 text-center text-sm font-bold tabular-nums" style={{ color: s.color }}>
+                                {c > 0 ? c : <span className="text-muted-foreground/40">-</span>}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2.5 text-center text-sm font-bold text-foreground tabular-nums">
+                            {ABSENSI_STATUSES.reduce((sum, s) => sum + (filteredDateRows.reduce((ss, r) => ss + (r.attendance_counts[s.nama] || 0), 0)), 0)}
+                          </td>
+                          {deliveryStatusColumns.map((c) => {
+                            const n = filteredDateRows.reduce((sum, r) => sum + (r.delivery_counts[c.nama] || 0), 0);
+                            return (
+                              <td key={`t-${c.nama}`} className="px-3 py-2.5 text-center text-sm font-bold tabular-nums" style={{ color: c.color }}>
+                                {n > 0 ? n : <span className="text-muted-foreground/40">-</span>}
+                              </td>
+                            );
+                          })}
+                          <td className="px-4 py-2.5 text-right text-sm font-bold text-primary tabular-nums">{formatNumber(filteredDateTotalTitik)}</td>
+                          <td className="px-4 py-2.5 text-right text-sm font-bold text-primary tabular-nums">{formatCurrency(filteredDateTotalPendapatan)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grand Total */}
+              <GrandTotalCard
+                totalTitik={filteredDateTotalTitik}
+                totalPendapatan={filteredDateTotalPendapatan}
               />
             </div>
           ) : (
