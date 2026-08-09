@@ -2022,8 +2022,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                     <table className="w-full min-w-[720px]">
                       <thead>
                         <tr className="border-b border-border">
-                          <th rowSpan={2} className="sticky left-0 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 w-10 bg-card border-r border-border">#</th>
-                          <th rowSpan={2} className="sticky left-10 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 min-w-[160px] bg-card border-r border-border">Tanggal</th>
+                          <th rowSpan={2} className="sticky left-0 z-20 text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 w-16 bg-card border-r border-border">#</th>
+                          <th rowSpan={2} className="sticky left-16 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 min-w-[160px] bg-card border-r border-border">Tanggal</th>
                           <th colSpan={ABSENSI_STATUSES.length + 1} className="text-center text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-l-2 border-l-blue-200 dark:border-l-blue-500/30">
                             Jumlah Absensi (hari)
                           </th>
@@ -2064,12 +2064,15 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                 onClick={() => setExpandedDateKey(isExpanded ? null : row.tanggal)}
                                 className={cn("group cursor-pointer transition-colors", isExpanded ? "bg-primary/[0.04]" : "hover:bg-muted/30")}
                               >
-                                <td className="sticky left-0 z-10 bg-card group-hover:bg-muted/30 px-4 py-3 text-center border-r border-border/50">
-                                  <ChevronDown className={cn("w-3.5 h-3.5 mx-auto text-muted-foreground transition-transform flex-shrink-0", isExpanded && "rotate-180 text-primary")} />
+                                <td className="sticky left-0 z-10 bg-card group-hover:bg-muted/30 px-2 py-3 text-center border-r border-border/50">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <span className="text-xs font-semibold text-foreground tabular-nums">{idx + 1}</span>
+                                    <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform flex-shrink-0", isExpanded && "rotate-180 text-primary")} />
+                                  </div>
                                 </td>
-                                <td className="sticky left-10 z-10 bg-card group-hover:bg-muted/30 px-4 py-3 border-r border-border/50">
+                                <td className="sticky left-16 z-10 bg-card group-hover:bg-muted/30 px-4 py-3 border-r border-border/50">
                                   <p className={cn("text-sm font-semibold break-words whitespace-nowrap", isExpanded ? "text-primary" : "text-foreground")}>
-                                    {idx + 1}. {formatDisplayDate(row.tanggal)}
+                                    {formatDisplayDate(row.tanggal)}
                                   </p>
                                 </td>
                                 {ABSENSI_STATUSES.map((s) => {
@@ -2237,7 +2240,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                           <td className="sticky left-0 z-10 bg-muted/40 px-4 py-2.5 text-center">
                             <span className="text-xs font-bold text-muted-foreground">Total</span>
                           </td>
-                          <td className="sticky left-10 z-10 bg-muted/40 px-4 py-2.5 border-r border-border/50">
+                          <td className="sticky left-16 z-10 bg-muted/40 px-4 py-2.5 border-r border-border/50">
                             <span className="text-xs font-bold text-muted-foreground">{filteredDateRows.length} hari</span>
                           </td>
                           {ABSENSI_STATUSES.map((s) => {
