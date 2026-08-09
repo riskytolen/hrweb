@@ -315,6 +315,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLDivElement>(null);
+  const employeeNamesRef = useRef<Map<string, string> | null>(null);
 
   // Grand totals (from all rows, tab-independent)
   const grandTotalTitik = reportRows.reduce((s, r) => s + r.total_titik, 0);
@@ -338,6 +339,13 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     const e = dateMode === "periode" ? getPeriodRange(periodKey).end : customEnd;
     if (!s || !e) return;
     setLoading(true);
+
+    if (!employeeNamesRef.current) {
+      const { data: empRows } = await supabase.from("pegawai").select("id, nama");
+      const m = new Map<string, string>();
+      (empRows || []).forEach((emp) => { if (emp.nama) m.set(emp.id, emp.nama); });
+      employeeNamesRef.current = m;
+    }
 
     const [deliveryRes, attendanceRes] = await Promise.all([
       fetchDeliveryRowsInRange(s, e),
@@ -401,6 +409,11 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
   }, []);
 
   // ─── Process raw data into ReportRow[], then group both ways ───
+  // Nama pegawai: join `pegawai` → master `pegawai` → snapshot `employee_nama` → employee_id
+  const resolveEmployeeName = (empId: string, joinedNama?: string | null, snapNama?: string | null): string => {
+    return joinedNama || employeeNamesRef.current?.get(empId) || snapNama || empId || "?";
+  };
+
   const processData = (data: DeliveryQueryRow[], attendanceRows: AttendanceLiteRow[] | null) => {
     // Hanya proses baris yang pegawainya aktif pada tanggal tersebut
     const activeData = data.filter((d) => isPegawaiActiveOnDate(d.pegawai, d.tanggal));
@@ -421,8 +434,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     activeData.forEach((d) => {
       const zNama = d.delivery_zones?.nama || "-";
       const zColor = d.delivery_zones?.color || "#3b82f6";
-      const empNama = d.pegawai?.nama || d.employee_nama || d.employee_id || "?";
       const empId = d.employee_id || "unknown";
+      const empNama = resolveEmployeeName(empId, d.pegawai?.nama, d.employee_nama);
       const zId = d.zone_id;
       const role = d.role;
 
@@ -530,7 +543,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
     const ringkasanMap = new Map<string, RingkasanRow>();
     activeData.forEach((d) => {
       const empId = d.employee_id || "unknown";
-      const empNama = d.pegawai?.nama || d.employee_nama || empId || "?";
+      const empNama = resolveEmployeeName(empId, d.pegawai?.nama, d.employee_nama);
       if (!ringkasanMap.has(empId)) {
         ringkasanMap.set(empId, { employee_id: empId, employee_nama: empNama, total_titik: 0, total_pendapatan: 0 });
       }
@@ -574,7 +587,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
         if (!map.has(a.employee_id)) {
           map.set(a.employee_id, {
             employee_id: a.employee_id,
-            employee_nama: a.pegawai?.[0]?.nama || a.employee_id || "?",
+            employee_nama: resolveEmployeeName(a.employee_id, a.pegawai?.[0]?.nama, null),
             total_titik: 0,
             total_pendapatan: 0,
             attendance_counts: {},
@@ -600,7 +613,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
       if (!map.has(empId)) {
         map.set(empId, {
           employee_id: empId,
-          employee_nama: d.pegawai?.nama || d.employee_nama || empId || "?",
+          employee_nama: resolveEmployeeName(empId, d.pegawai?.nama, d.employee_nama),
           total_titik: 0,
           total_pendapatan: 0,
           attendance_counts: {},
