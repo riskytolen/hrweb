@@ -139,6 +139,9 @@ const ABSENSI_STATUSES: readonly { nama: string; color: string }[] = [
   { nama: "Sakit", color: "#ef4444" },
 ] as const;
 
+/** Hanya status absensi ini yang ditampilkan di panel detail (Alpha, Izin, Cuti, Sakit). */
+const ABSENSI_FILTER_STATUSES = new Set(ABSENSI_STATUSES.map((s) => s.nama));
+
 /** Warna semua status absensi (termasuk Hadir/Terlambat/Libur) untuk panel detail. */
 const ATTENDANCE_STATUS_COLORS: Record<DbAttendanceRecord["status"], string> = {
   Hadir: "#10b981",
@@ -1768,6 +1771,8 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                         {filteredStatusRows.map((row, idx) => {
                           const isExpanded = expandedStatusEmployeeId === row.employee_id;
                           const totalAbsen = ABSENSI_STATUSES.reduce((sum, s) => sum + (row.attendance_counts[s.nama] || 0), 0);
+                          const absenDetail = row.attendance_details.filter((d) => ABSENSI_FILTER_STATUSES.has(d.status));
+                          const titikDetail = row.delivery_details.filter((d) => !!d.status_nama);
                           return (
                             <Fragment key={row.employee_id}>
                               <tr
@@ -1823,7 +1828,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                             Absen: {totalAbsen} hari
                                           </span>
                                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
-                                            Catat Titik: {row.delivery_details.length} kali
+                                            Catat Titik: {titikDetail.length} kali
                                           </span>
                                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
                                             {formatNumber(row.total_titik)} titik
@@ -1841,7 +1846,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                               <Calendar className="w-3.5 h-3.5 text-primary" />
                                               <p className="text-xs font-bold text-foreground">Detail Absensi</p>
                                             </div>
-                                            <p className="text-[11px] text-muted-foreground">{row.attendance_details.length} hari</p>
+                                            <p className="text-[11px] text-muted-foreground">{absenDetail.length} hari</p>
                                           </div>
                                           <div className="sm:overflow-x-auto">
                                             <table className="w-full min-w-[420px]">
@@ -1855,12 +1860,12 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                                 </tr>
                                               </thead>
                                               <tbody className="divide-y divide-border/50">
-                                                {row.attendance_details.length === 0 && (
+                                                {absenDetail.length === 0 && (
                                                   <tr>
-                                                    <td colSpan={5} className="px-3 py-5 text-center text-xs text-muted-foreground italic">Tidak ada data absensi pada periode ini</td>
+                                                    <td colSpan={5} className="px-3 py-5 text-center text-xs text-muted-foreground italic">Tidak ada absensi alpha/izin/cuti/sakit pada periode ini</td>
                                                   </tr>
                                                 )}
-                                                {row.attendance_details.map((d, di) => {
+                                                {absenDetail.map((d, di) => {
                                                   const color = ATTENDANCE_STATUS_COLORS[d.status];
                                                   return (
                                                     <tr key={`${d.tanggal}-${di}`}>
@@ -1888,7 +1893,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                               <ClipboardList className="w-3.5 h-3.5 text-primary" />
                                               <p className="text-xs font-bold text-foreground">Detail Status Titik</p>
                                             </div>
-                                            <p className="text-[11px] text-muted-foreground">{row.delivery_details.length} catatan</p>
+                                            <p className="text-[11px] text-muted-foreground">{titikDetail.length} catatan</p>
                                           </div>
                                           <div className="sm:overflow-x-auto">
                                             <table className="w-full min-w-[480px]">
@@ -1904,12 +1909,12 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                                 </tr>
                                               </thead>
                                               <tbody className="divide-y divide-border/50">
-                                                {row.delivery_details.length === 0 && (
+                                                {titikDetail.length === 0 && (
                                                   <tr>
-                                                    <td colSpan={7} className="px-3 py-5 text-center text-xs text-muted-foreground italic">Tidak ada riwayat titik pada periode ini</td>
+                                                    <td colSpan={7} className="px-3 py-5 text-center text-xs text-muted-foreground italic">Tidak ada catatan titik berstatus pada periode ini</td>
                                                   </tr>
                                                 )}
-                                                {row.delivery_details.map((d, di) => (
+                                                {titikDetail.map((d, di) => (
                                                   <tr key={`${d.tanggal}-${di}`}>
                                                     <td className="px-3 py-2 text-xs font-medium text-foreground whitespace-nowrap">{formatDisplayDate(d.tanggal)}</td>
                                                     <td className="px-3 py-2">
