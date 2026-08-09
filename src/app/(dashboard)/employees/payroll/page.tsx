@@ -172,6 +172,10 @@ export default function PayrollPage() {
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [payrolls, setPayrolls] = useState<PayrollRow[]>([]);
+  /** Map employee_id → sort_order (global, dari tabel payroll_employee_order) */
+  const [payrollOrder, setPayrollOrder] = useState<Map<string, number>>(new Map());
+  const [orderSaving, setOrderSaving] = useState(false);
+  const [orderSavedTick, setOrderSavedTick] = useState(0);
 
   // ─── Generate modal ───
   const [showGenerate, setShowGenerate] = useState(false);
@@ -291,6 +295,16 @@ export default function PayrollPage() {
     })));
   };
 
+  // ─── Fetch payroll order ───
+  const fetchPayrollOrder = async () => {
+    const { data, error } = await supabase
+      .from("payroll_employee_order")
+      .select("employee_id, sort_order")
+      .order("sort_order", { ascending: true });
+    if (error) { showToast("error", "Gagal Memuat Urutan", error.message); return; }
+    if (data) setPayrollOrder(new Map((data as { employee_id: string; sort_order: number }[]).map((d) => [d.employee_id, d.sort_order])));
+  };
+
   // ─── Fetch payrolls ───
   const fetchPayrolls = useCallback(async () => {
     const { data, error } = await supabase
@@ -313,7 +327,7 @@ export default function PayrollPage() {
   }, [periodKey, showToast]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchPayrolls()]).then(() => setLoading(false));
+    Promise.all([fetchEmployees(), fetchPayrolls(), fetchPayrollOrder()]).then(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -602,12 +616,40 @@ export default function PayrollPage() {
   const computedTotalPotongan = POTONGAN_FIELDS.reduce((sum, f) => sum + (editForm[f.key] || 0), 0);
   const computedNetto = computedTotalPendapatan - computedTotalPotongan;
 
+// ─── Urutan tampilan global (payroll_employee_order) ───
+  const orderedPayrolls = useMemo(() => {
+    const orderOf = (empId: string) => payrollOrder.get(empId);
+    return [...payrolls].sort((a, b) => {
+      const oa = orderOf(a.employee_id);
+      const ob = orderOf(b.employee_id);
+      if (oa === undefined && ob === undefined) {
+        return (a.pegawaiNama || a.employee_id).localeCompare(b.pegawaiNama || b.employee_id, "id");
+      }
+      if (oa === undefined) return 1; // tanpa urutan = paling bawah
+      if (ob === undefined) return -1;
+      if (oa !== ob) return oa - ob;
+      return (a.pegawaiNama || a.employee_id).localeCompare(b.pegawaiNama || b.employee_id, "id");
+    });
+  }, [payrolls, payrollOrder]);
+
+  const orderedEmployees = useMemo(() => {
+    return [...employees].sort((a, b) => {
+      const oa = payrollOrder.get(a.id);
+      const ob = payrollOrder.get(b.id);
+      if (oa === undefined && ob === undefined) return a.nama.localeCompare(b.nama, "id");
+      if (oa === undefined) return 1;
+      if (ob === undefined) return -1;
+      if (oa !== ob) return oa - ob;
+      return a.nama.localeCompare(b.nama, "id");
+    });
+  }, [employees, payrollOrder]);
+
   const getRowsForMainTab = useCallback((tab: "worksheet" | "draft" | "final" | "laporan" = activeMainTab) => {
-    if (tab === "laporan") return payrolls.filter((p) => p.status === "Final");
-    if (tab === "worksheet") return payrolls.filter((p) => p.status === "Worksheet");
-    if (tab === "final") return payrolls.filter((p) => p.status === "Final");
-    return payrolls.filter((p) => p.status === "Draft");
-  }, [activeMainTab, payrolls]);
+    if (tab === "laporan") return orderedPayrolls.filter((p) => p.status === "Final");
+    if (tab === "worksheet") return orderedPayrolls.filter((p) => p.status === "Worksheet");
+    if (tab === "final") return orderedPayrolls.filter((p) => p.status === "Final");
+    return orderedPayrolls.filter((p) => p.status === "Draft");
+  }, [activeMainTab, orderedPayrolls]);
 
   const getFilteredRowsForMainTab = useCallback((tab: "worksheet" | "draft" | "final" | "laporan" = activeMainTab) => {
     const q = search.toLowerCase();
@@ -961,7 +1003,7 @@ export default function PayrollPage() {
   };
 
   // ─── Export Excel (xlsx) ───
-  const exportExcel = async (rowsToExport: PayrollRow[] = payrolls, scopeLabel?: string) => {
+  const exportExcel = async (rowsToExport: PayrollRow[] = orderedPayrolls, scopeLabel?: string) => {
     if (rowsToExport.length === 0) {
       showToast("error", "Tidak Ada Data", "Tidak ada slip untuk di-export.");
       return;
@@ -1557,6 +1599,34 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     wsSaveTimersRef.current.set(id, timer);
   };
 
+  /** Reorder global: pindahkan `movedId` sebelum/sesudah `targetId` (optimistic + upsert). */
+  const handleReorderRow = useCallback((movedId: string, targetId: string, placement: "before" | "after") => {
+    if (!canEdit || orderSaving) return;
+    if (movedId === targetId) return;
+    const canonical = orderedEmployees.map((e) => e.id);
+    if (!canonical.includes(movedId) || !canonical.includes(targetId)) return;
+    const next = canonical.filter((id) => id !== movedId);
+    const tIdx = next.indexOf(targetId);
+    if (tIdx < 0) return;
+    next.splice(placement === "after" ? tIdx + 1 : tIdx, 0, movedId);
+
+    const prevMap = payrollOrder;
+    setPayrollOrder(new Map(next.map((id, i) => [id, i + 1])));
+    setOrderSaving(true);
+    supabase
+      .from("payroll_employee_order")
+      .upsert(next.map((id, i) => ({ employee_id: id, sort_order: i + 1 })), { onConflict: "employee_id" })
+      .then(({ error }) => {
+        setOrderSaving(false);
+        if (error) {
+          setPayrollOrder(prevMap);
+          showToast("error", "Gagal Menyimpan Urutan", error.message);
+        } else {
+          setOrderSavedTick((t) => t + 1);
+        }
+      });
+  }, [canEdit, orderSaving, orderedEmployees, payrollOrder, showToast]);
+
   const handleWsRefreshSources = async () => {
     if (!canEdit) {
       showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin refresh worksheet.");
@@ -1780,7 +1850,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
   };
 
   // ─── Gapok filter & paginate ───
-  const gapokFiltered = employees.filter((e) => {
+  const gapokFiltered = orderedEmployees.filter((e) => {
     // Search
     const matchSearch =
       e.nama.toLowerCase().includes(gapokSearch.toLowerCase()) ||
@@ -2073,6 +2143,9 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         setBuatSlipConfirm={activeMainTab === "worksheet" ? setBuatSlipConfirm : undefined}
         canEdit={canEdit}
         mode={activeMainTab === "laporan" ? "Final" : (activeMainTab.charAt(0).toUpperCase() + activeMainTab.slice(1)) as "Worksheet" | "Draft" | "Final"}
+        orderSaving={orderSaving}
+        orderSavedTick={orderSavedTick}
+        handleReorderRow={handleReorderRow}
         onClose={() => setSheetMode(false)}
       />
     )}
@@ -2096,7 +2169,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
                   Export Excel
                 </Button>
                 <Button variant="outline" icon={Download} size="sm" onClick={() => {
-                  const finalSlips = payrolls.filter((p) => p.status === "Final");
+                  const finalSlips = orderedPayrolls.filter((p) => p.status === "Final");
                   if (finalSlips.length === 0) {
                     showToast("error", "Tidak Ada Slip Final", "Belum ada slip gaji berstatus Final untuk di-export.");
                     return;

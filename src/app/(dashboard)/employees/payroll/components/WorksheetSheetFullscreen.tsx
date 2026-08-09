@@ -12,6 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  GripVertical,
+  CheckCircle2,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, formatInputCurrency, type PayrollRow } from "../constants";
@@ -41,6 +43,9 @@ interface WorksheetSheetFullscreenProps {
   setBuatSlipConfirm: ((v: { ids: number[]; mode: "single" | "bulk" } | null) => void) | undefined;
   canEdit: boolean;
   mode: "Worksheet" | "Draft" | "Final";
+  orderSaving: boolean;
+  orderSavedTick: number;
+  handleReorderRow: (movedId: string, targetId: string, placement: "before" | "after") => void;
   onClose: () => void;
 }
 
@@ -90,6 +95,9 @@ export default function WorksheetSheetFullscreen({
   setBuatSlipConfirm,
   canEdit,
   mode,
+  orderSaving,
+  orderSavedTick,
+  handleReorderRow,
   onClose,
 }: WorksheetSheetFullscreenProps) {
   const tableRef = useRef<HTMLDivElement>(null);
@@ -112,6 +120,69 @@ export default function WorksheetSheetFullscreen({
         .toLowerCase().includes(q)
     );
   }, [filtered, searchQuery]);
+
+  // ─── Urutan baris (drag / keyboard) ───
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [dragOverPosition, setDragOverPosition] = useState<"before" | "after">("before");
+  const [orderSavedFlash, setOrderSavedFlash] = useState(false);
+  const canReorder = canEdit && !orderSaving;
+  const dragActive = dragIdx !== null;
+  const canDragNow = canEdit && !orderSaving && !searchQuery.trim();
+
+  useEffect(() => {
+    if (orderSavedTick === 0) return;
+    setOrderSavedFlash(true);
+    const t = setTimeout(() => setOrderSavedFlash(false), 2000);
+    return () => clearTimeout(t);
+  }, [orderSavedTick]);
+
+  const resetDrag = () => { setDragIdx(null); setDragOverIdx(null); setDragOverPosition("before"); };
+
+  const handleDragStart = (e: React.DragEvent, idx: number) => {
+    if (searchQuery.trim() || !canReorder) return;
+    setDragIdx(idx);
+    const ghost = document.createElement("div");
+    ghost.style.opacity = "0";
+    ghost.style.position = "absolute";
+    ghost.style.top = "-9999px";
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 0, 0);
+    e.dataTransfer.effectAllowed = "move";
+    setTimeout(() => document.body.removeChild(ghost), 0);
+  };
+
+  const handleRowDragOver = (e: React.DragEvent, idx: number) => {
+    if (!dragActive) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDragOverPosition(e.clientY < rect.top + rect.height / 2 ? "before" : "after");
+    setDragOverIdx(idx);
+  };
+
+  const handleRowDrop = (e: React.DragEvent, row: PayrollRow, idx: number) => {
+    e.preventDefault();
+    if (dragIdx === null || dragIdx === idx) { resetDrag(); return; }
+    const moved = displayedRows[dragIdx];
+    if (!moved || moved.employee_id === row.employee_id) { resetDrag(); return; }
+    handleReorderRow(moved.employee_id, row.employee_id, dragOverPosition === "after" ? "after" : "before");
+    resetDrag();
+  };
+
+  /** Keyboard: panah atas/bawah pada handle grip. */
+  const handleGripKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, row: PayrollRow, idx: number) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    if (!canReorder || searchQuery.trim()) return;
+    if (e.key === "ArrowDown") {
+      const next = displayedRows[idx + 1];
+      if (next) handleReorderRow(row.employee_id, next.employee_id, "after");
+    } else {
+      const prev = displayedRows[idx - 1];
+      if (prev) handleReorderRow(row.employee_id, prev.employee_id, "before");
+    }
+  };
 
   const nameColumnWidth = useMemo(() => {
     const longestNameLength = filtered.reduce(
@@ -261,6 +332,13 @@ export default function WorksheetSheetFullscreen({
   const footerGridBorder = "border-r border-t border-dotted border-slate-500/80";
   const frozenDivider = (key: string) => key === "_status" && "border-r-2 border-solid border-r-slate-600";
 
+  const dragIndicator = (idx: number) => {
+    if (dragIdx === null || dragOverIdx !== idx) return "";
+    return dragOverPosition === "before"
+      ? "shadow-[inset_0_2px_0_0_rgba(37,99,235,0.75)] bg-blue-50/60"
+      : "shadow-[inset_0_-2px_0_0_rgba(37,99,235,0.75)] bg-blue-50/60";
+  };
+
   const getCellValue = (row: PayrollRow, col: SheetCol): string => {
     if (col.key === "_no") return "";
     if (col.key === "_nik") return row.employee_id;
@@ -363,7 +441,18 @@ export default function WorksheetSheetFullscreen({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center bg-muted rounded-xl p-0.5">
+            {(orderSaving || orderSavedFlash) && (
+              <div className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-semibold transition-colors",
+                orderSaving ? "bg-blue-50 text-blue-700" : "bg-emerald-50 text-emerald-700"
+              )}>
+                {orderSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                {orderSaving ? "Menyimpan urutan..." : "Urutan tersimpan"}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-muted rounded-xl p-0.5">
             <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronLeft className="w-3.5 h-3.5" /></button>
             <span className="text-[11px] font-bold text-foreground px-2.5 min-w-[200px] text-center whitespace-nowrap">{period.label}</span>
             <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-card text-muted-foreground hover:text-foreground"><ChevronRight className="w-3.5 h-3.5" /></button>
@@ -493,7 +582,18 @@ export default function WorksheetSheetFullscreen({
               const rowBg = isChanged ? "bg-amber-50" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
               const frozenBg = isChanged ? "bg-amber-50" : idx % 2 === 0 ? "bg-white" : "bg-[#fafafa]";
               return (
-                <tr key={row.id} className={cn("border-b border-dotted border-slate-500/80 text-slate-950 transition-colors", rowBg)}>
+                <tr
+                  key={row.id}
+                  onDragOver={(e) => handleRowDragOver(e, idx)}
+                  onDrop={(e) => handleRowDrop(e, row, idx)}
+                  onDragEnd={resetDrag}
+                  className={cn(
+                    "border-b border-dotted border-slate-500/80 text-slate-950 transition-colors",
+                    rowBg,
+                    dragActive && dragIdx === idx && "opacity-50",
+                    dragIndicator(idx),
+                  )}
+                >
                   {SHEET_COLS.map((c) => {
                       if (c.key === "_aksi") {
                       return (
@@ -542,7 +642,43 @@ export default function WorksheetSheetFullscreen({
                       );
                     }
                     if (c.key === "_no") {
-                      return <td key={c.key} style={getColumnStyle(c)} className={cn(c.width, "px-1 py-0.5 text-[10px] text-slate-600 text-center sticky z-30 leading-tight", frozenBg, gridBorder)}>{idx + 1}</td>;
+                      return (
+                        <td
+                          key={c.key}
+                          style={getColumnStyle(c)}
+                          className={cn(c.width, "px-1 py-0.5 text-[10px] text-slate-600 text-center sticky z-30 leading-tight", frozenBg, gridBorder)}
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            {canEdit && (
+                              <button
+                                type="button"
+                                draggable={canDragNow}
+                                onDragStart={(e) => handleDragStart(e, idx)}
+                                onDragEnd={resetDrag}
+                                onKeyDown={(e) => handleGripKeyDown(e, row, idx)}
+                                onClick={(e) => e.stopPropagation()}
+                                disabled={!canReorder}
+                                title={
+                                  searchQuery.trim()
+                                    ? "Hapus pencarian untuk mengubah urutan"
+                                    : orderSaving
+                                      ? "Menyimpan urutan..."
+                                      : "Ubah urutan (seret atau gunakan panah atas/bawah)"
+                                }
+                                className={cn(
+                                  "rounded-sm p-0.5 transition-colors outline-none",
+                                  canDragNow
+                                    ? "text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-grab active:cursor-grabbing focus:ring-1 focus:ring-blue-400"
+                                    : "text-slate-300 cursor-not-allowed",
+                                )}
+                              >
+                                <GripVertical className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <span className="tabular-nums leading-tight">{idx + 1}</span>
+                          </div>
+                        </td>
+                      );
                     }
                     if (c.key === "_nama") {
                       return (

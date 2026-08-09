@@ -7,6 +7,14 @@ export const supabase = createBrowserClient(
 
 // ─── Database Types ───
 
+export interface DbPayrollEmployeeOrder {
+  employee_id: string;
+  sort_order: number;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Inclusive date range for a historical non-active period (used by `pegawai.non_active_periods`). */
 export interface NonActivePeriod {
   from: string;
