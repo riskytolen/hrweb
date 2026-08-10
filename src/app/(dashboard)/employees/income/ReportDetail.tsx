@@ -277,7 +277,7 @@ function getCurrentPeriodKey(): string {
 function formatDisplayDate(dateStr: string): string {
   if (!dateStr) return "-";
   const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  return d.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
 /** Format jam DB (07:30:00 / 02:47:32.134861) ke HH:mm. */
@@ -978,7 +978,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
   const exportCSVPerTanggal = () => {
     const headers = [
-      "Tanggal",
+      "Hari/Tanggal",
       ...ABSENSI_STATUSES.map((s) => s.nama),
       "Total Absen",
       ...deliveryStatusColumns.map((c) => c.nama),
@@ -1296,7 +1296,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
 
     const headRow1: { content: string; rowSpan?: number; colSpan?: number; styles?: { halign?: "left" | "center" | "right" } }[] = [
       { content: "#", rowSpan: 2, styles: { halign: "center" } },
-      { content: "Tanggal", rowSpan: 2 },
+      { content: "Hari/Tanggal", rowSpan: 2 },
       { content: "Jumlah Absensi (hari)", colSpan: ABSENSI_STATUSES.length + 1, styles: { halign: "center" } },
       { content: "Status Rekap Titik (hari)", colSpan: deliveryStatusColumns.length, styles: { halign: "center" } },
       { content: "Total Titik", rowSpan: 2, styles: { halign: "right" } },
@@ -1921,7 +1921,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                         <table className="w-full">
                                           <thead>
                                             <tr className="border-b border-border/70 bg-muted/10">
-                                              <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2">Tanggal</th>
+                                              <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2">Hari / Tanggal</th>
                                               <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-24">Titik</th>
                                               <th className="text-right text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-36">Pendapatan</th>
                                               <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 w-32">Status</th>
@@ -2023,7 +2023,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                       <thead>
                         <tr className="border-b border-border">
                           <th rowSpan={2} className="sticky left-0 z-20 text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2.5 w-16 bg-card border-r border-border">#</th>
-                          <th rowSpan={2} className="sticky left-16 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 min-w-[160px] bg-card border-r border-border">Tanggal</th>
+                          <th rowSpan={2} className="sticky left-16 z-20 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-4 py-2.5 min-w-[190px] bg-card border-r border-border">Hari / Tanggal</th>
                           <th colSpan={ABSENSI_STATUSES.length + 1} className="text-center text-[10px] font-bold uppercase tracking-wider px-3 py-2.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-l-2 border-l-blue-200 dark:border-l-blue-500/30">
                             Jumlah Absensi (hari)
                           </th>
@@ -2402,7 +2402,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                             <table className="w-full min-w-[420px]">
                                               <thead>
                                                 <tr className="border-b border-border/70 bg-muted/10">
-                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Tanggal</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Hari / Tanggal</th>
                                                   <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-24">Status</th>
                                                   <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Masuk</th>
                                                   <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Pulang</th>
@@ -2449,7 +2449,7 @@ export default function ReportDetail({ show, onClose, zones, dStatuses }: Report
                                             <table className="w-full min-w-[480px]">
                                               <thead>
                                                 <tr className="border-b border-border/70 bg-muted/10">
-                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Tanggal</th>
+                                                  <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Hari / Tanggal</th>
                                                   <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2">Nama Titik</th>
                                                   <th className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Posisi</th>
                                                   <th className="text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-3 py-2 w-28">Status</th>
