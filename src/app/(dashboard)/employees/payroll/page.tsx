@@ -1843,7 +1843,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     setPage(1);
   };
 
-  /** Pindah ke periode berikutnya hanya jika seluruh payroll periode berjalan sudah Final. */
+  /** Pindah ke periode berikutnya; periode kosong tetap boleh dilewati. */
   const nextPeriod = async () => {
     if (nextChecking) return;
     setNextChecking(true);
@@ -1851,10 +1851,6 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       const state = await fetchPeriodState(periodKey);
       if (state.error) {
         showToast("error", "Validasi Periode Gagal", "Status periode tidak dapat diperiksa. Perpindahan periode dibatalkan.");
-        return;
-      }
-      if (state.total === 0) {
-        showToast("error", "Periode Belum Diproses", `Periode ${formatPeriodLabel(periodKey)} belum memiliki data payroll. Hitung Worksheet terlebih dahulu sebelum melanjutkan.`);
         return;
       }
       if (state.worksheet > 0) {
