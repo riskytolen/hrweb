@@ -8,6 +8,9 @@
 -- - Bucket privat untuk foto aset
 -- ═══════════════════════════════════════════════════════════════
 
+-- Dibutuhkan oleh indeks pencarian trigram di tabel aset.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- ──────────────────────────────────────────
 -- Helper: updated_at trigger (reuse if exists)
 -- ──────────────────────────────────────────
@@ -169,12 +172,7 @@ CREATE TRIGGER ga_asset_assignments_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- ──────────────────────────────────────────
--- 5. Enable pg_trgm for search (idempotent)
--- ──────────────────────────────────────────
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
--- ──────────────────────────────────────────
--- 6. RLS
+-- 5. RLS
 -- ──────────────────────────────────────────
 ALTER TABLE public.ga_asset_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ga_asset_locations ENABLE ROW LEVEL SECURITY;
@@ -281,7 +279,7 @@ CREATE POLICY auth_delete_ga_asset_assignments
   USING (public.has_app_permission('inventory-aset'));
 
 -- ──────────────────────────────────────────
--- 7. Storage bucket privat foto aset
+-- 6. Storage bucket privat foto aset
 -- ──────────────────────────────────────────
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
@@ -327,7 +325,7 @@ CREATE POLICY auth_delete_ga_asset_photos
   USING (bucket_id = 'ga-asset-photos' AND public.has_app_permission('inventory-aset'));
 
 -- ──────────────────────────────────────────
--- 8. RPC: kode aset + transfer/return
+-- 7. RPC: kode aset + transfer/return
 -- ──────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.next_ga_asset_code(p_category_id bigint)
 RETURNS text
@@ -468,7 +466,7 @@ GRANT EXECUTE ON FUNCTION public.return_ga_asset(bigint, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.return_ga_asset(bigint, text) TO service_role;
 
 -- ──────────────────────────────────────────
--- 9. Tambah permission inventory-aset ke role GA/Umum
+-- 8. Tambah permission inventory-aset ke role GA/Umum
 -- ──────────────────────────────────────────
 UPDATE public.roles
 SET permissions = (

@@ -13,13 +13,10 @@ import {
   CircleCheckBig,
   AlertTriangle,
   FileDown,
-  Building2,
-  ChevronDown,
   ArrowRightLeft,
   Undo2,
   MapPin,
   Boxes,
-  Wrench,
   Tag,
   DollarSign,
   CalendarDays,
@@ -44,6 +41,7 @@ import RouteGuard from "@/components/RouteGuard";
 
 const PAGE_SIZE = 24;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const MAX_BATCH_QUANTITY = 100;
 const ASSET_PHOTO_BUCKET = "ga-asset-photos";
 const inputClass =
   "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -64,6 +62,7 @@ const kondisiStyle: Record<Kondisi, string> = {
 };
 
 type FormState = {
+  jumlah_item: string;
   category_id: number | null;
   nama_aset: string;
   merek: string;
@@ -86,6 +85,7 @@ type AssignmentFormState = {
 };
 
 const emptyForm: FormState = {
+  jumlah_item: "1",
   category_id: null,
   nama_aset: "",
   merek: "",
@@ -193,6 +193,8 @@ export default function InventoryAsetPage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState("");
   const [removePhoto, setRemovePhoto] = useState(false);
+  const batchQuantity = editingId ? 1 : Number(form.jumlah_item) || 0;
+  const isBatchCreate = !editingId && batchQuantity > 1;
 
   const [detailAsset, setDetailAsset] = useState<DbGaAsset | null>(null);
   const [detailSignedUrl, setDetailSignedUrl] = useState<string | null>(null);
@@ -257,6 +259,17 @@ export default function InventoryAsetPage() {
     setRemovePhoto(false);
   };
 
+  const handleBatchQuantityChange = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    const quantity = digits ? Math.min(Number(digits), MAX_BATCH_QUANTITY) : 0;
+    setForm((current) => ({
+      ...current,
+      jumlah_item: quantity ? String(quantity) : "",
+      serial_number: quantity > 1 ? "" : current.serial_number,
+    }));
+    if (quantity > 1) resetPhotoState();
+  };
+
   const fetchAll = useCallback(async () => {
     const [{ data: catData }, { data: locData }, { data: assetData }, { data: assignData }, { data: pegData }, { data: divData }] =
       await Promise.all([
@@ -311,8 +324,8 @@ export default function InventoryAsetPage() {
   const filteredAssets = useMemo(() => {
     const q = search.toLowerCase().trim();
     return assets.filter((a) => {
-      const catName = (a as any).ga_asset_categories?.nama || "";
-      const locName = (a as any).ga_asset_locations?.nama || "";
+      const catName = a.ga_asset_categories?.nama || "";
+      const locName = a.ga_asset_locations?.nama || "";
       const matchSearch = !q
         || a.kode_aset.toLowerCase().includes(q)
         || a.nama_aset.toLowerCase().includes(q)
@@ -355,6 +368,7 @@ export default function InventoryAsetPage() {
 
   const openEdit = (a: DbGaAsset) => {
     setForm({
+      jumlah_item: "1",
       category_id: a.category_id,
       nama_aset: a.nama_aset,
       merek: a.merek || "",
@@ -391,6 +405,12 @@ export default function InventoryAsetPage() {
     if (!form.category_id) { setFormError("Kategori wajib dipilih."); return; }
     if (!form.nama_aset.trim()) { setFormError("Nama aset wajib diisi."); return; }
     if (!form.lokasi_id) { setFormError("Lokasi wajib dipilih."); return; }
+    const jumlahItem = editingId ? 1 : Number(form.jumlah_item);
+    if (!Number.isInteger(jumlahItem) || jumlahItem < 1 || jumlahItem > MAX_BATCH_QUANTITY) {
+      setFormError(`Jumlah item harus antara 1 dan ${MAX_BATCH_QUANTITY}.`);
+      return;
+    }
+    if (jumlahItem > 1 && photoFile) { setFormError("Foto hanya dapat diupload saat menambah satu aset."); return; }
     const hargaNum = parseRupiahInput(form.harga_beli);
     if (form.harga_beli && hargaNum == null) { setFormError("Harga beli tidak valid."); return; }
     if (hargaNum != null && hargaNum < 0) { setFormError("Harga beli tidak boleh negatif."); return; }
@@ -451,16 +471,12 @@ export default function InventoryAsetPage() {
         });
         showToast("success", "Aset Diperbarui", `${(oldAsset?.kode_aset || "").toString()} berhasil diperbarui.`);
       } else {
-        const { data: code, error: codeError } = await supabase.rpc("next_ga_asset_code", { p_category_id: form.category_id });
-        if (codeError || !code) { setFormError(codeError?.message || "Gagal membuat kode aset."); setFormSaving(false); return; }
-
         const payload: Record<string, unknown> = {
-          kode_aset: code as string,
           nama_aset: form.nama_aset.trim(),
           category_id: form.category_id,
           merek: form.merek.trim() || null,
           model: form.model.trim() || null,
-          serial_number: form.serial_number.trim() || null,
+          serial_number: jumlahItem === 1 ? form.serial_number.trim() || null : null,
           spesifikasi: form.spesifikasi.trim() || null,
           tanggal_beli: form.tanggal_beli || null,
           harga_beli: hargaNum,
@@ -470,20 +486,37 @@ export default function InventoryAsetPage() {
           catatan: form.catatan.trim() || null,
         };
 
-        const { data: inserted, error } = await supabase.from("ga_assets").insert(payload).select("id, kode_aset").single();
-        if (error || !inserted?.id) {
+        const { data: insertedData, error } = await supabase.rpc("create_ga_assets_batch", {
+          p_category_id: form.category_id,
+          p_nama_aset: payload.nama_aset,
+          p_jumlah: jumlahItem,
+          p_merek: payload.merek,
+          p_model: payload.model,
+          p_serial_number: payload.serial_number,
+          p_spesifikasi: payload.spesifikasi,
+          p_tanggal_beli: payload.tanggal_beli,
+          p_harga_beli: payload.harga_beli,
+          p_kondisi: payload.kondisi,
+          p_status: payload.status,
+          p_lokasi_id: payload.lokasi_id,
+          p_catatan: payload.catatan,
+        });
+        const inserted = (insertedData || []) as { asset_id: number; kode_aset: string }[];
+        if (error || inserted.length !== jumlahItem) {
           if (error?.message.toLowerCase().includes("unique")) setFormError("Kode aset bentrok. Coba simpan ulang.");
-          else setFormError(error?.message || "Gagal menyimpan aset.");
+          else setFormError(error?.message || "Jumlah aset yang tersimpan tidak sesuai. Seluruh proses dibatalkan.");
           setFormSaving(false);
           return;
         }
 
+        const firstAsset = inserted[0];
+        const lastAsset = inserted[inserted.length - 1];
         let photoPayload: { foto_url: string; foto_path: string } | null = null;
         let photoWarning = "";
-        if (photoFile) {
+        if (photoFile && jumlahItem === 1) {
           try {
-            const uploaded = await uploadAssetPhoto(inserted.id, photoFile);
-            const { error: photoUpdateError } = await supabase.from("ga_assets").update(uploaded).eq("id", inserted.id);
+            const uploaded = await uploadAssetPhoto(firstAsset.asset_id, photoFile);
+            const { error: photoUpdateError } = await supabase.from("ga_assets").update(uploaded).eq("id", firstAsset.asset_id);
             if (photoUpdateError) {
               await supabase.storage.from(ASSET_PHOTO_BUCKET).remove([uploaded.foto_path]);
               photoWarning = ` Foto gagal disimpan: ${photoUpdateError.message}`;
@@ -494,12 +527,23 @@ export default function InventoryAsetPage() {
         }
 
         await logAudit({
-          supabase, action: "create", entityType: "ga_assets", entityId: String(inserted.id),
-          entityLabel: inserted.kode_aset as string,
+          supabase, action: "create", entityType: "ga_assets", entityId: String(firstAsset.asset_id),
+          entityLabel: jumlahItem === 1 ? firstAsset.kode_aset : `${firstAsset.kode_aset} - ${lastAsset.kode_aset}`,
           newData: { ...payload, ...(photoPayload || {}) },
-          metadata: { photo_added: Boolean(photoPayload) },
+          metadata: {
+            quantity: jumlahItem,
+            asset_ids: inserted.map((item) => item.asset_id),
+            asset_codes: inserted.map((item) => item.kode_aset),
+            photo_added: Boolean(photoPayload),
+          },
         });
-        showToast("success", "Aset Ditambahkan", `${inserted.kode_aset} berhasil disimpan.${photoWarning}`);
+        showToast(
+          "success",
+          jumlahItem === 1 ? "Aset Ditambahkan" : `${jumlahItem} Aset Ditambahkan`,
+          jumlahItem === 1
+            ? `${firstAsset.kode_aset} berhasil disimpan.${photoWarning}`
+            : `${firstAsset.kode_aset} sampai ${lastAsset.kode_aset} berhasil dibuat sebagai aset individual.`,
+        );
       }
       setShowForm(false);
       resetPhotoState();
@@ -703,8 +747,8 @@ export default function InventoryAsetPage() {
       const headers = ["No", "Kode", "Nama Aset", "Kategori", "Merek", "Serial", "Tanggal Beli", "Harga", "Kondisi", "Status", "Lokasi", "Penempatan"];
       const colWidths = [8, 18, 40, 24, 22, 24, 22, 24, 20, 18, 24, 28];
       const rows = filteredAssets.map((a, i) => {
-        const cat = (a as any).ga_asset_categories?.nama || "-";
-        const loc = (a as any).ga_asset_locations?.nama || "-";
+        const cat = a.ga_asset_categories?.nama || "-";
+        const loc = a.ga_asset_locations?.nama || "-";
         const assign = activeAssignmentByAsset.get(a.id);
         const placement = assign ? `${assign.pegawai_nama || assign.divisi_nama || assign.lokasi_nama || "-"} @ ${assign.lokasi_nama || "-"}` : "-";
         return [
@@ -756,8 +800,8 @@ export default function InventoryAsetPage() {
 
   const renderAssetCard = (asset: DbGaAsset) => {
     const assign = activeAssignmentByAsset.get(asset.id);
-    const catName = (asset as any).ga_asset_categories?.nama || "-";
-    const locName = (asset as any).ga_asset_locations?.nama || "-";
+    const catName = asset.ga_asset_categories?.nama || "-";
+    const locName = asset.ga_asset_locations?.nama || "-";
     return (
       <div key={asset.id} className="bg-card rounded-3xl border border-border overflow-hidden hover:shadow-md transition-shadow flex flex-col">
         <div className="h-36 bg-muted/30 flex items-center justify-center overflow-hidden">
@@ -859,10 +903,10 @@ export default function InventoryAsetPage() {
               <input type="text" placeholder="Cari kode, nama, merek, serial, kategori, lokasi..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="bg-transparent text-xs outline-none w-full placeholder:text-muted-foreground/60 text-foreground" />
             </div>
             <Select value={categoryFilter} onChange={(v) => { setCategoryFilter(v); setPage(1); }} options={[{ value: "Semua", label: "Semua Kategori" }, ...categories.map((c) => ({ value: String(c.id), label: c.nama }))]} className="w-44" />
-            <Select value={statusFilter} onChange={(v) => { setStatusFilter(v as any); setPage(1); }} options={["Semua", "Aktif", "Rusak", "Tidak Aktif"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Status" : v }))} className="w-40" />
-            <Select value={kondisiFilter} onChange={(v) => { setKondisiFilter(v as any); setPage(1); }} options={["Semua", "Baik", "Rusak Ringan", "Rusak Berat"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Kondisi" : v }))} className="w-44" />
+            <Select value={statusFilter} onChange={(v) => { setStatusFilter(v as AssetStatus | "Semua"); setPage(1); }} options={["Semua", "Aktif", "Rusak", "Tidak Aktif"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Status" : v }))} className="w-40" />
+            <Select value={kondisiFilter} onChange={(v) => { setKondisiFilter(v as Kondisi | "Semua"); setPage(1); }} options={["Semua", "Baik", "Rusak Ringan", "Rusak Berat"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Kondisi" : v }))} className="w-44" />
             <Select value={locationFilter} onChange={(v) => { setLocationFilter(v); setPage(1); }} options={[{ value: "Semua", label: "Semua Lokasi" }, ...locations.filter((l) => l.status === "Aktif").map((l) => ({ value: String(l.id), label: l.nama }))]} className="w-44" />
-            <Select value={assignedFilter} onChange={(v) => { setAssignedFilter(v as any); setPage(1); }} options={["Semua", "Ditempatkan", "Belum Ditempatkan"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Penempatan" : v }))} className="w-44" />
+            <Select value={assignedFilter} onChange={(v) => { setAssignedFilter(v as "Semua" | "Ditempatkan" | "Belum Ditempatkan"); setPage(1); }} options={["Semua", "Ditempatkan", "Belum Ditempatkan"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Penempatan" : v }))} className="w-44" />
           </div>
         </div>
 
@@ -899,7 +943,7 @@ export default function InventoryAsetPage() {
                     <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center"><Package className="w-5 h-5 text-primary" /></div>
                     <div>
                       <h3 className="text-base font-bold text-foreground">{editingId ? "Edit Aset" : "Tambah Aset"}</h3>
-                      <p className="text-xs text-muted-foreground">{editingId ? "Perbarui data aset" : "Kode aset dibuat otomatis per kategori"}</p>
+                      <p className="text-xs text-muted-foreground">{editingId ? "Perbarui data aset" : "Buat satu atau beberapa aset dengan kode unik"}</p>
                     </div>
                   </div>
                   <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
@@ -913,10 +957,12 @@ export default function InventoryAsetPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-bold text-foreground">Foto Aset</p>
-                        <p className="mt-1 text-[10px] text-muted-foreground">Upload foto utama aset. Maksimal 5 MB (JPG/PNG/WEBP).</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          {isBatchCreate ? "Foto ditambahkan melalui edit masing-masing aset setelah batch dibuat." : "Upload foto utama aset. Maksimal 5 MB (JPG/PNG/WEBP)."}
+                        </p>
                         {removePhoto && <p className="mt-1 text-[10px] font-semibold text-danger">Foto lama akan dihapus saat disimpan.</p>}
                         {photoFile && <p className="mt-1 truncate text-[10px] font-semibold text-success">{photoFile.name}</p>}
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {!isBatchCreate && <div className="mt-3 flex flex-wrap items-center gap-2">
                           <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary/90">
                             <Boxes className="h-3.5 w-3.5" />
                             {photoPreview ? "Ganti Foto" : "Upload Foto"}
@@ -924,12 +970,28 @@ export default function InventoryAsetPage() {
                           </label>
                           {photoPreview && !photoFile && !removePhoto && <button onClick={() => setRemovePhoto(true)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted">Hapus Foto</button>}
                           {photoPreview && (photoFile || removePhoto) && <button onClick={() => resetPhotoState(editingId ? (assets.find((a) => a.id === editingId)?.foto_url || "") : "")} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted">Batal</button>}
-                        </div>
+                        </div>}
                       </div>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {!editingId && (
+                      <div className="sm:col-span-2 rounded-2xl border border-primary/20 bg-primary/5 p-3">
+                        <label className="text-xs font-semibold text-foreground mb-1 block">Jumlah Item <span className="text-danger">*</span></label>
+                        <input
+                          value={form.jumlah_item}
+                          onChange={(e) => handleBatchQuantityChange(e.target.value)}
+                          inputMode="numeric"
+                          autoComplete="off"
+                          placeholder="1"
+                          className={cn(inputClass, "max-w-32 bg-card")}
+                        />
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Maksimal {MAX_BATCH_QUANTITY}. Setiap item dibuat sebagai aset individual dengan kode unik.
+                        </p>
+                      </div>
+                    )}
                     <div>
                       <label className="text-xs font-semibold text-foreground mb-1 block">Kategori <span className="text-danger">*</span></label>
                       <Select value={form.category_id ? String(form.category_id) : ""} onChange={(v) => setForm({ ...form, category_id: v ? Number(v) : null })} options={[{ value: "", label: "Pilih kategori" }, ...categories.filter((c) => c.status === "Aktif").map((c) => ({ value: String(c.id), label: `${c.nama} (${c.kode_prefix})` }))]} className="w-full" />
@@ -944,10 +1006,20 @@ export default function InventoryAsetPage() {
                     </div>
                     <div><label className="text-xs font-semibold text-foreground mb-1 block">Merek</label><input value={form.merek} onChange={(e) => setForm({ ...form, merek: e.target.value })} placeholder="Dell, Lenovo, IKEA..." className={inputClass} /></div>
                     <div><label className="text-xs font-semibold text-foreground mb-1 block">Model/Tipe</label><input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="Latitude 5430, Ergo Chair..." className={inputClass} /></div>
-                    <div><label className="text-xs font-semibold text-foreground mb-1 block">Serial Number</label><input value={form.serial_number} onChange={(e) => setForm({ ...form, serial_number: e.target.value })} placeholder="SN123456" className={inputClass} /></div>
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1 block">Serial Number</label>
+                      <input
+                        value={form.serial_number}
+                        onChange={(e) => setForm({ ...form, serial_number: e.target.value })}
+                        placeholder={isBatchCreate ? "Diisi setelah aset dibuat" : "SN123456"}
+                        disabled={isBatchCreate}
+                        className={cn(inputClass, isBatchCreate && "cursor-not-allowed opacity-60")}
+                      />
+                      {isBatchCreate && <p className="text-[10px] text-muted-foreground mt-1">Serial dikosongkan agar dapat diisi per item melalui edit.</p>}
+                    </div>
                     <div><label className="text-xs font-semibold text-foreground mb-1 block">Tanggal Beli</label><input type="date" value={form.tanggal_beli} onChange={(e) => setForm({ ...form, tanggal_beli: e.target.value })} className={inputClass} /></div>
                     <div>
-                      <label className="text-xs font-semibold text-foreground mb-1 block">Harga Beli (Rp)</label>
+                      <label className="text-xs font-semibold text-foreground mb-1 block">Harga Beli per Item (Rp)</label>
                       <div className="relative">
                         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">Rp</span>
                         <input
@@ -975,7 +1047,9 @@ export default function InventoryAsetPage() {
                 </div>
                 <div className="flex items-center justify-end gap-2 p-5 border-t border-border">
                   <Button variant="outline" size="sm" onClick={() => setShowForm(false)} disabled={formSaving}>Batal</Button>
-                  <Button size="sm" icon={Check} onClick={handleSave} disabled={formSaving}>{formSaving ? "Menyimpan..." : editingId ? "Simpan" : "Tambah"}</Button>
+                  <Button size="sm" icon={Check} onClick={handleSave} disabled={formSaving}>
+                    {formSaving ? "Menyimpan..." : editingId ? "Simpan" : batchQuantity > 1 ? `Tambah ${batchQuantity} Aset` : "Tambah Aset"}
+                  </Button>
                 </div>
               </div>
             </div>
@@ -992,7 +1066,7 @@ export default function InventoryAsetPage() {
                     <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center"><Tag className="w-5 h-5 text-primary" /></div>
                     <div>
                       <h3 className="text-base font-bold text-foreground">{detailAsset.kode_aset} — {detailAsset.nama_aset}</h3>
-                      <p className="text-xs text-muted-foreground">{(detailAsset as any).ga_asset_categories?.nama || "-"} • {(detailAsset as any).ga_asset_locations?.nama || "-"}</p>
+                      <p className="text-xs text-muted-foreground">{detailAsset.ga_asset_categories?.nama || "-"} • {detailAsset.ga_asset_locations?.nama || "-"}</p>
                     </div>
                   </div>
                   <button onClick={() => setDetailAsset(null)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
