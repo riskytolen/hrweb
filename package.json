@@ -5,9 +5,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:cloudflare": "opennextjs-cloudflare build",
-    "deploy:cloudflare": "opennextjs-cloudflare build && wrangler deploy",
-    "preview:cloudflare": "opennextjs-cloudflare build && wrangler dev .open-next/worker.js",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
@@ -32,7 +29,6 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@opennextjs/cloudflare": "^1.20.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -44,7 +40,6 @@
     "fast-check": "4.8.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "4.1.8",
-    "wrangler": "^4.107.0"
+    "vitest": "4.1.8"
   }
 }
