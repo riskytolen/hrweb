@@ -146,6 +146,23 @@ function parseRupiahInput(value: string): number | null {
   return n;
 }
 
+const MAX_HARGA_BELI = 999_999_999_999;
+
+function formatRupiahInput(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+  // Hapus leading zero berlebih (sisakan 0 tunggal bila hanya 0)
+  const normalized = digits.replace(/^0+(?=\d)/, "");
+  if (!normalized) return "0";
+  // Batasi agar tidak melebihi numeric(14,2) secara visual
+  const capped = normalized.length > 12 ? normalized.slice(0, 12) : normalized;
+  return capped.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+function formatRupiahForDisplay(value: string): string {
+  return formatRupiahInput(value);
+}
+
 export default function InventoryAsetPage() {
   const { getPermissionLevel } = useAuth();
   const permLevel = getPermissionLevel("inventory-aset");
@@ -345,7 +362,7 @@ export default function InventoryAsetPage() {
       serial_number: a.serial_number || "",
       spesifikasi: a.spesifikasi || "",
       tanggal_beli: a.tanggal_beli || "",
-      harga_beli: a.harga_beli != null ? String(a.harga_beli) : "",
+      harga_beli: a.harga_beli != null ? formatRupiahForDisplay(String(a.harga_beli)) : "",
       kondisi: a.kondisi as Kondisi,
       status: a.status as AssetStatus,
       lokasi_id: a.lokasi_id,
@@ -377,6 +394,7 @@ export default function InventoryAsetPage() {
     const hargaNum = parseRupiahInput(form.harga_beli);
     if (form.harga_beli && hargaNum == null) { setFormError("Harga beli tidak valid."); return; }
     if (hargaNum != null && hargaNum < 0) { setFormError("Harga beli tidak boleh negatif."); return; }
+    if (hargaNum != null && hargaNum > MAX_HARGA_BELI) { setFormError(`Harga beli maksimal ${formatRupiah(MAX_HARGA_BELI)}.`); return; }
 
     setFormSaving(true);
     try {
@@ -928,7 +946,21 @@ export default function InventoryAsetPage() {
                     <div><label className="text-xs font-semibold text-foreground mb-1 block">Model/Tipe</label><input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="Latitude 5430, Ergo Chair..." className={inputClass} /></div>
                     <div><label className="text-xs font-semibold text-foreground mb-1 block">Serial Number</label><input value={form.serial_number} onChange={(e) => setForm({ ...form, serial_number: e.target.value })} placeholder="SN123456" className={inputClass} /></div>
                     <div><label className="text-xs font-semibold text-foreground mb-1 block">Tanggal Beli</label><input type="date" value={form.tanggal_beli} onChange={(e) => setForm({ ...form, tanggal_beli: e.target.value })} className={inputClass} /></div>
-                    <div><label className="text-xs font-semibold text-foreground mb-1 block">Harga Beli (Rp)</label><input value={form.harga_beli} onChange={(e) => setForm({ ...form, harga_beli: e.target.value })} placeholder="15000000" className={inputClass} /></div>
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1 block">Harga Beli (Rp)</label>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">Rp</span>
+                        <input
+                          value={form.harga_beli}
+                          onChange={(e) => setForm({ ...form, harga_beli: formatRupiahInput(e.target.value) })}
+                          placeholder="200.000"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          className={cn(inputClass, "pl-10")}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1">Contoh: 200.000 • Kosongkan bila belum ada harga.</p>
+                    </div>
                     <div>
                       <label className="text-xs font-semibold text-foreground mb-1 block">Kondisi</label>
                       <Select value={form.kondisi} onChange={(v) => setForm({ ...form, kondisi: v as Kondisi })} options={["Baik", "Rusak Ringan", "Rusak Berat"].map((v) => ({ value: v, label: v }))} className="w-full" />
