@@ -79,6 +79,7 @@ const PERMISSION_OPTIONS = [
   { key: "petty-cash", label: "Petty Cash" },
   { key: "data-mobil", label: "Data Mobil" },
   { key: "finance", label: "Finance" },
+  { key: "legalitas", label: "Legalitas" },
   { key: "settings", label: "Pengaturan" },
 ];
 

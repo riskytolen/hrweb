@@ -96,6 +96,7 @@ function BucketIcon({ name }: { name: string }) {
     "leave-attachments": "bg-violet-100 text-violet-600",
     "recruitment-docs": "bg-orange-100 text-orange-600",
     "ga-vehicle-docs": "bg-cyan-100 text-cyan-600",
+    "company-legal-documents": "bg-indigo-100 text-indigo-600",
   };
   const color = colors[name] || "bg-slate-100 text-slate-600";
   return (
@@ -111,6 +112,7 @@ function bucketLabel(name: string): string {
     "leave-attachments": "Lampiran Cuti",
     "recruitment-docs": "Dokumen Rekrutmen",
     "ga-vehicle-docs": "Dokumen Kendaraan",
+    "company-legal-documents": "Legalitas Perusahaan",
   };
   return labels[name] || name;
 }

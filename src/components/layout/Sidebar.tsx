@@ -37,6 +37,7 @@ import {
   TrendingUpDown,
   PieChart,
   SlidersHorizontal,
+  FileText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -139,6 +140,14 @@ const allSections: MenuSection[] = [
           { name: "Pengaturan", href: "/finance/pengaturan", icon: SlidersHorizontal, permission: "finance" },
         ],
       },
+      {
+        kind: "link",
+        key: "legalitas",
+        label: "Legalitas",
+        href: "/legalitas",
+        icon: FileText,
+        permission: "legalitas",
+      },
     ],
   },
   {
@@ -177,7 +186,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
             if (entry.href === "/settings/accounts") return isSuperAdmin ? entry : null;
             if (entry.href === "/settings/audit-logs") return isSuperAdmin ? entry : null;
             if (!entry.permission) return entry;
-            return hasPermission(entry.permission) || hasPermission(entry.permission + ".view") ? entry : null;
+            return hasPermission(entry.permission) || hasPermission(entry.permission + ".view") || hasPermission(entry.permission + ".input") ? entry : null;
           }
           // Group: filter sub items
           const filteredItems = entry.items.filter((item) => {
@@ -186,7 +195,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
             if (item.href === "/settings/audit-logs") return isSuperAdmin;
             if (item.href === "/settings/storage-usage") return isSuperAdmin;
             if (!item.permission) return true;
-            return hasPermission(item.permission) || hasPermission(item.permission + ".view");
+            return hasPermission(item.permission) || hasPermission(item.permission + ".view") || hasPermission(item.permission + ".input");
           });
           if (filteredItems.length === 0) return null;
           return { ...entry, items: filteredItems };

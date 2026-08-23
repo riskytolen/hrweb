@@ -66,7 +66,11 @@ export type AuditEntityType =
   | "finance_invoice_payments"
   | "finance_expense_categories"
   | "finance_expenses"
-  | "finance_cash_adjustments";
+  | "finance_cash_adjustments"
+  | "company_legal_categories"
+  | "company_legal_documents"
+  | "company_legal_document_versions"
+  | "company_legal_document_files";
 
 export interface AuditLogParams {
   supabase: SupabaseClient;
@@ -240,6 +244,10 @@ export function entityLabel(entityType: string): string {
     finance_expense_categories: "Kategori Pengeluaran",
     finance_expenses: "Pengeluaran Finance",
     finance_cash_adjustments: "Penyesuaian Kas",
+    company_legal_categories: "Kategori Legalitas",
+    company_legal_documents: "Dokumen Legalitas",
+    company_legal_document_versions: "Versi Dokumen Legalitas",
+    company_legal_document_files: "Berkas Legalitas",
   };
   return labels[entityType] ?? entityType;
 }

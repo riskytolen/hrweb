@@ -672,6 +672,57 @@ export interface DbGaVehicleDocument {
   files?: DbGaVehicleDocumentFile[];
 }
 
+export interface DbCompanyLegalCategory {
+  id: number;
+  nama: string;
+  deskripsi: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
+export interface DbCompanyLegalDocument {
+  id: number;
+  category_id: number;
+  judul: string;
+  catatan: string | null;
+  status: "Aktif" | "Diarsipkan";
+  current_version_no: number;
+  file_count: number;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  company_legal_categories?: DbCompanyLegalCategory;
+}
+
+export interface DbCompanyLegalDocumentVersion {
+  id: number;
+  document_id: number;
+  version_no: number;
+  catatan: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  company_legal_document_files?: DbCompanyLegalDocumentFile[];
+}
+
+export interface DbCompanyLegalDocumentFile {
+  id: number;
+  version_id: number;
+  file_path: string;
+  file_name: string;
+  mime_type: string;
+  file_size_bytes: number;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface DbUserUiPreference {
   user_id: string;
   preference_key: string;
