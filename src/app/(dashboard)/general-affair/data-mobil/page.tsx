@@ -1183,13 +1183,24 @@ export default function DataMobilPage() {
         </div>
 
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-[92px_1fr] gap-3 items-center">
-          <div className="h-24 overflow-hidden rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center border border-primary/10">
-            {vehicle.photo_url ? (
-              <img src={vehicle.photo_url} alt={`Foto unit ${vehicle.unit}`} className="h-full w-full object-cover" />
-            ) : (
-              <Truck className="w-12 h-12 text-primary/70" />
-            )}
-          </div>
+           <div className="h-24 overflow-hidden rounded-2xl bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center border border-primary/10">
+             {vehicle.photo_url ? (
+               <button
+                 type="button"
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   setPreviewMedia({ url: vehicle.photo_url as string, label: `Foto unit ${vehicle.unit}`, mimeType: "image/jpeg" });
+                 }}
+                 className="h-full w-full overflow-hidden rounded-2xl cursor-zoom-in group/photo focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                 aria-label={`Lihat foto unit ${vehicle.unit} ukuran penuh`}
+                 title="Klik untuk lihat full"
+               >
+                 <img src={vehicle.photo_url} alt={`Foto unit ${vehicle.unit}`} className="h-full w-full object-cover transition-transform group-hover/photo:scale-[1.02]" />
+               </button>
+             ) : (
+               <Truck className="w-12 h-12 text-primary/70" />
+             )}
+           </div>
           <div className="grid grid-cols-3 gap-1">
             {renderVehicleDocumentMetric(vehicle, "KIR", statuses.KIR)}
             {renderVehicleDocumentMetric(vehicle, "PAJAK", statuses.PAJAK)}
@@ -1537,15 +1548,23 @@ export default function DataMobilPage() {
                 </div>
                 <div className="flex-1 overflow-y-auto p-5 space-y-5">
                   <div className="h-56 overflow-hidden rounded-3xl border border-border bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center">
-                    {detailVehicle.photo_url ? (
-                      <img src={detailVehicle.photo_url} alt={`Foto unit ${detailVehicle.unit}`} className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="text-center">
-                        <Truck className="mx-auto h-16 w-16 text-primary/40" />
-                        <p className="mt-2 text-xs font-semibold text-muted-foreground">Belum ada foto unit</p>
-                      </div>
-                    )}
-                  </div>
+                     {detailVehicle.photo_url ? (
+                       <button
+                         type="button"
+                         onClick={() => setPreviewMedia({ url: detailVehicle.photo_url as string, label: `Foto unit ${detailVehicle.unit}`, mimeType: "image/jpeg" })}
+                         className="h-full w-full overflow-hidden rounded-3xl cursor-zoom-in group/detailPhoto focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                         aria-label={`Lihat foto unit ${detailVehicle.unit} ukuran penuh`}
+                         title="Klik untuk lihat full"
+                       >
+                         <img src={detailVehicle.photo_url} alt={`Foto unit ${detailVehicle.unit}`} className="h-full w-full object-cover transition-transform group-hover/detailPhoto:scale-[1.02]" />
+                       </button>
+                     ) : (
+                       <div className="text-center">
+                         <Truck className="mx-auto h-16 w-16 text-primary/40" />
+                         <p className="mt-2 text-xs font-semibold text-muted-foreground">Belum ada foto unit</p>
+                       </div>
+                     )}
+                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {DETAIL_FIELDS.map((f) => {
                       const value = detailVehicle[f.key] || "-";
