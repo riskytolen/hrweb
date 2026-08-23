@@ -60,6 +60,10 @@ export type AuditEntityType =
   | "ga_vehicles"
   | "ga_vehicle_documents"
   | "ga_vehicle_document_settings"
+  | "ga_asset_categories"
+  | "ga_asset_locations"
+  | "ga_assets"
+  | "ga_asset_assignments"
   | "finance_company_settings"
   | "finance_clients"
   | "finance_invoices"
@@ -237,6 +241,10 @@ export function entityLabel(entityType: string): string {
     ga_vehicles: "Data Mobil",
     ga_vehicle_documents: "Dokumen Kendaraan",
     ga_vehicle_document_settings: "Pengaturan Dokumen Kendaraan",
+    ga_asset_categories: "Kategori Aset",
+    ga_asset_locations: "Lokasi Aset",
+    ga_assets: "Aset",
+    ga_asset_assignments: "Penempatan Aset",
     finance_company_settings: "Pengaturan Finance",
     finance_clients: "Klien Finance",
     finance_invoices: "Invoice Finance",

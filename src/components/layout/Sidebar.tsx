@@ -28,6 +28,7 @@ import {
   LayoutDashboard,
   Briefcase,
   Truck,
+  Package,
   HardDrive,
   X,
   LineChart,
@@ -123,6 +124,7 @@ const allSections: MenuSection[] = [
         items: [
           { name: "Petty Cash", href: "/general-affair/petty-cash", icon: Wallet, permission: "petty-cash" },
           { name: "Data Mobil", href: "/general-affair/data-mobil", icon: Truck, permission: "data-mobil" },
+          { name: "Inventory Aset", href: "/general-affair/inventory-aset", icon: Package, permission: "inventory-aset" },
         ],
       },
       {

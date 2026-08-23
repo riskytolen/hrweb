@@ -588,6 +588,72 @@ export interface DbPettyCashTransaction {
   bagian?: DbPettyCashBagian;
 }
 
+// ─── GA Inventory Aset ───
+
+export interface DbGaAssetCategory {
+  id: number;
+  nama: string;
+  kode_prefix: string;
+  deskripsi: string | null;
+  next_sequence: number;
+  status: "Aktif" | "Tidak Aktif";
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbGaAssetLocation {
+  id: number;
+  nama: string;
+  alamat: string | null;
+  keterangan: string | null;
+  status: "Aktif" | "Tidak Aktif";
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbGaAsset {
+  id: number;
+  kode_aset: string;
+  nama_aset: string;
+  category_id: number;
+  merek: string | null;
+  model: string | null;
+  serial_number: string | null;
+  spesifikasi: string | null;
+  tanggal_beli: string | null;
+  harga_beli: number | null;
+  kondisi: "Baik" | "Rusak Ringan" | "Rusak Berat";
+  status: "Aktif" | "Rusak" | "Tidak Aktif";
+  lokasi_id: number | null;
+  foto_url: string | null;
+  foto_path: string | null;
+  catatan: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined
+  ga_asset_categories?: DbGaAssetCategory | null;
+  ga_asset_locations?: DbGaAssetLocation | null;
+}
+
+export interface DbGaAssetAssignment {
+  id: number;
+  asset_id: number;
+  pegawai_id: string | null;
+  pegawai_nama: string | null;
+  division_id: number | null;
+  divisi_nama: string | null;
+  lokasi_id: number | null;
+  lokasi_nama: string | null;
+  tanggal_serah: string;
+  tanggal_kembali: string | null;
+  status: "Aktif" | "Selesai";
+  catatan: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── GA Vehicles (Data Mobil) ───
 
 export interface DbGaVehicleVendor {

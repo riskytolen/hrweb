@@ -78,6 +78,7 @@ const PERMISSION_OPTIONS = [
   { key: "announcements", label: "Pengumuman" },
   { key: "petty-cash", label: "Petty Cash" },
   { key: "data-mobil", label: "Data Mobil" },
+  { key: "inventory-aset", label: "Inventory Aset" },
   { key: "finance", label: "Finance" },
   { key: "legalitas", label: "Legalitas" },
   { key: "settings", label: "Pengaturan" },
