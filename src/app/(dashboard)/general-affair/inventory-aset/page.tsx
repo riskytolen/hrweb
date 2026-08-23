@@ -21,6 +21,11 @@ import {
   DollarSign,
   CalendarDays,
   Hash,
+  LayoutGrid,
+  Table as TableIcon,
+  Layers,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -163,6 +168,44 @@ function formatRupiahForDisplay(value: string): string {
   return formatRupiahInput(value);
 }
 
+function normalizeAssetName(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function formatDistinctList(values: string[], max = 3): string {
+  const cleaned = values.filter((v) => v && v !== "-");
+  const unique = [...new Set(cleaned)];
+  if (unique.length === 0) return "-";
+  if (unique.length <= max) return unique.join(", ");
+  return `${unique.slice(0, max).join(", ")} +${unique.length - max}`;
+}
+
+function formatHargaPerUnit(min: number | null, max: number | null, missingCount: number, totalCount: number): string {
+  if (missingCount === totalCount) return "Belum ada harga";
+  if (min == null || max == null) return "-";
+  if (min === max) return formatRupiah(min);
+  return `${formatRupiah(min)} – ${formatRupiah(max)}`;
+}
+
+type GroupedAsset = {
+  key: string;
+  displayName: string;
+  assets: DbGaAsset[];
+  count: number;
+  totalNilai: number;
+  minHarga: number | null;
+  maxHarga: number | null;
+  missingPriceCount: number;
+  categories: string[];
+  distinctMerek: string[];
+  distinctModel: string[];
+  merekModelLabel: string;
+  locations: string[];
+  statusCounts: Record<AssetStatus, number>;
+  statusLabel: string;
+  kodeSample: string;
+};
+
 export default function InventoryAsetPage() {
   const { getPermissionLevel } = useAuth();
   const permLevel = getPermissionLevel("inventory-aset");
@@ -195,6 +238,9 @@ export default function InventoryAsetPage() {
   const [removePhoto, setRemovePhoto] = useState(false);
   const batchQuantity = editingId ? 1 : Number(form.jumlah_item) || 0;
   const isBatchCreate = !editingId && batchQuantity > 1;
+
+  const [viewMode, setViewMode] = useState<"laporan" | "unit">("laporan");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const [detailAsset, setDetailAsset] = useState<DbGaAsset | null>(null);
   const [detailSignedUrl, setDetailSignedUrl] = useState<string | null>(null);
@@ -355,8 +401,93 @@ export default function InventoryAsetPage() {
     const tidakAktif = assets.filter((a) => a.status === "Tidak Aktif").length;
     const ditempatkan = activeAssignmentByAsset.size;
     const belumDitempatkan = Math.max(0, aktif - ditempatkan);
-    return { total, aktif, rusak, tidakAktif, ditempatkan, belumDitempatkan };
+    const totalNilaiCompany = assets.reduce((sum, a) => sum + (a.harga_beli || 0), 0);
+    const tanpaHargaCompany = assets.filter((a) => a.harga_beli == null).length;
+    const totalUnitPerusahaan = total;
+    return { total, aktif, rusak, tidakAktif, ditempatkan, belumDitempatkan, totalNilaiCompany, tanpaHargaCompany, totalUnitPerusahaan };
   }, [assets, activeAssignmentByAsset]);
+
+  const groupedRows = useMemo<GroupedAsset[]>(() => {
+    const map = new Map<string, DbGaAsset[]>();
+    for (const a of filteredAssets) {
+      const key = normalizeAssetName(a.nama_aset);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(a);
+    }
+    const rows: GroupedAsset[] = [];
+    for (const [key, list] of map.entries()) {
+      const count = list.length;
+      const totalNilai = list.reduce((s, x) => s + (x.harga_beli || 0), 0);
+      const hargaList = list.map((x) => x.harga_beli).filter((v): v is number => v != null);
+      const minHarga = hargaList.length ? Math.min(...hargaList) : null;
+      const maxHarga = hargaList.length ? Math.max(...hargaList) : null;
+      const missingPriceCount = list.filter((x) => x.harga_beli == null).length;
+      const categories = [...new Set(list.map((x) => x.ga_asset_categories?.nama || "-"))];
+      const distinctMerek = [...new Set(list.map((x) => (x.merek || "").trim()).filter(Boolean))];
+      const distinctModel = [...new Set(list.map((x) => (x.model || "").trim()).filter(Boolean))];
+      const merekModelPairs = [...new Set(list.map((x) => {
+        const merek = (x.merek || "").trim();
+        const model = (x.model || "").trim();
+        if (merek && model) return `${merek} / ${model}`;
+        if (merek) return merek;
+        if (model) return model;
+        return "-";
+      }))];
+      const merekModelLabel = formatDistinctList(merekModelPairs, 2);
+      const locations = [...new Set(list.map((x) => x.ga_asset_locations?.nama || "-"))];
+      const statusCounts = list.reduce((acc, x) => {
+        const s = x.status as AssetStatus;
+        acc[s] = (acc[s] || 0) + 1;
+        return acc;
+      }, {} as Record<AssetStatus, number>);
+      const statusLabel = (["Aktif", "Rusak", "Tidak Aktif"] as AssetStatus[])
+        .filter((s) => statusCounts[s])
+        .map((s) => `${s} ${statusCounts[s]}`)
+        .join(" • ") || "-";
+      const displayName = list[0].nama_aset.trim().replace(/\s+/g, " ");
+      const sortedKode = [...list].sort((a, b) => a.kode_aset.localeCompare(b.kode_aset)).map((x) => x.kode_aset);
+      const kodeSample = sortedKode.length <= 3 ? sortedKode.join(", ") : `${sortedKode.slice(0, 2).join(", ")} +${sortedKode.length - 2}`;
+      rows.push({
+        key,
+        displayName,
+        assets: [...list].sort((a, b) => a.kode_aset.localeCompare(b.kode_aset)),
+        count,
+        totalNilai,
+        minHarga,
+        maxHarga,
+        missingPriceCount,
+        categories,
+        distinctMerek,
+        distinctModel,
+        merekModelLabel,
+        locations,
+        statusCounts,
+        statusLabel,
+        kodeSample,
+      });
+    }
+    return rows.sort((a, b) => a.displayName.localeCompare(b.displayName, "id"));
+  }, [filteredAssets]);
+
+  const pagedGroups = useMemo(() => groupedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [groupedRows, page]);
+
+  const filteredSummary = useMemo(() => {
+    const totalUnit = filteredAssets.length;
+    const totalNilai = filteredAssets.reduce((s, a) => s + (a.harga_beli || 0), 0);
+    const tanpaHarga = filteredAssets.filter((a) => a.harga_beli == null).length;
+    const groupCount = groupedRows.length;
+    const totalNilaiCompany = summary.totalNilaiCompany;
+    return { totalUnit, totalNilai, tanpaHarga, groupCount, totalNilaiCompany };
+  }, [filteredAssets, groupedRows, summary.totalNilaiCompany]);
+
+  const toggleGroup = useCallback((key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const openAdd = () => {
     setForm(emptyForm);
@@ -679,7 +810,9 @@ export default function InventoryAsetPage() {
   };
 
   const handleExportPdf = async () => {
-    if (filteredAssets.length === 0) { showToast("error", "Tidak Ada Data", "Tidak ada aset yang cocok dengan filter."); return; }
+    const isLaporan = viewMode === "laporan";
+    const hasData = isLaporan ? groupedRows.length > 0 : filteredAssets.length > 0;
+    if (!hasData) { showToast("error", "Tidak Ada Data", "Tidak ada aset yang cocok dengan filter."); return; }
     setPdfExporting(true);
     try {
       const { default: jsPDF } = await import("jspdf");
@@ -693,21 +826,29 @@ export default function InventoryAsetPage() {
       doc.setFontSize(18);
       doc.setTextColor(30);
       doc.setFont("helvetica", "bold");
-      doc.text("Inventory Aset", 14, 22);
+      doc.text(isLaporan ? "Laporan Ringkas Aset" : "Inventory Aset", 14, 22);
       doc.setFontSize(10);
       doc.setTextColor(100);
       doc.setFont("helvetica", "normal");
-      doc.text(`General Affair — ${new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`, 14, 30);
-      doc.text(`${filteredAssets.length} aset`, pw - 14, 22, { align: "right" });
+      doc.text(`General Affair — ${new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} • Nilai perusahaan: ${formatRupiah(summary.totalNilaiCompany)}`, 14, 30);
+      doc.text(isLaporan ? `${groupedRows.length} jenis • ${filteredAssets.length} unit` : `${filteredAssets.length} aset`, pw - 14, 22, { align: "right" });
 
       const totalHarga = filteredAssets.reduce((sum, a) => sum + (a.harga_beli || 0), 0);
-      const cardItems = [
-        { label: "Total Aset", value: String(filteredAssets.length), tc: [59, 130, 246], bg: [235, 245, 255] },
-        { label: "Aktif", value: String(filteredAssets.filter((a) => a.status === "Aktif").length), tc: [34, 197, 94], bg: [235, 255, 240] },
-        { label: "Rusak", value: String(filteredAssets.filter((a) => a.status === "Rusak").length), tc: [245, 158, 11], bg: [255, 250, 235] },
-        { label: "Tidak Aktif", value: String(filteredAssets.filter((a) => a.status === "Tidak Aktif").length), tc: [120, 120, 120], bg: [245, 247, 250] },
-        { label: "Total Nilai", value: formatRupiah(totalHarga), tc: [15, 118, 110], bg: [240, 253, 250] },
-      ];
+      const cardItems = isLaporan
+        ? [
+            { label: "Jenis Aset", value: String(groupedRows.length), tc: [59, 130, 246], bg: [235, 245, 255] },
+            { label: "Total Unit", value: String(filteredAssets.length), tc: [34, 197, 94], bg: [235, 255, 240] },
+            { label: "Tanpa Harga", value: String(filteredAssets.filter((a) => a.harga_beli == null).length), tc: [245, 158, 11], bg: [255, 250, 235] },
+            { label: "Subtotal Nilai", value: formatRupiah(totalHarga), tc: [15, 118, 110], bg: [240, 253, 250] },
+            { label: "Nilai Perusahaan", value: formatRupiah(summary.totalNilaiCompany), tc: [13, 110, 110], bg: [230, 255, 250] },
+          ]
+        : [
+            { label: "Total Aset", value: String(filteredAssets.length), tc: [59, 130, 246], bg: [235, 245, 255] },
+            { label: "Aktif", value: String(filteredAssets.filter((a) => a.status === "Aktif").length), tc: [34, 197, 94], bg: [235, 255, 240] },
+            { label: "Rusak", value: String(filteredAssets.filter((a) => a.status === "Rusak").length), tc: [245, 158, 11], bg: [255, 250, 235] },
+            { label: "Tidak Aktif", value: String(filteredAssets.filter((a) => a.status === "Tidak Aktif").length), tc: [120, 120, 120], bg: [245, 247, 250] },
+            { label: "Total Nilai", value: formatRupiah(totalHarga), tc: [15, 118, 110], bg: [240, 253, 250] },
+          ];
       const cardW = (pw - 28 - 12) / 5;
       const cardY = 36;
       cardItems.forEach((c, i) => {
@@ -727,45 +868,63 @@ export default function InventoryAsetPage() {
 
       let cursorY = cardY + 22;
       const chips: string[] = [];
+      chips.push(isLaporan ? "Mode: Laporan Ringkas (Nama Aset saja)" : "Mode: Per Unit");
       if (search) chips.push(`Cari: "${search}"`);
       if (statusFilter !== "Semua") chips.push(`Status: ${statusFilter}`);
       if (kondisiFilter !== "Semua") chips.push(`Kondisi: ${kondisiFilter}`);
       if (categoryFilter !== "Semua") chips.push(`Kategori: ${categories.find((c) => String(c.id) === categoryFilter)?.nama || categoryFilter}`);
       if (locationFilter !== "Semua") chips.push(`Lokasi: ${locations.find((l) => String(l.id) === locationFilter)?.nama || locationFilter}`);
       if (assignedFilter !== "Semua") chips.push(`Penempatan: ${assignedFilter}`);
-      if (chips.length > 0) {
-        doc.setFillColor(245, 247, 250);
-        doc.setDrawColor(210);
-        doc.roundedRect(14, cursorY, pw - 28, 7, 2, 2, "FD");
-        doc.setFontSize(7);
-        doc.setTextColor(90);
-        doc.setFont("helvetica", "normal");
-        doc.text(chips.join("    "), 18, cursorY + 4.5);
-        cursorY += 11;
-      }
+      doc.setFillColor(245, 247, 250);
+      doc.setDrawColor(210);
+      doc.roundedRect(14, cursorY, pw - 28, 7, 2, 2, "FD");
+      doc.setFontSize(7);
+      doc.setTextColor(90);
+      doc.setFont("helvetica", "normal");
+      doc.text(chips.join("    "), 18, cursorY + 4.5);
+      cursorY += 11;
 
-      const headers = ["No", "Kode", "Nama Aset", "Kategori", "Merek", "Serial", "Tanggal Beli", "Harga", "Kondisi", "Status", "Lokasi", "Penempatan"];
-      const colWidths = [8, 18, 40, 24, 22, 24, 22, 24, 20, 18, 24, 28];
-      const rows = filteredAssets.map((a, i) => {
-        const cat = a.ga_asset_categories?.nama || "-";
-        const loc = a.ga_asset_locations?.nama || "-";
-        const assign = activeAssignmentByAsset.get(a.id);
-        const placement = assign ? `${assign.pegawai_nama || assign.divisi_nama || assign.lokasi_nama || "-"} @ ${assign.lokasi_nama || "-"}` : "-";
-        return [
+      let headers: string[] = [];
+      let colWidths: number[] = [];
+      let rows: string[][] = [];
+      if (isLaporan) {
+        headers = ["No", "Nama Aset", "Kategori", "Merek / Model", "Jumlah", "Status", "Lokasi", "Harga Satuan", "Total Nilai"];
+        colWidths = [8, 44, 28, 36, 14, 32, 28, 34, 34];
+        rows = groupedRows.map((g, i) => [
           String(i + 1),
-          a.kode_aset,
-          a.nama_aset,
-          cat,
-          a.merek || "-",
-          a.serial_number || "-",
-          formatTanggal(a.tanggal_beli),
-          a.harga_beli != null ? formatRupiah(a.harga_beli) : "-",
-          a.kondisi,
-          a.status,
-          loc,
-          placement,
-        ];
-      });
+          g.displayName,
+          formatDistinctList(g.categories),
+          g.merekModelLabel,
+          String(g.count),
+          g.statusLabel,
+          formatDistinctList(g.locations),
+          formatHargaPerUnit(g.minHarga, g.maxHarga, g.missingPriceCount, g.count),
+          formatRupiah(g.totalNilai),
+        ]);
+      } else {
+        headers = ["No", "Kode", "Nama Aset", "Kategori", "Merek", "Serial", "Tanggal Beli", "Harga", "Kondisi", "Status", "Lokasi", "Penempatan"];
+        colWidths = [8, 18, 40, 24, 22, 24, 22, 24, 20, 18, 24, 28];
+        rows = filteredAssets.map((a, i) => {
+          const cat = a.ga_asset_categories?.nama || "-";
+          const loc = a.ga_asset_locations?.nama || "-";
+          const assign = activeAssignmentByAsset.get(a.id);
+          const placement = assign ? `${assign.pegawai_nama || assign.divisi_nama || assign.lokasi_nama || "-"} @ ${assign.lokasi_nama || "-"}` : "-";
+          return [
+            String(i + 1),
+            a.kode_aset,
+            a.nama_aset,
+            cat,
+            a.merek || "-",
+            a.serial_number || "-",
+            formatTanggal(a.tanggal_beli),
+            a.harga_beli != null ? formatRupiah(a.harga_beli) : "-",
+            a.kondisi,
+            a.status,
+            loc,
+            placement,
+          ];
+        });
+      }
 
       autoTable(doc, {
         head: [headers],
@@ -778,6 +937,16 @@ export default function InventoryAsetPage() {
         margin: { left: 14, right: 14, bottom: 14 },
       });
 
+      // Footer per mode dengan total nilai perusahaan tetap
+      const footerY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+      doc.setFontSize(7);
+      doc.setTextColor(90);
+      doc.setFont("helvetica", "normal");
+      if (isLaporan) {
+        doc.text(`Subtotal terfilter: ${filteredAssets.length} unit • ${groupedRows.length} jenis • ${formatRupiah(totalHarga)}${filteredSummary.tanpaHarga ? ` • ${filteredSummary.tanpaHarga} tanpa harga` : ""}`, 14, footerY);
+        doc.text(`Nilai perusahaan (semua status): ${formatRupiah(summary.totalNilaiCompany)}`, 14, footerY + 4);
+      }
+
       const pageCount = doc.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
@@ -788,9 +957,10 @@ export default function InventoryAsetPage() {
         doc.text("HRM System — General Affair / Inventory Aset", 14, ph - 6);
         doc.text(`Halaman ${i} dari ${pageCount}`, pw - 14, ph - 6, { align: "right" });
       }
-      doc.save(`inventory_aset_${new Date().toISOString().slice(0, 10)}.pdf`);
-      showToast("success", "Export Berhasil", `${filteredAssets.length} aset diexport ke PDF.`);
-      await logAudit({ supabase, action: "export", entityType: "ga_assets", entityLabel: `Export ${filteredAssets.length} aset`, metadata: { count: filteredAssets.length } });
+      doc.save(`inventory_aset_${isLaporan ? "laporan_ringkas" : "per_unit"}_${new Date().toISOString().slice(0, 10)}.pdf`);
+      const exportedCount = isLaporan ? groupedRows.length : filteredAssets.length;
+      showToast("success", "Export Berhasil", `${exportedCount} ${isLaporan ? "jenis" : "aset"} diexport ke PDF (${isLaporan ? "Laporan Ringkas" : "Per Unit"}).`);
+      await logAudit({ supabase, action: "export", entityType: "ga_assets", entityLabel: `Export ${exportedCount} ${isLaporan ? "jenis" : "aset"} (${isLaporan ? "ringkas" : "unit"})`, metadata: { count: exportedCount, mode: isLaporan ? "laporan" : "unit", totalHarga, nilaiPerusahaan: summary.totalNilaiCompany } });
     } catch (err) {
       showToast("error", "Gagal Export", err instanceof Error ? err.message : "Terjadi kesalahan.");
     } finally {
@@ -887,16 +1057,36 @@ export default function InventoryAsetPage() {
           </Portal>
         )}
 
+        <div className="bg-gradient-to-br from-teal-600 to-cyan-600 rounded-2xl p-5 text-white shadow-lg">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-white/80 flex items-center gap-2"><Layers className="w-3.5 h-3.5" /> Total Nilai Aset Perusahaan</p>
+              <p className="text-2xl lg:text-3xl font-extrabold mt-1">{formatRupiah(summary.totalNilaiCompany)}</p>
+              <p className="text-xs text-white/80 mt-1">Dari {summary.total} unit tercatat (semua status) • {summary.tanpaHargaCompany > 0 ? `${summary.tanpaHargaCompany} unit tanpa harga` : "Semua unit sudah ada harga"}</p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <div className="bg-white/15 backdrop-blur rounded-xl px-4 py-3 min-w-[110px]">
+                <p className="text-[10px] uppercase tracking-wider text-white/70">Total Unit</p>
+                <p className="text-lg font-bold">{summary.total}</p>
+              </div>
+              <div className="bg-white/15 backdrop-blur rounded-xl px-4 py-3 min-w-[110px]">
+                <p className="text-[10px] uppercase tracking-wider text-white/70">Jenis Aset</p>
+                <p className="text-lg font-bold">{groupedRows.length} <span className="text-xs font-normal text-white/70">nama</span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-          <div className="bg-card rounded-2xl border border-border p-4"><p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Aset</p><p className="text-xl font-bold text-foreground mt-1">{summary.total}</p></div>
+          <div className="bg-card rounded-2xl border border-border p-4"><p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total Aset</p><p className="text-xl font-bold text-foreground mt-1">{summary.total}</p><p className="text-[10px] text-muted-foreground mt-1">{summary.totalNilaiCompany ? formatRupiah(summary.totalNilaiCompany) : "-"}</p></div>
           <div className="bg-card rounded-2xl border border-border p-4"><p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Aktif</p><p className="text-xl font-bold text-success mt-1">{summary.aktif}</p></div>
           <div className="bg-card rounded-2xl border border-border p-4"><p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Rusak</p><p className="text-xl font-bold text-warning mt-1">{summary.rusak}</p></div>
           <div className="bg-card rounded-2xl border border-border p-4"><p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Tidak Aktif</p><p className="text-xl font-bold text-muted-foreground mt-1">{summary.tidakAktif}</p></div>
           <div className="bg-card rounded-2xl border border-border p-4"><p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Ditempatkan</p><p className="text-xl font-bold text-primary mt-1">{summary.ditempatkan}</p></div>
-          <div className="bg-card rounded-2xl border border-border p-4"><p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Belum Ditempatkan</p><p className="text-xl font-bold text-warning mt-1">{summary.belumDitempatkan}</p></div>
+          <div className="bg-card rounded-2xl border border-border p-4"><p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Belum Ditempatkan</p><p className="text-xl font-bold text-warning mt-1">{summary.belumDitempatkan}</p><p className="text-[10px] text-muted-foreground mt-1">{summary.tanpaHargaCompany ? `${summary.tanpaHargaCompany} tanpa harga` : ""}</p></div>
         </div>
 
-        <div className="bg-card rounded-2xl border border-border p-3">
+        <div className="bg-card rounded-2xl border border-border p-3 space-y-3">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[220px]">
               <Search className="w-3.5 h-3.5 text-muted-foreground" />
@@ -908,21 +1098,176 @@ export default function InventoryAsetPage() {
             <Select value={locationFilter} onChange={(v) => { setLocationFilter(v); setPage(1); }} options={[{ value: "Semua", label: "Semua Lokasi" }, ...locations.filter((l) => l.status === "Aktif").map((l) => ({ value: String(l.id), label: l.nama }))]} className="w-44" />
             <Select value={assignedFilter} onChange={(v) => { setAssignedFilter(v as "Semua" | "Ditempatkan" | "Belum Ditempatkan"); setPage(1); }} options={["Semua", "Ditempatkan", "Belum Ditempatkan"].map((v) => ({ value: v, label: v === "Semua" ? "Semua Penempatan" : v }))} className="w-44" />
           </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 p-1 bg-muted rounded-xl">
+              <button
+                onClick={() => { setViewMode("laporan"); setPage(1); setExpandedGroups(new Set()); }}
+                className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors", viewMode === "laporan" ? "bg-card text-foreground shadow-sm border border-border" : "text-muted-foreground hover:text-foreground")}
+              >
+                <TableIcon className="w-3.5 h-3.5" /> Laporan Ringkas
+              </button>
+              <button
+                onClick={() => { setViewMode("unit"); setPage(1); }}
+                className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors", viewMode === "unit" ? "bg-card text-foreground shadow-sm border border-border" : "text-muted-foreground hover:text-foreground")}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" /> Per Unit
+              </button>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="px-2.5 py-1.5 rounded-lg bg-muted text-muted-foreground font-medium">
+                {viewMode === "laporan" ? `${filteredSummary.groupCount} jenis` : `${filteredSummary.totalUnit} unit`} terfilter
+              </span>
+              <span className="px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary font-bold">
+                Subtotal: {formatRupiah(filteredSummary.totalNilai)}
+              </span>
+              {filteredSummary.tanpaHarga > 0 && (
+                <span className="px-2.5 py-1.5 rounded-lg bg-warning/10 text-warning font-medium">
+                  {filteredSummary.tanpaHarga} tanpa harga
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="bg-card rounded-3xl border border-border p-4 animate-pulse space-y-3">
-                <div className="h-36 bg-muted rounded-2xl" /><div className="h-4 bg-muted rounded w-24" /><div className="h-3 bg-muted rounded w-40" /><div className="h-20 bg-muted rounded-2xl" />
-              </div>
-            ))}
-          </div>
-        ) : pagedAssets.length === 0 ? (
+          viewMode === "laporan" ? (
+            <div className="bg-card rounded-2xl border border-border p-4 animate-pulse space-y-3">
+              <div className="h-6 bg-muted rounded w-32" />
+              <div className="h-32 bg-muted rounded-2xl" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="bg-card rounded-3xl border border-border p-4 animate-pulse space-y-3">
+                  <div className="h-36 bg-muted rounded-2xl" /><div className="h-4 bg-muted rounded w-24" /><div className="h-3 bg-muted rounded w-40" /><div className="h-20 bg-muted rounded-2xl" />
+                </div>
+              ))}
+            </div>
+          )
+        ) : filteredAssets.length === 0 ? (
           <div className="bg-card rounded-3xl border border-border p-12 text-center">
             <Package className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
             <p className="text-sm font-bold text-foreground">{assets.length === 0 ? "Belum ada aset" : "Tidak ada aset yang cocok"}</p>
             <p className="text-xs text-muted-foreground mt-1">{assets.length === 0 ? "Klik Tambah Aset untuk mulai." : "Coba ubah filter atau kata kunci pencarian."}</p>
+          </div>
+        ) : viewMode === "laporan" ? (
+          <div className="space-y-4">
+            <div className="bg-card rounded-2xl border border-border overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/60 border-b border-border">
+                    <tr className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                      <th className="px-3 py-3 text-left min-w-[180px]">Nama Aset</th>
+                      <th className="px-3 py-3 text-left min-w-[130px]">Kategori</th>
+                      <th className="px-3 py-3 text-left min-w-[150px]">Merek / Model</th>
+                      <th className="px-3 py-3 text-center min-w-[80px]">Jumlah</th>
+                      <th className="px-3 py-3 text-left min-w-[140px]">Status</th>
+                      <th className="px-3 py-3 text-left min-w-[130px]">Lokasi</th>
+                      <th className="px-3 py-3 text-right min-w-[140px]">Harga per Unit</th>
+                      <th className="px-3 py-3 text-right min-w-[150px]">Total Nilai</th>
+                      <th className="px-3 py-3 text-center w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {pagedGroups.map((g) => {
+                      const isExpanded = expandedGroups.has(g.key);
+                      return (
+                        <>
+                          <tr key={g.key} className="hover:bg-muted/30 transition-colors">
+                            <td className="px-3 py-3">
+                              <p className="text-sm font-bold text-foreground">{g.displayName}</p>
+                              <p className="text-[11px] text-muted-foreground font-mono truncate max-w-[220px]">{g.kodeSample}</p>
+                            </td>
+                            <td className="px-3 py-3 text-foreground">{formatDistinctList(g.categories)}</td>
+                            <td className="px-3 py-3 text-foreground">{g.merekModelLabel}</td>
+                            <td className="px-3 py-3 text-center">
+                              <span className="inline-flex items-center justify-center min-w-[36px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-bold text-xs border border-primary/20">{g.count}</span>
+                            </td>
+                            <td className="px-3 py-3">
+                              <span className="text-[11px] text-foreground font-medium">{g.statusLabel}</span>
+                              {g.missingPriceCount > 0 && <span className="ml-1 text-[10px] text-warning">• {g.missingPriceCount} tanpa harga</span>}
+                            </td>
+                            <td className="px-3 py-3 text-foreground">{formatDistinctList(g.locations)}</td>
+                            <td className="px-3 py-3 text-right">
+                              <span className={cn("font-semibold", g.missingPriceCount === g.count ? "text-warning" : "text-foreground")}>
+                                {formatHargaPerUnit(g.minHarga, g.maxHarga, g.missingPriceCount, g.count)}
+                              </span>
+                              {g.missingPriceCount > 0 && g.missingPriceCount !== g.count && (
+                                <span className="block text-[10px] text-muted-foreground">+ {g.missingPriceCount} tanpa harga</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-right">
+                              <span className="font-bold text-foreground">{formatRupiah(g.totalNilai)}</span>
+                              {g.missingPriceCount > 0 && g.missingPriceCount !== g.count && (
+                                <span className="block text-[10px] text-muted-foreground">tanpa {g.missingPriceCount} unit</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              <button onClick={() => toggleGroup(g.key)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title={isExpanded ? "Sembunyikan" : "Lihat unit"}>
+                                {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                              </button>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr key={`${g.key}-expanded`} className="bg-muted/20">
+                              <td colSpan={9} className="px-3 py-3">
+                                <div className="rounded-xl border border-border bg-card overflow-hidden">
+                                  <div className="px-3 py-2 bg-muted/40 border-b border-border flex items-center justify-between">
+                                    <p className="text-xs font-bold text-foreground">Rincian {g.count} unit — {g.displayName}</p>
+                                    <span className="text-[11px] text-muted-foreground">Total: {formatRupiah(g.totalNilai)}</span>
+                                  </div>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                      <thead className="bg-muted/30">
+                                        <tr className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                          <th className="px-3 py-2 text-left">Kode</th>
+                                          <th className="px-3 py-2 text-left">Merek / Model</th>
+                                          <th className="px-3 py-2 text-left">Lokasi</th>
+                                          <th className="px-3 py-2 text-left">Status</th>
+                                          <th className="px-3 py-2 text-right">Harga</th>
+                                          <th className="px-3 py-2 text-center">Aksi</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-border/40">
+                                        {g.assets.map((a) => (
+                                          <tr key={a.id} className="hover:bg-muted/20">
+                                            <td className="px-3 py-2 font-mono font-semibold text-primary">{a.kode_aset}</td>
+                                            <td className="px-3 py-2 text-foreground">{[a.merek, a.model].filter(Boolean).join(" / ") || "-"}</td>
+                                            <td className="px-3 py-2 text-foreground">{a.ga_asset_locations?.nama || "-"}</td>
+                                            <td className="px-3 py-2"><span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold border", statusStyle[a.status as AssetStatus])}>{a.status}</span></td>
+                                            <td className="px-3 py-2 text-right font-medium text-foreground">{formatRupiah(a.harga_beli)}</td>
+                                            <td className="px-3 py-2">
+                                              <div className="flex items-center justify-center gap-1">
+                                                <button onClick={() => setDetailAsset(a)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="Detail"><Eye className="w-3.5 h-3.5" /></button>
+                                                {canEdit && <button onClick={() => openEdit(a)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>}
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {pagedGroups.length === 0 && (
+                <div className="p-8 text-center text-sm text-muted-foreground">Tidak ada kelompok yang cocok.</div>
+              )}
+              <div className="px-3 py-3 bg-muted/20 border-t border-border flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  Menampilkan {pagedGroups.length} dari {groupedRows.length} jenis • {filteredSummary.totalUnit} unit • Total {formatRupiah(filteredSummary.totalNilai)}
+                </span>
+                <span className="text-muted-foreground">Nilai perusahaan (semua status): <span className="font-bold text-foreground">{formatRupiah(summary.totalNilaiCompany)}</span></span>
+              </div>
+            </div>
+            <Pagination currentPage={page} totalItems={groupedRows.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
           </div>
         ) : (
           <div className="space-y-4">
