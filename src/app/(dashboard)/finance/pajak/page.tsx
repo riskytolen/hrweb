@@ -443,9 +443,14 @@ export default function FinancePajakPage() {
                 </tfoot>
               </table>
             </div>
-            <div className="flex items-start gap-2.5 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border-t border-blue-200 dark:border-blue-800 text-[11px] font-medium text-blue-800 dark:text-blue-100">
-              <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-300" />
-              <span>Laporan internal — PPN dihitung 1,1% × subtotal tagihan, bukan pajak terutang resmi.</span>
+            <div className="flex items-start gap-3 px-4 py-3 bg-primary/5 border-t border-primary/10">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary flex-shrink-0">
+                <Info className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-foreground">Catatan Perhitungan</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">Laporan internal — PPN dihitung 1,1% × subtotal tagihan, bukan pajak terutang resmi.</p>
+              </div>
             </div>
           </div>
         </>
@@ -525,9 +530,14 @@ export default function FinancePajakPage() {
                 </tfoot>
               </table>
             </div>
-            <div className="flex items-start gap-2.5 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border-t border-blue-200 dark:border-blue-800 text-[11px] font-medium text-blue-800 dark:text-blue-100">
-              <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-300" />
-              <span>Laporan internal — Omzet kotor diambil dari subtotal tagihan (bukan total termasuk PPN) sesuai kesepakatan.</span>
+            <div className="flex items-start gap-3 px-4 py-3 bg-primary/5 border-t border-primary/10">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary flex-shrink-0">
+                <Info className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-foreground">Catatan Perhitungan</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">Laporan internal — Omzet kotor diambil dari subtotal tagihan (bukan total termasuk PPN) sesuai kesepakatan.</p>
+              </div>
             </div>
           </div>
         </>
