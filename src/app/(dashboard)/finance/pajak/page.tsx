@@ -443,7 +443,7 @@ export default function FinancePajakPage() {
                 </tfoot>
               </table>
             </div>
-            <div className="px-4 py-3 bg-amber-50 dark:bg-amber-950/20 border-t border-amber-200 dark:border-amber-900 text-[11px] text-amber-800 dark:text-amber-200">
+            <div className="px-4 py-3 bg-amber-100 dark:bg-amber-900/50 border-t border-amber-300 dark:border-amber-700 text-[11px] font-medium text-amber-950 dark:text-amber-50">
               Laporan internal — PPN dihitung 1,1% × subtotal tagihan, bukan pajak terutang resmi.
             </div>
           </div>
@@ -524,7 +524,7 @@ export default function FinancePajakPage() {
                 </tfoot>
               </table>
             </div>
-            <div className="px-4 py-3 bg-amber-50 dark:bg-amber-950/20 border-t border-amber-200 dark:border-amber-900 text-[11px] text-amber-800 dark:text-amber-200">
+            <div className="px-4 py-3 bg-amber-100 dark:bg-amber-900/50 border-t border-amber-300 dark:border-amber-700 text-[11px] font-medium text-amber-950 dark:text-amber-50">
               Laporan internal — Omzet kotor diambil dari subtotal tagihan (bukan total termasuk PPN) sesuai kesepakatan.
             </div>
           </div>
