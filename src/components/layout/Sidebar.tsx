@@ -139,6 +139,7 @@ const allSections: MenuSection[] = [
           { name: "Pengeluaran", href: "/finance/pengeluaran", icon: TrendingUpDown, permission: "finance" },
           { name: "Arus Kas", href: "/finance/arus-kas", icon: Landmark, permission: "finance" },
           { name: "Laba Rugi", href: "/finance/laba-rugi", icon: PieChart, permission: "finance" },
+          { name: "Pajak", href: "/finance/pajak", icon: ReceiptText, permission: "finance" },
           { name: "Pengaturan", href: "/finance/pengaturan", icon: SlidersHorizontal, permission: "finance" },
         ],
       },
