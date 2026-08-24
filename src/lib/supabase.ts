@@ -588,7 +588,7 @@ export interface DbPettyCashTransaction {
   bagian?: DbPettyCashBagian;
 }
 
-// ─── GA Inventory Aset ───
+// ─── GA Aset ───
 
 export interface DbGaAssetCategory {
   id: number;

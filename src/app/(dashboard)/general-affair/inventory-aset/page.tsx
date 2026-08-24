@@ -826,7 +826,7 @@ export default function InventoryAsetPage() {
       doc.setFontSize(18);
       doc.setTextColor(30);
       doc.setFont("helvetica", "bold");
-      doc.text(isLaporan ? "Laporan Ringkas Aset" : "Inventory Aset", 14, 22);
+      doc.text(isLaporan ? "Laporan Aset" : "Daftar Aset Per Unit", 14, 22);
       doc.setFontSize(10);
       doc.setTextColor(100);
       doc.setFont("helvetica", "normal");
@@ -954,10 +954,10 @@ export default function InventoryAsetPage() {
         doc.line(14, ph - 12, pw - 14, ph - 12);
         doc.setFontSize(7);
         doc.setTextColor(150);
-        doc.text("HRM System — General Affair / Inventory Aset", 14, ph - 6);
+        doc.text("HRM System — General Affair / Aset", 14, ph - 6);
         doc.text(`Halaman ${i} dari ${pageCount}`, pw - 14, ph - 6, { align: "right" });
       }
-      doc.save(`inventory_aset_${isLaporan ? "laporan_ringkas" : "per_unit"}_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`aset_${isLaporan ? "laporan_ringkas" : "per_unit"}_${new Date().toISOString().slice(0, 10)}.pdf`);
       const exportedCount = isLaporan ? groupedRows.length : filteredAssets.length;
       showToast("success", "Export Berhasil", `${exportedCount} ${isLaporan ? "jenis" : "aset"} diexport ke PDF (${isLaporan ? "Laporan Ringkas" : "Per Unit"}).`);
       await logAudit({ supabase, action: "export", entityType: "ga_assets", entityLabel: `Export ${exportedCount} ${isLaporan ? "jenis" : "aset"} (${isLaporan ? "ringkas" : "unit"})`, metadata: { count: exportedCount, mode: isLaporan ? "laporan" : "unit", totalHarga, nilaiPerusahaan: summary.totalNilaiCompany } });
@@ -1025,8 +1025,8 @@ export default function InventoryAsetPage() {
     <RouteGuard permission="inventory-aset">
       <div className="space-y-4 animate-fade-in">
         <PageHeader
-          title="Inventory Aset"
-          description="Kelola aset per unit, penempatan, dan riwayat serah terima"
+          title="Manajemen Aset"
+          description="Kelola aset perusahaan, kondisi, lokasi, penempatan, dan riwayatnya"
           icon={Package}
           actions={
             <div className="flex items-center gap-2">

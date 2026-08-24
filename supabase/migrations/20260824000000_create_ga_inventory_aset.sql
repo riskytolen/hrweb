@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════
--- MIGRATION: GA Inventory Aset (General Affair)
+-- MIGRATION: GA Aset (General Affair)
 -- - Master: categories (prefix + sequence), locations
 -- - Core: assets (kode per kategori, harga/tanggal, foto)
 -- - History: assignments (penanggung jawab, divisi, lokasi)
