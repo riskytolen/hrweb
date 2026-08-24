@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { ReceiptText, CalendarDays, FileDown, Calculator, TrendingUp, TrendingDown, PiggyBank, ChevronLeft, ChevronRight, Search, Building2 } from "lucide-react";
+import { ReceiptText, CalendarDays, FileDown, Calculator, TrendingUp, TrendingDown, PiggyBank, ChevronLeft, ChevronRight, Search, Building2, Info } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
@@ -443,8 +443,9 @@ export default function FinancePajakPage() {
                 </tfoot>
               </table>
             </div>
-            <div className="px-4 py-3 bg-amber-100 dark:bg-amber-900/50 border-t border-amber-300 dark:border-amber-700 text-[11px] font-medium text-amber-950 dark:text-amber-50">
-              Laporan internal — PPN dihitung 1,1% × subtotal tagihan, bukan pajak terutang resmi.
+            <div className="flex items-start gap-2.5 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border-t border-blue-200 dark:border-blue-800 text-[11px] font-medium text-blue-800 dark:text-blue-100">
+              <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-300" />
+              <span>Laporan internal — PPN dihitung 1,1% × subtotal tagihan, bukan pajak terutang resmi.</span>
             </div>
           </div>
         </>
@@ -524,8 +525,9 @@ export default function FinancePajakPage() {
                 </tfoot>
               </table>
             </div>
-            <div className="px-4 py-3 bg-amber-100 dark:bg-amber-900/50 border-t border-amber-300 dark:border-amber-700 text-[11px] font-medium text-amber-950 dark:text-amber-50">
-              Laporan internal — Omzet kotor diambil dari subtotal tagihan (bukan total termasuk PPN) sesuai kesepakatan.
+            <div className="flex items-start gap-2.5 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border-t border-blue-200 dark:border-blue-800 text-[11px] font-medium text-blue-800 dark:text-blue-100">
+              <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-300" />
+              <span>Laporan internal — Omzet kotor diambil dari subtotal tagihan (bukan total termasuk PPN) sesuai kesepakatan.</span>
             </div>
           </div>
         </>
