@@ -178,7 +178,7 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
 
   // Edit modal (responsive: dialog on desktop, bottom-sheet on mobile)
   const [editTarget, setEditTarget] = useState<DbVehicleOdometerLog | null>(null);
-  const [editForm, setEditForm] = useState({ tanggal: localDateInput(), odometerAkhir: "", catatan: "" });
+  const [editForm, setEditForm] = useState({ tanggal: localDateInput(), odometerAwal: "", odometerAkhir: "", catatan: "" });
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [editSaving, setEditSaving] = useState(false);
 
@@ -302,13 +302,13 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
     [vehicles],
   );
 
-  // ── Create form (input page) — always create, never becomes edit ──
+  // ── Create form (input page) — selalu manual awal+akhir per rute; validasi anomali berurutan ──
   const formStart = parseOdometerInput(form.odometerAwal);
   const formEnd = parseOdometerInput(form.odometerAkhir);
   const previewDistance = calculateDistance(formStart, formEnd);
-  const firstLogForVehicle = selectedVehicle?.last_odometer == null;
-  const startLocked = !firstLogForVehicle;
   const hasActiveVehicles = vehicles.length > 0;
+  const lastOdoForSelected = selectedVehicle?.last_odometer ?? null;
+  const lastDateForSelected = selectedVehicle?.last_log_date ?? null;
 
   const resetForm = () => {
     setForm(emptyForm());
@@ -321,10 +321,11 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
     else if (!vehicles.some((v) => String(v.id) === form.vehicleId)) errors.vehicleId = "Kendaraan tidak valid.";
     if (!form.tanggal) errors.tanggal = "Pilih tanggal pencatatan.";
     else if (form.tanggal > tomorrow) errors.tanggal = "Tanggal tidak boleh melebihi besok.";
+    else if (lastDateForSelected && form.tanggal < lastDateForSelected) errors.tanggal = `Tanggal tidak boleh sebelum log terakhir (${formatDateId(lastDateForSelected)}).`;
+    if (formStart == null) errors.odometerAwal = "Isi odometer awal dengan angka yang valid.";
     if (formEnd == null) errors.odometerAkhir = "Isi odometer akhir dengan angka yang valid.";
-    else if (formEnd < 0) errors.odometerAkhir = "Odometer tidak boleh negatif.";
-    if (formStart == null && firstLogForVehicle) errors.odometerAwal = "Odometer awal wajib diisi untuk log pertama.";
     if (formStart != null && formEnd != null && previewDistance == null) errors.odometerAkhir = "Odometer akhir harus >= odometer awal.";
+    if (lastOdoForSelected != null && formStart != null && formStart < lastOdoForSelected) errors.odometerAwal = `Odometer awal tidak boleh di bawah odometer terakhir ${formatKm(lastOdoForSelected, "")} (anomali). Boleh sama atau lebih besar karena pemakaian di luar rute.`;
     return errors;
   };
 
@@ -361,7 +362,7 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
   const openEdit = (log: DbVehicleOdometerLog) => {
     if (!canManage || !log.is_latest) return;
     setEditTarget(log);
-    setEditForm({ tanggal: log.tanggal, odometerAkhir: String(log.odometer_akhir), catatan: log.catatan ?? "" });
+    setEditForm({ tanggal: log.tanggal, odometerAwal: String(log.odometer_awal), odometerAkhir: String(log.odometer_akhir), catatan: log.catatan ?? "" });
     setEditErrors({});
   };
   const closeEdit = () => {
@@ -369,25 +370,28 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
     setEditTarget(null);
     setEditErrors({});
   };
-  const editStart = editTarget ? editTarget.odometer_awal : null;
+  const editStart = parseOdometerInput(editForm.odometerAwal);
   const editEnd = parseOdometerInput(editForm.odometerAkhir);
   const editPreview = calculateDistance(editStart, editEnd);
-  const previousLogDate = useMemo(() => {
+  const previousLog = useMemo(() => {
     if (!editTarget) return null;
     const siblings = logs.filter((l) => l.vehicle_id === editTarget.vehicle_id && l.id !== editTarget.id);
     if (siblings.length === 0) return null;
-    // logs sorted desc; find max tanggal among non-target
     const sorted = [...siblings].sort((a, b) => b.tanggal.localeCompare(a.tanggal) || b.id - a.id);
-    return sorted[0]?.tanggal ?? null;
+    return sorted[0] ?? null;
   }, [editTarget, logs]);
+  const previousLogDate = previousLog?.tanggal ?? null;
+  const previousLogEnd = previousLog ? toNumber(previousLog.odometer_akhir) : null;
 
   const getEditErrors = (): Record<string, string> => {
     const errors: Record<string, string> = {};
     if (!editForm.tanggal) errors.tanggal = "Pilih tanggal koreksi.";
     else if (editForm.tanggal > tomorrow) errors.tanggal = "Tanggal tidak boleh melebihi besok.";
     else if (previousLogDate && editForm.tanggal < previousLogDate) errors.tanggal = `Tidak boleh sebelum ${formatDateId(previousLogDate)}.`;
+    if (editStart == null) errors.odometerAwal = "Isi odometer awal dengan angka yang valid.";
     if (editEnd == null) errors.odometerAkhir = "Isi odometer akhir dengan angka yang valid.";
     else if (editPreview == null) errors.odometerAkhir = "Odometer akhir harus >= odometer awal.";
+    if (previousLogEnd != null && editStart != null && editStart < previousLogEnd) errors.odometerAwal = `Odometer awal tidak boleh di bawah akhir log sebelumnya ${formatKm(previousLogEnd, "")}.`;
     return errors;
   };
 
@@ -399,12 +403,13 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
       showToast("error", "Koreksi belum valid", Object.values(errors)[0]);
       return;
     }
-    if (editEnd == null || editPreview == null) return;
+    if (editStart == null || editEnd == null || editPreview == null) return;
     setEditSaving(true);
     try {
       const { error } = await supabase.rpc("update_vehicle_odometer_log", {
         p_log_id: editTarget.id,
         p_tanggal: editForm.tanggal,
+        p_odometer_awal: editStart,
         p_odometer_akhir: editEnd,
         p_catatan: editForm.catatan || null,
       });
@@ -897,7 +902,7 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-bold text-foreground flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10"><Plus className="h-4 w-4 text-primary" /></span>Input Log Baru</h2>
-                  <p className="mt-1 text-[11px] text-muted-foreground">Log pertama memakai odometer awal manual; log berikutnya otomatis dari odometer akhir terakhir. Untuk koreksi, gunakan tombol Koreksi pada tabel.</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">Setiap log wajib isi odometer awal dan akhir manual per rute. Odo awal boleh &gt; akhir sebelumnya (pemakaian luar rute), tapi tidak boleh turun. Tanggal harus berurutan.</p>
                 </div>
                 {!hasActiveVehicles && !loading && <span className="rounded-full bg-warning/10 px-2.5 py-1 text-[11px] font-semibold text-warning border border-warning/20">Belum ada kendaraan aktif</span>}
               </div>
@@ -922,37 +927,32 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
                       <Select
                         value={form.vehicleId}
                         onChange={(value) => {
-                          const nextVehicle = vehicles.find((vehicle) => String(vehicle.id) === value);
-                          setForm((prev) => ({
-                            ...prev,
-                            vehicleId: value,
-                            odometerAwal: nextVehicle?.last_odometer == null ? "" : String(nextVehicle.last_odometer),
-                          }));
+                          setForm((prev) => ({ ...prev, vehicleId: value }));
                           if (createErrors.vehicleId) setCreateErrors((p) => { const n = { ...p }; delete n.vehicleId; return n; });
+                          if (createErrors.odometerAwal || createErrors.tanggal) setCreateErrors((p) => { const n = { ...p }; delete n.odometerAwal; delete n.tanggal; return n; });
                         }}
                         options={[{ value: "", label: "Pilih kendaraan..." }, ...vehicles.map((vehicle) => ({ value: String(vehicle.id), label: `${vehicle.unit} - ${vehicle.jenis}` }))]}
                         className="w-full"
                         hasError={!!createErrors.vehicleId}
                       />
-                      {createErrors.vehicleId ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.vehicleId}</p> : <p className="mt-1 text-[10px] text-muted-foreground">Hanya kendaraan Aktif yang tampil.</p>}
+                      {createErrors.vehicleId ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.vehicleId}</p> : <p className="mt-1 text-[10px] text-muted-foreground">Hanya kendaraan Aktif yang tampil.{lastOdoForSelected != null ? ` Odo terakhir ${formatKm(lastOdoForSelected, "")}.` : ""}</p>}
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-semibold text-foreground">Tanggal <span className="text-danger">*</span></label>
-                      <DatePicker value={form.tanggal} onChange={(v) => { setForm((prev) => ({ ...prev, tanggal: v })); if (createErrors.tanggal) setCreateErrors((p) => { const n = { ...p }; delete n.tanggal; return n; }); }} maxDate={tomorrow} hasError={!!createErrors.tanggal} placeholder="Pilih tanggal" />
-                      {createErrors.tanggal ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.tanggal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">Maksimal besok ({formatDateId(tomorrow)}).</p>}
+                      <DatePicker value={form.tanggal} onChange={(v) => { setForm((prev) => ({ ...prev, tanggal: v })); if (createErrors.tanggal) setCreateErrors((p) => { const n = { ...p }; delete n.tanggal; return n; }); }} maxDate={tomorrow} minDate={lastDateForSelected ?? undefined} hasError={!!createErrors.tanggal} placeholder="Pilih tanggal" />
+                      {createErrors.tanggal ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.tanggal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">{lastDateForSelected ? `Min ${formatDateId(lastDateForSelected)}, maks besok (${formatDateId(tomorrow)}).` : `Maksimal besok (${formatDateId(tomorrow)}).`}</p>}
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Awal {firstLogForVehicle && <span className="text-danger">*</span>}</label>
+                      <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Awal <span className="text-danger">*</span></label>
                       <input
                         value={form.odometerAwal}
                         onChange={(e) => { setForm((prev) => ({ ...prev, odometerAwal: e.target.value })); if (createErrors.odometerAwal) setCreateErrors((p) => { const n = { ...p }; delete n.odometerAwal; return n; }); }}
-                        disabled={startLocked}
                         inputMode="decimal"
                         aria-invalid={!!createErrors.odometerAwal}
-                        placeholder={firstLogForVehicle ? "Isi awal" : "Otomatis"}
-                        className={cn("w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2", createErrors.odometerAwal ? "border-danger bg-danger/5 focus:border-danger focus:ring-danger/10 text-foreground" : "border-border bg-muted/30 text-foreground focus:border-primary focus:ring-primary/10", "disabled:cursor-not-allowed disabled:opacity-70")}
+                        placeholder="Contoh: 1250.5"
+                        className={cn("w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2", createErrors.odometerAwal ? "border-danger bg-danger/5 focus:border-danger focus:ring-danger/10 text-foreground" : "border-border bg-muted/30 text-foreground focus:border-primary focus:ring-primary/10")}
                       />
-                      {createErrors.odometerAwal ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.odometerAwal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">{firstLogForVehicle ? "Baseline pertama oleh Admin GA." : `Terkunci: ${formatKm(selectedVehicle?.last_odometer, "")} dari log terakhir.`}</p>}
+                      {createErrors.odometerAwal ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.odometerAwal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">{lastOdoForSelected != null ? `Min ${formatKm(lastOdoForSelected, "")} (boleh naik karena pemakaian luar rute).` : "Isi manual per rute."}</p>}
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Akhir <span className="text-danger">*</span></label>
@@ -1128,14 +1128,14 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Odo awal terkunci</p>
-                      <p className="text-sm font-bold tabular-nums text-foreground">{formatKm(editTarget.odometer_awal, "")}</p>
-                      <p className="text-[11px] text-muted-foreground">Jarak sebelumnya {formatKm(editTarget.jarak_km)}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Jarak sebelumnya</p>
+                      <p className="text-sm font-bold tabular-nums text-primary">{formatKm(editTarget.jarak_km)}</p>
+                      <p className="text-[11px] text-muted-foreground">{formatKm(editTarget.odometer_awal, "")} → {formatKm(editTarget.odometer_akhir, "")}</p>
                     </div>
                   </div>
                   <div className="mt-3 flex gap-2 rounded-lg bg-info/5 border border-info/15 px-3 py-2 text-[11px] text-muted-foreground">
                     <Info className="h-3.5 w-3.5 flex-shrink-0 text-info mt-0.5" />
-                    <p>Kendaraan tidak dapat diganti saat koreksi. Untuk ganti kendaraan, hapus log terbaru lalu buat log baru.</p>
+                    <p>Kendaraan tidak dapat diganti saat koreksi. Odometer awal dan akhir wajib diisi manual; awal boleh naik dari log sebelumnya tapi tidak boleh turun.</p>
                   </div>
                 </div>
 
@@ -1146,8 +1146,9 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
                   {editErrors.tanggal ? <p className="mt-1 text-[11px] font-medium text-danger">{editErrors.tanggal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">{previousLogDate ? `Tidak boleh sebelum ${formatDateId(previousLogDate)}.` : "Tanggal koreksi tidak boleh mundur sebelum log sebelumnya."}</p>}
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Awal <span className="text-muted-foreground font-normal">(terkunci)</span></label>
-                  <div className="rounded-xl border border-border bg-muted px-3 py-2.5 text-sm font-semibold tabular-nums text-muted-foreground">{formatKm(editTarget.odometer_awal, "")}</div>
+                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Awal <span className="text-danger">*</span></label>
+                  <input value={editForm.odometerAwal} onChange={(e) => { setEditForm((p) => ({ ...p, odometerAwal: e.target.value })); if (editErrors.odometerAwal) setEditErrors((prev) => { const n = { ...prev }; delete n.odometerAwal; return n; }); }} inputMode="decimal" aria-invalid={!!editErrors.odometerAwal} placeholder="Contoh: 1250.5" className={cn("w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2", editErrors.odometerAwal ? "border-danger bg-danger/5 focus:border-danger focus:ring-danger/10 text-foreground" : "border-border bg-muted/30 text-foreground focus:border-primary focus:ring-primary/10")} />
+                  {editErrors.odometerAwal ? <p className="mt-1 text-[11px] font-medium text-danger">{editErrors.odometerAwal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">{previousLogEnd != null ? `Min ${formatKm(previousLogEnd, "")} (boleh naik karena pemakaian luar rute).` : "Isi manual, harus ≤ odometer akhir."}</p>}
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Akhir <span className="text-danger">*</span></label>
@@ -1161,14 +1162,14 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
                 <div className={cn("rounded-xl border p-3", editPreview == null ? "border-border bg-muted/20" : "border-primary/20 bg-primary/5")}>
                   <p className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5"><Gauge className="h-3.5 w-3.5" /> Jarak baru (otomatis)</p>
                   <p className={cn("mt-1 text-xl font-bold tabular-nums", editPreview == null ? "text-muted-foreground" : "text-primary")}>{formatKm(editPreview)}</p>
-                  <p className="mt-1 text-[10px] text-muted-foreground">Dari {formatKm(editTarget.odometer_awal, "")} → {editEnd != null ? formatKm(editEnd, "") : "—"}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">Dari {editStart != null ? formatKm(editStart, "") : "—"} → {editEnd != null ? formatKm(editEnd, "") : "—"}</p>
                 </div>
               </div>
 
               {/* Footer */}
               <div className="flex items-center justify-end gap-2 border-t border-border bg-muted/20 px-5 py-4 flex-shrink-0">
                 <Button variant="outline" size="sm" onClick={closeEdit} disabled={editSaving}>Batal</Button>
-                <Button size="sm" icon={editSaving ? Loader2 : Check} onClick={saveEdit} disabled={editSaving || editEnd == null || editPreview == null}>
+                <Button size="sm" icon={editSaving ? Loader2 : Check} onClick={saveEdit} disabled={editSaving || editStart == null || editEnd == null || editPreview == null}>
                   {editSaving ? "Menyimpan Koreksi..." : "Simpan Koreksi"}
                 </Button>
               </div>
