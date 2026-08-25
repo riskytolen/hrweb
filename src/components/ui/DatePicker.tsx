@@ -17,6 +17,9 @@ interface DatePickerProps {
   placeholder?: string;
   className?: string;
   minDate?: string; // YYYY-MM-DD — tanggal minimum yang bisa dipilih
+  maxDate?: string; // YYYY-MM-DD — tanggal maksimum yang bisa dipilih
+  disabled?: boolean;
+  hasError?: boolean;
 }
 
 const MONTHS = [
@@ -33,7 +36,7 @@ function getFirstDayOfMonth(year: number, month: number) {
   return new Date(year, month, 1).getDay();
 }
 
-export default function DatePicker({ value, onChange, placeholder = "Pilih tanggal", className, minDate }: DatePickerProps) {
+export default function DatePicker({ value, onChange, placeholder = "Pilih tanggal", className, minDate, maxDate, disabled = false, hasError = false }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"days" | "months" | "years">("days");
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -137,9 +140,17 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
     return dateStr < minDate;
   };
 
+  const isAfterMax = (day: number) => {
+    if (!maxDate) return false;
+    const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return dateStr > maxDate;
+  };
+
   // Check if entire view month is before minDate month
   const canGoPrevMonth = !minDate || `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}` > minDate.slice(0, 7);
   const canGoPrevYear = !minDate || viewYear > parseInt(minDate.slice(0, 4));
+  const canGoNextMonth = !maxDate || `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}` < maxDate.slice(0, 7);
+  const canGoNextYear = !maxDate || viewYear < parseInt(maxDate.slice(0, 4));
 
   const displayValue = parsed
     ? `${parsed.getDate()} ${MONTHS[parsed.getMonth()]} ${parsed.getFullYear()}`
@@ -149,21 +160,37 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
   const dropdownWidth = 280;
   const clampedLeft = Math.min(pos.left, window.innerWidth - dropdownWidth - 8);
 
+  // Keep view in sync when value changes externally
+  useEffect(() => {
+    if (!parsed) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setViewYear(parsed.getFullYear());
+    setViewMonth(parsed.getMonth());
+    setYearRangeStart(Math.floor(parsed.getFullYear() / 12) * 12);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
   return (
     <div className="relative">
       {/* Input trigger */}
       <button
         ref={triggerRef}
         type="button"
-        onClick={handleOpen}
+        onClick={() => {
+          if (disabled) return;
+          handleOpen();
+        }}
+        disabled={disabled}
+        data-has-error={hasError ? "true" : undefined}
         className={cn(
-          "w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none text-left",
-          "focus:border-primary focus:ring-2 focus:ring-primary/10",
+          "w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border bg-muted/30 text-sm outline-none text-left transition-colors",
+          hasError ? "border-danger bg-danger/5 focus:border-danger focus:ring-2 focus:ring-danger/10" : "border-border focus:border-primary focus:ring-2 focus:ring-primary/10",
+          disabled ? "opacity-50 cursor-not-allowed" : "",
           displayValue ? "text-foreground" : "text-muted-foreground/50",
           className
         )}
       >
-        <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+        <Calendar className={cn("w-4 h-4 flex-shrink-0", hasError ? "text-danger" : "text-muted-foreground")} />
         <span className="flex-1 truncate">{displayValue || placeholder}</span>
       </button>
 
@@ -187,8 +214,9 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
                   className="text-sm font-bold text-foreground hover:text-primary px-2 py-1 rounded-lg hover:bg-primary-light/50">
                   {MONTHS[viewMonth]} {viewYear}
                 </button>
-                <button type="button" onClick={() => { if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); } else setViewMonth(viewMonth + 1); }}
-                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><ChevronRight className="w-4 h-4" /></button>
+                <button type="button" onClick={() => { if (canGoNextMonth && viewMonth === 11) { setViewMonth(0); setViewYear(viewYear + 1); } else if (canGoNextMonth) setViewMonth(viewMonth + 1); }}
+                  disabled={!canGoNextMonth}
+                  className={cn("p-1.5 rounded-lg", canGoNextMonth ? "hover:bg-muted text-muted-foreground" : "opacity-30 cursor-not-allowed text-muted-foreground")}><ChevronRight className="w-4 h-4" /></button>
               </div>
 
               {/* Day names */}
@@ -204,7 +232,7 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
                   <div key={`empty-${i}`} />
                 ))}
                 {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
-                  const disabled = isBeforeMin(day);
+                  const disabled = isBeforeMin(day) || isAfterMax(day);
                   return (
                   <button
                     key={day}
@@ -262,8 +290,9 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
                   className="text-sm font-bold text-foreground hover:text-primary px-2 py-1 rounded-lg hover:bg-primary-light/50">
                   {viewYear}
                 </button>
-                <button type="button" onClick={() => setViewYear(viewYear + 1)}
-                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><ChevronRight className="w-4 h-4" /></button>
+                <button type="button" onClick={() => { if (canGoNextYear) setViewYear(viewYear + 1); }}
+                  disabled={!canGoNextYear}
+                  className={cn("p-1.5 rounded-lg", canGoNextYear ? "hover:bg-muted text-muted-foreground" : "opacity-30 cursor-not-allowed text-muted-foreground")}><ChevronRight className="w-4 h-4" /></button>
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 {MONTHS.map((m, i) => (

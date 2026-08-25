@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle,
+  AlertTriangle,
   BarChart3,
   CalendarDays,
+  Check,
+  CircleCheckBig,
   ClipboardList,
   Edit2,
   FileDown,
   FileSpreadsheet,
   Gauge,
+  Info,
   Loader2,
   Plus,
   Printer,
@@ -24,6 +27,8 @@ import Button from "@/components/ui/Button";
 import Pagination from "@/components/ui/Pagination";
 import RouteGuard from "@/components/RouteGuard";
 import Select from "@/components/ui/Select";
+import DatePicker from "@/components/ui/DatePicker";
+import Portal from "@/components/ui/Portal";
 import { supabase, type DbVehicleOdometerLog, type DbVehicleOdometerVehicle } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { downloadCsv } from "@/lib/finance";
@@ -49,6 +54,12 @@ interface VehicleOdometerClientProps {
 type Toast = { type: "success" | "error"; title: string; message?: string };
 
 const PAGE_SIZE = 20;
+
+function tomorrowInput(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return localDateInput(d);
+}
 
 const modeConfig = {
   dashboard: {
@@ -154,22 +165,55 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState<"pdf" | "csv" | "xlsx" | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [vehicleFilter, setVehicleFilter] = useState("Semua");
-  const [startDate, setStartDate] = useState(monthStartInput());
-  const [endDate, setEndDate] = useState(localDateInput());
-  const [editingLogId, setEditingLogId] = useState<number | null>(null);
+  const [draftStartDate, setDraftStartDate] = useState(monthStartInput());
+  const [draftEndDate, setDraftEndDate] = useState(localDateInput());
+  const [appliedStartDate, setAppliedStartDate] = useState(monthStartInput());
+  const [appliedEndDate, setAppliedEndDate] = useState(localDateInput());
   const [form, setForm] = useState(emptyForm);
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+
+  // Edit modal (responsive: dialog on desktop, bottom-sheet on mobile)
+  const [editTarget, setEditTarget] = useState<DbVehicleOdometerLog | null>(null);
+  const [editForm, setEditForm] = useState({ tanggal: localDateInput(), odometerAkhir: "", catatan: "" });
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Delete confirm (custom, not window.confirm)
+  const [deleteTarget, setDeleteTarget] = useState<DbVehicleOdometerLog | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const permissionLevel = getPermissionLevel("vehicle-odometer");
   const canManage = permissionLevel === "edit" || hasPermission("vehicle-odometer.manage");
   const canView = canManage || permissionLevel === "view" || permissionLevel === "input";
 
   const showToast = useCallback((type: Toast["type"], title: string, message?: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ type, title, message });
-    setTimeout(() => setToast(null), 3500);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3800);
   }, []);
+
+  const dismissToast = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(null);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
+
+  // Scroll lock when any modal is open (mirrors attendance/income patterns)
+  useEffect(() => {
+    const hasModal = !!editTarget || !!deleteTarget;
+    if (hasModal) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [editTarget, deleteTarget]);
 
   const fetchVehicles = useCallback(async () => {
     const { data, error } = await supabase.rpc("list_vehicle_odometer_vehicles");
@@ -181,14 +225,14 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
     const params = mode === "laporan"
       ? {
           p_vehicle_id: vehicleFilter === "Semua" ? null : Number(vehicleFilter),
-          p_start_date: startDate || null,
-          p_end_date: endDate || null,
+          p_start_date: appliedStartDate || null,
+          p_end_date: appliedEndDate || null,
         }
       : { p_vehicle_id: null, p_start_date: null, p_end_date: null };
     const { data, error } = await supabase.rpc("get_vehicle_odometer_logs", params);
     if (error) throw error;
     setLogs(((data as Record<string, unknown>[] | null) ?? []).map(normalizeLog));
-  }, [endDate, mode, startDate, vehicleFilter]);
+  }, [appliedEndDate, appliedStartDate, mode, vehicleFilter]);
 
   const loadData = useCallback(async () => {
     if (authLoading || !user || (mode === "input" ? !canManage : !canView)) return;
@@ -229,6 +273,7 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
   );
 
   const today = localDateInput();
+  const tomorrow = tomorrowInput();
   const monthStart = monthStartInput();
   const yearStart = `${new Date().getFullYear()}-01-01`;
   const dashboardSummary = useMemo(() => {
@@ -257,58 +302,52 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
     [vehicles],
   );
 
+  // ── Create form (input page) — always create, never becomes edit ──
   const formStart = parseOdometerInput(form.odometerAwal);
   const formEnd = parseOdometerInput(form.odometerAkhir);
   const previewDistance = calculateDistance(formStart, formEnd);
-  const firstLogForVehicle = selectedVehicle?.last_odometer == null && !editingLogId;
+  const firstLogForVehicle = selectedVehicle?.last_odometer == null;
   const startLocked = !firstLogForVehicle;
+  const hasActiveVehicles = vehicles.length > 0;
 
   const resetForm = () => {
-    setEditingLogId(null);
     setForm(emptyForm());
+    setCreateErrors({});
+  };
+
+  const getCreateErrors = (): Record<string, string> => {
+    const errors: Record<string, string> = {};
+    if (!form.vehicleId) errors.vehicleId = "Pilih kendaraan terlebih dahulu.";
+    else if (!vehicles.some((v) => String(v.id) === form.vehicleId)) errors.vehicleId = "Kendaraan tidak valid.";
+    if (!form.tanggal) errors.tanggal = "Pilih tanggal pencatatan.";
+    else if (form.tanggal > tomorrow) errors.tanggal = "Tanggal tidak boleh melebihi besok.";
+    if (formEnd == null) errors.odometerAkhir = "Isi odometer akhir dengan angka yang valid.";
+    else if (formEnd < 0) errors.odometerAkhir = "Odometer tidak boleh negatif.";
+    if (formStart == null && firstLogForVehicle) errors.odometerAwal = "Odometer awal wajib diisi untuk log pertama.";
+    if (formStart != null && formEnd != null && previewDistance == null) errors.odometerAkhir = "Odometer akhir harus >= odometer awal.";
+    return errors;
   };
 
   const saveLog = async () => {
     if (!canManage) return;
-    if (!form.vehicleId || !form.tanggal) {
-      showToast("error", "Form belum lengkap", "Kendaraan dan tanggal wajib diisi.");
-      return;
-    }
-    if (formEnd == null) {
-      showToast("error", "Odometer akhir tidak valid", "Masukkan angka odometer akhir yang benar.");
-      return;
-    }
-    if (formStart == null) {
-      showToast("error", "Odometer awal tidak valid", "Untuk log pertama, odometer awal wajib diisi.");
-      return;
-    }
-    if (previewDistance == null) {
-      showToast("error", "Jarak tidak valid", "Odometer akhir tidak boleh lebih kecil dari odometer awal.");
+    const errors = getCreateErrors();
+    if (Object.keys(errors).length > 0) {
+      setCreateErrors(errors);
+      showToast("error", "Form belum lengkap", Object.values(errors)[0]);
       return;
     }
 
     setSaving(true);
     try {
-      if (editingLogId) {
-        const { error } = await supabase.rpc("update_vehicle_odometer_log", {
-          p_log_id: editingLogId,
-          p_tanggal: form.tanggal,
-          p_odometer_akhir: formEnd,
-          p_catatan: form.catatan || null,
-        });
-        if (error) throw error;
-        showToast("success", "Log diperbarui", "Koreksi odometer berhasil disimpan.");
-      } else {
-        const { error } = await supabase.rpc("create_vehicle_odometer_log", {
-          p_vehicle_id: Number(form.vehicleId),
-          p_tanggal: form.tanggal,
-          p_odometer_awal: formStart,
-          p_odometer_akhir: formEnd,
-          p_catatan: form.catatan || null,
-        });
-        if (error) throw error;
-        showToast("success", "Log tersimpan", "Jarak otomatis sudah dihitung dan disimpan.");
-      }
+      const { error } = await supabase.rpc("create_vehicle_odometer_log", {
+        p_vehicle_id: Number(form.vehicleId),
+        p_tanggal: form.tanggal,
+        p_odometer_awal: formStart!,
+        p_odometer_akhir: formEnd!,
+        p_catatan: form.catatan || null,
+      });
+      if (error) throw error;
+      showToast("success", "Log tersimpan", `Jarak ${formatKm(previewDistance)} berhasil dicatat.`);
       resetForm();
       await loadData();
     } catch (err) {
@@ -318,39 +357,128 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
     }
   };
 
-  const editLog = (log: DbVehicleOdometerLog) => {
-    setEditingLogId(log.id);
-    setForm({
-      vehicleId: String(log.vehicle_id),
-      tanggal: log.tanggal,
-      odometerAwal: String(log.odometer_awal),
-      odometerAkhir: String(log.odometer_akhir),
-      catatan: log.catatan ?? "",
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  // ── Edit modal helpers ──
+  const openEdit = (log: DbVehicleOdometerLog) => {
+    if (!canManage || !log.is_latest) return;
+    setEditTarget(log);
+    setEditForm({ tanggal: log.tanggal, odometerAkhir: String(log.odometer_akhir), catatan: log.catatan ?? "" });
+    setEditErrors({});
+  };
+  const closeEdit = () => {
+    if (editSaving) return;
+    setEditTarget(null);
+    setEditErrors({});
+  };
+  const editStart = editTarget ? editTarget.odometer_awal : null;
+  const editEnd = parseOdometerInput(editForm.odometerAkhir);
+  const editPreview = calculateDistance(editStart, editEnd);
+  const previousLogDate = useMemo(() => {
+    if (!editTarget) return null;
+    const siblings = logs.filter((l) => l.vehicle_id === editTarget.vehicle_id && l.id !== editTarget.id);
+    if (siblings.length === 0) return null;
+    // logs sorted desc; find max tanggal among non-target
+    const sorted = [...siblings].sort((a, b) => b.tanggal.localeCompare(a.tanggal) || b.id - a.id);
+    return sorted[0]?.tanggal ?? null;
+  }, [editTarget, logs]);
+
+  const getEditErrors = (): Record<string, string> => {
+    const errors: Record<string, string> = {};
+    if (!editForm.tanggal) errors.tanggal = "Pilih tanggal koreksi.";
+    else if (editForm.tanggal > tomorrow) errors.tanggal = "Tanggal tidak boleh melebihi besok.";
+    else if (previousLogDate && editForm.tanggal < previousLogDate) errors.tanggal = `Tidak boleh sebelum ${formatDateId(previousLogDate)}.`;
+    if (editEnd == null) errors.odometerAkhir = "Isi odometer akhir dengan angka yang valid.";
+    else if (editPreview == null) errors.odometerAkhir = "Odometer akhir harus >= odometer awal.";
+    return errors;
   };
 
-  const deleteLog = async (log: DbVehicleOdometerLog) => {
-    if (!canManage) return;
-    const ok = window.confirm(`Hapus log odometer ${log.vehicle_unit} tanggal ${formatDateId(log.tanggal)}?`);
-    if (!ok) return;
-    setSaving(true);
+  const saveEdit = async () => {
+    if (!editTarget || !canManage) return;
+    const errors = getEditErrors();
+    if (Object.keys(errors).length > 0) {
+      setEditErrors(errors);
+      showToast("error", "Koreksi belum valid", Object.values(errors)[0]);
+      return;
+    }
+    if (editEnd == null || editPreview == null) return;
+    setEditSaving(true);
     try {
-      const { error } = await supabase.rpc("delete_vehicle_odometer_log", { p_log_id: log.id });
+      const { error } = await supabase.rpc("update_vehicle_odometer_log", {
+        p_log_id: editTarget.id,
+        p_tanggal: editForm.tanggal,
+        p_odometer_akhir: editEnd,
+        p_catatan: editForm.catatan || null,
+      });
       if (error) throw error;
-      showToast("success", "Log dihapus", "Odometer terbaru kendaraan sudah dikembalikan ke log sebelumnya.");
-      if (editingLogId === log.id) resetForm();
+      showToast("success", "Koreksi disimpan", `Jarak terbaru ${formatKm(editPreview)} berhasil diperbarui.`);
+      closeEdit();
       await loadData();
     } catch (err) {
-      showToast("error", "Gagal menghapus", err instanceof Error ? err.message : "Hanya log terbaru kendaraan yang bisa dihapus.");
+      showToast("error", "Gagal menyimpan koreksi", err instanceof Error ? err.message : "Coba ulangi.");
     } finally {
-      setSaving(false);
+      setEditSaving(false);
     }
   };
 
+  // ── Delete helpers (custom confirm) ──
+  const openDelete = (log: DbVehicleOdometerLog) => {
+    if (!canManage || !log.is_latest) return;
+    setDeleteTarget(log);
+  };
+  const closeDelete = () => {
+    if (deleting) return;
+    setDeleteTarget(null);
+  };
+  const confirmDelete = async () => {
+    if (!deleteTarget || !canManage) return;
+    setDeleting(true);
+    try {
+      const { error } = await supabase.rpc("delete_vehicle_odometer_log", { p_log_id: deleteTarget.id });
+      if (error) throw error;
+      showToast("success", "Log dihapus", "Odometer terbaru telah dikembalikan ke log sebelumnya.");
+      const wasEditing = editTarget?.id === deleteTarget.id;
+      if (wasEditing) setEditTarget(null);
+      setDeleteTarget(null);
+      await loadData();
+    } catch (err) {
+      showToast("error", "Gagal menghapus", err instanceof Error ? err.message : "Hanya log terbaru yang bisa dihapus.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleApplyFilters = () => {
+    if (draftStartDate && draftEndDate && draftStartDate > draftEndDate) {
+      showToast("error", "Rentang tanggal tidak valid", "Tanggal awal tidak boleh melebihi tanggal akhir.");
+      return;
+    }
+    if (draftStartDate && draftStartDate > tomorrow) {
+      showToast("error", "Filter tanggal tidak valid", "Tanggal awal melebihi batas.");
+      return;
+    }
+    if (draftEndDate && draftEndDate > tomorrow) {
+      showToast("error", "Filter tanggal tidak valid", "Tanggal akhir melebihi batas.");
+      return;
+    }
+    setAppliedStartDate(draftStartDate);
+    setAppliedEndDate(draftEndDate);
+    setPage(1);
+  };
+  const handleResetFilters = () => {
+    const ms = monthStartInput();
+    const td = localDateInput();
+    setDraftStartDate(ms);
+    setDraftEndDate(td);
+    setAppliedStartDate(ms);
+    setAppliedEndDate(td);
+    setVehicleFilter("Semua");
+    setSearch("");
+    setPage(1);
+  };
+  const isFilterDirty = draftStartDate !== appliedStartDate || draftEndDate !== appliedEndDate;
+
   const exportRows = () => [
     ["Laporan Odometer Kendaraan"],
-    ["Periode", startDate ? formatDateId(startDate) : "Semua", "s/d", endDate ? formatDateId(endDate) : "Semua"],
+    ["Periode", appliedStartDate ? formatDateId(appliedStartDate) : "Semua", "s/d", appliedEndDate ? formatDateId(appliedEndDate) : "Semua"],
     ["Kendaraan", vehicleFilter === "Semua" ? "Semua Kendaraan" : vehicles.find((v) => String(v.id) === vehicleFilter)?.unit ?? "-"],
     [],
     ["Total Jarak", reportSummary.totalJarak],
@@ -414,7 +542,7 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
       doc.text("Laporan Odometer Kendaraan", pageWidth / 2, 14, { align: "center" });
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      doc.text(`Periode: ${startDate ? formatDateId(startDate) : "Semua"} s/d ${endDate ? formatDateId(endDate) : "Semua"}`, pageWidth / 2, 20, { align: "center" });
+      doc.text(`Periode: ${appliedStartDate ? formatDateId(appliedStartDate) : "Semua"} s/d ${appliedEndDate ? formatDateId(appliedEndDate) : "Semua"}`, pageWidth / 2, 20, { align: "center" });
       doc.text(`Total jarak: ${formatKm(reportSummary.totalJarak)} | Log: ${reportSummary.totalLog} | Kendaraan: ${reportSummary.kendaraanCount}`, pageWidth / 2, 25, { align: "center" });
 
       autoTable(doc, {
@@ -453,73 +581,171 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
     }
   };
 
-  const renderTable = (showActions: boolean) => (
-    <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="border-b border-border bg-muted/40">
-            <tr className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <th className="px-3 py-3 text-left">Tanggal</th>
-              <th className="px-3 py-3 text-left">Kendaraan</th>
-              <th className="px-3 py-3 text-right">Odo Awal</th>
-              <th className="px-3 py-3 text-right">Odo Akhir</th>
-              <th className="px-3 py-3 text-right">Jarak</th>
-              <th className="px-3 py-3 text-left">Catatan</th>
-              <th className="px-3 py-3 text-left">Input Oleh</th>
-              {showActions && <th className="px-3 py-3 text-right">Aksi</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/40">
-            {loading ? (
-              <tr><td colSpan={showActions ? 8 : 7} className="px-4 py-12 text-center text-muted-foreground">Memuat data...</td></tr>
-            ) : pagedLogs.length === 0 ? (
-              <tr><td colSpan={showActions ? 8 : 7} className="px-4 py-12 text-center text-muted-foreground">Belum ada data odometer.</td></tr>
-            ) : (
-              pagedLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-muted/20">
-                  <td className="whitespace-nowrap px-3 py-2.5 font-medium text-foreground">{formatDateId(log.tanggal)}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="font-semibold text-foreground">{log.vehicle_unit}</div>
-                    <div className="text-[10px] text-muted-foreground">{log.vehicle_jenis}</div>
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{formatKm(log.odometer_awal, "")}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{formatKm(log.odometer_akhir, "")}</td>
-                  <td className="px-3 py-2.5 text-right font-bold tabular-nums text-primary">{formatKm(log.jarak_km)}</td>
-                  <td className="max-w-[260px] px-3 py-2.5 text-muted-foreground">{log.catatan || "-"}</td>
-                  <td className="px-3 py-2.5 text-muted-foreground">{log.created_by_nama || "-"}</td>
-                  {showActions && (
-                    <td className="px-3 py-2.5 text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => editLog(log)}
-                          disabled={!log.is_latest || saving}
-                          className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
-                          title={log.is_latest ? "Edit" : "Hanya log terbaru yang bisa diedit"}
-                        >
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => deleteLog(log)}
-                          disabled={!log.is_latest || saving}
-                          className="rounded-lg p-1.5 text-muted-foreground hover:bg-danger-light hover:text-danger disabled:cursor-not-allowed disabled:opacity-35"
-                          title={log.is_latest ? "Hapus" : "Hanya log terbaru yang bisa dihapus"}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+  const renderTable = (showActions: boolean) => {
+    const showEmpty = !loading && pagedLogs.length === 0;
+    const emptyTitle = searchableLogs.length === 0 && logs.length > 0 ? "Tidak ada hasil" : "Belum ada data odometer";
+    const emptyDesc = searchableLogs.length === 0 && logs.length > 0
+      ? "Coba ubah kata kunci pencarian atau reset filter."
+      : showActions ? "Input log pertama untuk kendaraan aktif untuk memulai rekap jarak." : "Data akan muncul setelah ada pencatatan dari Admin GA.";
+
+    return (
+      <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+        {/* ── Desktop table ── */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="border-b border-border bg-muted/40">
+              <tr className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <th className="px-3 py-3 text-left">Tanggal</th>
+                <th className="px-3 py-3 text-left">Kendaraan</th>
+                <th className="px-3 py-3 text-right">Odo Awal</th>
+                <th className="px-3 py-3 text-right">Odo Akhir</th>
+                <th className="px-3 py-3 text-right">Jarak</th>
+                <th className="px-3 py-3 text-left">Catatan</th>
+                <th className="px-3 py-3 text-left">Input Oleh</th>
+                {showActions && <th className="px-3 py-3 text-right">Aksi</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    <td className="px-3 py-3"><div className="h-3 w-20 rounded bg-muted" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-28 rounded bg-muted" /><div className="mt-1 h-2 w-16 rounded bg-muted/50" /></td>
+                    <td className="px-3 py-3"><div className="ml-auto h-3 w-14 rounded bg-muted" /></td>
+                    <td className="px-3 py-3"><div className="ml-auto h-3 w-14 rounded bg-muted" /></td>
+                    <td className="px-3 py-3"><div className="ml-auto h-3 w-12 rounded bg-primary/20" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-24 rounded bg-muted" /></td>
+                    <td className="px-3 py-3"><div className="h-3 w-16 rounded bg-muted" /></td>
+                    {showActions && <td className="px-3 py-3"><div className="ml-auto h-7 w-16 rounded bg-muted" /></td>}
+                  </tr>
+                ))
+              ) : showEmpty ? (
+                <tr><td colSpan={showActions ? 8 : 7} className="px-4 py-10 text-center">
+                  <div className="mx-auto flex max-w-sm flex-col items-center gap-2">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted"><Search className="h-5 w-5 text-muted-foreground" /></div>
+                    <p className="text-sm font-semibold text-foreground">{emptyTitle}</p>
+                    <p className="text-xs text-muted-foreground">{emptyDesc}</p>
+                  </div>
+                </td></tr>
+              ) : (
+                pagedLogs.map((log) => (
+                  <tr key={log.id} className="hover:bg-muted/20">
+                    <td className="whitespace-nowrap px-3 py-2.5 font-medium text-foreground">{formatDateId(log.tanggal)}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground">{log.vehicle_unit}</span>
+                        <span className={cn("rounded-full px-1.5 py-0.5 text-[9px] font-bold", log.is_latest ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{log.is_latest ? "Terbaru" : "Terkunci"}</span>
                       </div>
+                      <div className="text-[10px] text-muted-foreground">{log.vehicle_jenis}</div>
                     </td>
-                  )}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{formatKm(log.odometer_awal, "")}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{formatKm(log.odometer_akhir, "")}</td>
+                    <td className="px-3 py-2.5 text-right font-bold tabular-nums text-primary">{formatKm(log.jarak_km)}</td>
+                    <td className="max-w-[260px] px-3 py-2.5 text-muted-foreground">{log.catatan || "-"}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{log.created_by_nama || "-"}</td>
+                    {showActions && (
+                      <td className="px-3 py-2.5 text-right">
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            onClick={() => openEdit(log)}
+                            disabled={!log.is_latest || saving || editSaving || deleting}
+                            aria-label={log.is_latest ? `Koreksi log ${log.vehicle_unit} ${formatDateId(log.tanggal)}` : "Hanya log terbaru yang bisa dikoreksi"}
+                            title={log.is_latest ? "Koreksi log terbaru" : "Hanya log terbaru yang bisa dikoreksi"}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => openDelete(log)}
+                            disabled={!log.is_latest || saving || deleting}
+                            aria-label={log.is_latest ? `Hapus log ${log.vehicle_unit} ${formatDateId(log.tanggal)}` : "Hanya log terbaru yang bisa dihapus"}
+                            title={log.is_latest ? "Hapus log terbaru" : "Hanya log terbaru yang bisa dihapus"}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-transparent bg-muted text-muted-foreground hover:bg-danger-light hover:text-danger disabled:cursor-not-allowed disabled:opacity-35"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Mobile cards ── */}
+        <div className="md:hidden divide-y divide-border/40">
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="p-4 animate-pulse">
+                <div className="h-3 w-28 rounded bg-muted" />
+                <div className="mt-2 h-3 w-20 rounded bg-muted/60" />
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="h-10 rounded-xl bg-muted" />
+                  <div className="h-10 rounded-xl bg-muted" />
+                  <div className="h-10 rounded-xl bg-primary/20" />
+                </div>
+              </div>
+            ))
+          ) : showEmpty ? (
+            <div className="p-8 text-center">
+              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-muted"><Search className="h-5 w-5 text-muted-foreground" /></div>
+              <p className="mt-3 text-sm font-semibold text-foreground">{emptyTitle}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{emptyDesc}</p>
+            </div>
+          ) : (
+            pagedLogs.map((log) => (
+              <div key={log.id} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{log.vehicle_unit}</p>
+                    <p className="text-[11px] text-muted-foreground">{log.vehicle_jenis} · {formatDateId(log.tanggal)}</p>
+                  </div>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold", log.is_latest ? "bg-success/10 text-success border border-success/20" : "bg-muted text-muted-foreground border border-border")}>{log.is_latest ? "Terbaru" : "Terkunci"}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="rounded-xl bg-muted/40 p-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Awal</p>
+                    <p className="mt-1 text-xs font-semibold tabular-nums text-foreground">{formatKm(log.odometer_awal, "")}</p>
+                  </div>
+                  <div className="rounded-xl bg-muted/40 p-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Akhir</p>
+                    <p className="mt-1 text-xs font-semibold tabular-nums text-foreground">{formatKm(log.odometer_akhir, "")}</p>
+                  </div>
+                  <div className="rounded-xl bg-primary/10 p-2.5 border border-primary/15">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-primary">Jarak</p>
+                    <p className="mt-1 text-xs font-bold tabular-nums text-primary">{formatKm(log.jarak_km)}</p>
+                  </div>
+                </div>
+                {(log.catatan || log.created_by_nama) && (
+                  <div className="mt-3 rounded-xl border border-border bg-muted/20 p-2.5">
+                    {log.catatan && <p className="text-xs text-foreground"><span className="font-semibold">Catatan:</span> {log.catatan}</p>}
+                    <p className="text-[11px] text-muted-foreground">Input oleh {log.created_by_nama || "-"}</p>
+                  </div>
+                )}
+                {showActions && (
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">{log.is_latest ? "Bisa dikoreksi / dihapus" : "Log terkunci"}</p>
+                    <div className="flex gap-2">
+                      <button onClick={() => openEdit(log)} disabled={!log.is_latest || saving || editSaving || deleting} className="inline-flex h-9 min-w-[72px] items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-40"><Edit2 className="h-3.5 w-3.5" />Koreksi</button>
+                      <button onClick={() => openDelete(log)} disabled={!log.is_latest || saving || deleting} className="inline-flex h-9 min-w-[64px] items-center justify-center gap-1.5 rounded-xl bg-danger px-3 text-xs font-semibold text-white hover:bg-danger/90 disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />Hapus</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+
+        {searchableLogs.length > PAGE_SIZE && (
+          <div className="border-t border-border">
+            <Pagination currentPage={page} totalItems={searchableLogs.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
+          </div>
+        )}
       </div>
-      {searchableLogs.length > PAGE_SIZE && (
-        <Pagination currentPage={page} totalItems={searchableLogs.length} pageSize={PAGE_SIZE} onPageChange={setPage} />
-      )}
-    </div>
-  );
+    );
+  };
 
   return (
     <RouteGuard permission={config.permission}>
@@ -668,73 +894,101 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
         {mode === "input" && (
           <>
             <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-bold text-foreground">{editingLogId ? "Koreksi Log Terbaru" : "Input Log Baru"}</h2>
-                  <p className="text-[11px] text-muted-foreground">Log pertama memakai odometer awal manual; log berikutnya otomatis dari odometer akhir terakhir.</p>
+                  <h2 className="text-sm font-bold text-foreground flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10"><Plus className="h-4 w-4 text-primary" /></span>Input Log Baru</h2>
+                  <p className="mt-1 text-[11px] text-muted-foreground">Log pertama memakai odometer awal manual; log berikutnya otomatis dari odometer akhir terakhir. Untuk koreksi, gunakan tombol Koreksi pada tabel.</p>
                 </div>
-                {editingLogId && <Button variant="outline" size="sm" icon={X} onClick={resetForm}>Batal Edit</Button>}
+                {!hasActiveVehicles && !loading && <span className="rounded-full bg-warning/10 px-2.5 py-1 text-[11px] font-semibold text-warning border border-warning/20">Belum ada kendaraan aktif</span>}
               </div>
-              <div className="grid gap-3 lg:grid-cols-5">
-                <div className="lg:col-span-2">
-                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Kendaraan</label>
-                  <Select
-                    value={form.vehicleId}
-                    onChange={(value) => {
-                      const nextVehicle = vehicles.find((vehicle) => String(vehicle.id) === value);
-                      setForm((prev) => ({
-                        ...prev,
-                        vehicleId: value,
-                        odometerAwal: editingLogId ? prev.odometerAwal : nextVehicle?.last_odometer == null ? "" : String(nextVehicle.last_odometer),
-                      }));
-                    }}
-                    options={[{ value: "", label: "Pilih kendaraan..." }, ...vehicles.map((vehicle) => ({ value: String(vehicle.id), label: `${vehicle.unit} - ${vehicle.jenis}` }))]}
-                    className="w-full"
-                  />
+
+              {!hasActiveVehicles && !loading ? (
+                <div className="rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center">
+                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-muted"><Truck className="h-5 w-5 text-muted-foreground" /></div>
+                  <p className="mt-3 text-sm font-semibold text-foreground">Belum ada kendaraan aktif</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Tambahkan data mobil di menu GA · Data Mobil dan pastikan status Aktif untuk mulai input odometer.</p>
                 </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Tanggal</label>
-                  <input type="date" value={form.tanggal} onChange={(e) => setForm((prev) => ({ ...prev, tanggal: e.target.value }))} className="w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Awal</label>
-                  <input
-                    value={form.odometerAwal}
-                    onChange={(e) => setForm((prev) => ({ ...prev, odometerAwal: e.target.value }))}
-                    disabled={startLocked}
-                    inputMode="decimal"
-                    placeholder={firstLogForVehicle ? "Isi awal" : "Otomatis"}
-                    className="w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-70"
-                  />
-                  <p className="mt-1 text-[10px] text-muted-foreground">{firstLogForVehicle ? "Baseline pertama oleh Admin GA." : "Terkunci dari log terakhir."}</p>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Akhir</label>
-                  <input value={form.odometerAkhir} onChange={(e) => setForm((prev) => ({ ...prev, odometerAkhir: e.target.value }))} inputMode="decimal" placeholder="Contoh: 1250.5" className="w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-                </div>
-                <div className="lg:col-span-4">
-                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Catatan</label>
-                  <input value={form.catatan} onChange={(e) => setForm((prev) => ({ ...prev, catatan: e.target.value }))} placeholder="Opsional" className="w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-                </div>
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
-                  <p className="text-[11px] font-semibold text-muted-foreground">Jarak Otomatis</p>
-                  <p className={cn("mt-1 text-xl font-bold tabular-nums", previewDistance == null ? "text-muted-foreground" : "text-primary")}>{formatKm(previewDistance)}</p>
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-                <Button variant="outline" onClick={resetForm} disabled={saving}>Reset</Button>
-                <Button icon={saving ? Loader2 : Plus} onClick={saveLog} disabled={saving || !form.vehicleId || !form.tanggal || formStart == null || formEnd == null || previewDistance == null}>
-                  {saving ? "Menyimpan..." : editingLogId ? "Simpan Koreksi" : "Simpan Log"}
-                </Button>
-              </div>
+              ) : (
+                <>
+                  {Object.keys(createErrors).length > 0 && (
+                    <div className="mb-4 flex gap-2 rounded-xl border border-danger/20 bg-danger-light px-3 py-2.5 text-xs text-danger" role="alert">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                      <div><p className="font-semibold">Periksa kembali form</p><p className="mt-0.5 text-[11px] opacity-90">{Object.values(createErrors)[0]}</p></div>
+                    </div>
+                  )}
+                  <div className="grid gap-3 lg:grid-cols-5">
+                    <div className="lg:col-span-2">
+                      <label className="mb-1.5 block text-xs font-semibold text-foreground">Kendaraan <span className="text-danger">*</span></label>
+                      <Select
+                        value={form.vehicleId}
+                        onChange={(value) => {
+                          const nextVehicle = vehicles.find((vehicle) => String(vehicle.id) === value);
+                          setForm((prev) => ({
+                            ...prev,
+                            vehicleId: value,
+                            odometerAwal: nextVehicle?.last_odometer == null ? "" : String(nextVehicle.last_odometer),
+                          }));
+                          if (createErrors.vehicleId) setCreateErrors((p) => { const n = { ...p }; delete n.vehicleId; return n; });
+                        }}
+                        options={[{ value: "", label: "Pilih kendaraan..." }, ...vehicles.map((vehicle) => ({ value: String(vehicle.id), label: `${vehicle.unit} - ${vehicle.jenis}` }))]}
+                        className="w-full"
+                        hasError={!!createErrors.vehicleId}
+                      />
+                      {createErrors.vehicleId ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.vehicleId}</p> : <p className="mt-1 text-[10px] text-muted-foreground">Hanya kendaraan Aktif yang tampil.</p>}
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-foreground">Tanggal <span className="text-danger">*</span></label>
+                      <DatePicker value={form.tanggal} onChange={(v) => { setForm((prev) => ({ ...prev, tanggal: v })); if (createErrors.tanggal) setCreateErrors((p) => { const n = { ...p }; delete n.tanggal; return n; }); }} maxDate={tomorrow} hasError={!!createErrors.tanggal} placeholder="Pilih tanggal" />
+                      {createErrors.tanggal ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.tanggal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">Maksimal besok ({formatDateId(tomorrow)}).</p>}
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Awal {firstLogForVehicle && <span className="text-danger">*</span>}</label>
+                      <input
+                        value={form.odometerAwal}
+                        onChange={(e) => { setForm((prev) => ({ ...prev, odometerAwal: e.target.value })); if (createErrors.odometerAwal) setCreateErrors((p) => { const n = { ...p }; delete n.odometerAwal; return n; }); }}
+                        disabled={startLocked}
+                        inputMode="decimal"
+                        aria-invalid={!!createErrors.odometerAwal}
+                        placeholder={firstLogForVehicle ? "Isi awal" : "Otomatis"}
+                        className={cn("w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2", createErrors.odometerAwal ? "border-danger bg-danger/5 focus:border-danger focus:ring-danger/10 text-foreground" : "border-border bg-muted/30 text-foreground focus:border-primary focus:ring-primary/10", "disabled:cursor-not-allowed disabled:opacity-70")}
+                      />
+                      {createErrors.odometerAwal ? <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.odometerAwal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">{firstLogForVehicle ? "Baseline pertama oleh Admin GA." : `Terkunci: ${formatKm(selectedVehicle?.last_odometer, "")} dari log terakhir.`}</p>}
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Akhir <span className="text-danger">*</span></label>
+                      <input value={form.odometerAkhir} onChange={(e) => { setForm((prev) => ({ ...prev, odometerAkhir: e.target.value })); if (createErrors.odometerAkhir) setCreateErrors((p) => { const n = { ...p }; delete n.odometerAkhir; return n; }); }} inputMode="decimal" aria-invalid={!!createErrors.odometerAkhir} placeholder="Contoh: 1250.5" className={cn("w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2", createErrors.odometerAkhir ? "border-danger bg-danger/5 focus:border-danger focus:ring-danger/10 text-foreground" : "border-border bg-muted/30 text-foreground focus:border-primary focus:ring-primary/10")} />
+                      {createErrors.odometerAkhir && <p className="mt-1 text-[11px] font-medium text-danger">{createErrors.odometerAkhir}</p>}
+                    </div>
+                    <div className="lg:col-span-4">
+                      <label className="mb-1.5 block text-xs font-semibold text-foreground">Catatan <span className="text-muted-foreground font-normal">(opsional)</span></label>
+                      <input value={form.catatan} onChange={(e) => setForm((prev) => ({ ...prev, catatan: e.target.value }))} placeholder="Misal: dinas luar kota, BBM, dsb." className="w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+                    </div>
+                    <div className={cn("rounded-xl border p-3", previewDistance == null ? "border-border bg-muted/30" : "border-primary/20 bg-primary/5")}>
+                      <p className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5"><Gauge className="h-3.5 w-3.5" /> Jarak Otomatis</p>
+                      <p className={cn("mt-1 text-xl font-bold tabular-nums", previewDistance == null ? "text-muted-foreground" : "text-primary")}>{formatKm(previewDistance)}</p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">Akhir − Awal, 1 desimal.</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-[11px] text-muted-foreground hidden sm:block">Koreksi data lama tidak dilakukan di sini—gunakan <span className="font-semibold text-foreground">Koreksi</span> pada tabel log terbaru.</p>
+                    <div className="ml-auto flex gap-2">
+                      <Button variant="outline" onClick={resetForm} disabled={saving}>Reset</Button>
+                      <Button icon={saving ? Loader2 : Plus} onClick={saveLog} disabled={saving}>
+                        {saving ? "Menyimpan..." : "Simpan Log"}
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-xl bg-muted px-3 py-2">
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
-                <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Cari kendaraan atau catatan..." className="w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60" />
+                <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Cari kendaraan, jenis, atau catatan..." className="w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60" />
               </div>
-              <span className="text-xs text-muted-foreground">{searchableLogs.length} log</span>
+              <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{searchableLogs.length} log</span>
+              {search && <button onClick={() => setSearch("")} className="text-xs font-semibold text-primary hover:underline">Bersihkan</button>}
             </div>
             {renderTable(true)}
           </>
@@ -743,18 +997,27 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
         {mode === "laporan" && (
           <>
             <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div>
+                  <h2 className="text-sm font-bold text-foreground">Filter Laporan</h2>
+                  <p className="text-[11px] text-muted-foreground">Ubah tanggal draft terlebih dahulu, lalu tekan Terapkan untuk memuat data baru. Export mengikuti filter yang sudah diterapkan.</p>
+                </div>
+                {isFilterDirty && <span className="rounded-full bg-warning/10 px-2.5 py-1 text-[11px] font-semibold text-warning border border-warning/20 flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Belum diterapkan</span>}
+              </div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1fr_1fr_1.4fr_auto]">
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-foreground">Kendaraan</label>
                   <Select value={vehicleFilter} onChange={(value) => { setVehicleFilter(value); setPage(1); }} options={vehicleOptions} className="w-full" />
+                  <p className="mt-1 text-[10px] text-muted-foreground">Filter kendaraan diterapkan langsung.</p>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-foreground">Tanggal Awal</label>
-                  <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPage(1); }} className="w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+                  <DatePicker value={draftStartDate} onChange={(v) => setDraftStartDate(v)} maxDate={tomorrow} hasError={!!(draftStartDate && draftEndDate && draftStartDate > draftEndDate)} placeholder="Pilih tanggal awal" />
+                  {draftStartDate && draftEndDate && draftStartDate > draftEndDate && <p className="mt-1 text-[11px] font-medium text-danger">Tanggal awal melebihi tanggal akhir.</p>}
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-foreground">Tanggal Akhir</label>
-                  <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+                  <DatePicker value={draftEndDate} onChange={(v) => setDraftEndDate(v)} maxDate={tomorrow} hasError={!!(draftStartDate && draftEndDate && draftStartDate > draftEndDate) || !!(draftEndDate && draftEndDate > tomorrow)} placeholder="Pilih tanggal akhir" />
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-foreground">Pencarian</label>
@@ -763,9 +1026,14 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
                     <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Cari unit, jenis, catatan..." className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/60" />
                   </div>
                 </div>
-                <div className="flex items-end">
-                  <Button variant="outline" icon={RefreshCw} onClick={loadData} disabled={loading} className="w-full">Terapkan</Button>
+                <div className="flex items-end gap-2">
+                  <Button variant="outline" icon={RefreshCw} onClick={handleApplyFilters} disabled={loading} className={cn("flex-1", isFilterDirty && "border-warning/30 bg-warning/5 hover:bg-warning/10")}>Terapkan</Button>
+                  <Button variant="ghost" size="sm" onClick={handleResetFilters} disabled={loading} className="px-3">Reset</Button>
                 </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="rounded-full bg-muted px-2.5 py-1">Diterapkan: <span className="font-semibold text-foreground">{appliedStartDate ? formatDateId(appliedStartDate) : "Semua"} — {appliedEndDate ? formatDateId(appliedEndDate) : "Semua"}</span></span>
+                {isFilterDirty && <span className="text-warning font-medium">Draft: {draftStartDate ? formatDateId(draftStartDate) : "—"} — {draftEndDate ? formatDateId(draftEndDate) : "—"}</span>}
               </div>
             </div>
 
@@ -808,18 +1076,153 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
           </>
         )}
 
-        {toast && (
-          <div className={cn("fixed bottom-4 right-4 z-50 max-w-sm rounded-xl px-4 py-3 text-sm shadow-lg", toast.type === "success" ? "bg-success text-white" : "bg-danger text-white")}>
-            <div className="flex items-start gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-              <div>
-                <p className="font-semibold">{toast.title}</p>
-                {toast.message && <p className="mt-0.5 text-xs opacity-90">{toast.message}</p>}
+      </div>
+
+      {/* ── Toast (custom, top-center card, accessible) ── */}
+      {toast && (
+        <Portal>
+          <div className="fixed top-6 left-1/2 z-[100] w-[calc(100%-2rem)] max-w-[480px] -translate-x-1/2 animate-fade-in" role="status" aria-live="polite">
+            <div className={cn("flex items-start gap-3 rounded-2xl border bg-card px-4 py-3.5 shadow-2xl", toast.type === "error" ? "border-danger/20" : "border-success/20")}>
+              <div className={cn("flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl", toast.type === "error" ? "bg-danger/10 text-danger" : "bg-success/10 text-success")}>
+                {toast.type === "error" ? <AlertTriangle className="h-5 w-5" /> : <CircleCheckBig className="h-5 w-5" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-foreground">{toast.title}</p>
+                {toast.message && <p className="mt-0.5 text-xs text-muted-foreground">{toast.message}</p>}
+              </div>
+              <button onClick={dismissToast} aria-label="Tutup notifikasi" className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ── Edit Modal (koreksi log terbaru) ── */}
+      {editTarget && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={closeEdit} />
+            <div className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden bg-card shadow-2xl animate-slide-up sm:animate-scale-in sm:rounded-2xl rounded-t-2xl border border-border">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-border bg-muted/30 px-5 py-4 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-warning/10 text-warning"><Edit2 className="h-4.5 w-4.5" /></div>
+                  <div>
+                    <h2 className="text-sm font-bold text-foreground">Koreksi Log Terbaru</h2>
+                    <p className="text-[11px] text-muted-foreground">Hanya log terbaru per kendaraan yang bisa dikoreksi</p>
+                  </div>
+                </div>
+                <button onClick={closeEdit} disabled={editSaving} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" aria-label="Tutup"><X className="h-4 w-4" /></button>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                {/* Immutable vehicle summary */}
+                <div className="rounded-xl border border-border bg-muted/20 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-foreground">{editTarget.vehicle_unit}</p>
+                      <p className="text-[11px] text-muted-foreground">{editTarget.vehicle_jenis} · {editTarget.vehicle_status}</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-bold text-success border border-success/20">Terbaru</span>
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">ID #{editTarget.id}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Odo awal terkunci</p>
+                      <p className="text-sm font-bold tabular-nums text-foreground">{formatKm(editTarget.odometer_awal, "")}</p>
+                      <p className="text-[11px] text-muted-foreground">Jarak sebelumnya {formatKm(editTarget.jarak_km)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex gap-2 rounded-lg bg-info/5 border border-info/15 px-3 py-2 text-[11px] text-muted-foreground">
+                    <Info className="h-3.5 w-3.5 flex-shrink-0 text-info mt-0.5" />
+                    <p>Kendaraan tidak dapat diganti saat koreksi. Untuk ganti kendaraan, hapus log terbaru lalu buat log baru.</p>
+                  </div>
+                </div>
+
+                {/* Editable fields */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Tanggal <span className="text-danger">*</span></label>
+                  <DatePicker value={editForm.tanggal} onChange={(v) => { setEditForm((p) => ({ ...p, tanggal: v })); if (editErrors.tanggal) setEditErrors((prev) => { const n = { ...prev }; delete n.tanggal; return n; }); }} maxDate={tomorrow} minDate={previousLogDate ?? undefined} hasError={!!editErrors.tanggal} placeholder="Pilih tanggal koreksi" />
+                  {editErrors.tanggal ? <p className="mt-1 text-[11px] font-medium text-danger">{editErrors.tanggal}</p> : <p className="mt-1 text-[10px] text-muted-foreground">{previousLogDate ? `Tidak boleh sebelum ${formatDateId(previousLogDate)}.` : "Tanggal koreksi tidak boleh mundur sebelum log sebelumnya."}</p>}
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Awal <span className="text-muted-foreground font-normal">(terkunci)</span></label>
+                  <div className="rounded-xl border border-border bg-muted px-3 py-2.5 text-sm font-semibold tabular-nums text-muted-foreground">{formatKm(editTarget.odometer_awal, "")}</div>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Odometer Akhir <span className="text-danger">*</span></label>
+                  <input value={editForm.odometerAkhir} onChange={(e) => { setEditForm((p) => ({ ...p, odometerAkhir: e.target.value })); if (editErrors.odometerAkhir) setEditErrors((prev) => { const n = { ...prev }; delete n.odometerAkhir; return n; }); }} inputMode="decimal" aria-invalid={!!editErrors.odometerAkhir} placeholder="Misal: 1280.5" className={cn("w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2", editErrors.odometerAkhir ? "border-danger bg-danger/5 focus:border-danger focus:ring-danger/10 text-foreground" : "border-border bg-muted/30 text-foreground focus:border-primary focus:ring-primary/10")} />
+                  {editErrors.odometerAkhir ? <p className="mt-1 text-[11px] font-medium text-danger">{editErrors.odometerAkhir}</p> : <p className="mt-1 text-[10px] text-muted-foreground">Harus ≥ odometer awal.</p>}
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-foreground">Catatan <span className="text-muted-foreground font-normal">(opsional)</span></label>
+                  <textarea value={editForm.catatan} onChange={(e) => setEditForm((p) => ({ ...p, catatan: e.target.value }))} rows={3} placeholder="Alasan koreksi, opsional..." className="w-full resize-none rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+                </div>
+                <div className={cn("rounded-xl border p-3", editPreview == null ? "border-border bg-muted/20" : "border-primary/20 bg-primary/5")}>
+                  <p className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5"><Gauge className="h-3.5 w-3.5" /> Jarak baru (otomatis)</p>
+                  <p className={cn("mt-1 text-xl font-bold tabular-nums", editPreview == null ? "text-muted-foreground" : "text-primary")}>{formatKm(editPreview)}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">Dari {formatKm(editTarget.odometer_awal, "")} → {editEnd != null ? formatKm(editEnd, "") : "—"}</p>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 border-t border-border bg-muted/20 px-5 py-4 flex-shrink-0">
+                <Button variant="outline" size="sm" onClick={closeEdit} disabled={editSaving}>Batal</Button>
+                <Button size="sm" icon={editSaving ? Loader2 : Check} onClick={saveEdit} disabled={editSaving || editEnd == null || editPreview == null}>
+                  {editSaving ? "Menyimpan Koreksi..." : "Simpan Koreksi"}
+                </Button>
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </Portal>
+      )}
+
+      {/* ── Delete Confirm (custom, destructive) ── */}
+      {deleteTarget && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={closeDelete} />
+            <div className="relative w-full max-w-md bg-card shadow-2xl animate-slide-up sm:animate-scale-in overflow-hidden sm:rounded-2xl rounded-t-2xl border border-border">
+              <div className="p-6 text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-danger/10"><Trash2 className="h-7 w-7 text-danger" /></div>
+                <h3 className="mt-4 text-base font-bold text-foreground">Hapus Log Odometer?</h3>
+                <p className="mt-2 text-sm text-muted-foreground">Tindakan ini tidak dapat dibatalkan.</p>
+                <div className="mt-4 rounded-xl border border-border bg-muted/30 p-3 text-left">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-foreground">{deleteTarget.vehicle_unit}</p>
+                      <p className="text-[11px] text-muted-foreground">{deleteTarget.vehicle_jenis} · {formatDateId(deleteTarget.tanggal)}</p>
+                    </div>
+                    <span className="rounded-full bg-success/10 px-2.5 py-1 text-[11px] font-bold text-success border border-success/20">Terbaru</span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-lg bg-card border border-border p-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Awal</p>
+                      <p className="text-xs font-bold tabular-nums text-foreground">{formatKm(deleteTarget.odometer_awal, "")}</p>
+                    </div>
+                    <div className="rounded-lg bg-card border border-border p-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Akhir</p>
+                      <p className="text-xs font-bold tabular-nums text-foreground">{formatKm(deleteTarget.odometer_akhir, "")}</p>
+                    </div>
+                    <div className="rounded-lg bg-primary/10 border border-primary/15 p-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-primary">Jarak</p>
+                      <p className="text-xs font-bold tabular-nums text-primary">{formatKm(deleteTarget.jarak_km)}</p>
+                    </div>
+                  </div>
+                  {deleteTarget.catatan && <p className="mt-3 text-xs text-muted-foreground"><span className="font-semibold text-foreground">Catatan:</span> {deleteTarget.catatan}</p>}
+                  <p className="mt-3 flex gap-1.5 text-[11px] text-danger bg-danger-light border border-danger/15 rounded-lg px-2.5 py-2"><AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />Odometer kendaraan akan kembali ke log sebelumnya.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-6 pb-6">
+                <Button variant="outline" size="sm" className="flex-1" onClick={closeDelete} disabled={deleting}>Batal</Button>
+                <Button variant="danger" size="sm" icon={deleting ? Loader2 : Trash2} className="flex-1" onClick={confirmDelete} disabled={deleting}>
+                  {deleting ? "Menghapus..." : "Hapus Log"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
     </RouteGuard>
   );
 }
