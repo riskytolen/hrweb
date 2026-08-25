@@ -13,6 +13,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase-browser";
+import { getDefaultRouteForPermissions } from "@/lib/navigation";
 
 export default function LoginPage() {
   const [supabase] = useState(() => createClient());
@@ -25,7 +26,8 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setMounted(true);
+    const timer = window.setTimeout(() => setMounted(true), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -52,24 +54,40 @@ export default function LoginPage() {
         return;
       }
 
-      // 2. Check if user profile is active
+      // 2. Check if user profile and role are active
+      let redirectTo = "/dashboard";
       if (data.user) {
         const { data: profile } = await supabase
           .from("user_profiles")
-          .select("status")
+          .select("status, account_type, roles(permissions, status)")
           .eq("id", data.user.id)
           .single();
 
-        if (profile && profile.status === "Tidak Aktif") {
+        const role = Array.isArray(profile?.roles) ? profile.roles[0] : profile?.roles;
+
+        if (!profile || profile.status === "Tidak Aktif" || role?.status === "Tidak Aktif") {
           await supabase.auth.signOut();
-          setError("Akun Anda telah dinonaktifkan. Hubungi Super Admin.");
+          setError("Akun Anda belum aktif. Hubungi Super Admin.");
           setIsLoading(false);
           return;
         }
+
+        let permissions: string[] = [];
+        const rawPermissions = role?.permissions;
+        if (Array.isArray(rawPermissions)) {
+          permissions = rawPermissions as string[];
+        } else if (typeof rawPermissions === "string") {
+          try {
+            permissions = JSON.parse(rawPermissions) as string[];
+          } catch {
+            permissions = [];
+          }
+        }
+        redirectTo = getDefaultRouteForPermissions(permissions, profile.account_type ?? "internal");
       }
 
       // 3. Success → redirect
-      window.location.assign("/dashboard");
+      window.location.assign(redirectTo);
     } catch {
       setError("Terjadi kesalahan. Silakan coba lagi.");
       setIsLoading(false);

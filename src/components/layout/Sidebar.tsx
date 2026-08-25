@@ -15,6 +15,7 @@ import {
   Award,
   Scale,
   CalendarDays,
+  ClipboardList,
   UserPlus,
   Wallet,
   Database,
@@ -26,6 +27,7 @@ import {
   Clock,
   ShieldCheck,
   LayoutDashboard,
+  Gauge,
   Briefcase,
   Truck,
   Package,
@@ -39,8 +41,10 @@ import {
   PieChart,
   SlidersHorizontal,
   FileText,
+  FileSpreadsheet,
   type LucideIcon,
 } from "lucide-react";
+import { getDefaultRouteForPermissions } from "@/lib/navigation";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -94,7 +98,19 @@ const allSections: MenuSection[] = [
         label: "Dashboard",
         href: "/dashboard",
         icon: LayoutDashboard,
-        alwaysVisible: true,
+        permission: "dashboard",
+      },
+      {
+        kind: "group",
+        key: "operasional-kendaraan",
+        label: "Operasional Kendaraan",
+        icon: Gauge,
+        basePath: "/operasional-kendaraan",
+        items: [
+          { name: "Dashboard", href: "/operasional-kendaraan/dashboard", icon: Gauge, permission: "vehicle-odometer" },
+          { name: "Input Odometer", href: "/operasional-kendaraan/input", icon: ClipboardList, permission: "vehicle-odometer.manage" },
+          { name: "Laporan", href: "/operasional-kendaraan/laporan", icon: FileSpreadsheet, permission: "vehicle-odometer" },
+        ],
       },
       {
         kind: "group",
@@ -185,7 +201,8 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
         .map((entry): MenuEntry | null => {
           if (entry.kind === "link") {
             // Standalone link
-            if (isLoading || !profile || entry.alwaysVisible) return entry;
+            if (isLoading || !profile) return null;
+            if (entry.alwaysVisible) return entry;
             if (entry.href === "/settings/accounts") return isSuperAdmin ? entry : null;
             if (entry.href === "/settings/audit-logs") return isSuperAdmin ? entry : null;
             if (!entry.permission) return entry;
@@ -193,7 +210,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
           }
           // Group: filter sub items
           const filteredItems = entry.items.filter((item) => {
-            if (isLoading || !profile) return true;
+            if (isLoading || !profile) return false;
             if (item.href === "/settings/accounts") return isSuperAdmin;
             if (item.href === "/settings/audit-logs") return isSuperAdmin;
             if (item.href === "/settings/storage-usage") return isSuperAdmin;
@@ -251,7 +268,8 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(computeOpenGroups);
 
   useEffect(() => {
-    setOpenGroups(computeOpenGroups());
+    const timer = window.setTimeout(() => setOpenGroups(computeOpenGroups()), 0);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, pathname]);
 
@@ -260,6 +278,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
   };
 
   const roleLabel = profile?.roles?.nama ?? (isSuperAdmin ? "Super Admin" : "User");
+  const homeHref = getDefaultRouteForPermissions(profile?.roles?.permissions ?? [], profile?.account_type ?? "internal");
 
   return (
     <>
@@ -294,7 +313,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
           )}
         >
           <a
-            href="/employees"
+            href={homeHref}
             className={cn(
               "flex items-center gap-2.5 min-w-0",
               collapsed ? "" : "flex-1",

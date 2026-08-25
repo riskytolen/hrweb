@@ -66,6 +66,7 @@ type FormState = {
   kir_required: boolean;
   stnk_required: boolean;
   pajak_required: boolean;
+  status: "Aktif" | "Tidak Aktif";
 };
 
 type DocumentFormState = {
@@ -90,10 +91,24 @@ type OverallStatusInfo = {
   detail: string;
 };
 
+type PdfDocumentWithAutoTable = {
+  internal: { pageSize: { getWidth: () => number; getHeight: () => number } };
+  lastAutoTable?: { finalY: number };
+  setFillColor: (...args: number[]) => void;
+  setDrawColor: (...args: number[]) => void;
+  setFontSize: (size: number) => void;
+  setTextColor: (...args: number[]) => void;
+  setFont: (fontName: string, fontStyle?: string) => void;
+  rect: (x: number, y: number, w: number, h: number, style?: string) => void;
+  roundedRect: (x: number, y: number, w: number, h: number, rx: number, ry: number, style?: string) => void;
+  text: (text: string | string[], x: number, y: number, options?: { align?: "left" | "center" | "right" }) => void;
+};
+
 const emptyForm: FormState = {
   unit: "", jenis: "", divisi: "", vendor: "", vendor_id: null, vehicle_division_id: null,
   lokasi_administrasi: "", no_rangka: "", nomer_mesin: "", volume: "", tonase: "", suhu: "",
   kir_required: true, stnk_required: true, pajak_required: true,
+  status: "Aktif",
 };
 
 const emptyDocumentForm: DocumentFormState = {
@@ -438,7 +453,7 @@ export default function DataMobilPage() {
   const attentionCount = vehicleStatusRows.filter((r) => r.overall.key === "Perlu Diperhatikan" || r.overall.key === "Belum Lengkap").length;
   const safeCount = vehicleStatusRows.filter((r) => r.overall.key === "Aman").length;
 
-  const filteredDocVehicles = vehicleStatusRows.filter(({ vehicle, statuses, overall }) => {
+  const filteredDocVehicles = vehicleStatusRows.filter(({ vehicle, overall }) => {
     const q = docSearch.toLowerCase();
     const matchSearch = !q
       || vehicle.unit.toLowerCase().includes(q)
@@ -482,6 +497,7 @@ export default function DataMobilPage() {
   for (const [vendorKey, rows] of vendorGroupMap) {
     vendorGroups.push({ vendorKey, rows });
   }
+  const vendorGroupKeys = vendorGroups.map((g) => g.vendorKey).join("\u001f");
 
   const toggleVendorGroup = (key: string) => {
     setExpandedVendors((prev) => {
@@ -503,10 +519,13 @@ export default function DataMobilPage() {
   };
 
   useEffect(() => {
-    setExpandedVendors(new Set(vendorGroups.map((g) => g.vendorKey)));
-  }, [vendorGroups]);
+    const timer = window.setTimeout(() => {
+      setExpandedVendors(new Set(vendorGroupKeys ? vendorGroupKeys.split("\u001f") : []));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [vendorGroupKeys]);
 
-  const renderPdfBase = async (doc: any, isVehicleData: boolean) => {
+  const renderPdfBase = async (doc: PdfDocumentWithAutoTable, isVehicleData: boolean) => {
     const pw = doc.internal.pageSize.getWidth();
     const ph = doc.internal.pageSize.getHeight();
     // ═══════════════ HEADER ═══════════════
@@ -582,7 +601,7 @@ export default function DataMobilPage() {
       const { default: jsPDF } = await import("jspdf");
       const { default: autoTable } = await import("jspdf-autotable");
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-      const { pw, ph, cursorY: baseCursor } = await renderPdfBase(doc, false);
+      const { pw, ph, cursorY: baseCursor } = await renderPdfBase(doc as unknown as PdfDocumentWithAutoTable, false);
 
       const exportGroups = new Map<string, typeof filteredDocVehicles>();
       for (const row of filteredDocVehicles) {
@@ -660,7 +679,7 @@ export default function DataMobilPage() {
             }
           },
         });
-        cursorY = (doc as any).lastAutoTable.finalY + 8;
+        cursorY = ((doc as unknown as PdfDocumentWithAutoTable).lastAutoTable?.finalY ?? cursorY) + 8;
       }
 
       const pageCount = doc.getNumberOfPages();
@@ -692,7 +711,7 @@ export default function DataMobilPage() {
       const { default: jsPDF } = await import("jspdf");
       const { default: autoTable } = await import("jspdf-autotable");
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-      const { pw, ph, cursorY: baseCursor } = await renderPdfBase(doc, true);
+      const { pw, ph, cursorY: baseCursor } = await renderPdfBase(doc as unknown as PdfDocumentWithAutoTable, true);
 
       const exportGroups = new Map<string, typeof filteredDocVehicles>();
       for (const row of filteredDocVehicles) {
@@ -751,7 +770,7 @@ export default function DataMobilPage() {
           alternateRowStyles: { fillColor: [248, 250, 252] },
           margin: { left: 14, right: 14, bottom: 14 },
         });
-        cursorY = (doc as any).lastAutoTable.finalY + 8;
+        cursorY = ((doc as unknown as PdfDocumentWithAutoTable).lastAutoTable?.finalY ?? cursorY) + 8;
       }
 
       const pageCount = doc.getNumberOfPages();
@@ -805,6 +824,7 @@ export default function DataMobilPage() {
       kir_required: v.kir_required ?? true,
       stnk_required: v.stnk_required ?? true,
       pajak_required: v.pajak_required ?? true,
+      status: v.status ?? "Aktif",
     });
     setEditingId(v.id);
     setFormError("");
@@ -842,6 +862,7 @@ export default function DataMobilPage() {
       kir_required: form.kir_required,
       stnk_required: form.stnk_required,
       pajak_required: form.pajak_required,
+      status: form.status,
     };
 
     try {
@@ -935,7 +956,12 @@ export default function DataMobilPage() {
     setDeleting(true);
     const { data: oldRow } = await supabase.from("ga_vehicles").select("*").eq("id", deleteConfirm.id).maybeSingle();
     const { error } = await supabase.from("ga_vehicles").delete().eq("id", deleteConfirm.id);
-    if (error) { showToast("error", "Gagal Menghapus", error.message); setDeleting(false); return; }
+    if (error) {
+      const hasOdometerHistory = error.code === "23503" || error.message.toLowerCase().includes("vehicle_odometer_logs");
+      showToast("error", "Gagal Menghapus", hasOdometerHistory ? "Kendaraan sudah memiliki histori odometer. Ubah status menjadi Tidak Aktif." : error.message);
+      setDeleting(false);
+      return;
+    }
     const oldPhotoPath = (oldRow as DbGaVehicle | null)?.photo_path;
     if (oldPhotoPath) await supabase.storage.from(VEHICLE_PHOTO_BUCKET).remove([oldPhotoPath]);
     await logAudit({
@@ -1447,6 +1473,29 @@ export default function DataMobilPage() {
                       <label className="text-[10px] font-semibold text-muted-foreground mb-1.5 block">JENIS *</label>
                       <input type="text" placeholder="Box, Wingbox, Tronton, dll" value={form.jenis} onChange={(e) => setForm({ ...form, jenis: e.target.value })} className={inputClass} />
                     </div>
+                  </div>
+                  <div className="rounded-2xl border border-border p-3 bg-muted/20">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Status Kendaraan</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["Aktif", "Tidak Aktif"] as const).map((status) => (
+                        <button
+                          key={status}
+                          type="button"
+                          onClick={() => setForm({ ...form, status })}
+                          className={cn(
+                            "rounded-xl border px-3 py-2 text-xs font-bold transition-colors",
+                            form.status === status
+                              ? status === "Aktif"
+                                ? "border-success/30 bg-success/10 text-success"
+                                : "border-danger/30 bg-danger/10 text-danger"
+                              : "border-border bg-card text-muted-foreground hover:bg-muted"
+                          )}
+                        >
+                          {status}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[10px] text-muted-foreground">Kendaraan Tidak Aktif tetap muncul pada histori/laporan, tetapi tidak bisa dipilih untuk input odometer baru.</p>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>

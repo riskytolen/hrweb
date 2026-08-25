@@ -9,8 +9,6 @@ import {
   Trash2,
   X,
   Shield,
-  Mail,
-  User,
   Lock,
   Eye,
   EyeOff,
@@ -43,6 +41,8 @@ interface PegawaiLite {
   jabatan?: { nama: string } | { nama: string }[] | null;
 }
 
+let nextToastId = 1;
+
 // Helper: get jabatan nama from pegawai (handles both object and array from Supabase)
 function getJabatanNama(pegawai?: PegawaiLite | null): string {
   if (!pegawai?.jabatan) return "";
@@ -66,6 +66,7 @@ interface Toast {
 
 // ─── Permission Options ───
 const PERMISSION_OPTIONS = [
+  { key: "dashboard", label: "Dashboard" },
   { key: "employees", label: "Data Pegawai" },
   { key: "attendance", label: "Absensi" },
   { key: "leave", label: "Cuti & Izin" },
@@ -79,6 +80,7 @@ const PERMISSION_OPTIONS = [
   { key: "petty-cash", label: "Petty Cash" },
   { key: "data-mobil", label: "Data Mobil" },
   { key: "inventory-aset", label: "Aset" },
+  { key: "vehicle-odometer", label: "Operasional Kendaraan" },
   { key: "finance", label: "Finance" },
   { key: "legalitas", label: "Legalitas" },
   { key: "settings", label: "Pengaturan" },
@@ -107,6 +109,7 @@ export default function AccountsPage() {
     role_id: 0,
     employee_id: "" as string,
     status: "Aktif" as "Aktif" | "Tidak Aktif",
+    account_type: "internal" as "internal" | "external",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -134,7 +137,7 @@ export default function AccountsPage() {
 
   // ─── Toast helper ───
   const addToast = (type: "success" | "error", message: string) => {
-    const id = Date.now();
+    const id = nextToastId++;
     setToasts((prev) => [...prev, { id, type, message }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
   };
@@ -169,7 +172,10 @@ export default function AccountsPage() {
   }, []);
 
   useEffect(() => {
-    Promise.all([fetchUsers(), fetchRoles(), fetchEmployees()]).finally(() => setLoading(false));
+    const timer = window.setTimeout(() => {
+      Promise.all([fetchUsers(), fetchRoles(), fetchEmployees()]).finally(() => setLoading(false));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchUsers, fetchRoles, fetchEmployees]);
 
   // ─── Pegawai yang belum punya akun ───
@@ -181,7 +187,7 @@ export default function AccountsPage() {
   // ─── User CRUD ───
   const openCreateUser = () => {
     setEditingUserId(null);
-    setUserForm({ email: "", nama: "", password: "", role_id: roles[0]?.id || 0, employee_id: "", status: "Aktif" });
+    setUserForm({ email: "", nama: "", password: "", role_id: roles[0]?.id || 0, employee_id: "", status: "Aktif", account_type: "internal" });
     setShowPassword(false);
     setShowUserModal(true);
   };
@@ -195,6 +201,7 @@ export default function AccountsPage() {
       role_id: u.role_id || 0,
       employee_id: u.employee_id || "",
       status: u.status,
+      account_type: u.account_type ?? "internal",
     });
     setShowPassword(false);
     setShowUserModal(true);
@@ -225,6 +232,7 @@ export default function AccountsPage() {
             role_id: userForm.role_id,
             employee_id: userForm.employee_id || null,
             status: userForm.status,
+            account_type: userForm.account_type,
           })
           .eq("id", editingUserId);
 
@@ -248,6 +256,7 @@ export default function AccountsPage() {
             role_id: userForm.role_id,
             employee_id: userForm.employee_id || null,
             status: userForm.status,
+            account_type: userForm.account_type,
           }),
         });
 
@@ -433,7 +442,8 @@ export default function AccountsPage() {
         (u) =>
           u.nama.toLowerCase().includes(search.toLowerCase()) ||
           u.email.toLowerCase().includes(search.toLowerCase()) ||
-          (u.roles?.nama || "").toLowerCase().includes(search.toLowerCase())
+          (u.roles?.nama || "").toLowerCase().includes(search.toLowerCase()) ||
+          (u.account_type || "internal").toLowerCase().includes(search.toLowerCase())
       ),
     [users, search]
   );
@@ -644,6 +654,7 @@ export default function AccountsPage() {
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Nama</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Pegawai / Jabatan</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Role</th>
+                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Akun</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Status</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Login Terakhir</th>
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Aksi</th>
@@ -688,6 +699,16 @@ export default function AccountsPage() {
                         )}>
                           <Shield className="w-3 h-3" />
                           {u.roles?.nama || "Tanpa Role"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={cn(
+                          "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold",
+                          (u.account_type ?? "internal") === "external"
+                            ? "bg-violet-500/10 text-violet-600"
+                            : "bg-primary/10 text-primary"
+                        )}>
+                          {(u.account_type ?? "internal") === "external" ? "External" : "Internal"}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -926,6 +947,37 @@ export default function AccountsPage() {
                   )}
                 </div>
 
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Tipe Akun</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: "internal" as const, label: "Internal", desc: "Akses karyawan/perusahaan" },
+                      { value: "external" as const, label: "External", desc: "Akses tamu terbatas" },
+                    ]).map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setUserForm((prev) => ({
+                          ...prev,
+                          account_type: item.value,
+                          employee_id: item.value === "external" ? "" : prev.employee_id,
+                        }))}
+                        className={cn(
+                          "rounded-xl border p-3 text-left transition-all",
+                          userForm.account_type === item.value
+                            ? item.value === "external"
+                              ? "border-violet-500/30 bg-violet-500/10"
+                              : "border-primary/30 bg-primary/5"
+                            : "border-border hover:bg-muted/40"
+                        )}
+                      >
+                        <p className="text-xs font-bold text-foreground">{item.label}</p>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">{item.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Link Pegawai */}
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">
@@ -944,6 +996,7 @@ export default function AccountsPage() {
                           nama: emp ? emp.nama : "",
                         });
                       }}
+                      disabled={userForm.account_type === "external"}
                       className="w-full px-3 py-2.5 pr-8 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 appearance-none"
                     >
                       <option value="">— Tidak dihubungkan (input manual) —</option>
@@ -959,7 +1012,7 @@ export default function AccountsPage() {
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    {userForm.employee_id ? "Nama diambil dari data pegawai." : "Opsional. Jika tidak dipilih, isi nama manual di bawah."}
+                    {userForm.account_type === "external" ? "Akun external tidak dihubungkan ke data pegawai." : userForm.employee_id ? "Nama diambil dari data pegawai." : "Opsional. Jika tidak dipilih, isi nama manual di bawah."}
                   </p>
                 </div>
 

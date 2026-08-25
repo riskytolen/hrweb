@@ -39,6 +39,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
 import { cn, formatCurrency, formatNumber, getInitials } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/Skeleton";
+import RouteGuard from "@/components/RouteGuard";
 import { entityLabel } from "@/lib/audit";
 import {
   computePerformance,
@@ -184,7 +185,7 @@ function actionVerb(action: string): string {
 
 // ─── Main page ───
 export default function DashboardPage() {
-  const { profile } = useAuth();
+  const { profile, hasPermission, isLoading: authLoading, user } = useAuth();
   const [now, setNow] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const [kpi, setKpi] = useState<KpiData | null>(null);
@@ -202,9 +203,12 @@ export default function DashboardPage() {
 
   // Live clock — update tiap menit (client-only untuk hindari hydration mismatch)
   useEffect(() => {
-    setNow(new Date());
+    const initial = window.setTimeout(() => setNow(new Date()), 0);
     const t = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(t);
+    return () => {
+      window.clearTimeout(initial);
+      clearInterval(t);
+    };
   }, []);
 
   const fetchAll = useCallback(async () => {
@@ -536,8 +540,13 @@ export default function DashboardPage() {
   }, [period.start, period.end, prev.start, prev.end, today]);
 
   useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+    const canAccessDashboard = hasPermission("dashboard") || hasPermission("dashboard.view") || hasPermission("dashboard.input");
+    if (authLoading || !user || !canAccessDashboard) return;
+    const timer = window.setTimeout(() => {
+      void fetchAll();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [authLoading, fetchAll, hasPermission, user]);
 
   const totalPending = pending.reduce((s, p) => s + p.count, 0);
   const pendapatanGrowth = useMemo(() => {
@@ -557,6 +566,7 @@ export default function DashboardPage() {
   const initials = getInitials(namaUser);
 
   return (
+    <RouteGuard permission="dashboard">
     <div className="space-y-6 animate-fade-in">
       {/* ─── Hero / Greeting ─── */}
       <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-primary/[0.08] via-card to-card p-6">
@@ -1160,6 +1170,7 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+    </RouteGuard>
   );
 }
 

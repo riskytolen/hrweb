@@ -13,11 +13,18 @@ async function verifySuperAdmin() {
 
   const { data: profile } = await supabase
     .from("user_profiles")
-    .select("*, roles(id, nama, level)")
+    .select("*, roles(id, nama, level, status)")
     .eq("id", user.id)
     .single();
 
-  if (!profile || !profile.roles || profile.roles.level < 100) return null;
+  if (
+    !profile ||
+    profile.status !== "Aktif" ||
+    profile.account_type !== "internal" ||
+    !profile.roles ||
+    profile.roles.status !== "Aktif" ||
+    profile.roles.level < 100
+  ) return null;
 
   return user;
 }
@@ -36,7 +43,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { email, password, nama, role_id, employee_id, status } = body;
+    const { email, password, nama, role_id, employee_id, status, account_type } = body;
 
     if (!email || !password || !nama || !role_id) {
       return NextResponse.json(
@@ -48,6 +55,14 @@ export async function POST(request: NextRequest) {
     if (password.length < 6) {
       return NextResponse.json(
         { error: "Password minimal 6 karakter." },
+        { status: 400 }
+      );
+    }
+
+    const accountType = account_type === "external" ? "external" : "internal";
+    if (status && status !== "Aktif" && status !== "Tidak Aktif") {
+      return NextResponse.json(
+        { error: "Status akun tidak valid." },
         { status: 400 }
       );
     }
@@ -81,13 +96,19 @@ export async function POST(request: NextRequest) {
         .update({
           nama,
           role_id,
-          employee_id: employee_id || null,
+          employee_id: accountType === "external" ? null : employee_id || null,
           status: status || "Aktif",
+          account_type: accountType,
         })
         .eq("id", authData.user.id);
 
       if (profileError) {
         console.error("Failed to update profile:", profileError);
+        await adminClient.auth.admin.deleteUser(authData.user.id);
+        return NextResponse.json(
+          { error: "Gagal mengatur profil akun baru. Akun dibatalkan." },
+          { status: 500 }
+        );
       }
     }
 

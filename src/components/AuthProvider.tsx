@@ -20,6 +20,7 @@ export interface UserProfile {
   employee_id: string | null;
   avatar_url: string | null;
   status: "Aktif" | "Tidak Aktif";
+  account_type: "internal" | "external";
   last_login: string | null;
   created_at: string;
   updated_at: string;
@@ -29,6 +30,7 @@ export interface UserProfile {
     nama: string;
     level: number;
     permissions: string[];
+    status?: "Aktif" | "Tidak Aktif";
   } | null;
 }
 
@@ -71,6 +73,18 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
+function externalCanViewVehicleOdometer(permissions: string[], permission: string): boolean {
+  if (permission !== "vehicle-odometer" && permission !== "vehicle-odometer.view") return false;
+  return permissions.some(
+    (p) =>
+      p === "all" ||
+      p === "vehicle-odometer" ||
+      p === "vehicle-odometer.view" ||
+      p === "vehicle-odometer.input" ||
+      p === "vehicle-odometer.manage",
+  );
+}
+
 // ─── Provider ───
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [supabase] = useState(() => createClient());
@@ -83,12 +97,13 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     async (userId: string) => {
       const { data, error } = await supabase
         .from("user_profiles")
-        .select("*, roles(id, nama, level, permissions)")
+        .select("*, roles(id, nama, level, permissions, status)")
         .eq("id", userId)
         .single();
 
       if (error) {
         console.error("Failed to fetch profile:", error);
+        setProfile(null);
         return;
       }
 
@@ -103,14 +118,15 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
         }
+        if (data.status !== "Aktif" || data.roles?.status === "Tidak Aktif") {
+          setProfile(null);
+          await supabase.auth.signOut();
+          return;
+        }
         setProfile(data as UserProfile);
 
-        // Update last_login (fire and forget, don't block)
-        supabase
-          .from("user_profiles")
-          .update({ last_login: new Date().toISOString() })
-          .eq("id", userId)
-          .then(() => {});
+        // Update last_login via RPC so users cannot update privileged profile fields.
+        supabase.rpc("touch_user_last_login").then(() => {});
       }
     },
     [supabase]
@@ -144,12 +160,21 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, [supabase, fetchProfile]);
 
-  const isSuperAdmin = (profile?.roles?.level ?? 0) >= 100 || (profile?.roles?.permissions ?? []).includes("all");
+  const isSuperAdmin =
+    profile?.status === "Aktif" &&
+    profile.account_type === "internal" &&
+    profile.roles?.status !== "Tidak Aktif" &&
+    ((profile?.roles?.level ?? 0) >= 100 || (profile?.roles?.permissions ?? []).includes("all"));
 
   const hasPermission = useCallback(
     (permission: string): boolean => {
-      if (!profile?.roles) return false;
+      if (!profile?.roles || profile.status !== "Aktif" || profile.roles.status === "Tidak Aktif") return false;
       const perms = profile.roles.permissions;
+
+      if (profile.account_type === "external") {
+        return externalCanViewVehicleOdometer(perms, permission);
+      }
+
       // "all" = akses penuh
       if (perms.includes("all")) return true;
       // Cek exact match atau parent match (e.g. "employees" covers "employees.view")
@@ -167,8 +192,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
    */
   const getPermissionLevel = useCallback(
     (module: string): PermissionLevel => {
-      if (!profile?.roles) return "none";
+      if (!profile?.roles || profile.status !== "Aktif" || profile.roles.status === "Tidak Aktif") return "none";
       const perms = profile.roles.permissions;
+
+      if (profile.account_type === "external") {
+        if (module !== "vehicle-odometer") return "none";
+        return externalCanViewVehicleOdometer(perms, "vehicle-odometer") ? "view" : "none";
+      }
+
       // "all" = akses penuh
       if (perms.includes("all")) return "edit";
       // "module" (tanpa suffix) = full CRUD

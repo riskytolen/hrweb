@@ -465,6 +465,7 @@ export interface DbUserProfile {
   employee_id: string | null;
   avatar_url: string | null;
   status: "Aktif" | "Tidak Aktif";
+  account_type: "internal" | "external";
   last_login: string | null;
   created_at: string;
   updated_at: string;
@@ -736,6 +737,35 @@ export interface DbGaVehicleDocument {
   updated_at: string;
   // joined
   files?: DbGaVehicleDocumentFile[];
+}
+
+export interface DbVehicleOdometerVehicle {
+  id: number;
+  unit: string;
+  jenis: string;
+  status: "Aktif" | "Tidak Aktif";
+  last_log_id: number | null;
+  last_log_date: string | null;
+  last_odometer: number | null;
+  total_jarak: number;
+}
+
+export interface DbVehicleOdometerLog {
+  id: number;
+  vehicle_id: number;
+  vehicle_unit: string;
+  vehicle_jenis: string;
+  vehicle_status: "Aktif" | "Tidak Aktif";
+  tanggal: string;
+  odometer_awal: number;
+  odometer_akhir: number;
+  jarak_km: number;
+  catatan: string | null;
+  created_by: string | null;
+  created_by_nama: string | null;
+  created_at: string;
+  updated_at: string;
+  is_latest: boolean;
 }
 
 export interface DbCompanyLegalCategory {
