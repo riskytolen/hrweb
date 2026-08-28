@@ -212,7 +212,7 @@ export default function PayrollPage() {
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [payrolls, setPayrolls] = useState<PayrollRow[]>([]);
-  const [payrollExporting, setPayrollExporting] = useState<"slip" | "recap-pdf" | "recap-xlsx" | null>(null);
+  const [payrollExporting, setPayrollExporting] = useState<{ type: "slip"; payrollId: number } | { type: "recap-pdf" } | { type: "recap-xlsx" } | null>(null);
   /** Map employee_id → sort_order (global, dari tabel payroll_employee_order) */
   const [payrollOrder, setPayrollOrder] = useState<Map<string, number>>(new Map());
   const [orderSaving, setOrderSaving] = useState(false);
@@ -1171,7 +1171,7 @@ export default function PayrollPage() {
       showToast("error", "Slip Belum Final", "PDF slip hanya tersedia untuk payroll berstatus Final.");
       return;
     }
-    setPayrollExporting("slip");
+    setPayrollExporting({ type: "slip", payrollId: row.id });
     try {
       const filename = await exportPayrollSlipPdf(row, getPeriodRange(row.periode));
       const employee = getPayrollEmployeeSnapshot(row);
@@ -1193,7 +1193,7 @@ export default function PayrollPage() {
 
   const handleExportPayrollRecapPdf = async () => {
     if (payrollExporting || !ensureCanExportPayrollRecap()) return;
-    setPayrollExporting("recap-pdf");
+    setPayrollExporting({ type: "recap-pdf" });
     try {
       const filename = await exportPayrollRecapPdf(finalReportRows, periodKey, period);
       showToast("success", "PDF Rekap Dibuat", `${finalReportRows.length} slip Final diexport ke ${filename}.`);
@@ -1213,7 +1213,7 @@ export default function PayrollPage() {
 
   const handleExportPayrollRecapXlsx = async () => {
     if (payrollExporting || !ensureCanExportPayrollRecap()) return;
-    setPayrollExporting("recap-xlsx");
+    setPayrollExporting({ type: "recap-xlsx" });
     try {
       const filename = await exportPayrollRecapXlsx(finalReportRows, periodKey, period);
       showToast("success", "Excel Rekap Dibuat", `${finalReportRows.length} slip Final diexport ke ${filename}.`);
@@ -1932,6 +1932,10 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
   const finalReportRows = getRowsForMainTab("laporan");
   const isPayrollPeriodFullyFinal = payrolls.length > 0 && worksheetCount === 0 && draftCount === 0 && finalCount === payrolls.length;
   const payrollRecapDisabled = loading || !!payrollExporting || !isPayrollPeriodFullyFinal;
+  const isSlipExporting = payrollExporting?.type === "slip";
+  const isSlipExportingFor = (payrollId: number) => payrollExporting?.type === "slip" && payrollExporting.payrollId === payrollId;
+  const isRecapPdfExporting = payrollExporting?.type === "recap-pdf";
+  const isRecapXlsxExporting = payrollExporting?.type === "recap-xlsx";
 
   // ─── Periode navigation: berurutan (tidak boleh melompat) ───
   const prevPeriod = () => {
@@ -2749,11 +2753,11 @@ wsComputeTotals={wsComputeTotals}
                     Rekap resmi menunggu {worksheetCount} Worksheet / {draftCount} Draft
                   </span>
                 )}
-                <Button variant="outline" size="sm" icon={payrollExporting === "recap-pdf" ? Loader2 : Download} onClick={handleExportPayrollRecapPdf} disabled={payrollRecapDisabled}>
-                  {payrollExporting === "recap-pdf" ? "Export..." : "PDF Rekap"}
+                <Button variant="outline" size="sm" icon={isRecapPdfExporting ? Loader2 : Download} onClick={handleExportPayrollRecapPdf} disabled={payrollRecapDisabled} aria-busy={isRecapPdfExporting}>
+                  {isRecapPdfExporting ? "Export..." : "PDF Rekap"}
                 </Button>
-                <Button variant="outline" size="sm" icon={payrollExporting === "recap-xlsx" ? Loader2 : FileSpreadsheet} onClick={handleExportPayrollRecapXlsx} disabled={payrollRecapDisabled}>
-                  {payrollExporting === "recap-xlsx" ? "Export..." : "Excel Rekap"}
+                <Button variant="outline" size="sm" icon={isRecapXlsxExporting ? Loader2 : FileSpreadsheet} onClick={handleExportPayrollRecapXlsx} disabled={payrollRecapDisabled} aria-busy={isRecapXlsxExporting}>
+                  {isRecapXlsxExporting ? "Export..." : "Excel Rekap"}
                 </Button>
               </div>
             </div>
@@ -2812,10 +2816,11 @@ wsComputeTotals={wsComputeTotals}
                         <button
                           onClick={(e) => { e.stopPropagation(); void handleExportPayrollSlipPdf(row); }}
                           disabled={!!payrollExporting}
+                          aria-busy={isSlipExportingFor(row.id)}
                           className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                           title="Export PDF slip perorangan"
                         >
-                          {payrollExporting === "slip" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                          {isSlipExportingFor(row.id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                           PDF
                         </button>
                       </td>
@@ -3463,11 +3468,12 @@ wsComputeTotals={wsComputeTotals}
                     <Button
                       variant="outline"
                       size="sm"
-                      icon={payrollExporting === "slip" ? Loader2 : Download}
+                      icon={isSlipExportingFor(selectedPayroll.id) ? Loader2 : Download}
                       onClick={() => void handleExportPayrollSlipPdf(selectedPayroll)}
                       disabled={!!payrollExporting}
+                      aria-busy={isSlipExportingFor(selectedPayroll.id)}
                     >
-                      {payrollExporting === "slip" ? "Export..." : "PDF Slip"}
+                      {isSlipExportingFor(selectedPayroll.id) ? "Export..." : "PDF Slip"}
                     </Button>
                   )}
                   {canEdit && <Button
