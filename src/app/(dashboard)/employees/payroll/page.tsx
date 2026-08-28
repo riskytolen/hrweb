@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Users,
   FileText,
+  FileSpreadsheet,
   Download,
   Trash2,
   Zap,
@@ -52,6 +53,7 @@ import BreakdownLembur, { type LemburItem } from "./components/BreakdownLembur";
 import WorksheetEditor from "./components/WorksheetEditor";
 import WorksheetSheetFullscreen from "./components/WorksheetSheetFullscreen";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
+import { exportPayrollRecapPdf, exportPayrollRecapXlsx, exportPayrollSlipPdf, getPayrollEmployeeSnapshot } from "./payroll-export";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
@@ -172,19 +174,25 @@ type PeriodState = {
 };
 
 async function fetchPeriodState(periode: string): Promise<PeriodState> {
-  const { data, error } = await supabase
-    .from("payrolls")
-    .select("id, employee_id, status")
-    .eq("periode", periode);
-  if (error) return { total: 0, worksheet: 0, draft: 0, final: 0, duplicates: 0, error: error.message };
-  const rows = data || [];
-  const worksheet = rows.filter((r) => r.status === "Worksheet").length;
-  const draft = rows.filter((r) => r.status === "Draft").length;
-  const final = rows.filter((r) => r.status === "Final").length;
-  const seen = new Map<string, number>();
-  rows.forEach((r) => seen.set(r.employee_id, (seen.get(r.employee_id) || 0) + 1));
-  const duplicates = rows.length - seen.size;
-  return { total: rows.length, worksheet, draft, final, duplicates, error: null };
+  try {
+    const rows = await fetchAllRanges<{ id: number; employee_id: string; status: string }>((from, to) =>
+      supabase
+        .from("payrolls")
+        .select("id, employee_id, status")
+        .eq("periode", periode)
+        .order("id", { ascending: true })
+        .range(from, to)
+    );
+    const worksheet = rows.filter((r) => r.status === "Worksheet").length;
+    const draft = rows.filter((r) => r.status === "Draft").length;
+    const final = rows.filter((r) => r.status === "Final").length;
+    const seen = new Map<string, number>();
+    rows.forEach((r) => seen.set(r.employee_id, (seen.get(r.employee_id) || 0) + 1));
+    const duplicates = rows.length - seen.size;
+    return { total: rows.length, worksheet, draft, final, duplicates, error: null };
+  } catch (err) {
+    return { total: 0, worksheet: 0, draft: 0, final: 0, duplicates: 0, error: err instanceof Error ? err.message : "Gagal mengambil status periode." };
+  }
 }
 
 export default function PayrollPage() {
@@ -204,6 +212,7 @@ export default function PayrollPage() {
 
   const [employees, setEmployees] = useState<EmployeeLite[]>([]);
   const [payrolls, setPayrolls] = useState<PayrollRow[]>([]);
+  const [payrollExporting, setPayrollExporting] = useState<"slip" | "recap-pdf" | "recap-xlsx" | null>(null);
   /** Map employee_id → sort_order (global, dari tabel payroll_employee_order) */
   const [payrollOrder, setPayrollOrder] = useState<Map<string, number>>(new Map());
   const [orderSaving, setOrderSaving] = useState(false);
@@ -365,14 +374,16 @@ export default function PayrollPage() {
 
   // ─── Fetch payrolls ───
   const fetchPayrolls = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("payrolls")
-      .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening, status)")
-      .eq("periode", periodKey)
-      .order("id", { ascending: true });
-    if (error) { showToast("error", "Gagal Memuat Payroll", error.message); return; }
-    if (data) {
-      const mapped: PayrollRow[] = data.map((d: Record<string, unknown>) => {
+    try {
+      const data = await fetchAllRanges<Record<string, unknown>>((from, to) =>
+        supabase
+          .from("payrolls")
+          .select("*, pegawai(nama, jabatan:jabatan_id(nama), bank, no_rekening, nama_rekening, status)")
+          .eq("periode", periodKey)
+          .order("id", { ascending: true })
+          .range(from, to)
+      );
+      const mapped: PayrollRow[] = data.map((d) => {
         const peg = d.pegawai as Record<string, unknown> | null;
         return {
           ...d,
@@ -381,6 +392,9 @@ export default function PayrollPage() {
         } as PayrollRow;
       });
       setPayrolls(mapped);
+    } catch (err) {
+      setPayrolls([]);
+      showToast("error", "Gagal Memuat Payroll", err instanceof Error ? err.message : "Gagal mengambil data payroll.");
     }
   }, [periodKey, showToast]);
 
@@ -1004,8 +1018,9 @@ export default function PayrollPage() {
       entityLabel: `Bulk update ${draftIds.length} slip gaji ke Final`,
       metadata: { ids: draftIds, records: draftsToUpdate.map(r => ({ id: r.id, nama: r.pegawaiNama })) }
     });
-    
+
     setPayrolls((prev) => prev.map((p) => draftIds.includes(p.id) ? { ...p, status: "Final", locked_at: lockedAt, locked_by: user?.id ?? null } : p));
+    await fetchPayrolls();
     showToast("success", "Slip Difinalkan", `${draftIds.length} slip gaji berhasil diubah menjadi Final.`);
     
     // Update selected payroll if it's currently open
@@ -1135,6 +1150,84 @@ export default function PayrollPage() {
     } catch (err) {
       console.error("[Payroll] Export CSV Gaji Pokok failed:", err);
       showToast("error", "Gagal Export", err instanceof Error ? err.message : "Tidak dapat membuat file CSV.");
+    }
+  };
+
+  const ensureCanExportPayrollRecap = () => {
+    if (payrolls.length === 0) {
+      showToast("error", "Tidak Ada Data", "Periode ini belum memiliki payroll untuk direkap.");
+      return false;
+    }
+    if (!isPayrollPeriodFullyFinal) {
+      showToast("error", "Periode Belum Final", `Selesaikan ${worksheetCount} Worksheet dan ${draftCount} Draft sebelum export rekap resmi.`);
+      return false;
+    }
+    return true;
+  };
+
+  const handleExportPayrollSlipPdf = async (row: PayrollRow) => {
+    if (payrollExporting) return;
+    if (row.status !== "Final") {
+      showToast("error", "Slip Belum Final", "PDF slip hanya tersedia untuk payroll berstatus Final.");
+      return;
+    }
+    setPayrollExporting("slip");
+    try {
+      const filename = await exportPayrollSlipPdf(row, getPeriodRange(row.periode));
+      const employee = getPayrollEmployeeSnapshot(row);
+      showToast("success", "PDF Slip Dibuat", `${employee.nama} diexport ke ${filename}.`);
+      await logAudit({
+        supabase,
+        action: "export",
+        entityType: "payrolls",
+        entityId: row.id,
+        entityLabel: `Export PDF slip ${employee.nama} (${row.periode})`,
+        metadata: { periode: row.periode, employee_id: row.employee_id, filename },
+      });
+    } catch (err) {
+      showToast("error", "Gagal Export Slip", err instanceof Error ? err.message : "Tidak dapat membuat PDF slip.");
+    } finally {
+      setPayrollExporting(null);
+    }
+  };
+
+  const handleExportPayrollRecapPdf = async () => {
+    if (payrollExporting || !ensureCanExportPayrollRecap()) return;
+    setPayrollExporting("recap-pdf");
+    try {
+      const filename = await exportPayrollRecapPdf(finalReportRows, periodKey, period);
+      showToast("success", "PDF Rekap Dibuat", `${finalReportRows.length} slip Final diexport ke ${filename}.`);
+      await logAudit({
+        supabase,
+        action: "export",
+        entityType: "payrolls",
+        entityLabel: `Export PDF rekap payroll final ${periodKey}`,
+        metadata: { periode: periodKey, jumlah_slip: finalReportRows.length, filename },
+      });
+    } catch (err) {
+      showToast("error", "Gagal Export PDF", err instanceof Error ? err.message : "Tidak dapat membuat PDF rekap.");
+    } finally {
+      setPayrollExporting(null);
+    }
+  };
+
+  const handleExportPayrollRecapXlsx = async () => {
+    if (payrollExporting || !ensureCanExportPayrollRecap()) return;
+    setPayrollExporting("recap-xlsx");
+    try {
+      const filename = await exportPayrollRecapXlsx(finalReportRows, periodKey, period);
+      showToast("success", "Excel Rekap Dibuat", `${finalReportRows.length} slip Final diexport ke ${filename}.`);
+      await logAudit({
+        supabase,
+        action: "export",
+        entityType: "payrolls",
+        entityLabel: `Export Excel rekap payroll final ${periodKey}`,
+        metadata: { periode: periodKey, jumlah_slip: finalReportRows.length, filename },
+      });
+    } catch (err) {
+      showToast("error", "Gagal Export Excel", err instanceof Error ? err.message : "Tidak dapat membuat Excel rekap.");
+    } finally {
+      setPayrollExporting(null);
     }
   };
 
@@ -1821,7 +1914,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
 
   // ─── Filter & paginate (by tab + search) ───
   const tabFiltered = getRowsForMainTab(activeMainTab);
-  const filtered = getFilteredRowsForMainTab(activeMainTab);
+  const filtered = activeMainTab === "laporan" ? tabFiltered : getFilteredRowsForMainTab(activeMainTab);
   const paged = filtered.slice((page - 1) * PAYROLL_PAGE_SIZE, page * PAYROLL_PAGE_SIZE);
   const scopedSelectedRows = filtered.filter((p) => selectedIds.has(p.id));
   const scopedSelectedIds = scopedSelectedRows.map((p) => p.id);
@@ -1836,6 +1929,9 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
   const draftCount = payrolls.filter((p) => p.status === "Draft").length;
   const finalCount = payrolls.filter((p) => p.status === "Final").length;
   const worksheetCount = payrolls.filter((p) => p.status === "Worksheet").length;
+  const finalReportRows = getRowsForMainTab("laporan");
+  const isPayrollPeriodFullyFinal = payrolls.length > 0 && worksheetCount === 0 && draftCount === 0 && finalCount === payrolls.length;
+  const payrollRecapDisabled = loading || !!payrollExporting || !isPayrollPeriodFullyFinal;
 
   // ─── Periode navigation: berurutan (tidak boleh melompat) ───
   const prevPeriod = () => {
@@ -2638,16 +2734,29 @@ wsComputeTotals={wsComputeTotals}
       ) : activeMainTab === "laporan" ? (
         <div className="bg-card rounded-2xl border border-border overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-border bg-card">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20 flex-shrink-0">
-                <BarChart3 className="w-4.5 h-4.5 text-white" />
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm shadow-primary/20 flex-shrink-0">
+                  <BarChart3 className="w-4.5 h-4.5 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-bold text-foreground">Laporan Payroll Final</h2>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Rekap read-only untuk slip yang sudah difinalkan</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <h2 className="text-sm font-bold text-foreground">Laporan Payroll Final</h2>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Rekap read-only untuk slip yang sudah difinalkan</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {!isPayrollPeriodFullyFinal && payrolls.length > 0 && (
+                  <span className="rounded-full border border-warning/20 bg-warning/10 px-2.5 py-1 text-[10px] font-semibold text-warning">
+                    Rekap resmi menunggu {worksheetCount} Worksheet / {draftCount} Draft
+                  </span>
+                )}
+                <Button variant="outline" size="sm" icon={payrollExporting === "recap-pdf" ? Loader2 : Download} onClick={handleExportPayrollRecapPdf} disabled={payrollRecapDisabled}>
+                  {payrollExporting === "recap-pdf" ? "Export..." : "PDF Rekap"}
+                </Button>
+                <Button variant="outline" size="sm" icon={payrollExporting === "recap-xlsx" ? Loader2 : FileSpreadsheet} onClick={handleExportPayrollRecapXlsx} disabled={payrollRecapDisabled}>
+                  {payrollExporting === "recap-xlsx" ? "Export..." : "Excel Rekap"}
+                </Button>
               </div>
             </div>
-          </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-5 border-b border-border bg-muted/20">
             <_HeroMetric icon={ShieldCheck} label="Slip Final" value={String(filtered.length)} unit="slip" iconBg="bg-emerald-100" iconColor="text-emerald-700" />
@@ -2657,7 +2766,7 @@ wsComputeTotals={wsComputeTotals}
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px]">
+            <table className="w-full min-w-[980px]">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-12">#</th>
@@ -2667,13 +2776,14 @@ wsComputeTotals={wsComputeTotals}
                   <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Potongan</th>
                   <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Netto Transfer</th>
                   <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Status</th>
+                  <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Export</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
                 {loading ? (
-                  <SkeletonTable rows={6} cols={7} />
+                  <SkeletonTable rows={6} cols={8} />
                 ) : paged.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-16 text-sm text-muted-foreground">
+                  <tr><td colSpan={8} className="text-center py-16 text-sm text-muted-foreground">
                     <div className="flex flex-col items-center gap-2">
                       <BarChart3 className="w-10 h-10 text-muted-foreground/20" />
                       <p>Belum ada laporan Final</p>
@@ -2681,23 +2791,34 @@ wsComputeTotals={wsComputeTotals}
                     </div>
                   </td></tr>
                 ) : paged.map((row, idx) => {
-                  const peg = row.pegawai as { bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null } | undefined;
+                  const employee = getPayrollEmployeeSnapshot(row);
                   return (
                     <tr key={row.id} className="hover:bg-muted/20 transition-colors">
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">{(page - 1) * PAYROLL_PAGE_SIZE + idx + 1}</td>
                       <td className="px-5 py-3.5 cursor-pointer" onClick={() => openDetail(row)}>
-                        <p className="text-sm font-semibold text-foreground">{row.pegawaiNama}</p>
-                        <p className="text-xs text-muted-foreground">{row.pegawaiJabatan}</p>
+                        <p className="text-sm font-semibold text-foreground">{employee.nama}</p>
+                        <p className="text-xs text-muted-foreground">{employee.jabatan}</p>
                       </td>
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">
-                        <p className="font-semibold text-foreground">{peg?.bank || "-"}</p>
-                        <p>{peg?.no_rekening || "-"}</p>
-                        <p className="text-[10px]">{peg?.nama_rekening || "-"}</p>
+                        <p className="font-semibold text-foreground">{employee.bank}</p>
+                        <p>{employee.noRekening}</p>
+                        <p className="text-[10px]">{employee.namaRekening}</p>
                       </td>
                       <td className="px-5 py-3.5 text-right text-sm font-semibold text-success tabular-nums">{formatCurrency(row.total_pendapatan)}</td>
                       <td className="px-5 py-3.5 text-right text-sm font-semibold text-danger tabular-nums">{formatCurrency(row.total_potongan)}</td>
                       <td className="px-5 py-3.5 text-right text-sm font-bold text-foreground tabular-nums">{formatCurrency(row.netto)}</td>
                       <td className="px-5 py-3.5 text-center"><FinalPillBadge /></td>
+                      <td className="px-5 py-3.5 text-center">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void handleExportPayrollSlipPdf(row); }}
+                          disabled={!!payrollExporting}
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-semibold text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Export PDF slip perorangan"
+                        >
+                          {payrollExporting === "slip" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                          PDF
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -3338,6 +3459,17 @@ wsComputeTotals={wsComputeTotals}
               {/* Footer actions */}
               <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-card flex-shrink-0">
                 <div className="flex items-center gap-2">
+                  {selectedPayroll.status === "Final" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon={payrollExporting === "slip" ? Loader2 : Download}
+                      onClick={() => void handleExportPayrollSlipPdf(selectedPayroll)}
+                      disabled={!!payrollExporting}
+                    >
+                      {payrollExporting === "slip" ? "Export..." : "PDF Slip"}
+                    </Button>
+                  )}
                   {canEdit && <Button
                     variant="danger"
                     size="sm"

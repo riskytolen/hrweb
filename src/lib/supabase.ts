@@ -200,6 +200,18 @@ export interface DbPayroll {
   catatan: string | null;
   created_at: string;
   updated_at: string;
+  locked_at: string | null;
+  locked_by: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  version: number;
+  snapshot_data: Record<string, unknown> | null;
+  final_employee_nama: string | null;
+  final_employee_jabatan: string | null;
+  final_employee_bank: string | null;
+  final_employee_no_rekening: string | null;
+  final_employee_nama_rekening: string | null;
+  final_snapshot_at: string | null;
   /** Kapan worksheet terakhir di-recompute. NULL untuk slip Draft/Final. */
   last_recomputed_at: string | null;
   /** Snapshot auto-computed nilai gapok saat worksheet di-compute. Untuk audit. */
