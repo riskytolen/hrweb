@@ -110,9 +110,11 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [revealedPasswords, setRevealedPasswords] = useState<Map<string, string>>(new Map());
-  const [missingPasswordUserIds, setMissingPasswordUserIds] = useState<Set<string>>(new Set());
-  const [revealingUserId, setRevealingUserId] = useState<string | null>(null);
+  // Edit Password modal — current password reveal (per-modal, not per-row)
+  const [currentPassword, setCurrentPassword] = useState<string | null>(null);
+  const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false);
+  const [currentPasswordLoading, setCurrentPasswordLoading] = useState(false);
+  const [currentPasswordMissing, setCurrentPasswordMissing] = useState(false);
 
   // User modal
   const [showUserModal, setShowUserModal] = useState(false);
@@ -187,44 +189,43 @@ export default function AccountsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const revealPassword = useCallback(async (userId: string) => {
-    // Already revealed: hide
-    if (revealedPasswords.has(userId)) {
-      setRevealedPasswords((prev) => {
-        const next = new Map(prev);
-        next.delete(userId);
-        return next;
-      });
+  const closeResetPasswordModal = useCallback(() => {
+    if (resettingPw || currentPasswordLoading) return;
+    setShowResetPwModal(false);
+    setResetPwUser(null);
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowNewPassword(false);
+    setCurrentPassword(null);
+    setCurrentPasswordVisible(false);
+    setCurrentPasswordLoading(false);
+    setCurrentPasswordMissing(false);
+  }, [resettingPw, currentPasswordLoading]);
+
+  const toggleCurrentPassword = useCallback(async () => {
+    if (!resetPwUser) return;
+    if (currentPasswordVisible) {
+      setCurrentPassword(null);
+      setCurrentPasswordVisible(false);
       return;
     }
-
-    setRevealingUserId(userId);
-    setMissingPasswordUserIds((prev) => {
-      const next = new Set(prev);
-      next.delete(userId);
-      return next;
-    });
+    if (currentPasswordMissing) return;
+    setCurrentPasswordLoading(true);
     try {
-      const res = await fetch(`/api/admin/users/${userId}/password/reveal`, {
+      const res = await fetch(`/api/admin/users/${resetPwUser.id}/password/reveal`, {
         method: "POST",
       });
-
       const result = await res.json();
-
       if (!res.ok) {
-        if (res.status === 404) {
-          setMissingPasswordUserIds((prev) => new Set(prev).add(userId));
-        }
+        if (res.status === 404) setCurrentPasswordMissing(true);
         throw new Error(result.error || "Gagal mengambil password.");
       }
-
-      setRevealedPasswords((prev) => new Map(prev).set(userId, result.password));
+      setCurrentPassword(result.password as string);
+      setCurrentPasswordVisible(true);
       if (result.passwordChangedAt) {
         setUsers((prev) =>
           prev.map((u) =>
-            u.id === userId
-              ? { ...u, password_changed_at: result.passwordChangedAt }
-              : u
+            u.id === resetPwUser.id ? { ...u, password_changed_at: result.passwordChangedAt as string } : u
           )
         );
       }
@@ -232,9 +233,9 @@ export default function AccountsPage() {
       const message = err instanceof Error ? err.message : "Gagal mengambil password.";
       addToast("error", message);
     } finally {
-      setRevealingUserId(null);
+      setCurrentPasswordLoading(false);
     }
-  }, [revealedPasswords]);
+  }, [resetPwUser, currentPasswordVisible, currentPasswordMissing]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -272,12 +273,16 @@ export default function AccountsPage() {
     setShowUserModal(true);
   };
 
-  // Fix #6: Open reset password modal
+  // Fix #6: Open edit password modal
   const openResetPassword = (u: UserWithRole) => {
     setResetPwUser({ id: u.id, nama: u.nama });
     setNewPassword("");
     setConfirmPassword("");
     setShowNewPassword(false);
+    setCurrentPassword(null);
+    setCurrentPasswordVisible(false);
+    setCurrentPasswordLoading(false);
+    setCurrentPasswordMissing(false);
     setShowResetPwModal(true);
   };
 
@@ -401,43 +406,33 @@ export default function AccountsPage() {
         throw new Error(result.error || "Gagal mereset password.");
       }
 
-      // Update local state with new password_changed_at
       if (result.passwordChangedAt) {
         setUsers((prev) =>
           prev.map((u) =>
             u.id === resetPwUser.id
-              ? { ...u, password_changed_at: result.passwordChangedAt }
+              ? { ...u, password_changed_at: result.passwordChangedAt as string }
               : u
           )
         );
-        setRevealedPasswords((prev) =>
-          new Map(prev).set(resetPwUser.id, newPassword)
-        );
-        setMissingPasswordUserIds((prev) => {
-          const next = new Set(prev);
-          next.delete(resetPwUser.id);
-          return next;
-        });
       }
 
-      const ts = result.passwordChangedAt
-        ? formatDateTime(result.passwordChangedAt)
-        : "";
+      const ts = result.passwordChangedAt ? formatDateTime(result.passwordChangedAt as string) : "";
       const suffix = ts ? ` (${ts})` : "";
-      addToast(
-        "success",
-        `Password ${resetPwUser.nama} berhasil direset.${suffix}`
-      );
+      addToast("success", `Password ${resetPwUser.nama} berhasil direset.${suffix}`);
 
       if (result.warning) {
         addToast("error", result.warning);
       }
 
       setShowResetPwModal(false);
+      setResetPwUser(null);
       setNewPassword("");
       setConfirmPassword("");
       setShowNewPassword(false);
-      setResetPwUser(null);
+      setCurrentPassword(null);
+      setCurrentPasswordVisible(false);
+      setCurrentPasswordLoading(false);
+      setCurrentPasswordMissing(false);
 
       // Refetch to reconcile
       fetchUsers();
@@ -600,7 +595,6 @@ export default function AccountsPage() {
             <div className="h-4 w-20 rounded bg-muted animate-pulse" />
             <div className="h-4 w-16 rounded bg-muted animate-pulse" />
             <div className="h-4 w-28 rounded bg-muted animate-pulse" />
-            <div className="h-4 w-20 rounded bg-muted animate-pulse" />
             <div className="h-4 w-16 rounded bg-muted animate-pulse ml-auto" />
           </div>
 
@@ -620,7 +614,6 @@ export default function AccountsPage() {
               <div className="h-6 w-24 rounded-full bg-muted animate-pulse" />
               <div className="h-6 w-16 rounded-full bg-muted animate-pulse" />
               <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-              <div className="h-6 w-24 rounded-lg bg-muted animate-pulse" />
               <div className="flex items-center gap-1 ml-auto">
                 <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
                 <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
@@ -771,7 +764,6 @@ export default function AccountsPage() {
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Akun</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Status</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Aktivitas</th>
-                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Password</th>
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Aksi</th>
                   </tr>
                 </thead>
@@ -853,58 +845,11 @@ export default function AccountsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        {revealedPasswords.has(u.id) ? (
-                          <div className="flex items-center gap-2">
-                            <code className="font-mono text-xs text-foreground bg-muted/50 px-2 py-1 rounded-lg max-w-[200px] truncate block">
-                              {revealedPasswords.get(u.id)}
-                            </code>
-                            <button
-                              onClick={() => revealPassword(u.id)}
-                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground flex-shrink-0"
-                              title="Sembunyikan password"
-                            >
-                              <EyeOff className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ) : missingPasswordUserIds.has(u.id) ? (
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground/70 italic whitespace-nowrap">
-                              Belum tersimpan
-                            </span>
-                            <button
-                              onClick={() => openResetPassword(u)}
-                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground flex-shrink-0"
-                              title="Reset password agar tersimpan"
-                            >
-                              <Lock className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => revealPassword(u.id)}
-                            disabled={revealingUserId === u.id}
-                            className={cn(
-                              "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                              "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground",
-                              revealingUserId === u.id && "opacity-50 cursor-wait"
-                            )}
-                            title="Lihat password"
-                          >
-                            {revealingUserId === u.id ? (
-                              <div className="w-3.5 h-3.5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
-                            ) : (
-                              <Eye className="w-3.5 h-3.5" />
-                            )}
-                            <span>{revealingUserId === u.id ? "..." : "****"}</span>
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => openResetPassword(u)}
                             className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                            title="Reset Password"
+                            title="Edit Password"
                           >
                             <Lock className="w-4 h-4" />
                           </button>
@@ -1318,7 +1263,7 @@ export default function AccountsPage() {
       {showResetPwModal && resetPwUser && (
         <Portal>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !resettingPw && setShowResetPwModal(false)} />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeResetPasswordModal} />
             <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden">
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 bg-muted/30">
@@ -1326,9 +1271,9 @@ export default function AccountsPage() {
                   <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
                     <Lock className="w-4 h-4 text-amber-500" />
                   </div>
-                  <h2 className="text-sm font-bold text-foreground">Reset Password</h2>
+                  <h2 className="text-sm font-bold text-foreground">Edit Password</h2>
                 </div>
-                <button onClick={() => !resettingPw && setShowResetPwModal(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+                <button onClick={closeResetPasswordModal} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -1341,8 +1286,43 @@ export default function AccountsPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-foreground truncate">{resetPwUser.nama}</p>
-                    <p className="text-[10px] text-muted-foreground">Password akan direset</p>
+                    <p className="text-[10px] text-muted-foreground">Kelola password akun</p>
                   </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Password Saat Ini</label>
+                  <div className="relative">
+                    <input
+                      type={currentPasswordVisible ? "text" : "password"}
+                      value={currentPasswordVisible && currentPassword ? currentPassword : currentPasswordMissing ? "" : "••••••••"}
+                      placeholder={currentPasswordMissing ? "Belum tersimpan" : "••••••••"}
+                      readOnly
+                      className="w-full px-3 py-2.5 pr-10 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    />
+                    <button
+                      type="button"
+                      onClick={toggleCurrentPassword}
+                      disabled={currentPasswordLoading || currentPasswordMissing}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      title={currentPasswordVisible ? "Sembunyikan password" : currentPasswordMissing ? "Belum tersimpan" : "Lihat password"}
+                    >
+                      {currentPasswordLoading ? (
+                        <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+                      ) : currentPasswordVisible ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                  {currentPasswordMissing ? (
+                    <p className="text-[10px] text-muted-foreground mt-1 italic">
+                      Password belum tersimpan. Ganti password terlebih dahulu.
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground mt-1">Klik ikon mata untuk melihat password saat ini.</p>
+                  )}
                 </div>
 
                 <div>
@@ -1396,31 +1376,16 @@ export default function AccountsPage() {
 
               {/* Footer */}
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setShowResetPwModal(false);
-                    setNewPassword("");
-                    setConfirmPassword("");
-                    setShowNewPassword(false);
-                    setResetPwUser(null);
-                  }}
-                  disabled={resettingPw}
-                >
+                <Button variant="outline" size="sm" onClick={closeResetPasswordModal} disabled={resettingPw || currentPasswordLoading}>
                   Batal
                 </Button>
                 <Button
                   size="sm"
                   icon={Lock}
                   onClick={resetPassword}
-                  disabled={
-                    resettingPw ||
-                    newPassword.length < 10 ||
-                    newPassword !== confirmPassword
-                  }
+                  disabled={resettingPw || currentPasswordLoading || newPassword.length < 10 || newPassword !== confirmPassword}
                 >
-                  {resettingPw ? "Mereset..." : "Reset Password"}
+                  {resettingPw ? "Menyimpan..." : "Simpan Password"}
                 </Button>
               </div>
             </div>
