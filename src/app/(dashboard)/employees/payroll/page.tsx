@@ -39,7 +39,7 @@ import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { cn, formatCurrency } from "@/lib/utils";
-import { supabase, type DbPayroll, type DbPegawai, type NonActivePeriod, type DbPayrollGroup, type DbPayrollEmployeeGroup } from "@/lib/supabase";
+import { supabase, type DbPayroll, type DbPegawai, type NonActivePeriod, type DbPayrollGroup, type DbPayrollEmployeeGroup, type DbBackupLiburSetting } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -54,6 +54,7 @@ import WorksheetEditor from "./components/WorksheetEditor";
 import WorksheetSheetFullscreen from "./components/WorksheetSheetFullscreen";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
 import { exportPayrollRecapPdf, exportPayrollRecapXlsx, exportPayrollSlipPdf, getPayrollEmployeeSnapshot } from "./payroll-export";
+import { calculateBackupLiburByEmployee, getBackupLiburPayrollValues, type BackupLiburPoint } from "./backup-libur";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
@@ -81,6 +82,16 @@ async function fetchAllRanges<T>(
     if (!data || data.length < SUPABASE_PAGE_SIZE) break;
   }
   return rows;
+}
+
+async function fetchBackupLiburSettings(): Promise<DbBackupLiburSetting> {
+  const { data, error } = await supabase
+    .from("backup_libur_settings")
+    .select("id, delivery_status_id, driver_amount, helper_amount, created_at, updated_at")
+    .eq("id", 1)
+    .single();
+  if (error || !data) throw new Error(error?.message || "Pengaturan Backup Libur belum tersedia.");
+  return data as DbBackupLiburSetting;
 }
 
 // ─── Period helpers ───
@@ -452,20 +463,26 @@ export default function PayrollPage() {
         return;
       }
 
-      // 4. Fetch delivery points totals for each employee in period
-      const dpData = await fetchAllRanges<{ employee_id: string; total: number }>((from, to) =>
-        supabase
-          .from("delivery_points")
-          .select("employee_id, total")
-          .gte("tanggal", genPeriod.start)
-          .lte("tanggal", genPeriod.end)
-          .in("employee_id", newEmps.map((e) => e.id))
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
+      // 4. Fetch delivery points totals and Backup Libur markers for each employee in period.
+      const [backupLiburSettings, dpData] = await Promise.all([
+        fetchBackupLiburSettings(),
+        fetchAllRanges<BackupLiburPoint & { total: number }>((from, to) =>
+          supabase
+            .from("delivery_points")
+            .select("employee_id, total, tanggal, status_id, role")
+            .gte("tanggal", genPeriod.start)
+            .lte("tanggal", genPeriod.end)
+            .in("employee_id", newEmps.map((e) => e.id))
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+      ]);
+
+      const backupLiburByEmployee = calculateBackupLiburByEmployee(dpData, backupLiburSettings);
 
       const dpTotals = new Map<string, number>();
       dpData.forEach((d) => {
+        if (!d.employee_id) return;
         dpTotals.set(d.employee_id, (dpTotals.get(d.employee_id) || 0) + d.total);
       });
 
@@ -552,6 +569,7 @@ export default function PayrollPage() {
           potongan_lain: 0,
           jht: 0,
           bpjs_kesehatan: 0,
+          ...getBackupLiburPayrollValues(backupLiburByEmployee, e.id, backupLiburSettings),
           status: "Draft",
           catatan: null,
           extra_job_keterangan: null,
@@ -1692,7 +1710,8 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       const employeeIds = worksheetRows.map((p) => p.employee_id);
       const refreshedAt = new Date().toISOString();
 
-      const [empData, dpData, attData, lemburData] = await Promise.all([
+      const [backupLiburSettings, empData, dpData, attData, lemburData] = await Promise.all([
+        fetchBackupLiburSettings(),
         fetchAllRanges<{ id: string; gaji_pokok: number | null }>((from, to) =>
           supabase
             .from("pegawai")
@@ -1701,10 +1720,10 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
             .order("id", { ascending: true })
             .range(from, to)
         ),
-        fetchAllRanges<{ employee_id: string; total: number | null }>((from, to) =>
+        fetchAllRanges<BackupLiburPoint & { total: number | null }>((from, to) =>
           supabase
             .from("delivery_points")
-            .select("employee_id, total")
+            .select("employee_id, total, tanggal, status_id, role")
             .gte("tanggal", period.start)
             .lte("tanggal", period.end)
             .in("employee_id", employeeIds)
@@ -1737,8 +1756,10 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       const gapokMap = new Map(empData.map((e) => [e.id, e.gaji_pokok || 0]));
       const titikTotals = new Map<string, number>();
       dpData.forEach((d) => {
+        if (!d.employee_id) return;
         titikTotals.set(d.employee_id, (titikTotals.get(d.employee_id) || 0) + (d.total || 0));
       });
+      const backupLiburByEmployee = calculateBackupLiburByEmployee(dpData, backupLiburSettings);
       const absenTotals = new Map<string, number>();
       attData.forEach((d) => {
         absenTotals.set(d.employee_id, (absenTotals.get(d.employee_id) || 0) + (d.denda || 0));
@@ -1755,9 +1776,15 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         const sourceTitik = titikTotals.get(row.employee_id) || 0;
         const sourceLembur = lemburTotals.get(row.employee_id) || 0;
         const sourcePotonganAbsen = absenTotals.get(row.employee_id) || 0;
+        const backupLibur = getBackupLiburPayrollValues(backupLiburByEmployee, row.employee_id, backupLiburSettings);
         const payload: Record<string, number | string | null> = {
           gaji_pokok: sourceGapok,
           pendapatan_titik: sourceTitik,
+          tambahan_backup_libur: backupLibur.tambahan_backup_libur,
+          backup_libur_driver_days: backupLibur.backup_libur_driver_days,
+          backup_libur_helper_days: backupLibur.backup_libur_helper_days,
+          backup_libur_driver_rate: backupLibur.backup_libur_driver_rate,
+          backup_libur_helper_rate: backupLibur.backup_libur_helper_rate,
           lembur: sourceLembur,
           potongan_absen: sourcePotonganAbsen,
           source_gaji_pokok: sourceGapok,
@@ -1792,7 +1819,12 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
           metadata: {
             periode: periodKey,
             jumlah_slip: updated,
-            sumber: ["gaji_pokok", "pendapatan_titik", "lembur", "potongan_absen"],
+            sumber: ["gaji_pokok", "pendapatan_titik", "tambahan_backup_libur", "lembur", "potongan_absen"],
+            backup_libur: {
+              delivery_status_id: backupLiburSettings.delivery_status_id,
+              driver_amount: backupLiburSettings.driver_amount,
+              helper_amount: backupLiburSettings.helper_amount,
+            },
           },
         });
       }
@@ -2030,20 +2062,25 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       }
 
       // 2. Fetch delivery points, attendance, lembur dalam periode
-      const dpData = await fetchAllRanges<{ employee_id: string; total: number }>((from, to) =>
-        supabase
-          .from("delivery_points")
-          .select("employee_id, total")
-          .gte("tanggal", genPeriod.start)
-          .lte("tanggal", genPeriod.end)
-          .in("employee_id", allEmps.map((e) => e.id))
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
+      const [backupLiburSettings, dpData] = await Promise.all([
+        fetchBackupLiburSettings(),
+        fetchAllRanges<BackupLiburPoint & { total: number }>((from, to) =>
+          supabase
+            .from("delivery_points")
+            .select("employee_id, total, tanggal, status_id, role")
+            .gte("tanggal", genPeriod.start)
+            .lte("tanggal", genPeriod.end)
+            .in("employee_id", allEmps.map((e) => e.id))
+            .order("id", { ascending: true })
+            .range(from, to)
+        ),
+      ]);
       const dpTotals = new Map<string, number>();
       dpData.forEach((d) => {
+        if (!d.employee_id) return;
         dpTotals.set(d.employee_id, (dpTotals.get(d.employee_id) || 0) + d.total);
       });
+      const backupLiburByEmployee = calculateBackupLiburByEmployee(dpData, backupLiburSettings);
 
       const attData = await fetchAllRanges<{ employee_id: string; denda: number; tanggal: string; status: string }>((from, to) =>
         supabase
@@ -2105,6 +2142,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
           periode_selesai: genPeriod.end,
           gaji_pokok: sourceGapok,
           pendapatan_titik: sourceTitik,
+          ...getBackupLiburPayrollValues(backupLiburByEmployee, e.id, backupLiburSettings),
           extra_job: 0,
           uang_makan: 0,
           insentif: 0,

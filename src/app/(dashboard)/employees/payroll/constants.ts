@@ -9,6 +9,7 @@ export type LemburBreakdownItem = { tanggal: string; jam_mulai: string; jam_sele
 export const PENDAPATAN_FIELDS: FieldDef[] = [
   { key: "gaji_pokok", label: "Gaji Pokok", readonly: true },
   { key: "pendapatan_titik", label: "Pendapatan Titik", readonly: true },
+  { key: "tambahan_backup_libur", label: "Tambahan Backup Libur", readonly: true },
   { key: "lembur", label: "Lembur", readonly: true },
   { key: "extra_job", label: "Extra Job", keteranganKey: "extra_job_keterangan" },
   { key: "uang_makan", label: "Uang Makan" },

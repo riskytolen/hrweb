@@ -33,13 +33,13 @@ import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
-import { cn, generateDivisionColor, toTitleCase, toUpperTrim } from "@/lib/utils";
+import { cn, formatCurrency, generateDivisionColor, toTitleCase, toUpperTrim } from "@/lib/utils";
 import Portal from "@/components/ui/Portal";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { logAudit } from "@/lib/audit";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting, type DbGaVehicleDocumentSetting, type DbGaVehicleVendor, type DbGaVehicleDivision } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting, type DbGaVehicleDocumentSetting, type DbGaVehicleVendor, type DbGaVehicleDivision, type DbBackupLiburSetting } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -57,6 +57,15 @@ type VehicleDivision = DbGaVehicleDivision;
 
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 const selectClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 appearance-none text-foreground";
+
+function parseCurrencyInput(value: string): number {
+  return parseInt(value.replace(/\D/g, ""), 10) || 0;
+}
+
+function formatCurrencyInput(value: string): string {
+  const amount = parseCurrencyInput(value);
+  return amount === 0 ? "" : new Intl.NumberFormat("id-ID").format(amount);
+}
 
 // ─── Period helpers (cut-off tanggal 8) ───
 const CUT_OFF_DAY = 8;
@@ -84,6 +93,7 @@ const tabs = [
   { key: "nama-titik", label: "Nama Titik", icon: MapPinned },
   { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
   { key: "status-titik", label: "Status Titik", icon: Tag },
+  { key: "backup-libur", label: "Backup Libur", icon: CalendarDays },
   { key: "bank", label: "Bank", icon: Landmark },
   { key: "kendaraan", label: "Kendaraan", icon: Truck },
   { key: "legal", label: "Legal", icon: Scale },
@@ -195,6 +205,9 @@ export default function MasterDataPage() {
   const [showDStatusForm, setShowDStatusForm] = useState(false);
   const [editingDStatusId, setEditingDStatusId] = useState<number | null>(null);
   const [dStatusForm, setDStatusForm] = useState({ nama: "", kode: "", color: "#6b7280", status: "Aktif" });
+  const [backupLiburSetting, setBackupLiburSetting] = useState<DbBackupLiburSetting | null>(null);
+  const [showBackupLiburForm, setShowBackupLiburForm] = useState(false);
+  const [backupLiburForm, setBackupLiburForm] = useState({ driver_amount: "65000", helper_amount: "45000" });
 
   // ─── Legal Settings State ───
   const [legalSettings, setLegalSettings] = useState<DbLegalSetting[]>([]);
@@ -307,13 +320,22 @@ export default function MasterDataPage() {
     if (data) setDStatusList(data);
   };
 
+  const fetchBackupLiburSettings = async () => {
+    const { data } = await supabase
+      .from("backup_libur_settings")
+      .select("*, delivery_statuses(nama, kode, status)")
+      .eq("id", 1)
+      .maybeSingle();
+    if (data) setBackupLiburSetting(data as DbBackupLiburSetting);
+  };
+
   const fetchPenalties = async () => {
     const { data } = await supabase.from("attendance_penalty_rates").select("*, divisions(nama)").order("division_id");
     if (data) setPenaltyList(data.map((p) => ({ ...p, divisionNama: p.divisions?.nama || "-" })));
   };
 
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchVendorKendaraan(), fetchDivisiKendaraan(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings(), fetchVehicleDocSettings()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchVendorKendaraan(), fetchDivisiKendaraan(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchBackupLiburSettings(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings(), fetchVehicleDocSettings()]).then(() => setLoading(false));
   }, []);
 
   // Lock body scroll when any modal is open
@@ -326,7 +348,7 @@ export default function MasterDataPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showLevelForm, showJabatanForm, showBankForm, showVendorKendaraanForm, showDivisiKendaraanForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, showPenaltyForm, showLegalSettingForm, showCompanyForm, showLeaveSettingForm, showVehicleDocSettingForm, syncRow]);
+  }, [showLevelForm, showJabatanForm, showBankForm, showVendorKendaraanForm, showDivisiKendaraanForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, showBackupLiburForm, showPenaltyForm, showLegalSettingForm, showCompanyForm, showLeaveSettingForm, showVehicleDocSettingForm, syncRow]);
 
   const showSuccess = (title: string, message?: string) => {
     setToast({ show: true, title, message: message || "" });
@@ -1010,11 +1032,21 @@ export default function MasterDataPage() {
     }
     setShowDStatusForm(false);
     fetchDStatuses();
+    fetchBackupLiburSettings();
   };
   const handleDeleteDStatus = async (id: number) => {
+    if (backupLiburSetting?.delivery_status_id === id) {
+      setDeleteConfirm(null);
+      showSuccess("Status Dipakai", "Status ini dipakai sebagai sumber insentif Backup Libur dan tidak dapat dihapus.");
+      return;
+    }
     const oldStatus = dStatusList.find((s) => s.id === id);
-    await supabase.from("delivery_statuses").delete().eq("id", id);
+    const { error } = await supabase.from("delivery_statuses").delete().eq("id", id);
     setDeleteConfirm(null);
+    if (error) {
+      showSuccess("Gagal Hapus", error.message);
+      return;
+    }
     showSuccess("Status Dihapus", "Data status telah dihapus.");
     if (oldStatus) {
       await logAudit({
@@ -1045,6 +1077,54 @@ export default function MasterDataPage() {
       });
     }
     fetchDStatuses();
+    fetchBackupLiburSettings();
+  };
+
+  // ─── Backup Libur Settings Handlers ───
+  const handleOpenEditBackupLiburSettings = () => {
+    if (!backupLiburSetting) return;
+    setBackupLiburForm({
+      driver_amount: String(backupLiburSetting.driver_amount),
+      helper_amount: String(backupLiburSetting.helper_amount),
+    });
+    setShowBackupLiburForm(true);
+  };
+
+  const handleSaveBackupLiburSettings = async () => {
+    if (!canEdit || !backupLiburSetting) return;
+    const payload = {
+      driver_amount: parseCurrencyInput(backupLiburForm.driver_amount),
+      helper_amount: parseCurrencyInput(backupLiburForm.helper_amount),
+    };
+    const { data, error } = await supabase
+      .from("backup_libur_settings")
+      .update(payload)
+      .eq("id", backupLiburSetting.id)
+      .select("*, delivery_statuses(nama, kode, status)")
+      .single();
+
+    if (error) {
+      showSuccess("Gagal Menyimpan", error.message);
+      return;
+    }
+
+    await logAudit({
+      supabase,
+      action: "update",
+      entityType: "backup_libur_settings",
+      entityId: backupLiburSetting.id,
+      entityLabel: "Insentif Backup Libur",
+      oldData: {
+        driver_amount: backupLiburSetting.driver_amount,
+        helper_amount: backupLiburSetting.helper_amount,
+        delivery_status_id: backupLiburSetting.delivery_status_id,
+      },
+      newData: payload,
+    });
+
+    setBackupLiburSetting(data as DbBackupLiburSetting);
+    setShowBackupLiburForm(false);
+    showSuccess("Backup Libur Diperbarui", `Driver ${formatCurrency(payload.driver_amount)}, Helper ${formatCurrency(payload.helper_amount)}.`);
   };
 
   // ─── Bank Handlers ───
@@ -1922,6 +2002,71 @@ export default function MasterDataPage() {
           </>
         )}
 
+        {/* ─── TAB: BACKUP LIBUR ─── */}
+        {activeTab === "backup-libur" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Insentif Backup Libur</h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Tambahan payroll dari Rekap Titik berstatus Backup Libur, dihitung sekali per pegawai, tanggal, dan role.</p>
+              </div>
+              {canEdit && <Button variant="outline" size="sm" icon={Pencil} onClick={handleOpenEditBackupLiburSettings}>Edit Nominal</Button>}
+            </div>
+            <div className="p-5 space-y-4">
+              {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Skeleton className="h-32 rounded-2xl" />
+                  <Skeleton className="h-32 rounded-2xl" />
+                  <Skeleton className="h-32 rounded-2xl" />
+                </div>
+              ) : backupLiburSetting ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="rounded-2xl border border-border p-4 bg-muted/20">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-foreground">Status Sumber</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Rekap Titik yang memicu tambahan.</p>
+                        </div>
+                        <Tag className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        <p className="text-lg font-bold text-foreground">{backupLiburSetting.delivery_statuses?.nama || "Backup Libur"}</p>
+                        <span className="inline-flex text-[10px] font-mono text-muted-foreground bg-card border border-border px-2 py-0.5 rounded">{backupLiburSetting.delivery_statuses?.kode || "BKP-LB"}</span>
+                      </div>
+                    </div>
+                    {[
+                      { label: "Driver", amount: backupLiburSetting.driver_amount, tone: "text-blue-700 bg-blue-50 dark:text-blue-300 dark:bg-blue-500/10" },
+                      { label: "Helper", amount: backupLiburSetting.helper_amount, tone: "text-orange-700 bg-orange-50 dark:text-orange-300 dark:bg-orange-500/10" },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-2xl border border-border p-4 bg-muted/20">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-foreground">{item.label}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Nominal per hari-role Backup Libur.</p>
+                          </div>
+                          <CircleDollarSign className="w-4 h-4 text-primary" />
+                        </div>
+                        <div className={cn("mt-4 rounded-xl px-3 py-2 inline-block", item.tone)}>
+                          <p className="text-lg font-bold tabular-nums">{formatCurrency(item.amount)}</p>
+                          <p className="text-[10px]">per pegawai/tanggal/role</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-xs text-amber-800 dark:text-amber-200">
+                    Perubahan nominal berlaku untuk Worksheet yang dihitung atau di-refresh setelah perubahan. Slip Draft dan Final tidak berubah otomatis.
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-border bg-muted/20 px-4 py-6 text-sm text-muted-foreground text-center">
+                  Pengaturan Backup Libur belum tersedia. Jalankan migrasi database terlebih dahulu.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         {/* ─── TAB: BANK ─── */}
         {activeTab === "bank" && (
           <>
@@ -2336,6 +2481,63 @@ export default function MasterDataPage() {
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
               <Button variant="outline" size="sm" onClick={() => setShowLeaveSettingForm(false)}>Batal</Button>
               <Button size="sm" icon={Check} onClick={handleSaveLeave}>Simpan</Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {/* ═══ BACKUP LIBUR SETTINGS FORM MODAL ═══ */}
+      {showBackupLiburForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowBackupLiburForm(false)} />
+          <div className="relative w-full max-w-sm bg-card rounded-2xl shadow-2xl animate-scale-in">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <CalendarDays className="w-4 h-4 text-primary" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">Edit Backup Libur</h2>
+              </div>
+              <button onClick={() => setShowBackupLiburForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Nominal Driver <span className="text-danger">*</span></label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={formatCurrencyInput(backupLiburForm.driver_amount)}
+                    onChange={(e) => setBackupLiburForm({ ...backupLiburForm, driver_amount: String(parseCurrencyInput(e.target.value)) })}
+                    className={cn(inputClass, "pl-9 text-right tabular-nums")}
+                    placeholder="65.000"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Nominal Helper <span className="text-danger">*</span></label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={formatCurrencyInput(backupLiburForm.helper_amount)}
+                    onChange={(e) => setBackupLiburForm({ ...backupLiburForm, helper_amount: String(parseCurrencyInput(e.target.value)) })}
+                    className={cn(inputClass, "pl-9 text-right tabular-nums")}
+                    placeholder="45.000"
+                  />
+                </div>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 px-3 py-2.5 text-[10px] text-muted-foreground">
+                Dihitung sekali per pegawai, tanggal, dan role pada Rekap Titik yang memakai status {backupLiburSetting?.delivery_statuses?.nama || "Backup Libur"}.
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
+              <Button variant="outline" size="sm" onClick={() => setShowBackupLiburForm(false)}>Batal</Button>
+              <Button size="sm" icon={Check} onClick={handleSaveBackupLiburSettings}>Simpan</Button>
             </div>
           </div>
         </div>

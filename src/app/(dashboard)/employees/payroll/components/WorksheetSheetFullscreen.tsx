@@ -65,7 +65,7 @@ interface WorksheetSheetFullscreenProps {
   onClose: () => void;
 }
 
-const READONLY_KEYS = new Set(["gaji_pokok", "pendapatan_titik", "lembur", "potongan_absen"]);
+const READONLY_KEYS = new Set(["gaji_pokok", "pendapatan_titik", "tambahan_backup_libur", "lembur", "potongan_absen"]);
 const FROZEN_COLS = new Set(["_no", "_nik", "_nama", "_jabatan", "_status"]);
 const REQUIRED_VISIBLE_COLUMN_KEYS = new Set(["_no", "_nama"]);
 const COLUMN_VISIBILITY_STORAGE_PREFIX = "hrweb.payroll.sheet.hiddenColumns";
@@ -505,6 +505,7 @@ export default function WorksheetSheetFullscreen({
   const sheetLabels: Record<string, string> = {
     gaji_pokok: "GAPOK",
     pendapatan_titik: "TITIK",
+    tambahan_backup_libur: "BACKUP LIBUR",
     lembur: "LEMBUR",
     extra_job: "EXTRA JOB",
     uang_makan: "UANG MAKAN",

@@ -60,6 +60,7 @@ export type AuditEntityType =
   | "ga_vehicles"
   | "ga_vehicle_documents"
   | "ga_vehicle_document_settings"
+  | "backup_libur_settings"
   | "vehicle_odometer_logs"
   | "ga_asset_categories"
   | "ga_asset_locations"
@@ -242,6 +243,7 @@ export function entityLabel(entityType: string): string {
     ga_vehicles: "Data Mobil",
     ga_vehicle_documents: "Dokumen Kendaraan",
     ga_vehicle_document_settings: "Pengaturan Dokumen Kendaraan",
+    backup_libur_settings: "Pengaturan Backup Libur",
     vehicle_odometer_logs: "Log Odometer Kendaraan",
     ga_asset_categories: "Kategori Aset",
     ga_asset_locations: "Lokasi Aset",

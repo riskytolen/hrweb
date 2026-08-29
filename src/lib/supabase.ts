@@ -171,6 +171,12 @@ export interface DbPayroll {
   // Pendapatan
   gaji_pokok: number;
   pendapatan_titik: number;
+  /** Tambahan otomatis dari Rekap Titik berstatus Backup Libur. */
+  tambahan_backup_libur: number;
+  backup_libur_driver_days: number;
+  backup_libur_helper_days: number;
+  backup_libur_driver_rate: number;
+  backup_libur_helper_rate: number;
   extra_job: number;
   extra_job_keterangan: string | null;
   uang_makan: number;
@@ -230,6 +236,16 @@ export interface DbDeliveryStatus {
   status: "Aktif" | "Tidak Aktif";
   created_at: string;
   updated_at: string;
+}
+
+export interface DbBackupLiburSetting {
+  id: 1;
+  delivery_status_id: number;
+  driver_amount: number;
+  helper_amount: number;
+  created_at: string;
+  updated_at: string;
+  delivery_statuses?: DbDeliveryStatus;
 }
 
 /**
