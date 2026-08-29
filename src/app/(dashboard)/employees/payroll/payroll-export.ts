@@ -5,7 +5,6 @@ type PeriodRange = { start: string; end: string; label: string };
 
 type PayrollCompanyInfo = {
   namaPerusahaan: string;
-  namaBadanHukum: string;
   alamat: string;
   noTelp: string;
   email: string;
@@ -110,7 +109,6 @@ async function getPayrollCompanyInfo(): Promise<PayrollCompanyInfo> {
   });
   return {
     namaPerusahaan: settings.nama_perusahaan || "JAMS LOGISTICS",
-    namaBadanHukum: settings.nama_badan_hukum || "CV. JAMI BERKAH TRANSINDO",
     alamat: settings.alamat || "",
     noTelp: settings.no_telp || "",
     email: settings.email || "",
@@ -145,20 +143,16 @@ async function addPortraitHeader(doc: PdfDoc, company: PayrollCompanyInfo): Prom
     doc.text(company.namaPerusahaan, pageWidth / 2, y + 8, { align: "center" });
     y += 18;
   }
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.setTextColor(30);
-  doc.text(company.namaBadanHukum, pageWidth / 2, y, { align: "center" });
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(90);
-  if (company.alamat) doc.text(company.alamat, pageWidth / 2, y + 4, { align: "center" });
+  if (company.alamat) doc.text(company.alamat, pageWidth / 2, y, { align: "center" });
   const contacts = [company.noTelp && `Telp: ${company.noTelp}`, company.email && `Email: ${company.email}`].filter(Boolean).join(" | ");
-  if (contacts) doc.text(contacts, pageWidth / 2, y + 8, { align: "center" });
+  if (contacts) doc.text(contacts, pageWidth / 2, y + 4, { align: "center" });
   doc.setDrawColor(37, 99, 235);
   doc.setLineWidth(0.8);
-  doc.line(18, y + 12, pageWidth - 18, y + 12);
-  return y + 22;
+  doc.line(18, y + 8, pageWidth - 18, y + 8);
+  return y + 18;
 }
 
 function addFooter(doc: PdfDoc, company: PayrollCompanyInfo, label: string): void {
