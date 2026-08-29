@@ -55,6 +55,18 @@ interface UserWithRole extends UserProfile {
   pegawai?: PegawaiLite | null;
 }
 
+// Helper: format datetime for display
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 type Tab = "users" | "roles";
 
 // ─── Toast ───
@@ -118,6 +130,7 @@ export default function AccountsPage() {
   const [showResetPwModal, setShowResetPwModal] = useState(false);
   const [resetPwUser, setResetPwUser] = useState<{ id: string; nama: string } | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [resettingPw, setResettingPw] = useState(false);
 
@@ -211,6 +224,7 @@ export default function AccountsPage() {
   const openResetPassword = (u: UserWithRole) => {
     setResetPwUser({ id: u.id, nama: u.nama });
     setNewPassword("");
+    setConfirmPassword("");
     setShowNewPassword(false);
     setShowResetPwModal(true);
   };
@@ -240,8 +254,8 @@ export default function AccountsPage() {
         addToast("success", `Akun ${userForm.nama} berhasil diperbarui.`);
       } else {
         // Fix #1: Create new user via API Route (tidak mengganti session admin)
-        if (!userForm.password || userForm.password.length < 6) {
-          addToast("error", "Password minimal 6 karakter.");
+        if (!userForm.password || userForm.password.length < 10) {
+          addToast("error", "Password minimal 10 karakter.");
           setSaving(false);
           return;
         }
@@ -305,8 +319,13 @@ export default function AccountsPage() {
   const resetPassword = async () => {
     if (!resetPwUser || !newPassword) return;
 
-    if (newPassword.length < 6) {
-      addToast("error", "Password minimal 6 karakter.");
+    if (newPassword.length < 10) {
+      addToast("error", "Password minimal 10 karakter.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      addToast("error", "Password konfirmasi tidak cocok.");
       return;
     }
 
@@ -327,8 +346,38 @@ export default function AccountsPage() {
         throw new Error(result.error || "Gagal mereset password.");
       }
 
-      addToast("success", `Password ${resetPwUser.nama} berhasil direset.`);
+      // Update local state with new password_changed_at
+      if (result.passwordChangedAt) {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === resetPwUser.id
+              ? { ...u, password_changed_at: result.passwordChangedAt }
+              : u
+          )
+        );
+      }
+
+      const ts = result.passwordChangedAt
+        ? formatDateTime(result.passwordChangedAt)
+        : "";
+      const suffix = ts ? ` (${ts})` : "";
+      addToast(
+        "success",
+        `Password ${resetPwUser.nama} berhasil direset.${suffix}`
+      );
+
+      if (result.warning) {
+        addToast("error", result.warning);
+      }
+
       setShowResetPwModal(false);
+      setNewPassword("");
+      setConfirmPassword("");
+      setShowNewPassword(false);
+      setResetPwUser(null);
+
+      // Refetch to reconcile
+      fetchUsers();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Gagal mereset password.";
       addToast("error", message);
@@ -656,7 +705,7 @@ export default function AccountsPage() {
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Role</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Akun</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Status</th>
-                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Login Terakhir</th>
+                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Aktivitas</th>
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Aksi</th>
                   </tr>
                 </thead>
@@ -727,10 +776,15 @@ export default function AccountsPage() {
                           {u.status}
                         </button>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {u.last_login
-                          ? new Date(u.last_login).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
-                          : "Belum pernah"}
+                      <td className="px-4 py-3 text-xs text-muted-foreground space-y-0.5">
+                        <div>Login: {formatDateTime(u.last_login)}</div>
+                        <div>
+                          Password:{" "}
+                          {u.password_changed_at
+                            ? formatDateTime(u.password_changed_at)
+                            : <span className="italic opacity-60">Belum tercatat</span>
+                          }
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
@@ -1062,7 +1116,7 @@ export default function AccountsPage() {
                         type={showPassword ? "text" : "password"}
                         value={userForm.password}
                         onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                        placeholder="Minimal 6 karakter"
+                        placeholder="Minimal 10 karakter"
                         className="w-full px-3 py-2.5 pr-10 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
                       />
                       <button
@@ -1073,9 +1127,9 @@ export default function AccountsPage() {
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    {userForm.password.length > 0 && userForm.password.length < 6 && (
+                    {userForm.password.length > 0 && userForm.password.length < 10 && (
                       <p className="text-[10px] text-danger mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" /> Minimal 6 karakter
+                        <AlertCircle className="w-3 h-3" /> Minimal 10 karakter
                       </p>
                     )}
                   </div>
@@ -1135,7 +1189,7 @@ export default function AccountsPage() {
                   size="sm"
                   icon={editingUserId ? CheckCircle : Plus}
                   onClick={saveUser}
-                  disabled={saving || !userForm.nama || !userForm.email || !userForm.role_id || (!editingUserId && userForm.password.length < 6)}
+                  disabled={saving || !userForm.nama || !userForm.email || !userForm.role_id || (!editingUserId && userForm.password.length < 10)}
                 >
                   {saving ? "Menyimpan..." : editingUserId ? "Simpan" : "Buat Akun"}
                 </Button>
@@ -1187,7 +1241,8 @@ export default function AccountsPage() {
                       type={showNewPassword ? "text" : "password"}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Minimal 6 karakter"
+                      placeholder="Minimal 10 karakter"
+                      autoComplete="new-password"
                       autoFocus
                       className="w-full px-3 py-2.5 pr-10 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
                     />
@@ -1199,9 +1254,28 @@ export default function AccountsPage() {
                       {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  {newPassword.length > 0 && newPassword.length < 6 && (
+                  {newPassword.length > 0 && newPassword.length < 10 && (
                     <p className="text-[10px] text-danger mt-1 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> Minimal 6 karakter
+                      <AlertCircle className="w-3 h-3" /> Minimal 10 karakter
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">
+                    Konfirmasi Password <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Ulangi password baru"
+                    autoComplete="new-password"
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                  {confirmPassword.length > 0 && newPassword !== confirmPassword && (
+                    <p className="text-[10px] text-danger mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> Password tidak cocok
                     </p>
                   )}
                 </div>
@@ -1209,10 +1283,30 @@ export default function AccountsPage() {
 
               {/* Footer */}
               <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
-                <Button variant="outline" size="sm" onClick={() => setShowResetPwModal(false)} disabled={resettingPw}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowResetPwModal(false);
+                    setNewPassword("");
+                    setConfirmPassword("");
+                    setShowNewPassword(false);
+                    setResetPwUser(null);
+                  }}
+                  disabled={resettingPw}
+                >
                   Batal
                 </Button>
-                <Button size="sm" icon={Lock} onClick={resetPassword} disabled={resettingPw || newPassword.length < 6}>
+                <Button
+                  size="sm"
+                  icon={Lock}
+                  onClick={resetPassword}
+                  disabled={
+                    resettingPw ||
+                    newPassword.length < 10 ||
+                    newPassword !== confirmPassword
+                  }
+                >
                   {resettingPw ? "Mereset..." : "Reset Password"}
                 </Button>
               </div>

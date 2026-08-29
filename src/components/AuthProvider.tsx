@@ -22,6 +22,7 @@ export interface UserProfile {
   status: "Aktif" | "Tidak Aktif";
   account_type: "internal" | "external";
   last_login: string | null;
+  password_changed_at: string | null;
   created_at: string;
   updated_at: string;
   // joined

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase-server";
+import { logAudit } from "@/lib/audit";
 
 // ─── Helper: verify caller is Super Admin ───
 async function verifySuperAdmin() {
@@ -52,9 +53,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (password.length < 6) {
+    if (password.length < 10) {
       return NextResponse.json(
-        { error: "Password minimal 6 karakter." },
+        { error: "Password minimal 10 karakter." },
         { status: 400 }
       );
     }
@@ -188,34 +189,132 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-    const { userId, password } = body;
-
-    if (!userId || !password) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { error: "User ID dan password wajib diisi." },
+        { error: "Request body tidak valid." },
         { status: 400 }
       );
     }
 
-    if (password.length < 6) {
+    const { userId, password } = body as Record<string, unknown>;
+
+    if (!userId || typeof userId !== "string") {
       return NextResponse.json(
-        { error: "Password minimal 6 karakter." },
+        { error: "User ID wajib diisi." },
+        { status: 400 }
+      );
+    }
+
+    if (!password || typeof password !== "string") {
+      return NextResponse.json(
+        { error: "Password wajib diisi." },
+        { status: 400 }
+      );
+    }
+
+    if (password.length < 10) {
+      return NextResponse.json(
+        { error: "Password minimal 10 karakter." },
+        { status: 400 }
+      );
+    }
+
+    // UUID format check
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(userId)) {
+      return NextResponse.json(
+        { error: "Format User ID tidak valid." },
+        { status: 400 }
+      );
+    }
+
+    // Prevent self-reset (would invalidate own session)
+    if (userId === caller.id) {
+      return NextResponse.json(
+        { error: "Tidak bisa mereset password akun sendiri." },
         { status: 400 }
       );
     }
 
     const adminClient = createAdminClient();
+    const serviceClient = createAdminClient();
 
-    const { error } = await adminClient.auth.admin.updateUserById(userId, {
-      password,
-    });
+    // 1. Update password in Supabase Auth
+    const { error: authError } =
+      await adminClient.auth.admin.updateUserById(userId, {
+        password,
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true });
+    // 2. Record password change timestamp via RPC
+    let passwordChangedAt: string | null = null;
+    let rpcFailed = false;
+    try {
+      const { data: ts, error: rpcErr } = await serviceClient.rpc(
+        "mark_password_changed",
+        { target_user_id: userId }
+      );
+      if (rpcErr) {
+        console.error("RPC mark_password_changed failed:", rpcErr);
+        rpcFailed = true;
+      } else {
+        passwordChangedAt = ts as string;
+      }
+    } catch (rpcEx) {
+      console.error("RPC mark_password_changed exception:", rpcEx);
+      rpcFailed = true;
+    }
+
+    // 3. Audit log (best-effort, never blocks response)
+    try {
+      const targetProfile = await serviceClient
+        .from("user_profiles")
+        .select("nama")
+        .eq("id", userId)
+        .maybeSingle();
+
+      await logAudit({
+        supabase: serviceClient,
+        action: "status_change",
+        entityType: "user_profiles",
+        entityId: userId,
+        entityLabel: targetProfile?.data?.nama ?? null,
+        oldData: { password_changed_at: null },
+        newData: { password_changed_at: passwordChangedAt },
+        metadata: {
+          operation: "password_reset",
+          called_by: caller.id,
+          rpc_failed: rpcFailed,
+        },
+      });
+    } catch (auditErr) {
+      console.warn("[audit] Failed to log password reset:", auditErr);
+    }
+
+    if (rpcFailed) {
+      return NextResponse.json(
+        {
+          success: true,
+          userId,
+          passwordChangedAt: null,
+          warning:
+            "Password berhasil diubah, tetapi pencatatan waktu terjadi kesalahan. Silakan refresh halaman.",
+        },
+        { status: 200 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      userId,
+      passwordChangedAt,
+    });
   } catch (err) {
     console.error("PATCH /api/admin/users error:", err);
     return NextResponse.json(
