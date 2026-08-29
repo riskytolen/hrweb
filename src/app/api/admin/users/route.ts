@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase-server";
 import { logAudit } from "@/lib/audit";
+import { encryptPassword } from "@/lib/account-password-crypto";
 
 // ─── Helper: verify caller is Super Admin ───
 async function verifySuperAdmin() {
@@ -110,6 +111,24 @@ export async function POST(request: NextRequest) {
           { error: "Gagal mengatur profil akun baru. Akun dibatalkan." },
           { status: 500 }
         );
+      }
+
+      // 3. Save encrypted password for reveal capability
+      try {
+        const enc = encryptPassword(password, authData.user.id);
+        await adminClient.from("account_password_secrets").insert({
+          user_id: authData.user.id,
+          password_encrypted: enc.ciphertext,
+          password_iv: enc.iv,
+          password_tag: enc.tag,
+          key_version: enc.keyVersion,
+          is_active: true,
+          created_by: caller.id,
+          updated_by: caller.id,
+        });
+      } catch (encErr) {
+        console.error("Failed to save encrypted credential:", encErr);
+        // Non-fatal: account is created, just reveal won't work until next reset
       }
     }
 
@@ -252,7 +271,31 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: authError.message }, { status: 400 });
     }
 
-    // 2. Record password change timestamp via RPC
+    // 2. Deactivate old credential, save new encrypted password
+    try {
+      await serviceClient
+        .from("account_password_secrets")
+        .update({ is_active: false, updated_at: new Date().toISOString(), updated_by: caller.id })
+        .eq("user_id", userId)
+        .eq("is_active", true);
+
+      const enc = encryptPassword(password, userId);
+      await serviceClient.from("account_password_secrets").insert({
+        user_id: userId,
+        password_encrypted: enc.ciphertext,
+        password_iv: enc.iv,
+        password_tag: enc.tag,
+        key_version: enc.keyVersion,
+        is_active: true,
+        created_by: caller.id,
+        updated_by: caller.id,
+      });
+    } catch (encErr) {
+      console.error("Failed to save encrypted credential:", encErr);
+      // Non-fatal: password is changed in Auth, reveal won't work until next reset
+    }
+
+    // 3. Record password change timestamp via RPC
     let passwordChangedAt: string | null = null;
     let rpcFailed = false;
     try {
@@ -271,7 +314,7 @@ export async function PATCH(request: NextRequest) {
       rpcFailed = true;
     }
 
-    // 3. Audit log (best-effort, never blocks response)
+    // 4. Audit log (best-effort, never blocks response)
     try {
       const targetProfile = await serviceClient
         .from("user_profiles")

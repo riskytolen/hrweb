@@ -110,6 +110,8 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [revealedPasswords, setRevealedPasswords] = useState<Map<string, string>>(new Map());
+  const [revealingUserId, setRevealingUserId] = useState<string | null>(null);
 
   // User modal
   const [showUserModal, setShowUserModal] = useState(false);
@@ -183,6 +185,38 @@ export default function AccountsPage() {
     if (data) setEmployees(data as PegawaiLite[]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const revealPassword = useCallback(async (userId: string) => {
+    // Already revealed: hide
+    if (revealedPasswords.has(userId)) {
+      setRevealedPasswords((prev) => {
+        const next = new Map(prev);
+        next.delete(userId);
+        return next;
+      });
+      return;
+    }
+
+    setRevealingUserId(userId);
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/password/reveal`, {
+        method: "POST",
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || "Gagal mengambil password.");
+      }
+
+      setRevealedPasswords((prev) => new Map(prev).set(userId, result.password));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Gagal mengambil password.";
+      addToast("error", message);
+    } finally {
+      setRevealingUserId(null);
+    }
+  }, [revealedPasswords]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -537,6 +571,7 @@ export default function AccountsPage() {
             <div className="h-4 w-20 rounded bg-muted animate-pulse" />
             <div className="h-4 w-16 rounded bg-muted animate-pulse" />
             <div className="h-4 w-28 rounded bg-muted animate-pulse" />
+            <div className="h-4 w-20 rounded bg-muted animate-pulse" />
             <div className="h-4 w-16 rounded bg-muted animate-pulse ml-auto" />
           </div>
 
@@ -556,6 +591,7 @@ export default function AccountsPage() {
               <div className="h-6 w-24 rounded-full bg-muted animate-pulse" />
               <div className="h-6 w-16 rounded-full bg-muted animate-pulse" />
               <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+              <div className="h-6 w-24 rounded-lg bg-muted animate-pulse" />
               <div className="flex items-center gap-1 ml-auto">
                 <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
                 <div className="w-8 h-8 rounded-lg bg-muted animate-pulse" />
@@ -706,6 +742,7 @@ export default function AccountsPage() {
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Akun</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Status</th>
                     <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Aktivitas</th>
+                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Password</th>
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Aksi</th>
                   </tr>
                 </thead>
@@ -785,6 +822,42 @@ export default function AccountsPage() {
                             : <span className="italic opacity-60">Belum tercatat</span>
                           }
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {u.id === currentUser?.id ? (
+                          <span className="text-xs text-muted-foreground/60 italic">Anda</span>
+                        ) : revealedPasswords.has(u.id) ? (
+                          <div className="flex items-center gap-2">
+                            <code className="font-mono text-xs text-foreground bg-muted/50 px-2 py-1 rounded-lg max-w-[200px] truncate block">
+                              {revealedPasswords.get(u.id)}
+                            </code>
+                            <button
+                              onClick={() => revealPassword(u.id)}
+                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground flex-shrink-0"
+                              title="Sembunyikan password"
+                            >
+                              <EyeOff className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => revealPassword(u.id)}
+                            disabled={revealingUserId === u.id}
+                            className={cn(
+                              "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                              "bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground",
+                              revealingUserId === u.id && "opacity-50 cursor-wait"
+                            )}
+                            title="Lihat password"
+                          >
+                            {revealingUserId === u.id ? (
+                              <div className="w-3.5 h-3.5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                            <span>{revealingUserId === u.id ? "..." : "****"}</span>
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
