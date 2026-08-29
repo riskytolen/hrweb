@@ -198,9 +198,8 @@ export default function GapokIncrementsPage() {
         <div className="bg-card rounded-2xl border border-border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Banknote className="w-3.5 h-3.5" />
-            <span>Default Driver {settings ? formatCurrency(settings.driver_default_amount) : "-"} · Helper {settings ? formatCurrency(settings.helper_default_amount) : "-"}</span>
-            <span className="hidden sm:inline">·</span>
-            <span className="hidden sm:inline">Sinkron otomatis harian 00:10 WIB</span>
+            <span>Kenaikan {settings ? `+${formatCurrency(settings.increment_amount)}` : "-"} per kelipatan {settings ? `${settings.interval_months} bulan` : "-"}</span>
+            <span className="hidden sm:inline">· Sinkron otomatis harian 00:10 WIB</span>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" icon={RefreshCw} onClick={fetchAll} disabled={loading}>Refresh</Button>
