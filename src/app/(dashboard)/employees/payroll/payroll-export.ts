@@ -41,6 +41,7 @@ type PdfDoc = {
   splitTextToSize: (text: string, maxWidth: number) => string[];
   text: (text: string | string[], x: number, y: number, options?: { align?: "left" | "center" | "right" }) => void;
   getNumberOfPages: () => number;
+  addPage: () => void;
   save: (filename: string) => void;
 };
 
@@ -171,6 +172,7 @@ function addFooter(doc: PdfDoc, company: PayrollCompanyInfo, label: string): voi
   for (let page = 1; page <= pages; page += 1) {
     doc.setPage(page);
     doc.setDrawColor(210);
+    doc.setLineWidth(0.3);
     doc.line(14, pageHeight - 12, pageWidth - 14, pageHeight - 12);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
@@ -179,6 +181,11 @@ function addFooter(doc: PdfDoc, company: PayrollCompanyInfo, label: string): voi
     doc.text(`Halaman ${page} dari ${pages}`, pageWidth - 14, pageHeight - 6, { align: "right" });
   }
 }
+
+const SLIP_FOOTER_RESERVED = 16;
+const SLIP_SIGNATURE_HEIGHT = 32;
+const SLIP_SIGNATURE_GAP = 12;
+const SLIP_LINE_HEIGHT = 4.5;
 
 function lastAutoTableY(doc: PdfDoc, fallback: number): number {
   return ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? fallback);
@@ -195,6 +202,7 @@ export async function exportPayrollSlipPdf(row: PayrollRow, periodRange: PeriodR
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pdf = doc as unknown as PdfDoc;
   const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
   let y = await addPortraitHeader(pdf, company);
   const employee = getPayrollEmployeeSnapshot(row);
 
@@ -226,7 +234,7 @@ export async function exportPayrollSlipPdf(row: PayrollRow, periodRange: PeriodR
       2: { fontStyle: "bold", textColor: [80, 80, 80], cellWidth: 28 },
       3: { cellWidth: 56 },
     },
-    margin: { left: 18, right: 18 },
+    margin: { left: 18, right: 18, bottom: SLIP_FOOTER_RESERVED },
   });
 
   y = lastAutoTableY(pdf, y) + 8;
@@ -252,7 +260,7 @@ export async function exportPayrollSlipPdf(row: PayrollRow, periodRange: PeriodR
       1: { cellWidth: 70 },
       2: { cellWidth: 40, halign: "right" },
     },
-    margin: { left: 18, right: 18, bottom: 18 },
+    margin: { left: 18, right: 18, bottom: SLIP_FOOTER_RESERVED },
     didParseCell: (data) => {
       const label = Array.isArray(data.row.raw) ? String(data.row.raw[0]) : "";
       if (label === "PENDAPATAN" || label === "POTONGAN") {
@@ -267,29 +275,80 @@ export async function exportPayrollSlipPdf(row: PayrollRow, periodRange: PeriodR
     },
   });
 
-  y = lastAutoTableY(pdf, y) + 8;
+  let contentEndY = lastAutoTableY(pdf, y) + 8;
+  const safeContentBottom = pageHeight - SLIP_FOOTER_RESERVED - 2;
+
+  // --- Catatan: hitung tinggi lalu cek apakah perlu pindah halaman ---
+  let noteLines: string[] = [];
+  let catatanBlockHeight = 0;
   if (row.catatan) {
+    noteLines = pdf.splitTextToSize(row.catatan, pageWidth - 36);
+    catatanBlockHeight = 4 + noteLines.length * SLIP_LINE_HEIGHT + 2;
+    // Jika catatan tidak muat di sisa halaman, pindah ke halaman baru sebelum menggambar
+    if (contentEndY + catatanBlockHeight > safeContentBottom - SLIP_SIGNATURE_GAP - SLIP_SIGNATURE_HEIGHT) {
+      // Jika masih ada ruang minimal untuk catatan tanpa tanda tangan, biarkan catatan di halaman ini dan tanda tangan pindah nanti
+      // Tapi jika catatan sendiri melebihi safeContentBottom, harus pindah halaman
+      if (contentEndY + catatanBlockHeight > safeContentBottom) {
+        pdf.addPage();
+        contentEndY = 20;
+      }
+    }
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(8);
     pdf.setTextColor(30);
-    pdf.text("Catatan", 18, y);
-    y += 4;
+    pdf.text("Catatan", 18, contentEndY);
+    contentEndY += 4;
     pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
     pdf.setTextColor(90);
-    const noteLines = pdf.splitTextToSize(row.catatan, pageWidth - 36);
-    pdf.text(noteLines, 18, y);
+    pdf.text(noteLines, 18, contentEndY);
+    contentEndY += noteLines.length * SLIP_LINE_HEIGHT;
   }
 
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  const signY = Math.max(lastAutoTableY(pdf, y) + 16, pageHeight - 54);
+  // --- Tanda tangan: pastikan tidak masuk zona footer, pindah halaman jika perlu ---
+  const signatureBottomLimit = pageHeight - SLIP_FOOTER_RESERVED - 2;
+  let signY = Math.max(contentEndY + SLIP_SIGNATURE_GAP, pageHeight - 54);
+  if (signY + SLIP_SIGNATURE_HEIGHT > signatureBottomLimit) {
+    // Coba tempatkan langsung setelah konten jika masih muat
+    if (contentEndY + SLIP_SIGNATURE_GAP + SLIP_SIGNATURE_HEIGHT <= signatureBottomLimit) {
+      signY = contentEndY + SLIP_SIGNATURE_GAP;
+    } else {
+      // Tidak muat di halaman ini -> halaman baru
+      pdf.addPage();
+      signY = 22;
+    }
+  }
+
+  const leftCenter = 46;
+  const rightCenter = pageWidth - 46;
+  const signatureLineWidth = 36;
+
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(8);
   pdf.setTextColor(80);
-  pdf.text("Dibuat oleh,", 28, signY);
-  pdf.text("Diterima oleh,", pageWidth - 58, signY);
+  pdf.text("Dibuat oleh,", leftCenter, signY, { align: "center" });
+  pdf.text("Diterima oleh,", rightCenter, signY, { align: "center" });
+
+  // Garis tanda tangan
+  pdf.setDrawColor(160);
+  pdf.setLineWidth(0.3);
+  pdf.line(leftCenter - signatureLineWidth / 2, signY + 18, leftCenter + signatureLineWidth / 2, signY + 18);
+  pdf.line(rightCenter - signatureLineWidth / 2, signY + 18, rightCenter + signatureLineWidth / 2, signY + 18);
+
   pdf.setFont("helvetica", "bold");
-  pdf.text(company.namaPerusahaan, 28, signY + 24);
-  pdf.text(employee.nama, pageWidth - 58, signY + 24);
+  pdf.setFontSize(8);
+  pdf.setTextColor(30);
+  const companyNameLines = pdf.splitTextToSize(company.namaPerusahaan, 58);
+  const employeeNameLines = pdf.splitTextToSize(employee.nama, 58);
+  // Nama di bawah garis, center-aligned; jika lebih dari 1 baris, tetap rapi
+  pdf.text(companyNameLines, leftCenter, signY + 23, { align: "center" });
+  pdf.text(employeeNameLines, rightCenter, signY + 23, { align: "center" });
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(6.5);
+  pdf.setTextColor(120);
+  pdf.text("Tanda tangan & stempel", leftCenter, signY + 30, { align: "center" });
+  pdf.text("Tanda tangan pegawai", rightCenter, signY + 30, { align: "center" });
 
   addFooter(pdf, company, `Slip Gaji ${row.periode}`);
   const filename = `Slip_Gaji_${row.periode}_${fileSafe(row.employee_id)}_${fileSafe(employee.nama)}.pdf`;
