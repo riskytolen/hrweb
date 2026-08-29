@@ -28,6 +28,8 @@ import {
   CalendarDays,
   RefreshCw,
   Truck,
+  Banknote,
+  TrendingUp,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -39,7 +41,7 @@ import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
 import { logAudit } from "@/lib/audit";
-import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting, type DbGaVehicleDocumentSetting, type DbGaVehicleVendor, type DbGaVehicleDivision, type DbBackupLiburSetting } from "@/lib/supabase";
+import { supabase, type DbLevel, type DbJabatan, type DbBank, type DbDivision, type DbAttendanceLocation, type DbDivisionLocationAssignment, type DbDivisionSchedule, type DbPointRate, type DbDeliveryStatus, type DbDeliveryZone, type DbAttendancePenaltyRate, type DbLegalSetting, type DbGaVehicleDocumentSetting, type DbGaVehicleVendor, type DbGaVehicleDivision, type DbBackupLiburSetting, type DbGapokSetting } from "@/lib/supabase";
 
 // ─── Types ───
 type Level = DbLevel;
@@ -94,6 +96,7 @@ const tabs = [
   { key: "harga-titik", label: "Harga Titik", icon: CircleDollarSign },
   { key: "status-titik", label: "Status Titik", icon: Tag },
   { key: "backup-libur", label: "Backup Libur", icon: CalendarDays },
+  { key: "gapok", label: "Gapok", icon: Banknote },
   { key: "bank", label: "Bank", icon: Landmark },
   { key: "kendaraan", label: "Kendaraan", icon: Truck },
   { key: "legal", label: "Legal", icon: Scale },
@@ -208,6 +211,10 @@ export default function MasterDataPage() {
   const [backupLiburSetting, setBackupLiburSetting] = useState<DbBackupLiburSetting | null>(null);
   const [showBackupLiburForm, setShowBackupLiburForm] = useState(false);
   const [backupLiburForm, setBackupLiburForm] = useState({ driver_amount: "65000", helper_amount: "45000" });
+  const [gapokSetting, setGapokSetting] = useState<DbGapokSetting | null>(null);
+  const [showGapokForm, setShowGapokForm] = useState(false);
+  const [gapokForm, setGapokForm] = useState({ driver_default_amount: "2000000", helper_default_amount: "1000000", increment_amount: "250000", interval_years: "2.5", notification_days: "90", driver_jabatan_id: "", helper_jabatan_id: "" });
+  const [gapokPreview, setGapokPreview] = useState<{ upcoming90: number; overdue: number; totalActive: number; loading: boolean }>({ upcoming90: 0, overdue: 0, totalActive: 0, loading: false });
 
   // ─── Legal Settings State ───
   const [legalSettings, setLegalSettings] = useState<DbLegalSetting[]>([]);
@@ -329,18 +336,51 @@ export default function MasterDataPage() {
     if (data) setBackupLiburSetting(data as DbBackupLiburSetting);
   };
 
+  const fetchGapokSetting = async () => {
+    const { data } = await supabase
+      .from("gapok_settings")
+      .select("*, driver_jabatan:jabatan!gapok_settings_driver_jabatan_id_fkey(nama), helper_jabatan:jabatan!gapok_settings_helper_jabatan_id_fkey(nama)")
+      .eq("id", 1)
+      .maybeSingle();
+    if (data) {
+      const row = data as unknown as DbGapokSetting & { driver_jabatan?: { nama: string } | null; helper_jabatan?: { nama: string } | null };
+      setGapokSetting(row as DbGapokSetting);
+    } else {
+      const { data: fallback } = await supabase.from("gapok_settings").select("*").eq("id", 1).maybeSingle();
+      if (fallback) setGapokSetting(fallback as DbGapokSetting);
+    }
+  };
+
+  const fetchGapokPreview = async () => {
+    setGapokPreview((p) => ({ ...p, loading: true }));
+    const today = new Date().toISOString().slice(0, 10);
+    const in90 = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const [sched, active] = await Promise.all([
+      supabase.from("gapok_increment_events").select("due_date, status"),
+      supabase.from("pegawai").select("id", { count: "exact", head: true }).eq("status", "Aktif").in("jabatan_id", gapokSetting ? [gapokSetting.driver_jabatan_id, gapokSetting.helper_jabatan_id].filter(Boolean) as number[] : []),
+    ]);
+    const rows = (sched.data ?? []) as { due_date: string; status: string }[];
+    const overdue = rows.filter((r) => r.status === "Scheduled" && r.due_date <= today).length;
+    const upcoming90 = rows.filter((r) => r.status === "Scheduled" && r.due_date > today && r.due_date <= in90).length;
+    setGapokPreview({ overdue, upcoming90, totalActive: active.count ?? 0, loading: false });
+  };
+
   const fetchPenalties = async () => {
     const { data } = await supabase.from("attendance_penalty_rates").select("*, divisions(nama)").order("division_id");
     if (data) setPenaltyList(data.map((p) => ({ ...p, divisionNama: p.divisions?.nama || "-" })));
   };
 
   useEffect(() => {
-    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchVendorKendaraan(), fetchDivisiKendaraan(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchBackupLiburSettings(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings(), fetchVehicleDocSettings()]).then(() => setLoading(false));
+    Promise.all([fetchLevels(), fetchJabatan(), fetchBanks(), fetchVendorKendaraan(), fetchDivisiKendaraan(), fetchDivisions(), fetchLocations(), fetchSchedules(), fetchZones(), fetchRates(), fetchDStatuses(), fetchBackupLiburSettings(), fetchGapokSetting(), fetchPenalties(), fetchLegalSettings(), fetchCompanySettings(), fetchLeaveSettings(), fetchVehicleDocSettings()]).then(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (gapokSetting) fetchGapokPreview();
+  }, [gapokSetting?.id, gapokSetting?.updated_at]);
 
   // Lock body scroll when any modal is open
   useEffect(() => {
-    if (showLevelForm || showJabatanForm || showBankForm || showVendorKendaraanForm || showDivisiKendaraanForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm || showVehicleDocSettingForm || syncRow !== null) {
+    if (showLevelForm || showJabatanForm || showBankForm || showVendorKendaraanForm || showDivisiKendaraanForm || showDivisionForm || showLocationForm || showScheduleForm || showZoneForm || showRateForm || showDStatusForm || showPenaltyForm || showLegalSettingForm || showCompanyForm || showLeaveSettingForm || showVehicleDocSettingForm || showGapokForm || syncRow !== null) {
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -348,7 +388,7 @@ export default function MasterDataPage() {
     return () => {
       document.body.style.overflow = "";
     };
-  }, [showLevelForm, showJabatanForm, showBankForm, showVendorKendaraanForm, showDivisiKendaraanForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, showBackupLiburForm, showPenaltyForm, showLegalSettingForm, showCompanyForm, showLeaveSettingForm, showVehicleDocSettingForm, syncRow]);
+  }, [showLevelForm, showJabatanForm, showBankForm, showVendorKendaraanForm, showDivisiKendaraanForm, showDivisionForm, showLocationForm, showScheduleForm, showZoneForm, showRateForm, showDStatusForm, showBackupLiburForm, showGapokForm, showLegalSettingForm, showCompanyForm, showLeaveSettingForm, showVehicleDocSettingForm, syncRow]);
 
   const showSuccess = (title: string, message?: string) => {
     setToast({ show: true, title, message: message || "" });
@@ -1127,6 +1167,59 @@ export default function MasterDataPage() {
     showSuccess("Backup Libur Diperbarui", `Driver ${formatCurrency(payload.driver_amount)}, Helper ${formatCurrency(payload.helper_amount)}.`);
   };
 
+  // ─── Gapok Settings Handlers ───
+  const handleOpenEditGapok = () => {
+    if (!gapokSetting) return;
+    setGapokForm({
+      driver_default_amount: String(gapokSetting.driver_default_amount),
+      helper_default_amount: String(gapokSetting.helper_default_amount),
+      increment_amount: String(gapokSetting.increment_amount),
+      interval_years: (gapokSetting.interval_months / 12).toString(),
+      notification_days: String(gapokSetting.notification_days),
+      driver_jabatan_id: gapokSetting.driver_jabatan_id ? String(gapokSetting.driver_jabatan_id) : "",
+      helper_jabatan_id: gapokSetting.helper_jabatan_id ? String(gapokSetting.helper_jabatan_id) : "",
+    });
+    setShowGapokForm(true);
+  };
+
+  const handleSaveGapok = async () => {
+    if (!canEdit || !gapokSetting) return;
+    const intervalYears = parseFloat(gapokForm.interval_years.replace(",", ".")) || 2.5;
+    const intervalMonths = Math.max(1, Math.min(120, Math.round(intervalYears * 12)));
+    const payload: Record<string, unknown> = {
+      driver_default_amount: parseCurrencyInput(gapokForm.driver_default_amount),
+      helper_default_amount: parseCurrencyInput(gapokForm.helper_default_amount),
+      increment_amount: parseCurrencyInput(gapokForm.increment_amount),
+      interval_months: intervalMonths,
+      notification_days: Math.max(1, Math.min(365, parseInt(gapokForm.notification_days) || 90)),
+      driver_jabatan_id: gapokForm.driver_jabatan_id ? parseInt(gapokForm.driver_jabatan_id) : null,
+      helper_jabatan_id: gapokForm.helper_jabatan_id ? parseInt(gapokForm.helper_jabatan_id) : null,
+      updated_at: new Date().toISOString(),
+    };
+    if (gapokForm.driver_jabatan_id && gapokForm.helper_jabatan_id && gapokForm.driver_jabatan_id === gapokForm.helper_jabatan_id) {
+      showSuccess("Gagal Menyimpan", "Jabatan Driver dan Helper tidak boleh sama.");
+      return;
+    }
+    const { data, error } = await supabase.from("gapok_settings").update(payload).eq("id", gapokSetting.id).select("*").single();
+    if (error) {
+      showSuccess("Gagal Menyimpan", error.message);
+      return;
+    }
+    await logAudit({
+      supabase,
+      action: "update",
+      entityType: "gapok_settings",
+      entityId: gapokSetting.id,
+      entityLabel: "Pengaturan Gapok",
+      oldData: gapokSetting as unknown as Record<string, unknown>,
+      newData: payload,
+    });
+    setGapokSetting(data as DbGapokSetting);
+    setShowGapokForm(false);
+    showSuccess("Gapok Diperbarui", `Default Driver ${formatCurrency(payload.driver_default_amount as number)}, Helper ${formatCurrency(payload.helper_default_amount as number)}, +${formatCurrency(payload.increment_amount as number)} per ${intervalYears} tahun.`);
+    fetchGapokPreview();
+  };
+
   // ─── Bank Handlers ───
   const filteredBanks = bankList.filter((b) =>
     b.nama.toLowerCase().includes(bankSearch.toLowerCase()) || (b.kode || "").toLowerCase().includes(bankSearch.toLowerCase())
@@ -1414,7 +1507,7 @@ export default function MasterDataPage() {
               {tabs.map((tab) => {
                 const isActive = activeTab === tab.key;
                 const Icon = tab.icon;
-                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "kendaraan" ? (vendorKendaraanList.length + divisiKendaraanList.length + 1) : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
+                const count = tab.key === "level" ? levelList.length : tab.key === "jabatan" ? jabatanList.length : tab.key === "divisi" ? divisionList.length : tab.key === "titik-absen" ? locationList.length : tab.key === "waktu-kerja" ? scheduleList.length : tab.key === "denda-telat" ? penaltyList.length : tab.key === "nama-titik" ? zoneList.length : tab.key === "harga-titik" ? rateRows.length : tab.key === "status-titik" ? dStatusList.length : tab.key === "backup-libur" ? 1 : tab.key === "gapok" ? 1 : tab.key === "kendaraan" ? (vendorKendaraanList.length + divisiKendaraanList.length + 1) : tab.key === "legal" ? (legalSettings.length + companySettings.length) : bankList.length;
                 return (
                   <button
                     key={tab.key}
@@ -2067,6 +2160,106 @@ export default function MasterDataPage() {
           </>
         )}
 
+        {/* ─── TAB: GAPOK ─── */}
+        {activeTab === "gapok" && (
+          <>
+            <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Gaji Pokok (Gapok)</h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Default gapok pegawai baru Driver/Helper dan kenaikan berkala per kelipatan masa kerja.</p>
+              </div>
+              {canEdit && <Button variant="outline" size="sm" icon={Pencil} onClick={handleOpenEditGapok}>Edit Pengaturan</Button>}
+            </div>
+            <div className="p-5 space-y-4">
+              {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Skeleton className="h-32 rounded-2xl" />
+                  <Skeleton className="h-32 rounded-2xl" />
+                  <Skeleton className="h-32 rounded-2xl" />
+                </div>
+              ) : gapokSetting ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="rounded-2xl border border-border p-4 bg-muted/20">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-foreground">Driver Default</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Gapok awal pegawai baru.</p>
+                        </div>
+                        <Banknote className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="mt-4 rounded-xl px-3 py-2 inline-block bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                        <p className="text-lg font-bold tabular-nums">{formatCurrency(gapokSetting.driver_default_amount)}</p>
+                        <p className="text-[10px]">{jabatanList.find((j) => j.id === gapokSetting.driver_jabatan_id)?.nama || "Driver"}</p>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-border p-4 bg-muted/20">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-foreground">Helper Default</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Gapok awal pegawai baru.</p>
+                        </div>
+                        <Banknote className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="mt-4 rounded-xl px-3 py-2 inline-block bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-300">
+                        <p className="text-lg font-bold tabular-nums">{formatCurrency(gapokSetting.helper_default_amount)}</p>
+                        <p className="text-[10px]">{jabatanList.find((j) => j.id === gapokSetting.helper_jabatan_id)?.nama || "Helper"}</p>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-border p-4 bg-muted/20">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-foreground">Kenaikan Berkala</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Per kelipatan masa kerja.</p>
+                        </div>
+                        <TrendingUp className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="mt-4 rounded-xl px-3 py-2 inline-block bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                        <p className="text-lg font-bold tabular-nums">+{formatCurrency(gapokSetting.increment_amount)}</p>
+                        <p className="text-[10px]">per {(gapokSetting.interval_months / 12).toFixed(1).replace(/\.0$/, "")} tahun ({gapokSetting.interval_months} bln)</p>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-border p-4 bg-muted/20">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-foreground">Notifikasi</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Jendela upcoming di HRM.</p>
+                        </div>
+                        <CalendarDays className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="mt-4 rounded-xl px-3 py-2 inline-block bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300">
+                        <p className="text-lg font-bold tabular-nums">{gapokSetting.notification_days} hari</p>
+                        <p className="text-[10px]">efektif {gapokSetting.effective_from}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="rounded-2xl border border-border p-4 bg-card flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center"><AlertTriangle className="w-5 h-5 text-warning" /></div>
+                      <div><p className="text-xs text-muted-foreground">Jatuh Tempo / Terlambat</p><p className="text-lg font-bold text-foreground">{gapokPreview.loading ? "-" : gapokPreview.overdue}</p></div>
+                    </div>
+                    <div className="rounded-2xl border border-border p-4 bg-card flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center"><Clock className="w-5 h-5 text-primary" /></div>
+                      <div><p className="text-xs text-muted-foreground">Akan Datang {gapokSetting.notification_days} Hari</p><p className="text-lg font-bold text-foreground">{gapokPreview.loading ? "-" : gapokPreview.upcoming90}</p></div>
+                    </div>
+                    <div className="rounded-2xl border border-border p-4 bg-card flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-success-light flex items-center justify-center"><Briefcase className="w-5 h-5 text-success" /></div>
+                      <div><p className="text-xs text-muted-foreground">Pegawai Aktif Eligible</p><p className="text-lg font-bold text-foreground">{gapokPreview.loading ? "-" : gapokPreview.totalActive}</p></div>
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-xs text-amber-800 dark:text-amber-200">
+                    Kenaikan diterapkan otomatis setiap hari 00:10 WIB oleh sistem (cron). Manual “Proses Sekarang” tersedia di HRM → Kenaikan Gapok. Perubahan nominal/interval akan menjadwalkan ulang event yang masih Scheduled; histori Applied tidak berubah.
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-border bg-muted/20 px-4 py-6 text-sm text-muted-foreground text-center">
+                  Pengaturan Gapok belum tersedia. Jalankan migrasi database terlebih dahulu.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         {/* ─── TAB: BANK ─── */}
         {activeTab === "bank" && (
           <>
@@ -2538,6 +2731,86 @@ export default function MasterDataPage() {
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20">
               <Button variant="outline" size="sm" onClick={() => setShowBackupLiburForm(false)}>Batal</Button>
               <Button size="sm" icon={Check} onClick={handleSaveBackupLiburSettings}>Simpan</Button>
+            </div>
+          </div>
+        </div>
+        </Portal>
+      )}
+
+      {/* ═══ GAPOK SETTINGS FORM MODAL ═══ */}
+      {showGapokForm && (
+        <Portal>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowGapokForm(false)} />
+          <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30 sticky top-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Banknote className="w-4 h-4 text-primary" />
+                </div>
+                <h2 className="text-sm font-bold text-foreground">Edit Pengaturan Gapok</h2>
+              </div>
+              <button onClick={() => setShowGapokForm(false)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Jabatan Driver <span className="text-danger">*</span></label>
+                  <select value={gapokForm.driver_jabatan_id} onChange={(e) => setGapokForm({ ...gapokForm, driver_jabatan_id: e.target.value })} className={selectClass}>
+                    <option value="">Pilih jabatan</option>
+                    {jabatanList.map((j) => <option key={j.id} value={String(j.id)}>{j.nama}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Nominal Default Driver <span className="text-danger">*</span></label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
+                    <input type="text" inputMode="numeric" value={formatCurrencyInput(gapokForm.driver_default_amount)} onChange={(e) => setGapokForm({ ...gapokForm, driver_default_amount: String(parseCurrencyInput(e.target.value)) })} className={cn(inputClass, "pl-9 text-right tabular-nums")} placeholder="2.000.000" />
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Jabatan Helper <span className="text-danger">*</span></label>
+                  <select value={gapokForm.helper_jabatan_id} onChange={(e) => setGapokForm({ ...gapokForm, helper_jabatan_id: e.target.value })} className={selectClass}>
+                    <option value="">Pilih jabatan</option>
+                    {jabatanList.map((j) => <option key={j.id} value={String(j.id)}>{j.nama}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Nominal Default Helper <span className="text-danger">*</span></label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
+                    <input type="text" inputMode="numeric" value={formatCurrencyInput(gapokForm.helper_default_amount)} onChange={(e) => setGapokForm({ ...gapokForm, helper_default_amount: String(parseCurrencyInput(e.target.value)) })} className={cn(inputClass, "pl-9 text-right tabular-nums")} placeholder="1.000.000" />
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Kenaikan per Kelipatan <span className="text-danger">*</span></label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Rp</span>
+                    <input type="text" inputMode="numeric" value={formatCurrencyInput(gapokForm.increment_amount)} onChange={(e) => setGapokForm({ ...gapokForm, increment_amount: String(parseCurrencyInput(e.target.value)) })} className={cn(inputClass, "pl-9 text-right tabular-nums")} placeholder="250.000" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Interval Kelipatan (tahun) <span className="text-danger">*</span></label>
+                  <input type="text" inputMode="decimal" value={gapokForm.interval_years} onChange={(e) => setGapokForm({ ...gapokForm, interval_years: e.target.value })} className={inputClass} placeholder="2.5" />
+                  <p className="text-[10px] text-muted-foreground mt-1">{(parseFloat(gapokForm.interval_years.replace(",","."))||0)*12} bulan</p>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Jendela Notifikasi (hari) <span className="text-danger">*</span></label>
+                <input type="number" min={1} max={365} value={gapokForm.notification_days} onChange={(e) => setGapokForm({ ...gapokForm, notification_days: e.target.value })} className={inputClass} placeholder="90" />
+                <p className="text-[10px] text-muted-foreground mt-1">Pegawai dengan jatuh tempo dalam X hari akan tampil di HRM → Kenaikan Gapok dan notifikasi Dashboard.</p>
+              </div>
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5 text-[10px] text-amber-800 dark:text-amber-200">
+                Mengubah jabatan, nominal, atau interval akan menjadwal ulang event Scheduled. Histori Applied tidak diubah. Pegawai baru Aktif dengan gapok 0 akan otomatis memakai nominal default sesuai jabatannya.
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/20 sticky bottom-0">
+              <Button variant="outline" size="sm" onClick={() => setShowGapokForm(false)}>Batal</Button>
+              <Button size="sm" icon={Check} onClick={handleSaveGapok}>Simpan</Button>
             </div>
           </div>
         </div>

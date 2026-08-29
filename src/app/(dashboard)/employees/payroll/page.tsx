@@ -31,6 +31,7 @@ import {
   ShieldCheck,
   Lock,
   Maximize2,
+  TrendingUp,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -211,6 +212,17 @@ export default function PayrollPage() {
   const permLevel = getPermissionLevel("payroll");
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
+  // ─── Gapok auto-increment notice ───
+  const [gapokNotice, setGapokNotice] = useState<{ overdue: number; upcoming: number } | null>(null);
+  const fetchGapokNotice = useCallback(async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const in90 = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const { data } = await supabase.from("gapok_increment_events").select("due_date").eq("status", "Scheduled");
+    const rows = (data ?? []) as { due_date: string }[];
+    const overdue = rows.filter((r) => r.due_date <= today).length;
+    const upcoming = rows.filter((r) => r.due_date > today && r.due_date <= in90).length;
+    setGapokNotice({ overdue, upcoming });
+  }, []);
   // ─── Tab state ───
   const [activeTab, setActiveTab] = useState<"slip" | "gapok">("slip");
 
@@ -410,8 +422,8 @@ export default function PayrollPage() {
   }, [periodKey, showToast]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchPayrolls(), fetchPayrollOrder(), fetchPayrollGroups()]).then(() => setLoading(false));
-  }, []);
+    Promise.all([fetchEmployees(), fetchPayrolls(), fetchPayrollOrder(), fetchPayrollGroups(), fetchGapokNotice()]).then(() => setLoading(false));
+  }, [fetchGapokNotice]);
 
   useEffect(() => {
     setLoading(true);
@@ -2470,6 +2482,22 @@ wsComputeTotals={wsComputeTotals}
           </div>
         }
       />
+
+      {/* ─── Gapok auto-increment notice ─── */}
+      {gapokNotice && (gapokNotice.overdue > 0 || gapokNotice.upcoming > 0) && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center flex-shrink-0"><Banknote className="w-5 h-5 text-amber-600" /></div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
+              {gapokNotice.overdue > 0 ? `${gapokNotice.overdue} pegawai jatuh tempo kenaikan gapok` : `${gapokNotice.upcoming} pegawai akan naik gapok dalam 90 hari`}
+            </p>
+            <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
+              Kenaikan otomatis 00:10 WIB. {gapokNotice.overdue > 0 ? "Worksheet yang sudah terbuat perlu di-Refresh agar gapok baru terpakai." : "Lihat detail di HRM → Kenaikan Gapok."}
+            </p>
+          </div>
+          <a href="/employees/gapok-increments" className="hidden sm:inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 hover:underline">Lihat <TrendingUp className="w-3.5 h-3.5" /></a>
+        </div>
+      )}
 
       {/* ═══ Toast ═══ */}
       {toast.show && (

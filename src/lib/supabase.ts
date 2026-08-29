@@ -248,6 +248,42 @@ export interface DbBackupLiburSetting {
   delivery_statuses?: DbDeliveryStatus;
 }
 
+export interface DbGapokSetting {
+  id: 1;
+  driver_jabatan_id: number | null;
+  helper_jabatan_id: number | null;
+  driver_default_amount: number;
+  helper_default_amount: number;
+  increment_amount: number;
+  interval_months: number;
+  notification_days: number;
+  effective_from: string;
+  created_at: string;
+  updated_at: string;
+  driver_jabatan?: DbJabatan | null;
+  helper_jabatan?: DbJabatan | null;
+}
+
+export interface DbGapokIncrementEvent {
+  id: number;
+  employee_id: string;
+  jabatan_id: number | null;
+  milestone_no: number;
+  due_date: string;
+  status: "Scheduled" | "Applied" | "Skipped" | "Cancelled";
+  amount: number;
+  before_gapok: number | null;
+  after_gapok: number | null;
+  applied_at: string | null;
+  applied_by: string | null;
+  source: "seed" | "cron" | "manual" | "system";
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  pegawai?: DbPegawai;
+  jabatan?: DbJabatan;
+}
+
 /**
  * Nama titik pengantaran (delivery_zones).
  *

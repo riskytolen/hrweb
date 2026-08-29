@@ -419,6 +419,16 @@ export default function RecruitmentPage() {
     return generated;
   };
 
+  // ─── Helper: resolve jabatan_id untuk posisi Driver/Helper (gapok default via DB trigger) ───
+  const resolveJabatanIdFromPosisi = async (posisi: string): Promise<number | null> => {
+    const normalized = posisi.trim().toLowerCase();
+    if (normalized !== "driver" && normalized !== "helper") return null;
+    const { data } = await supabase.from("jabatan").select("id, nama").ilike("nama", posisi).limit(1).maybeSingle();
+    if (data?.id) return data.id as number;
+    // fallback ke ID default produksi jika lookup gagal
+    return normalized === "driver" ? 16 : 14;
+  };
+
   // ─── Helper: insert pegawai dari data recruitment ───
   const insertPegawaiFromRecruitment = async (
     rec: DbRecruitment,
@@ -426,6 +436,7 @@ export default function RecruitmentPage() {
     joinDate?: string,
   ): Promise<{ id: string } | { error: string }> => {
     const newId = await generateEmployeeId();
+    const jabatanId = await resolveJabatanIdFromPosisi(rec.posisi_dilamar || "");
     const { error } = await supabase.from("pegawai").insert({
       id: newId,
       nama: (rec.nama || "").trim(),
@@ -434,6 +445,7 @@ export default function RecruitmentPage() {
       alamat_ktp: rec.alamat || null,
       status: pegawaiStatus,
       tanggal_bergabung: pegawaiStatus === "Training" ? null : (joinDate || localDateStr()),
+      jabatan_id: jabatanId,
       recruitment_id: rec.id,
     });
     if (error) return { error: error.message };
@@ -468,17 +480,20 @@ export default function RecruitmentPage() {
         }
         return { ok: false, toast: { type: "error", title: "Gagal Buat Pegawai", message: result.error } };
       }
-      const { error } = await supabase.from("pegawai").update({ status: "Training", tanggal_bergabung: null }).eq("recruitment_id", rec.id);
+      const jabatanIdForTraining = await resolveJabatanIdFromPosisi(rec.posisi_dilamar || "");
+      const { error } = await supabase.from("pegawai").update({ status: "Training", tanggal_bergabung: null, ...(jabatanIdForTraining ? { jabatan_id: jabatanIdForTraining } : {}) }).eq("recruitment_id", rec.id);
       if (error) return { ok: false, toast: { type: "error", title: "Gagal Update Pegawai", message: error.message } };
       return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status diubah ke Training.` } };
     }
 
     if (newStatus === "Diterima") {
       const effectiveJoinDate = joinDate || localDateStr();
+      const jabatanId = await resolveJabatanIdFromPosisi(rec.posisi_dilamar || "");
       if (existingEmp) {
         const updates: Record<string, unknown> = {
           status: "Aktif",
           tanggal_keluar: null,
+          ...(jabatanId ? { jabatan_id: jabatanId } : {}),
         };
 
         const oldStatus = existingEmp.status;

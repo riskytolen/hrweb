@@ -42,6 +42,8 @@ import {
   SlidersHorizontal,
   FileText,
   FileSpreadsheet,
+  TrendingUp,
+  Banknote,
   type LucideIcon,
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
@@ -125,6 +127,7 @@ const allSections: MenuSection[] = [
           { name: "Lembur", href: "/employees/overtime", icon: Clock, permission: "overtime" },
           { name: "Rekap Titik", href: "/employees/income", icon: Wallet, permission: "income" },
           { name: "Penggajian", href: "/employees/payroll", icon: CreditCard, permission: "payroll" },
+          { name: "Kenaikan Gapok", href: "/employees/gapok-increments", icon: TrendingUp, permission: "payroll" },
           { name: "Kinerja", href: "/employees/performance", icon: Award, permission: "performance" },
           { name: "Legal & Administrasi", href: "/employees/legal", icon: Scale, permission: "legal" },
           { name: "Pengumuman", href: "/employees/announcements", icon: Megaphone, permission: "announcements" },
