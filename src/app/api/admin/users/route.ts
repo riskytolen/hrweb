@@ -2,7 +2,54 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase-server";
 import { logAudit } from "@/lib/audit";
-import { encryptPassword } from "@/lib/account-password-crypto";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function savePasswordCopy(
+  adminClient: ReturnType<typeof createAdminClient>,
+  userId: string,
+  password: string,
+  actorId: string
+): Promise<{ passwordChangedAt: string | null; warning: string | null }> {
+  const passwordChangedAt = new Date().toISOString();
+
+  const { error: passwordCopyError } = await adminClient
+    .from("account_password_copies")
+    .upsert(
+      {
+        user_id: userId,
+        password,
+        updated_at: passwordChangedAt,
+        updated_by: actorId,
+      },
+      { onConflict: "user_id" }
+    );
+
+  if (passwordCopyError) {
+    console.error("Failed to save password copy:", passwordCopyError);
+    return {
+      passwordChangedAt: null,
+      warning:
+        "Password berhasil diubah, tetapi salinan password gagal disimpan. Silakan cek migration database lalu reset ulang password.",
+    };
+  }
+
+  const { error: profileError } = await adminClient
+    .from("user_profiles")
+    .update({ password_changed_at: passwordChangedAt })
+    .eq("id", userId);
+
+  if (profileError) {
+    console.error("Failed to update password_changed_at:", profileError);
+    return {
+      passwordChangedAt,
+      warning:
+        "Password dan salinannya berhasil disimpan, tetapi waktu perubahan gagal diperbarui.",
+    };
+  }
+
+  return { passwordChangedAt, warning: null };
+}
 
 // ─── Helper: verify caller is Super Admin ───
 async function verifySuperAdmin() {
@@ -113,22 +160,20 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // 3. Save encrypted password for reveal capability
-      try {
-        const enc = encryptPassword(password, authData.user.id);
-        await adminClient.from("account_password_secrets").insert({
-          user_id: authData.user.id,
-          password_encrypted: enc.ciphertext,
-          password_iv: enc.iv,
-          password_tag: enc.tag,
-          key_version: enc.keyVersion,
-          is_active: true,
-          created_by: caller.id,
-          updated_by: caller.id,
+      const passwordCopy = await savePasswordCopy(
+        adminClient,
+        authData.user.id,
+        password,
+        caller.id
+      );
+
+      if (passwordCopy.warning) {
+        return NextResponse.json({
+          success: true,
+          warning: passwordCopy.warning,
+          user: { id: authData.user.id, email },
+          passwordChangedAt: passwordCopy.passwordChangedAt,
         });
-      } catch (encErr) {
-        console.error("Failed to save encrypted credential:", encErr);
-        // Non-fatal: account is created, just reveal won't work until next reset
       }
     }
 
@@ -241,8 +286,6 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // UUID format check
-    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!UUID_RE.test(userId)) {
       return NextResponse.json(
         { error: "Format User ID tidak valid." },
@@ -250,16 +293,7 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // Prevent self-reset (would invalidate own session)
-    if (userId === caller.id) {
-      return NextResponse.json(
-        { error: "Tidak bisa mereset password akun sendiri." },
-        { status: 400 }
-      );
-    }
-
     const adminClient = createAdminClient();
-    const serviceClient = createAdminClient();
 
     // 1. Update password in Supabase Auth
     const { error: authError } =
@@ -271,83 +305,46 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: authError.message }, { status: 400 });
     }
 
-    // 2. Deactivate old credential, save new encrypted password
-    try {
-      await serviceClient
-        .from("account_password_secrets")
-        .update({ is_active: false, updated_at: new Date().toISOString(), updated_by: caller.id })
-        .eq("user_id", userId)
-        .eq("is_active", true);
-
-      const enc = encryptPassword(password, userId);
-      await serviceClient.from("account_password_secrets").insert({
-        user_id: userId,
-        password_encrypted: enc.ciphertext,
-        password_iv: enc.iv,
-        password_tag: enc.tag,
-        key_version: enc.keyVersion,
-        is_active: true,
-        created_by: caller.id,
-        updated_by: caller.id,
-      });
-    } catch (encErr) {
-      console.error("Failed to save encrypted credential:", encErr);
-      // Non-fatal: password is changed in Auth, reveal won't work until next reset
-    }
-
-    // 3. Record password change timestamp via RPC
-    let passwordChangedAt: string | null = null;
-    let rpcFailed = false;
-    try {
-      const { data: ts, error: rpcErr } = await serviceClient.rpc(
-        "mark_password_changed",
-        { target_user_id: userId }
-      );
-      if (rpcErr) {
-        console.error("RPC mark_password_changed failed:", rpcErr);
-        rpcFailed = true;
-      } else {
-        passwordChangedAt = ts as string;
-      }
-    } catch (rpcEx) {
-      console.error("RPC mark_password_changed exception:", rpcEx);
-      rpcFailed = true;
-    }
+    const passwordCopy = await savePasswordCopy(
+      adminClient,
+      userId,
+      password,
+      caller.id
+    );
 
     // 4. Audit log (best-effort, never blocks response)
     try {
-      const targetProfile = await serviceClient
+      const targetProfile = await adminClient
         .from("user_profiles")
         .select("nama")
         .eq("id", userId)
         .maybeSingle();
 
       await logAudit({
-        supabase: serviceClient,
+        supabase: adminClient,
         action: "status_change",
         entityType: "user_profiles",
         entityId: userId,
         entityLabel: targetProfile?.data?.nama ?? null,
         oldData: { password_changed_at: null },
-        newData: { password_changed_at: passwordChangedAt },
+        newData: { password_changed_at: passwordCopy.passwordChangedAt },
         metadata: {
           operation: "password_reset",
           called_by: caller.id,
-          rpc_failed: rpcFailed,
+          password_copy_saved: !passwordCopy.warning,
         },
       });
     } catch (auditErr) {
       console.warn("[audit] Failed to log password reset:", auditErr);
     }
 
-    if (rpcFailed) {
+    if (passwordCopy.warning) {
       return NextResponse.json(
         {
           success: true,
           userId,
-          passwordChangedAt: null,
-          warning:
-            "Password berhasil diubah, tetapi pencatatan waktu terjadi kesalahan. Silakan refresh halaman.",
+          passwordChangedAt: passwordCopy.passwordChangedAt,
+          warning: passwordCopy.warning,
         },
         { status: 200 }
       );
@@ -356,7 +353,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({
       success: true,
       userId,
-      passwordChangedAt,
+      passwordChangedAt: passwordCopy.passwordChangedAt,
     });
   } catch (err) {
     console.error("PATCH /api/admin/users error:", err);

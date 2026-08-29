@@ -111,6 +111,7 @@ export default function AccountsPage() {
   const [search, setSearch] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [revealedPasswords, setRevealedPasswords] = useState<Map<string, string>>(new Map());
+  const [missingPasswordUserIds, setMissingPasswordUserIds] = useState<Set<string>>(new Set());
   const [revealingUserId, setRevealingUserId] = useState<string | null>(null);
 
   // User modal
@@ -198,6 +199,11 @@ export default function AccountsPage() {
     }
 
     setRevealingUserId(userId);
+    setMissingPasswordUserIds((prev) => {
+      const next = new Set(prev);
+      next.delete(userId);
+      return next;
+    });
     try {
       const res = await fetch(`/api/admin/users/${userId}/password/reveal`, {
         method: "POST",
@@ -206,10 +212,22 @@ export default function AccountsPage() {
       const result = await res.json();
 
       if (!res.ok) {
+        if (res.status === 404) {
+          setMissingPasswordUserIds((prev) => new Set(prev).add(userId));
+        }
         throw new Error(result.error || "Gagal mengambil password.");
       }
 
       setRevealedPasswords((prev) => new Map(prev).set(userId, result.password));
+      if (result.passwordChangedAt) {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === userId
+              ? { ...u, password_changed_at: result.passwordChangedAt }
+              : u
+          )
+        );
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Gagal mengambil password.";
       addToast("error", message);
@@ -315,6 +333,9 @@ export default function AccountsPage() {
         }
 
         addToast("success", `Akun ${userForm.nama} berhasil dibuat.`);
+        if (result.warning) {
+          addToast("error", result.warning);
+        }
       }
 
       setShowUserModal(false);
@@ -389,6 +410,14 @@ export default function AccountsPage() {
               : u
           )
         );
+        setRevealedPasswords((prev) =>
+          new Map(prev).set(resetPwUser.id, newPassword)
+        );
+        setMissingPasswordUserIds((prev) => {
+          const next = new Set(prev);
+          next.delete(resetPwUser.id);
+          return next;
+        });
       }
 
       const ts = result.passwordChangedAt
@@ -824,9 +853,7 @@ export default function AccountsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        {u.id === currentUser?.id ? (
-                          <span className="text-xs text-muted-foreground/60 italic">Anda</span>
-                        ) : revealedPasswords.has(u.id) ? (
+                        {revealedPasswords.has(u.id) ? (
                           <div className="flex items-center gap-2">
                             <code className="font-mono text-xs text-foreground bg-muted/50 px-2 py-1 rounded-lg max-w-[200px] truncate block">
                               {revealedPasswords.get(u.id)}
@@ -837,6 +864,19 @@ export default function AccountsPage() {
                               title="Sembunyikan password"
                             >
                               <EyeOff className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : missingPasswordUserIds.has(u.id) ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground/70 italic whitespace-nowrap">
+                              Belum tersimpan
+                            </span>
+                            <button
+                              onClick={() => openResetPassword(u)}
+                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground flex-shrink-0"
+                              title="Reset password agar tersimpan"
+                            >
+                              <Lock className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ) : (

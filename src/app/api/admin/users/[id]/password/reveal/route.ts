@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase-server";
-import { decryptPassword } from "@/lib/account-password-crypto";
 import { logAudit } from "@/lib/audit";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function jsonNoStore(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
+}
 
 async function verifySuperAdmin() {
   const supabase = await createClient();
@@ -42,46 +50,41 @@ export async function POST(
     if (!caller) {
       return NextResponse.json(
         { error: "Unauthorized. Super Admin access required." },
-        { status: 403 }
+        { status: 403, headers: { "Cache-Control": "no-store" } }
       );
     }
 
     const { id: targetUserId } = await params;
 
     if (!targetUserId || !UUID_RE.test(targetUserId)) {
-      return NextResponse.json(
-        { error: "User ID tidak valid." },
-        { status: 400 }
-      );
+      return jsonNoStore({ error: "User ID tidak valid." }, 400);
     }
 
     const adminClient = createAdminClient();
 
-    // Get encrypted credential
-    const { data: secretRow, error: fetchErr } = await adminClient
-      .from("account_password_secrets")
-      .select("password_encrypted, password_iv, password_tag, key_version")
+    const { data: passwordCopy, error: fetchErr } = await adminClient
+      .from("account_password_copies")
+      .select("password, updated_at")
       .eq("user_id", targetUserId)
-      .eq("is_active", true)
-      .order("created_at", { ascending: false })
-      .limit(1)
       .maybeSingle();
 
-    if (fetchErr || !secretRow) {
-      return NextResponse.json(
-        { error: "Credential tidak ditemukan. Password mungkin belum pernah disimpan melalui aplikasi ini." },
-        { status: 404 }
+    if (fetchErr) {
+      console.error("Failed to fetch password copy:", fetchErr);
+      return jsonNoStore(
+        { error: "Gagal mengambil salinan password dari database." },
+        500
       );
     }
 
-    // Decrypt
-    const plaintext = decryptPassword(
-      Buffer.from(secretRow.password_encrypted, "hex"),
-      Buffer.from(secretRow.password_iv, "hex"),
-      Buffer.from(secretRow.password_tag, "hex"),
-      secretRow.key_version,
-      targetUserId // AAD: user_id
-    );
+    if (!passwordCopy) {
+      return jsonNoStore(
+        {
+          error:
+            "Password belum tersimpan. Reset password akun ini dulu agar bisa ditampilkan.",
+        },
+        404
+      );
+    }
 
     // Audit (best-effort, fail silent)
     try {
@@ -108,16 +111,13 @@ export async function POST(
       console.warn("[audit] Failed to log credential reveal:", auditErr);
     }
 
-    return NextResponse.json({
+    return jsonNoStore({
       success: true,
-      password: plaintext,
-      keyVersion: secretRow.key_version,
+      password: passwordCopy.password,
+      passwordChangedAt: passwordCopy.updated_at,
     });
   } catch (err) {
     console.error("POST /api/admin/users/[id]/password/reveal error:", err);
-    return NextResponse.json(
-      { error: "Internal server error." },
-      { status: 500 }
-    );
+    return jsonNoStore({ error: "Internal server error." }, 500);
   }
 }
