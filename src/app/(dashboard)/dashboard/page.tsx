@@ -20,7 +20,6 @@ import {
   Trophy,
   Medal,
   Banknote,
-  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -39,7 +38,8 @@ import {
 } from "recharts";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
-import { cn, formatCurrency, formatNumber, getInitials } from "@/lib/utils";
+import { addDaysLocal, cn, formatCurrency, formatNumber, getInitials } from "@/lib/utils";
+import { summarizeGapokSchedule } from "@/lib/gapok";
 import { Skeleton } from "@/components/ui/Skeleton";
 import RouteGuard from "@/components/RouteGuard";
 import { entityLabel } from "@/lib/audit";
@@ -198,7 +198,7 @@ export default function DashboardPage() {
   const [recruitment, setRecruitment] = useState<RecruitmentStat[]>([]);
   const [recent, setRecent] = useState<AuditLite[]>([]);
   const [topPerformers, setTopPerformers] = useState<TopPerformer[]>([]);
-  const [gapokNotif, setGapokNotif] = useState<{ overdue: number; upcoming90: number; dueToday: number; notificationDays: number } | null>(null);
+  const [gapokNotif, setGapokNotif] = useState<{ overdue: number; upcoming90: number; dueToday: number; notificationDays: number; recentApplied: number } | null>(null);
 
   const period = useMemo(() => getActivePeriod(), []);
   const prev = useMemo(() => getPreviousPeriod(), []);
@@ -291,6 +291,11 @@ export default function DashboardPage() {
     // 9. Gapok kenaikan (jadwal kenaikan berkala Driver/Helper)
     const gapokSettingsPromise = supabase.from("gapok_settings").select("notification_days").eq("id", 1).maybeSingle();
     const gapokEventsPromise = supabase.from("gapok_increment_events").select("due_date, status").eq("status", "Scheduled");
+    const gapokAppliedPromise = supabase
+      .from("gapok_increment_events")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "Applied")
+      .gte("applied_at", `${addDaysLocal(today, -7)}T00:00:00+07:00`);
 
     const [
       pegRes,
@@ -308,6 +313,7 @@ export default function DashboardPage() {
       spPerfRes,
       gapokSettingsRes,
       gapokEventsRes,
+      gapokAppliedRes,
     ] = await Promise.all([
       pegawaiPromise,
       attendancePromise,
@@ -324,6 +330,7 @@ export default function DashboardPage() {
       spPerfPromise,
       gapokSettingsPromise,
       gapokEventsPromise,
+      gapokAppliedPromise,
     ]);
 
     // ─── Process pegawai stats ───
@@ -450,15 +457,7 @@ export default function DashboardPage() {
     // ─── Gapok notification ───
     const notifDays = (gapokSettingsRes.data as { notification_days?: number } | null)?.notification_days ?? 90;
     const gapokRows = (gapokEventsRes.data ?? []) as { due_date: string; status: string }[];
-    const gapokOverdue = gapokRows.filter((r) => r.due_date <= today).length;
-    const gapokDueToday = gapokRows.filter((r) => r.due_date === today).length;
-    const gapokUpcoming = gapokRows.filter((r) => {
-      if (r.due_date <= today) return false;
-      const due = new Date(r.due_date + "T00:00:00");
-      const t = new Date(today + "T00:00:00");
-      const diff = Math.round((due.getTime() - t.getTime()) / 86400000);
-      return diff > 0 && diff <= notifDays;
-    }).length;
+    const gapokSummary = summarizeGapokSchedule(gapokRows, notifDays, today);
 
     // ─── Top Performers (kinerja terbaik periode aktif) ───
     type EmpPerfRow = {
@@ -560,7 +559,7 @@ export default function DashboardPage() {
     setRecruitment(recArr);
     setRecent(auditRows);
     setTopPerformers(topPerformersData);
-    setGapokNotif({ overdue: gapokOverdue, upcoming90: gapokUpcoming, dueToday: gapokDueToday, notificationDays: notifDays });
+    setGapokNotif({ overdue: gapokSummary.overdue, upcoming90: gapokSummary.upcoming, dueToday: gapokSummary.dueToday, notificationDays: notifDays, recentApplied: gapokAppliedRes.count ?? 0 });
     setLoading(false);
   }, [period.start, period.end, prev.start, prev.end, today]);
 
@@ -632,21 +631,27 @@ export default function DashboardPage() {
       </div>
 
       {/* ─── Gapok Notification (payroll only) ─── */}
-      {hasPermission("payroll") && gapokNotif && (gapokNotif.overdue > 0 || gapokNotif.upcoming90 > 0) && (
+      {hasPermission("payroll") && gapokNotif && (gapokNotif.overdue > 0 || gapokNotif.upcoming90 > 0 || gapokNotif.recentApplied > 0) && (
         <Link href="/employees/gapok-increments" className="flex items-center gap-3 px-4 py-3 rounded-2xl border bg-card hover:bg-muted/40 transition-colors border-primary/20">
           <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center flex-shrink-0">
             <Banknote className="w-5 h-5 text-primary" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-foreground">
-              {gapokNotif.overdue > 0 ? `${gapokNotif.overdue} pegawai jatuh tempo kenaikan gapok` : `${gapokNotif.upcoming90} pegawai akan naik gapok dalam ${gapokNotif.notificationDays} hari`}
+              {gapokNotif.overdue > 0
+                ? `${gapokNotif.overdue} pegawai jatuh tempo kenaikan gapok`
+                : gapokNotif.upcoming90 > 0
+                ? `${gapokNotif.upcoming90} pegawai akan naik gapok dalam ${gapokNotif.notificationDays} hari`
+                : `${gapokNotif.recentApplied} kenaikan gapok diterapkan dalam 7 hari terakhir`}
             </p>
             <p className="text-xs text-muted-foreground">
               {gapokNotif.overdue > 0 && gapokNotif.upcoming90 > 0
                 ? `${gapokNotif.upcoming90} lainnya akan jatuh tempo dalam ${gapokNotif.notificationDays} hari · Kenaikan otomatis 00:10 WIB`
                 : gapokNotif.overdue > 0
                 ? `Akan diproses otomatis pada 00:10 WIB · Lihat daftar di HRM → Kenaikan Gapok`
-                : `Periode kelipatan ${(gapokNotif.notificationDays === 90 ? "2,5 tahun" : `${gapokNotif.notificationDays} hari`)} · Tap untuk detail`}
+                : gapokNotif.upcoming90 > 0
+                ? `Kenaikan otomatis 00:10 WIB${gapokNotif.recentApplied > 0 ? ` · ${gapokNotif.recentApplied} diterapkan dalam 7 hari terakhir` : ""}`
+                : `${gapokNotif.recentApplied} kenaikan telah diterapkan dalam 7 hari terakhir · Tap untuk detail`}
             </p>
           </div>
           <ArrowRight className="w-4 h-4 text-primary flex-shrink-0" />

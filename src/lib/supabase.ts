@@ -250,8 +250,8 @@ export interface DbBackupLiburSetting {
 
 export interface DbGapokSetting {
   id: 1;
-  driver_jabatan_id: number | null;
-  helper_jabatan_id: number | null;
+  driver_jabatan_id: number;
+  helper_jabatan_id: number;
   driver_default_amount: number;
   helper_default_amount: number;
   increment_amount: number;

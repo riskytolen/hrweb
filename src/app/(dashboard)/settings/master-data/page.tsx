@@ -35,7 +35,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import Pagination from "@/components/ui/Pagination";
-import { cn, formatCurrency, generateDivisionColor, toTitleCase, toUpperTrim } from "@/lib/utils";
+import { cn, formatCurrency, generateDivisionColor, localDateStr, toTitleCase, toUpperTrim } from "@/lib/utils";
+import { summarizeGapokSchedule } from "@/lib/gapok";
 import Portal from "@/components/ui/Portal";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
@@ -214,7 +215,7 @@ export default function MasterDataPage() {
   const [gapokSetting, setGapokSetting] = useState<DbGapokSetting | null>(null);
   const [showGapokForm, setShowGapokForm] = useState(false);
   const [gapokForm, setGapokForm] = useState({ driver_default_amount: "2000000", helper_default_amount: "1000000", increment_amount: "250000", interval_years: "2.5", notification_days: "90", driver_jabatan_id: "", helper_jabatan_id: "" });
-  const [gapokPreview, setGapokPreview] = useState<{ upcoming90: number; overdue: number; totalActive: number; loading: boolean }>({ upcoming90: 0, overdue: 0, totalActive: 0, loading: false });
+  const [gapokPreview, setGapokPreview] = useState<{ upcoming: number; overdue: number; totalActive: number; loading: boolean }>({ upcoming: 0, overdue: 0, totalActive: 0, loading: false });
 
   // ─── Legal Settings State ───
   const [legalSettings, setLegalSettings] = useState<DbLegalSetting[]>([]);
@@ -353,16 +354,16 @@ export default function MasterDataPage() {
 
   const fetchGapokPreview = async () => {
     setGapokPreview((p) => ({ ...p, loading: true }));
-    const today = new Date().toISOString().slice(0, 10);
-    const in90 = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
     const [sched, active] = await Promise.all([
-      supabase.from("gapok_increment_events").select("due_date, status"),
-      supabase.from("pegawai").select("id", { count: "exact", head: true }).eq("status", "Aktif").in("jabatan_id", gapokSetting ? [gapokSetting.driver_jabatan_id, gapokSetting.helper_jabatan_id].filter(Boolean) as number[] : []),
+      supabase.from("gapok_increment_events").select("due_date").eq("status", "Scheduled"),
+      supabase.from("pegawai").select("id", { count: "exact", head: true }).eq("status", "Aktif").in("jabatan_id", gapokSetting ? [gapokSetting.driver_jabatan_id, gapokSetting.helper_jabatan_id] : []),
     ]);
-    const rows = (sched.data ?? []) as { due_date: string; status: string }[];
-    const overdue = rows.filter((r) => r.status === "Scheduled" && r.due_date <= today).length;
-    const upcoming90 = rows.filter((r) => r.status === "Scheduled" && r.due_date > today && r.due_date <= in90).length;
-    setGapokPreview({ overdue, upcoming90, totalActive: active.count ?? 0, loading: false });
+    const summary = summarizeGapokSchedule(
+      (sched.data ?? []) as { due_date: string }[],
+      gapokSetting?.notification_days ?? 90,
+      localDateStr(),
+    );
+    setGapokPreview({ overdue: summary.overdue, upcoming: summary.upcoming, totalActive: active.count ?? 0, loading: false });
   };
 
   const fetchPenalties = async () => {
@@ -1184,6 +1185,10 @@ export default function MasterDataPage() {
 
   const handleSaveGapok = async () => {
     if (!canEdit || !gapokSetting) return;
+    if (!gapokForm.driver_jabatan_id || !gapokForm.helper_jabatan_id) {
+      showSuccess("Gagal Menyimpan", "Jabatan Driver dan Helper wajib dipilih.");
+      return;
+    }
     const intervalYears = parseFloat(gapokForm.interval_years.replace(",", ".")) || 2.5;
     const intervalMonths = Math.max(1, Math.min(120, Math.round(intervalYears * 12)));
     const payload: Record<string, unknown> = {
@@ -2240,7 +2245,7 @@ export default function MasterDataPage() {
                     </div>
                     <div className="rounded-2xl border border-border p-4 bg-card flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center"><Clock className="w-5 h-5 text-primary" /></div>
-                      <div><p className="text-xs text-muted-foreground">Akan Datang {gapokSetting.notification_days} Hari</p><p className="text-lg font-bold text-foreground">{gapokPreview.loading ? "-" : gapokPreview.upcoming90}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Akan Datang {gapokSetting.notification_days} Hari</p><p className="text-lg font-bold text-foreground">{gapokPreview.loading ? "-" : gapokPreview.upcoming}</p></div>
                     </div>
                     <div className="rounded-2xl border border-border p-4 bg-card flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-success-light flex items-center justify-center"><Briefcase className="w-5 h-5 text-success" /></div>

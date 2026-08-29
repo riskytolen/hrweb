@@ -39,7 +39,8 @@ import Badge from "@/components/ui/Badge";
 import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
 import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
-import { cn, formatCurrency } from "@/lib/utils";
+import { cn, formatCurrency, localDateStr } from "@/lib/utils";
+import { summarizeGapokSchedule } from "@/lib/gapok";
 import { supabase, type DbPayroll, type DbPegawai, type NonActivePeriod, type DbPayrollGroup, type DbPayrollEmployeeGroup, type DbBackupLiburSetting } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
@@ -213,15 +214,19 @@ export default function PayrollPage() {
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
   // ─── Gapok auto-increment notice ───
-  const [gapokNotice, setGapokNotice] = useState<{ overdue: number; upcoming: number } | null>(null);
+  const [gapokNotice, setGapokNotice] = useState<{ overdue: number; upcoming: number; notificationDays: number } | null>(null);
   const fetchGapokNotice = useCallback(async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const in90 = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-    const { data } = await supabase.from("gapok_increment_events").select("due_date").eq("status", "Scheduled");
-    const rows = (data ?? []) as { due_date: string }[];
-    const overdue = rows.filter((r) => r.due_date <= today).length;
-    const upcoming = rows.filter((r) => r.due_date > today && r.due_date <= in90).length;
-    setGapokNotice({ overdue, upcoming });
+    const [settingsResult, eventsResult] = await Promise.all([
+      supabase.from("gapok_settings").select("notification_days").eq("id", 1).single(),
+      supabase.from("gapok_increment_events").select("due_date").eq("status", "Scheduled"),
+    ]);
+    const notificationDays = settingsResult.data?.notification_days ?? 90;
+    const summary = summarizeGapokSchedule(
+      (eventsResult.data ?? []) as { due_date: string }[],
+      notificationDays,
+      localDateStr(),
+    );
+    setGapokNotice({ overdue: summary.overdue, upcoming: summary.upcoming, notificationDays });
   }, []);
   // ─── Tab state ───
   const [activeTab, setActiveTab] = useState<"slip" | "gapok">("slip");
@@ -1925,13 +1930,16 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     }
     const value = parseCurrencyInput(gapokEditValue);
     setGapokSaving(true);
-    const { error } = await supabase.from("pegawai").update({ gaji_pokok: value }).eq("id", empId);
+    const { data, error } = await supabase.rpc("set_employee_gapok", { p_employee_id: empId, p_amount: value });
     setGapokSaving(false);
     if (error) {
       showToast("error", "Gagal Menyimpan", error.message);
       return;
     }
-    setEmployees((prev) => prev.map((e) => e.id === empId ? { ...e, gaji_pokok: value } : e));
+    const savedValue = Array.isArray(data) && data[0]?.new_gapok != null
+      ? Number(data[0].new_gapok)
+      : value;
+    setEmployees((prev) => prev.map((e) => e.id === empId ? { ...e, gaji_pokok: savedValue } : e));
     setGapokEditId(null);
     setGapokEditValue("");
     showToast("success", "Gaji Pokok Diperbarui");
@@ -2489,7 +2497,7 @@ wsComputeTotals={wsComputeTotals}
           <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center flex-shrink-0"><Banknote className="w-5 h-5 text-amber-600" /></div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
-              {gapokNotice.overdue > 0 ? `${gapokNotice.overdue} pegawai jatuh tempo kenaikan gapok` : `${gapokNotice.upcoming} pegawai akan naik gapok dalam 90 hari`}
+              {gapokNotice.overdue > 0 ? `${gapokNotice.overdue} pegawai jatuh tempo kenaikan gapok` : `${gapokNotice.upcoming} pegawai akan naik gapok dalam ${gapokNotice.notificationDays} hari`}
             </p>
             <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
               Kenaikan otomatis 00:10 WIB. {gapokNotice.overdue > 0 ? "Worksheet yang sudah terbuat perlu di-Refresh agar gapok baru terpakai." : "Lihat detail di HRM → Kenaikan Gapok."}

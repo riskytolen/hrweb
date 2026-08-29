@@ -236,6 +236,20 @@ export default function RecruitmentPage() {
             if (url) (updatedRec as unknown as Record<string, unknown>)[DOC_CONFIG[type].urlField] = url;
           }
           const syncResult = await syncPegawaiForStatus(updatedRec, form.status);
+          if (!syncResult.ok) {
+            const { error: rollbackError } = await supabase
+              .from("recruitments")
+              .update({ status: existingRow.status })
+              .eq("id", editingId);
+            showToast(
+              "error",
+              syncResult.toast.title,
+              rollbackError
+                ? `${syncResult.toast.message} Status pelamar juga gagal dipulihkan: ${rollbackError.message}`
+                : `${syncResult.toast.message} Status pelamar dikembalikan ke ${existingRow.status}.`,
+            );
+            return;
+          }
           showToast(syncResult.toast.type, syncResult.toast.title, syncResult.toast.message);
         } else if (docWarnings.length > 0) {
           const labels = docWarnings.map((t) => DOC_CONFIG[t].label).join(", ");
@@ -423,10 +437,13 @@ export default function RecruitmentPage() {
   const resolveJabatanIdFromPosisi = async (posisi: string): Promise<number | null> => {
     const normalized = posisi.trim().toLowerCase();
     if (normalized !== "driver" && normalized !== "helper") return null;
-    const { data } = await supabase.from("jabatan").select("id, nama").ilike("nama", posisi).limit(1).maybeSingle();
-    if (data?.id) return data.id as number;
-    // fallback ke ID default produksi jika lookup gagal
-    return normalized === "driver" ? 16 : 14;
+    const { data, error } = await supabase
+      .from("gapok_settings")
+      .select("driver_jabatan_id, helper_jabatan_id")
+      .eq("id", 1)
+      .single();
+    if (error || !data) throw new Error(error?.message || "Pengaturan jabatan gapok belum tersedia.");
+    return normalized === "driver" ? data.driver_jabatan_id : data.helper_jabatan_id;
   };
 
   // ─── Helper: insert pegawai dari data recruitment ───

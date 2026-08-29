@@ -7,11 +7,12 @@ import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import Pagination from "@/components/ui/Pagination";
 import Portal from "@/components/ui/Portal";
-import { Skeleton, SkeletonTable } from "@/components/ui/Skeleton";
+import { SkeletonTable } from "@/components/ui/Skeleton";
 import RouteGuard from "@/components/RouteGuard";
 import { useAuth } from "@/components/AuthProvider";
 import { supabase, type DbGapokSetting } from "@/lib/supabase";
 import { cn, formatCurrency } from "@/lib/utils";
+import { daysUntilGapok, summarizeGapokSchedule } from "@/lib/gapok";
 import { logAudit } from "@/lib/audit";
 
 type GapokEventRow = {
@@ -30,12 +31,23 @@ type GapokEventRow = {
 };
 
 const PAGE_SIZE = 10;
+const SUPABASE_PAGE_SIZE = 1000;
 
-function daysUntil(due: string): number {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const d = new Date(due + "T00:00:00"); d.setHours(0, 0, 0, 0);
-  const diff = d.getTime() - today.getTime();
-  return Math.round(diff / 86400000);
+async function fetchGapokEvents(status: "Scheduled" | "Applied"): Promise<GapokEventRow[]> {
+  const rows: GapokEventRow[] = [];
+  const orderColumn = status === "Scheduled" ? "due_date" : "applied_at";
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("gapok_increment_events")
+      .select("*, pegawai:employee_id(id, nama, tanggal_bergabung, gaji_pokok, jabatan_id, jabatan:jabatan_id(nama))")
+      .eq("status", status)
+      .order(orderColumn, { ascending: status === "Scheduled" })
+      .range(from, from + SUPABASE_PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...((data ?? []) as unknown as GapokEventRow[]));
+    if (!data || data.length < SUPABASE_PAGE_SIZE) break;
+  }
+  return rows;
 }
 
 function formatDays(d: number): string {
@@ -47,7 +59,7 @@ function formatDays(d: number): string {
 }
 
 export default function GapokIncrementsPage() {
-  const { getPermissionLevel, user } = useAuth();
+  const { getPermissionLevel } = useAuth();
   const permLevel = getPermissionLevel("payroll");
   const canEdit = permLevel === "edit";
 
@@ -71,29 +83,28 @@ export default function GapokIncrementsPage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [sRes, eRes, hRes] = await Promise.all([
-      supabase.from("gapok_settings").select("*").eq("id", 1).maybeSingle(),
-      supabase.from("gapok_increment_events").select("*, pegawai:employee_id(id, nama, tanggal_bergabung, gaji_pokok, jabatan_id, jabatan:jabatan_id(nama))").eq("status", "Scheduled").order("due_date", { ascending: true }).limit(200),
-      supabase.from("gapok_increment_events").select("*, pegawai:employee_id(id, nama, tanggal_bergabung, gaji_pokok, jabatan:jabatan_id(nama))").eq("status", "Applied").order("applied_at", { ascending: false }).limit(200),
-    ]);
-    if (sRes.data) setSettings(sRes.data as DbGapokSetting);
-    if (eRes.data) setEvents(eRes.data as unknown as GapokEventRow[]);
-    if (hRes.data) setHistory(hRes.data as unknown as GapokEventRow[]);
-    setLoading(false);
+    try {
+      const [sRes, scheduledRows, historyRows] = await Promise.all([
+        supabase.from("gapok_settings").select("*").eq("id", 1).maybeSingle(),
+        fetchGapokEvents("Scheduled"),
+        fetchGapokEvents("Applied"),
+      ]);
+      if (sRes.error) throw sRes.error;
+      if (sRes.data) setSettings(sRes.data as DbGapokSetting);
+      setEvents(scheduledRows);
+      setHistory(historyRows);
+    } catch (error) {
+      showToast("error", "Gagal Memuat", error instanceof Error ? error.message : "Data kenaikan gapok tidak dapat dimuat.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const metrics = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const overdue = events.filter((e) => e.due_date <= today).length;
-    const upcoming = events.filter((e) => e.due_date > today).length;
-    const dueToday = events.filter((e) => e.due_date === today).length;
-    const in90 = events.filter((e) => {
-      const d = daysUntil(e.due_date);
-      return d > 0 && d <= (settings?.notification_days ?? 90);
-    }).length;
-    return { overdue, upcoming, dueToday, in90, total: events.length };
+    const summary = summarizeGapokSchedule(events, settings?.notification_days ?? 90);
+    return { overdue: summary.overdue, dueToday: summary.dueToday, in90: summary.upcoming, total: events.length };
   }, [events, settings]);
 
   const filtered = useMemo(() => {
@@ -101,8 +112,8 @@ export default function GapokIncrementsPage() {
     return events.filter((e) => {
       const jab = e.pegawai?.jabatan?.nama || (e.jabatan_id === settings?.driver_jabatan_id ? "Driver" : e.jabatan_id === settings?.helper_jabatan_id ? "Helper" : "-");
       if (jabatanFilter !== "semua" && jab !== jabatanFilter) return false;
-      if (statusFilter === "overdue" && daysUntil(e.due_date) > 0) return false;
-      if (statusFilter === "upcoming" && daysUntil(e.due_date) <= 0) return false;
+      if (statusFilter === "overdue" && daysUntilGapok(e.due_date) > 0) return false;
+      if (statusFilter === "upcoming" && daysUntilGapok(e.due_date) <= 0) return false;
       if (q) {
         const hay = `${e.employee_id} ${e.pegawai?.nama || ""} ${jab}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -123,7 +134,7 @@ export default function GapokIncrementsPage() {
   const handleProcessDue = async () => {
     if (!canEdit) return;
     setProcessing(true);
-    const { data, error } = await supabase.rpc("process_due_gapok_increments", { p_limit: 100, p_source: "manual", p_actor: user?.id ?? null });
+    const { data, error } = await supabase.rpc("process_due_gapok_increments", { p_limit: 100 });
     setProcessing(false);
     if (error) {
       showToast("error", "Gagal Memproses", error.message);
@@ -137,21 +148,6 @@ export default function GapokIncrementsPage() {
       showToast("success", "Tidak Ada Yang Jatuh Tempo", "Tidak ada pegawai yang jadwalnya sudah lewat hari ini.");
     }
     fetchAll();
-  };
-
-  const handleReconcile = async () => {
-    if (!canEdit) return;
-    setProcessing(true);
-    const { error } = await supabase.rpc("reconcile_gapok_schedules" as never);
-    // fallback: call via SQL if rpc not exposed directly; we also have reconcile via service
-    if (error) {
-      // try direct SQL via supabase rpc? ignore
-      showToast("error", "Gagal Sinkron", error.message);
-    } else {
-      showToast("success", "Sinkron Selesai", "Jadwal gapok disinkronkan untuk pegawai Aktif Driver/Helper.");
-      fetchAll();
-    }
-    setProcessing(false);
   };
 
   return (
@@ -265,7 +261,7 @@ export default function GapokIncrementsPage() {
                     <tr><td colSpan={10} className="text-center py-16 text-sm text-muted-foreground"><div className="flex flex-col items-center gap-2"><Users className="w-10 h-10 text-muted-foreground/20" /><p>Tidak ada jadwal ditemukan</p></div></td></tr>
                   ) : paged.map((e, idx) => {
                     const jab = e.pegawai?.jabatan?.nama || "-";
-                    const d = daysUntil(e.due_date);
+                    const d = daysUntilGapok(e.due_date);
                     const isOverdue = d <= 0;
                     const gapokNow = e.pegawai?.gaji_pokok ?? 0;
                     return (
