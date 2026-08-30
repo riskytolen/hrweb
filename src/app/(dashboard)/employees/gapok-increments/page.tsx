@@ -320,7 +320,7 @@ export default function GapokIncrementsPage() {
         </div>
 
         <div className="rounded-2xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-          Kenaikan otomatis menambah <span className="font-semibold text-foreground">pegawai.gaji_pokok</span> pada tanggal jatuh tempo dan membuat jadwal kelipatan berikutnya. Worksheet penggajian yang sudah terbuat tidak berubah otomatis — silakan Refresh Worksheet agar gapok terbaru terpakai di periode berjalan.
+          Kenaikan otomatis menambah <span className="font-semibold text-foreground">pegawai.gaji_pokok</span> pada tanggal jatuh tempo dan membuat jadwal kelipatan berikutnya. Nilai pendapatan &amp; potongan otomatis pada Worksheet diperbarui otomatis saat halaman Penggajian dimuat — cukup muat ulang halaman Penggajian untuk melihat nilai terbaru (Worksheet saja; Draft/Final tidak berubah otomatis).
         </div>
       </div>
     </RouteGuard>

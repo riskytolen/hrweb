@@ -12,7 +12,6 @@ import {
   Save,
   Loader2,
   FileCheck,
-  RefreshCw,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -32,7 +31,6 @@ interface WorksheetEditorProps {
   wsLemburBreakdown: Record<number, WsBreakdownLembur>;
   wsLemburLoading: Record<number, boolean>;
   wsSaving: boolean;
-  wsRefreshing: boolean;
   wsExpandedId: number | null;
   wsRowsChanged: number;
   wsTotalChanged: number;
@@ -48,7 +46,6 @@ interface WorksheetEditorProps {
   wsKeterangan: Record<number, Record<string, string>>;
   handleWsSaveRow: (id: number) => Promise<void>;
   handleWsAutoSave: (id: number, immediate: boolean) => void;
-  handleWsRefreshSources: () => Promise<void>;
   initWsData: (rows: PayrollRow[]) => void;
   isCellChanged: (id: number, field: string) => boolean;
   wsComputeTotals: (id: number) => { totalPendapatan: number; totalPotongan: number; netto: number };
@@ -70,7 +67,6 @@ export default function WorksheetEditor({
   wsLemburBreakdown,
   wsLemburLoading,
   wsSaving,
-  wsRefreshing,
   wsExpandedId,
   wsRowsChanged,
   wsTotalChanged,
@@ -84,7 +80,6 @@ export default function WorksheetEditor({
   wsKeterangan,
   handleWsSaveRow,
   handleWsAutoSave,
-  handleWsRefreshSources,
   initWsData,
   isCellChanged,
   wsComputeTotals,
@@ -169,11 +164,7 @@ export default function WorksheetEditor({
             <input type="text" placeholder="Cari pegawai..." value={search} onChange={(e) => setSearch(e.target.value)}
               className="bg-transparent text-[11px] outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
           </div>
-          {canEdit && <button onClick={handleWsRefreshSources} disabled={wsRefreshing || wsSaving}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            <RefreshCw className={cn("w-3 h-3", wsRefreshing && "animate-spin")} />
-            {wsRefreshing ? "Refresh..." : "Refresh Data"}
-          </button>}
+
           {canEdit && <button onClick={onOpenBatchFill}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">
             <Zap className="w-3 h-3" />Batch Fill
