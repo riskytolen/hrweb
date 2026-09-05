@@ -520,8 +520,9 @@ export default function RecruitmentPage() {
         if (oldStatus === "Training") {
           updates.tanggal_bergabung = effectiveJoinDate;
         } else if (oldStatus === "Tidak Aktif" && oldKeluar) {
+          // Kontrak: tanggal_keluar = hari pertama TIDAK aktif.
           const newPeriod: NonActivePeriod = {
-            from: addDaysLocal(oldKeluar, 1),
+            from: oldKeluar,
             to: addDaysLocal(effectiveJoinDate, -1),
           };
           if (newPeriod.from <= newPeriod.to) {

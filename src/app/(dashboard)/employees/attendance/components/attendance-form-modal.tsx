@@ -179,9 +179,9 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
         setError(`${emp.nama} baru bergabung tanggal ${tglBergabung}. Tanggal absen harus pada atau setelah tanggal bergabung.`);
         return;
       }
-      if (emp?.tanggal_keluar && form.tanggal > emp.tanggal_keluar) {
+      if (emp?.tanggal_keluar && form.tanggal >= emp.tanggal_keluar) {
         const tglKeluar = new Date(emp.tanggal_keluar + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
-        setError(`${emp.nama} sudah tidak aktif sejak ${tglKeluar}. Tanggal absen harus pada atau sebelum tanggal terakhir aktif.`);
+        setError(`${emp.nama} sudah tidak aktif sejak ${tglKeluar}. Tanggal absen harus sebelum tanggal mulai tidak aktif.`);
         return;
       }
     }

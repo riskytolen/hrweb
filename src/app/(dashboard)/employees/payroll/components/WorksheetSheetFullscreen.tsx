@@ -50,6 +50,7 @@ interface WorksheetSheetFullscreenProps {
   onCopyInputs: () => void;
   copyInputsBusy: boolean;
   canEdit: boolean;
+  canEditWorksheet?: boolean;
   mode: "Worksheet" | "Draft" | "Final";
   orderSaving: boolean;
   orderSavedTick: number;
@@ -121,6 +122,7 @@ export default function WorksheetSheetFullscreen({
   onCopyInputs,
   copyInputsBusy,
   canEdit,
+  canEditWorksheet,
   mode,
   orderSaving,
   orderSavedTick,
@@ -136,6 +138,7 @@ export default function WorksheetSheetFullscreen({
   onClose,
 }: WorksheetSheetFullscreenProps) {
   const tableRef = useRef<HTMLDivElement>(null);
+  const canWsEdit = canEditWorksheet ?? canEdit;
   const isReadOnly = mode === "Final";
 
   const modeLabel =
@@ -762,22 +765,22 @@ export default function WorksheetSheetFullscreen({
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
-            if (!isReadOnly && col.editable) {
+            if (!isReadOnly && col.editable && canWsEdit) {
               handleWsAutoSave(row.id, true);
               focusNextRowCell(row.id, col.key);
             }
           }
         }}
         onBlur={() => {
-          if (!isReadOnly && col.editable) handleWsAutoSave(row.id, false);
+          if (!isReadOnly && col.editable && canWsEdit) handleWsAutoSave(row.id, false);
         }}
-        readOnly={!col.editable || isReadOnly}
+        readOnly={!col.editable || isReadOnly || !canWsEdit}
         ref={registerCellRef(row.id, col.key)}
         className={cn(
           "w-full text-right text-[11px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-950 placeholder:text-slate-400 transition-all leading-tight",
-          (!col.editable || isReadOnly) && "!bg-transparent text-slate-700 cursor-default border-transparent",
-          col.editable && !isReadOnly && !isCellChanged(row.id, col.key) && "border-transparent hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-200 bg-transparent",
-          col.editable && !isReadOnly && isCellChanged(row.id, col.key) && "border-amber-500 bg-amber-50 ring-1 ring-amber-200",
+          (!col.editable || isReadOnly || !canWsEdit) && "!bg-transparent text-slate-700 cursor-default border-transparent",
+          col.editable && !isReadOnly && canWsEdit && !isCellChanged(row.id, col.key) && "border-transparent hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-200 bg-transparent",
+          col.editable && !isReadOnly && canWsEdit && isCellChanged(row.id, col.key) && "border-amber-500 bg-amber-50 ring-1 ring-amber-200",
         )}
       />
     );
@@ -838,7 +841,7 @@ export default function WorksheetSheetFullscreen({
                 {selectMode ? "Selesai Pilih" : "Pilih Baris"}
               </button>
             )}
-            {mode === "Worksheet" && canEdit && (
+            {mode === "Worksheet" && canWsEdit && (
               <button
                 onClick={onCopyInputs}
                 disabled={copyInputsBusy || wsSaving}
@@ -1235,7 +1238,7 @@ export default function WorksheetSheetFullscreen({
                                 <Trash2 className="w-2.5 h-2.5" />
                               </button>
                             )}
-                            {!isReadOnly && canEdit && isChanged && (
+                            {!isReadOnly && canWsEdit && isChanged && (
                               <button
                                 onClick={() => handleWsSaveRow(row.id)}
                                 disabled={wsSaving}
@@ -1348,22 +1351,22 @@ export default function WorksheetSheetFullscreen({
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  if (!isReadOnly && c.editable) {
+                                  if (!isReadOnly && c.editable && canWsEdit) {
                                     handleWsAutoSave(row.id, true);
                                     focusNextRowCell(row.id, c.key);
                                   }
                                 }
                               }}
                               onBlur={() => {
-                                if (!isReadOnly && c.editable) handleWsAutoSave(row.id, false);
+                                if (!isReadOnly && c.editable && canWsEdit) handleWsAutoSave(row.id, false);
                               }}
-                              readOnly={!c.editable || isReadOnly}
+                              readOnly={!c.editable || isReadOnly || !canWsEdit}
                               ref={registerCellRef(row.id, c.key)}
                               className={cn(
                                 "w-full text-[10px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-700 placeholder:text-slate-400 transition-all leading-tight",
-                                (!c.editable || isReadOnly) && "!bg-transparent text-slate-600 cursor-default border-transparent",
-                                c.editable && !isReadOnly && !isCellChanged(row.id, c.key) && "border-transparent hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-200 bg-transparent",
-                                c.editable && !isReadOnly && isCellChanged(row.id, c.key) && "border-amber-500 bg-amber-50 ring-1 ring-amber-200",
+                                (!c.editable || isReadOnly || !canWsEdit) && "!bg-transparent text-slate-600 cursor-default border-transparent",
+                                c.editable && !isReadOnly && canWsEdit && !isCellChanged(row.id, c.key) && "border-transparent hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-200 bg-transparent",
+                                c.editable && !isReadOnly && canWsEdit && isCellChanged(row.id, c.key) && "border-amber-500 bg-amber-50 ring-1 ring-amber-200",
                               )}
                             />
                            </td>
@@ -1410,22 +1413,22 @@ export default function WorksheetSheetFullscreen({
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  if (!isReadOnly && c.editable) {
+                                  if (!isReadOnly && c.editable && canWsEdit) {
                                     handleWsAutoSave(row.id, true);
                                     focusNextRowCell(row.id, c.key);
                                   }
                                 }
                               }}
                               onBlur={() => {
-                                if (!isReadOnly && c.editable) handleWsAutoSave(row.id, false);
+                                if (!isReadOnly && c.editable && canWsEdit) handleWsAutoSave(row.id, false);
                               }}
-                              readOnly={!c.editable || isReadOnly}
+                              readOnly={!c.editable || isReadOnly || !canWsEdit}
                               ref={registerCellRef(row.id, c.key)}
                               className={cn(
                                 "w-full text-[10px] tabular-nums px-1 py-0.5 rounded-sm border outline-none text-slate-700 placeholder:text-slate-400 transition-all leading-tight",
-                                (!c.editable || isReadOnly) && "!bg-transparent text-slate-600 cursor-default border-transparent",
-                                c.editable && !isReadOnly && !isCellChanged(row.id, c.key) && "border-transparent hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-200 bg-transparent",
-                                c.editable && !isReadOnly && isCellChanged(row.id, c.key) && "border-amber-500 bg-amber-50 ring-1 ring-amber-200",
+                                (!c.editable || isReadOnly || !canWsEdit) && "!bg-transparent text-slate-600 cursor-default border-transparent",
+                                c.editable && !isReadOnly && canWsEdit && !isCellChanged(row.id, c.key) && "border-transparent hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-200 bg-transparent",
+                                c.editable && !isReadOnly && canWsEdit && isCellChanged(row.id, c.key) && "border-amber-500 bg-amber-50 ring-1 ring-amber-200",
                               )}
                             />
                           </td>

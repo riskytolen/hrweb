@@ -146,7 +146,7 @@ export interface DbPegawai {
   kartu_keluarga: string | null;
   tanggal_mulai_pkwt: string | null;
   tanggal_berakhir_pkwt: string | null;
-  /** Tanggal terakhir efektif kerja saat status diubah ke "Tidak Aktif". NULL jika masih aktif. */
+  /** Hari pertama TIDAK aktif saat status diubah ke "Tidak Aktif" (eksklusif, tidak dihitung). NULL jika masih aktif. */
   tanggal_keluar: string | null;
   /**
    * Historical non-active periods (inclusive date ranges) from past termination/rehire cycles.
@@ -224,6 +224,18 @@ export interface DbPayroll {
   source_gaji_pokok: number | null;
   source_titik: number | null;
   source_lembur: number | null;
+  /** Gapok bulanan penuh yang menjadi dasar prorata (sama dengan source_gaji_pokok). */
+  gapok_bulanan?: number | null;
+  /** Jumlah hari kalender aktif dalam periode (untuk prorata). */
+  gapok_hari_aktif?: number | null;
+  /** Total hari kalender dalam periode. */
+  gapok_total_hari?: number | null;
+  /** Pembagi prorata (kontrak: selalu 30). */
+  gapok_pembagi?: number | null;
+  /** True jika gapok periode ini hasil prorata (aktif sebagian). */
+  gapok_is_prorata?: boolean | null;
+  /** Rincian audit prorata, mis. "Prorata: 6000000 / 30 × 12 hari". Bukan catatan manual. */
+  gapok_rincian?: string | null;
   // joined
   pegawai?: DbPegawai;
 }
@@ -282,6 +294,18 @@ export interface DbGapokIncrementEvent {
   updated_at: string;
   pegawai?: DbPegawai;
   jabatan?: DbJabatan;
+}
+
+/** Histori nominal gapok per tanggal efektif (untuk prorata yang dapat diaudit). */
+export interface DbEmployeeGapokHistory {
+  id: number;
+  employee_id: string;
+  amount: number;
+  effective_date: string;
+  source: "manual" | "cron" | "system" | "seed";
+  notes: string | null;
+  created_at: string;
+  created_by: string | null;
 }
 
 /**

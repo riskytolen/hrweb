@@ -55,6 +55,16 @@ import WorksheetSheetFullscreen from "./components/WorksheetSheetFullscreen";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
 import { exportPayrollRecapPdf, exportPayrollRecapXlsx, exportPayrollSlipPdf, getPayrollEmployeeSnapshot } from "./payroll-export";
 import { calculateBackupLiburByEmployee, getBackupLiburPayrollValues, type BackupLiburPoint } from "./backup-libur";
+import {
+  GAPOK_PRORATA_DIVISOR,
+  computeGapokProrata,
+  countActiveDaysInPeriod,
+  countDaysInRange,
+  formatGapokProrataDetail,
+  hasActiveDayInPeriod as hasActiveDayInPeriodShared,
+  isEmployeeActiveOnDate,
+  type EmployeeActivity,
+} from "@/lib/employee-activity";
 
 // ─── Types ───
 type EmployeeLite = { id: string; nama: string; status: string; jabatan?: { nama: string } | null; bank?: string | null; no_rekening?: string | null; nama_rekening?: string | null; gaji_pokok?: number };
@@ -144,25 +154,10 @@ function formatPeriodLabel(periodKey: string): string {
   return d.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
 }
 
-// ─── Helper: cek apakah pegawai punya minimal 1 hari aktif dalam rentang ───
-type ActiveCheckEmp = {
-  tanggal_bergabung: string | null;
-  tanggal_keluar: string | null;
-  non_active_periods?: NonActivePeriod[] | null;
-};
+// ─── Helper aktivitas: single source of truth di @/lib/employee-activity ───
+type ActiveCheckEmp = EmployeeActivity;
 function hasActiveDayInPeriod(emp: ActiveCheckEmp, periodStart: string, periodEnd: string): boolean {
-  if (emp.tanggal_bergabung && emp.tanggal_bergabung > periodEnd) return false;
-  if (emp.tanggal_keluar && emp.tanggal_keluar <= periodStart) return false;
-  if (emp.non_active_periods && emp.non_active_periods.length > 0) {
-    const activeStart = emp.tanggal_bergabung && emp.tanggal_bergabung > periodStart ? emp.tanggal_bergabung : periodStart;
-    const activeEnd = emp.tanggal_keluar && emp.tanggal_keluar <= periodEnd
-      ? String(new Date(new Date(emp.tanggal_keluar).getTime() - 86400000).toISOString().slice(0, 10))
-      : periodEnd;
-    for (const nap of emp.non_active_periods) {
-      if (nap.from <= activeStart && nap.to >= activeEnd) return false;
-    }
-  }
-  return true;
+  return hasActiveDayInPeriodShared(emp, periodStart, periodEnd);
 }
 
 // ─── Pendapatan & Potongan field definitions & currency helpers — see ./constants.ts ───
@@ -209,8 +204,9 @@ async function fetchPeriodState(periode: string): Promise<PeriodState> {
 export default function PayrollPage() {
   const { user, getPermissionLevel, isSuperAdmin } = useAuth();
   const permLevel = getPermissionLevel("payroll");
-  const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
+  /** Izin edit manual Worksheet: payroll.edit penuh + payroll.input (tanpa ubah status/final/hapus). */
+  const canEditWorksheet = permLevel === "edit" || permLevel === "input";
   // ─── Tab state ───
   const [activeTab, setActiveTab] = useState<"slip" | "gapok">("slip");
 
@@ -235,10 +231,7 @@ export default function PayrollPage() {
   const [groupSaving, setGroupSaving] = useState(false);
   const [groupSavedTick, setGroupSavedTick] = useState(0);
 
-  // ─── Generate modal ───
-  const [showGenerate, setShowGenerate] = useState(false);
-  const [generatePeriod, setGeneratePeriod] = useState(getCurrentPeriodKey);
-  const [generating, setGenerating] = useState(false);
+  // ─── (Legacy generate langsung ke Draft sudah dihapus; alur tunggal: Hitung Worksheet → Worksheet → Draft → Final) ───
 
   // ─── Detail slide-over ───
   const [showDetail, setShowDetail] = useState(false);
@@ -258,6 +251,7 @@ export default function PayrollPage() {
   const [gapokPage, setGapokPage] = useState(1);
   const [gapokEditId, setGapokEditId] = useState<string | null>(null);
   const [gapokEditValue, setGapokEditValue] = useState("");
+  const [gapokEffectiveDate, setGapokEffectiveDate] = useState("");
   const [gapokSaving, setGapokSaving] = useState(false);
   const [gapokStatusFilter, setGapokStatusFilter] = useState<"semua" | "Aktif" | "Tidak Aktif">("semua");
   const [gapokIsiFilter, setGapokIsiFilter] = useState<"semua" | "terisi" | "belum">("semua");
@@ -279,8 +273,8 @@ export default function PayrollPage() {
   const wsComputingRef = useRef(false);
   const wsAutoRefreshRef = useRef(false);
   const payrollLoadSeqRef = useRef(0);
-  const wsLiveRef = useRef({ wsData, wsChangedCells, wsKeterangan, payrolls, canEdit });
-  wsLiveRef.current = { wsData, wsChangedCells, wsKeterangan, payrolls, canEdit };
+  const wsLiveRef = useRef({ wsData, wsChangedCells, wsKeterangan, payrolls, canEdit, canEditWorksheet });
+  wsLiveRef.current = { wsData, wsChangedCells, wsKeterangan, payrolls, canEdit, canEditWorksheet };
   /** Indikator validasi periode saat mencoba pindah ke periode berikutnya. */
   const [nextChecking, setNextChecking] = useState(false);
   /** Konfirmasi dialog: buat slip dari worksheet */
@@ -340,10 +334,10 @@ export default function PayrollPage() {
 
   // ─── Lock body scroll ───
   useEffect(() => {
-    if (showGenerate || showDetail) document.body.style.overflow = "hidden";
+    if (showDetail) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
-  }, [showGenerate, showDetail]);
+  }, [showDetail]);
 
   // ─── Fetch employees ───
   const fetchEmployees = useCallback(async () => {
@@ -428,48 +422,80 @@ export default function PayrollPage() {
     try {
       const employeeIds = worksheetRows.map((p) => p.employee_id);
       const refreshedAt = new Date().toISOString();
+      const totalDays = countDaysInRange(targetPeriod.start, targetPeriod.end);
       const [backupLiburSettings, empData, dpData, attData, lemburData] = await Promise.all([
         fetchBackupLiburSettings(),
-        fetchAllRanges<{ id: string; gaji_pokok: number | null }>((from, to) =>
-          supabase.from("pegawai").select("id, gaji_pokok").in("id", employeeIds).order("id", { ascending: true }).range(from, to)
+        fetchAllRanges<{ id: string; gaji_pokok: number | null; status: string; tanggal_bergabung: string | null; tanggal_keluar: string | null; non_active_periods: NonActivePeriod[] | null }>((from, to) =>
+          supabase.from("pegawai").select("id, gaji_pokok, status, tanggal_bergabung, tanggal_keluar, non_active_periods").in("id", employeeIds).order("id", { ascending: true }).range(from, to)
         ),
         fetchAllRanges<BackupLiburPoint & { total: number | null }>((from, to) =>
           supabase.from("delivery_points").select("employee_id, total, tanggal, status_id, role").gte("tanggal", targetPeriod.start).lte("tanggal", targetPeriod.end).in("employee_id", employeeIds).order("id", { ascending: true }).range(from, to)
         ),
-        fetchAllRanges<{ employee_id: string; denda: number | null }>((from, to) =>
-          supabase.from("attendance_records").select("employee_id, denda").gte("tanggal", targetPeriod.start).lte("tanggal", targetPeriod.end).in("employee_id", employeeIds).order("id", { ascending: true }).range(from, to)
+        fetchAllRanges<{ employee_id: string; denda: number | null; tanggal: string }>((from, to) =>
+          supabase.from("attendance_records").select("employee_id, denda, tanggal").gte("tanggal", targetPeriod.start).lte("tanggal", targetPeriod.end).in("employee_id", employeeIds).order("id", { ascending: true }).range(from, to)
         ),
-        fetchAllRanges<{ employee_id: string; total_lembur: number | null }>((from, to) =>
-          supabase.from("overtime_requests").select("employee_id, total_lembur").eq("status", "Disetujui").gte("tanggal", targetPeriod.start).lte("tanggal", targetPeriod.end).in("employee_id", employeeIds).order("id", { ascending: true }).range(from, to)
+        fetchAllRanges<{ employee_id: string; total_lembur: number | null; tanggal: string }>((from, to) =>
+          supabase.from("overtime_requests").select("employee_id, total_lembur, tanggal").eq("status", "Disetujui").gte("tanggal", targetPeriod.start).lte("tanggal", targetPeriod.end).in("employee_id", employeeIds).order("id", { ascending: true }).range(from, to)
         ),
       ]);
 
-      const gapokMap = new Map(empData.map((e) => [e.id, e.gaji_pokok || 0]));
+      const empMap = new Map(empData.map((e) => [e.id, e]));
+      // Filter sumber hanya pada tanggal pegawai aktif (kontrak tanggal_keluar eksklusif).
+      const isActiveFor = (employeeId: string, tanggal: string | null | undefined): boolean => {
+        const emp = empMap.get(employeeId);
+        if (!emp || !tanggal) return false;
+        return isEmployeeActiveOnDate(tanggal, {
+          tanggal_bergabung: emp.tanggal_bergabung,
+          tanggal_keluar: emp.tanggal_keluar,
+          non_active_periods: emp.non_active_periods,
+          status: emp.status,
+        });
+      };
+      const activeDpData = dpData.filter((d) => d.employee_id && d.tanggal && isActiveFor(d.employee_id, d.tanggal));
       const titikTotals = new Map<string, number>();
-      dpData.forEach((d) => {
+      activeDpData.forEach((d) => {
         if (!d.employee_id) return;
         titikTotals.set(d.employee_id, (titikTotals.get(d.employee_id) || 0) + (d.total || 0));
       });
-      const backupLiburByEmployee = calculateBackupLiburByEmployee(dpData, backupLiburSettings);
+      const backupLiburByEmployee = calculateBackupLiburByEmployee(activeDpData, backupLiburSettings);
       const absenTotals = new Map<string, number>();
       attData.forEach((d) => {
+        if (!d.employee_id || !d.tanggal || !isActiveFor(d.employee_id, d.tanggal)) return;
         absenTotals.set(d.employee_id, (absenTotals.get(d.employee_id) || 0) + (d.denda || 0));
       });
       const lemburTotals = new Map<string, number>();
       lemburData.forEach((d) => {
+        if (!d.employee_id || !d.tanggal || !isActiveFor(d.employee_id, d.tanggal)) return;
         lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
       });
 
+      const missingExitNames: string[] = [];
       let updated = 0;
       let failed = 0;
       for (const row of worksheetRows) {
-        const sourceGapok = gapokMap.get(row.employee_id) || 0;
+        const emp = empMap.get(row.employee_id);
+        if (!emp) continue;
+        if (emp.status === "Tidak Aktif" && !emp.tanggal_keluar) {
+          missingExitNames.push(row.pegawaiNama || row.employee_id);
+          continue;
+        }
+        const activity: EmployeeActivity = {
+          tanggal_bergabung: emp.tanggal_bergabung,
+          tanggal_keluar: emp.tanggal_keluar,
+          non_active_periods: emp.non_active_periods,
+          status: emp.status,
+        };
+        const activeDays = countActiveDaysInPeriod(activity, targetPeriod.start, targetPeriod.end);
+        if (activeDays <= 0) continue; // Tidak eligible lagi; jangan hapus diam-diam.
+        const monthly = emp.gaji_pokok || 0;
+        const prorata = computeGapokProrata(monthly, activeDays, totalDays, GAPOK_PRORATA_DIVISOR);
+        const rincian = formatGapokProrataDetail(prorata);
         const sourceTitik = titikTotals.get(row.employee_id) || 0;
         const sourceLembur = lemburTotals.get(row.employee_id) || 0;
         const sourcePotonganAbsen = absenTotals.get(row.employee_id) || 0;
         const backupLibur = getBackupLiburPayrollValues(backupLiburByEmployee, row.employee_id, backupLiburSettings);
-        const payload: Record<string, number | string | null> = {
-          gaji_pokok: sourceGapok,
+        const payload: Record<string, number | string | boolean | null> = {
+          gaji_pokok: prorata.amount,
           pendapatan_titik: sourceTitik,
           tambahan_backup_libur: backupLibur.tambahan_backup_libur,
           backup_libur_driver_days: backupLibur.backup_libur_driver_days,
@@ -478,9 +504,15 @@ export default function PayrollPage() {
           backup_libur_helper_rate: backupLibur.backup_libur_helper_rate,
           lembur: sourceLembur,
           potongan_absen: sourcePotonganAbsen,
-          source_gaji_pokok: sourceGapok,
+          source_gaji_pokok: prorata.monthly,
           source_titik: sourceTitik,
           source_lembur: sourceLembur,
+          gapok_bulanan: prorata.monthly,
+          gapok_hari_aktif: prorata.activeDays,
+          gapok_total_hari: prorata.totalDays,
+          gapok_pembagi: prorata.divisor,
+          gapok_is_prorata: prorata.isProrata,
+          gapok_rincian: rincian,
           last_recomputed_at: refreshedAt,
         };
         if (
@@ -504,13 +536,21 @@ export default function PayrollPage() {
           (row.source_gaji_pokok ?? null) !== payload.source_gaji_pokok ||
           (row.source_titik ?? null) !== payload.source_titik ||
           (row.source_lembur ?? null) !== payload.source_lembur ||
+          ((row.gapok_hari_aktif ?? null) !== payload.gapok_hari_aktif) ||
+          ((row.gapok_total_hari ?? null) !== payload.gapok_total_hari) ||
+          ((row.gapok_bulanan ?? null) !== payload.gapok_bulanan) ||
+          ((row.gapok_is_prorata ?? null) !== payload.gapok_is_prorata) ||
+          ((row.gapok_rincian ?? null) !== payload.gapok_rincian) ||
           (payload.catatan !== undefined && row.catatan !== payload.catatan);
         if (!hasChange) continue;
-        const { error, count } = await supabase.from("payrolls").update(payload).eq("id", row.id).eq("status", "Worksheet").select("id");
-        if (error || !count) failed += 1;
+        const { data, error } = await supabase.from("payrolls").update(payload).eq("id", row.id).eq("status", "Worksheet").select("id");
+        if (error || !data || data.length === 0) failed += 1;
         else updated += 1;
       }
 
+      if (missingExitNames.length > 0) {
+        showToast("error", "Tanggal Nonaktif Belum Lengkap", `${missingExitNames.slice(0, 5).join(", ")}${missingExitNames.length > 5 ? ` (+${missingExitNames.length - 5} lainnya)` : ""} berstatus Tidak Aktif tanpa Tanggal Mulai Tidak Aktif. Lengkapi dulu agar prorata dapat dihitung.`);
+      }
       if (updated > 0) {
         await logAudit({
           supabase,
@@ -521,6 +561,7 @@ export default function PayrollPage() {
             periode: targetPeriodKey,
             jumlah_slip: updated,
             sumber: ["gaji_pokok", "pendapatan_titik", "tambahan_backup_libur", "lembur", "potongan_absen"],
+            prorata: { pembagi: GAPOK_PRORATA_DIVISOR, total_hari: totalDays },
             backup_libur: {
               delivery_status_id: backupLiburSettings.delivery_status_id,
               driver_amount: backupLiburSettings.driver_amount,
@@ -581,209 +622,8 @@ export default function PayrollPage() {
     });
   }, [periodKey, reloadKey, loadPayrollsForPeriod]);
 
-  // ─── Generate slip gaji ───
-  const handleGenerate = async () => {
-    if (!canEdit) {
-      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin generate slip.");
-      return;
-    }
-    setGenerating(true);
-    const genPeriod = getPeriodRange(generatePeriod);
-
-    try {
-      // 1. Fetch pegawai relevan untuk periode ini:
-      //    - Aktif (semua)
-      //    - Tidak Aktif: tetap di-generate kalau masih ada data absen/delivery/lembur di
-      //      periode (penghasilan yang belum dibayarkan), atau tanggal_keluar di dalam periode.
-      const { data: allEmps, error: empErr } = await supabase
-        .from("pegawai")
-        .select("id, nama, gaji_pokok, tanggal_keluar, status, tanggal_bergabung, non_active_periods")
-        .order("nama");
-      if (empErr || !allEmps) {
-        showToast("error", "Gagal Memuat Pegawai", (empErr as { message?: string } | null)?.message || "Unknown error");
-        setGenerating(false);
-        return;
-      }
-      // Filter di-JS: hanya pegawai yg punya minimal 1 hari aktif dalam rentang periode
-      const activeEmps = (allEmps as { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null; tanggal_bergabung: string | null; non_active_periods: NonActivePeriod[] | null }[]).filter((e) => {
-        if (!hasActiveDayInPeriod(e, genPeriod.start, genPeriod.end)) return false;
-        return true;
-      });
-
-
-      // 2. Check existing payrolls for this period
-      const { data: existing } = await supabase
-        .from("payrolls")
-        .select("employee_id")
-        .eq("periode", generatePeriod);
-      const existingSet = new Set((existing || []).map((e: { employee_id: string }) => e.employee_id));
-
-      // 3. Filter employees that don't have a slip yet
-      const newEmps = (activeEmps as { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null; tanggal_bergabung: string | null; non_active_periods: NonActivePeriod[] | null }[]).filter((e) => !existingSet.has(e.id));
-      if (newEmps.length === 0) {
-        showToast("error", "Tidak Ada Slip Baru", "Semua pegawai aktif sudah memiliki slip gaji untuk periode ini.");
-        setGenerating(false);
-        return;
-      }
-
-      // 4. Fetch delivery points totals and Backup Libur markers for each employee in period.
-      const [backupLiburSettings, dpData] = await Promise.all([
-        fetchBackupLiburSettings(),
-        fetchAllRanges<BackupLiburPoint & { total: number }>((from, to) =>
-          supabase
-            .from("delivery_points")
-            .select("employee_id, total, tanggal, status_id, role")
-            .gte("tanggal", genPeriod.start)
-            .lte("tanggal", genPeriod.end)
-            .in("employee_id", newEmps.map((e) => e.id))
-            .order("id", { ascending: true })
-            .range(from, to)
-        ),
-      ]);
-
-      const backupLiburByEmployee = calculateBackupLiburByEmployee(dpData, backupLiburSettings);
-
-      const dpTotals = new Map<string, number>();
-      dpData.forEach((d) => {
-        if (!d.employee_id) return;
-        dpTotals.set(d.employee_id, (dpTotals.get(d.employee_id) || 0) + d.total);
-      });
-
-      // 5. Fetch attendance denda totals for each employee in period
-      const attData = await fetchAllRanges<{ employee_id: string; denda: number; tanggal: string; status: string }>((from, to) =>
-        supabase
-          .from("attendance_records")
-          .select("employee_id, denda, tanggal, status")
-          .gte("tanggal", genPeriod.start)
-          .lte("tanggal", genPeriod.end)
-          .in("employee_id", newEmps.map((e) => e.id))
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
-
-      const dendaTotals = new Map<string, number>();
-      attData.forEach((d) => {
-        dendaTotals.set(d.employee_id, (dendaTotals.get(d.employee_id) || 0) + d.denda);
-      });
-
-      // 5b. Fetch lembur Disetujui per employee dalam periode
-      const lemburData = await fetchAllRanges<{ employee_id: string; total_lembur: number | null }>((from, to) =>
-        supabase
-          .from("overtime_requests")
-          .select("employee_id, total_lembur")
-          .eq("status", "Disetujui")
-          .gte("tanggal", genPeriod.start)
-          .lte("tanggal", genPeriod.end)
-          .in("employee_id", newEmps.map((e) => e.id))
-          .order("id", { ascending: true })
-          .range(from, to)
-      );
-
-      const lemburTotals = new Map<string, number>();
-      lemburData.forEach((d) => {
-        lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
-      });
-
-      // 5c. Fallback untuk Tidak Aktif tanpa tanggal_keluar: butuh catatan absen di periode
-      const empsWithData = newEmps.filter((e) => {
-        if (e.status !== "Tidak Aktif") return true;
-        if (e.tanggal_keluar) return true; // sudah dicek hasActiveDayInPeriod
-        // Tidak Aktif + NULL tanggal_keluar → hanya include kalau ada catatan absen
-        const hariAdaCatatan = new Set(
-          attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
-        ).size;
-        return hariAdaCatatan > 0;
-      });
-      const skippedNoAbsen = newEmps.length - empsWithData.length;
-      if (empsWithData.length === 0) {
-        showToast("error", "Tidak Ada Slip Baru", "Tidak ada pegawai dengan catatan kehadiran di periode ini.");
-        setGenerating(false);
-        return;
-      }
-
-      // 6. Build gaji_pokok lookup dari master pegawai.
-      const gapokMap = new Map<string, number>();
-      (activeEmps as { id: string; gaji_pokok?: number }[]).forEach((e) => {
-        gapokMap.set(e.id, e.gaji_pokok || 0);
-      });
-
-      // 7. Build insert rows (exclude generated columns)
-      const inserts = empsWithData.map((e) => {
-        const gapok = gapokMap.get(e.id) || 0;
-
-        return {
-          employee_id: e.id,
-          periode: generatePeriod,
-          periode_mulai: genPeriod.start,
-          periode_selesai: genPeriod.end,
-          gaji_pokok: gapok,
-          pendapatan_titik: dpTotals.get(e.id) || 0,
-          extra_job: 0,
-          uang_makan: 0,
-          insentif: 0,
-          tunjangan_jabatan: 0,
-          transport: 0,
-          tunjangan_lain: 0,
-          tambahan_lain: 0,
-          lembur: lemburTotals.get(e.id) || 0,
-          koperasi: 0,
-          pinjaman_perusahaan: 0,
-          potongan_absen: dendaTotals.get(e.id) || 0,
-          potongan_lain: 0,
-          jht: 0,
-          bpjs_kesehatan: 0,
-          ...getBackupLiburPayrollValues(backupLiburByEmployee, e.id, backupLiburSettings),
-          status: "Draft",
-          catatan: null,
-          extra_job_keterangan: null,
-          insentif_keterangan: null,
-          koperasi_keterangan: null,
-          pinjaman_perusahaan_keterangan: null,
-          potongan_lain_keterangan: null,
-        };
-      });
-
-      // 8. Insert
-      const { error: insertErr } = await supabase.from("payrolls").insert(inserts);
-      if (insertErr) {
-        showToast("error", "Gagal Generate", insertErr.message);
-        setGenerating(false);
-        return;
-      }
-
-      showToast(
-        "success",
-        "Generate Berhasil",
-        skippedNoAbsen > 0
-          ? `${inserts.length} slip gaji dibuat (${skippedNoAbsen} Tidak Aktif tanpa catatan absen dilewati).`
-          : `${inserts.length} slip gaji berhasil dibuat untuk periode ${formatPeriodLabel(generatePeriod)}.`
-      );
-      // Audit log
-      await logAudit({
-        supabase,
-        action: "generate",
-        entityType: "payrolls",
-        entityLabel: `Slip gaji periode ${formatPeriodLabel(generatePeriod)}`,
-        metadata: {
-          periode: generatePeriod,
-          jumlah_slip: inserts.length,
-          rentang: `${genPeriod.start} – ${genPeriod.end}`,
-        },
-      });
-      setShowGenerate(false);
-
-      // Refresh if same period
-      if (generatePeriod === periodKey) {
-        await fetchPayrolls();
-      } else {
-        setPeriodKey(generatePeriod);
-      }
-    } catch (err) {
-      showToast("error", "Terjadi Kesalahan", err instanceof Error ? err.message : "Gagal generate slip gaji.");
-    } finally {
-      setGenerating(false);
-    }
-  };
+  // ─── (Dihapus) Jalur generate langsung ke Draft dihilangkan agar tidak kontradiktif.
+  // Alur tunggal yang didukung: Hitung Worksheet → Worksheet → Draft → Final.
 
   // ─── Open detail panel ───
   const [absenBreakdown, setAbsenBreakdown] = useState<{ telat: number; alpha: number; lainnya: number; items: AbsenBreakdownItem[] } | null>(null);
@@ -1067,7 +907,7 @@ export default function PayrollPage() {
     setSingleFinalConfirm(null);
   };
 
-  // ─── Delete slip ───
+  // ─── Delete slip (Final tidak boleh dihapus langsung) ───
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     if (!canEdit) {
@@ -1075,9 +915,14 @@ export default function PayrollPage() {
       setDeleteConfirm(null);
       return;
     }
-    setDeleting(true);
     const oldRecord = payrolls.find((p) => p.id === deleteConfirm.id);
-    const { error } = await supabase.from("payrolls").delete().eq("id", deleteConfirm.id);
+    if (oldRecord?.status === "Final") {
+      showToast("error", "Slip Final Terkunci", "Slip Final tidak boleh dihapus langsung. Minta Super Admin mengembalikannya ke Draft terlebih dahulu.");
+      setDeleteConfirm(null);
+      return;
+    }
+    setDeleting(true);
+    const { error } = await supabase.from("payrolls").delete().eq("id", deleteConfirm.id).neq("status", "Final");
     if (error) {
       showToast("error", "Gagal Menghapus", error.message);
       setDeleting(false);
@@ -1116,13 +961,18 @@ export default function PayrollPage() {
     }
     const scopedRows = getScopedSelectedRows();
     if (scopedRows.length === 0) return;
+    if (scopedRows.some((p) => p.status === "Final")) {
+      showToast("error", "Slip Final Terkunci", "Pilihan mencakup slip Final. Kembalikan ke Draft oleh Super Admin terlebih dahulu sebelum menghapus.");
+      setBulkDeleteConfirm(false);
+      return;
+    }
     setDeleting(true);
-    
+
     const idsToDelete = scopedRows.map((p) => p.id);
     // Optimistically get records for audit
     const oldRecords = scopedRows;
-    
-    const { error } = await supabase.from("payrolls").delete().in("id", idsToDelete);
+
+    const { error } = await supabase.from("payrolls").delete().in("id", idsToDelete).neq("status", "Final");
     if (error) {
       showToast("error", "Gagal Menghapus", error.message);
       setDeleting(false);
@@ -1506,7 +1356,7 @@ export default function PayrollPage() {
   }, [wsChangedCells]);
 
   const handleWsChange = (id: number, field: string, rawValue: string) => {
-    if (!canEdit) return;
+    if (!canEditWorksheet) return;
     const row = payrolls.find((p) => p.id === id);
     if (row?.status === "Final") return;
     const value = parseCurrencyInput(rawValue);
@@ -1521,7 +1371,7 @@ export default function PayrollPage() {
   };
 
   const handleWsKeteranganChange = (id: number, fieldKey: string, value: string) => {
-    if (!canEdit) return;
+    if (!canEditWorksheet) return;
     const row = payrolls.find((p) => p.id === id);
     if (row?.status === "Final") return;
     setWsKeterangan((prev) => ({ ...prev, [id]: { ...prev[id], [fieldKey]: value } }));
@@ -1568,7 +1418,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
   const flushWsSaveRow = async (id: number, silent: boolean) => {
     const live = wsLiveRef.current;
     if (!live.wsChangedCells.has(id)) return;
-    if (!live.canEdit) {
+    if (!live.canEditWorksheet) {
       if (!silent) showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit worksheet.");
       return;
     }
@@ -1591,16 +1441,17 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     const changedCellCount = savedCells.size;
     wsSavingRowsRef.current.add(id);
     setWsSaving(true);
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("payrolls")
       .update(buildWsUpdatePayload(id, vals, live.wsKeterangan[id]))
       .eq("id", id)
-      .eq("status", status);
+      .eq("status", status)
+      .select("id");
     wsSavingRowsRef.current.delete(id);
     setWsSaving(false);
 
-    if (error) {
-      showToast("error", "Gagal Menyimpan", error.message);
+    if (error || !data || data.length === 0) {
+      showToast("error", "Gagal Menyimpan", error?.message || "Data sudah berubah status (mis. sudah Final). Muat ulang halaman.");
       return;
     }
 
@@ -1868,7 +1719,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
   }, [batchField, batchFilter, wsData]);
 
   const handleBatchFill = () => {
-    if (!canEdit) {
+    if (!canEditWorksheet) {
       showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit worksheet.");
       return;
     }
@@ -1899,15 +1750,17 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     showToast("success", "Batch Fill Berhasil", `${targets.length} pegawai diisi ${fieldLabel} = ${formatCurrency(value)}`);
   };
 
-  // ─── Gapok handlers ───
+  // ─── Gapok handlers (wajib tanggal efektif untuk prorata yang dapat diaudit) ───
   const handleGapokEdit = (empId: string, currentValue: number) => {
     setGapokEditId(empId);
     setGapokEditValue(formatInputCurrency(currentValue));
+    setGapokEffectiveDate(new Date().toISOString().slice(0, 10));
   };
 
   const handleGapokCancel = () => {
     setGapokEditId(null);
     setGapokEditValue("");
+    setGapokEffectiveDate("");
   };
 
   const handleGapokSave = async (empId: string) => {
@@ -1915,9 +1768,13 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin edit gaji pokok.");
       return;
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(gapokEffectiveDate)) {
+      showToast("error", "Tanggal Efektif Wajib", "Pilih tanggal efektif berlakunya gapok baru.");
+      return;
+    }
     const value = parseCurrencyInput(gapokEditValue);
     setGapokSaving(true);
-    const { data, error } = await supabase.rpc("set_employee_gapok", { p_employee_id: empId, p_amount: value });
+    const { data, error } = await supabase.rpc("set_employee_gapok", { p_employee_id: empId, p_amount: value, p_effective_date: gapokEffectiveDate });
     setGapokSaving(false);
     if (error) {
       showToast("error", "Gagal Menyimpan", error.message);
@@ -1927,9 +1784,18 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       ? Number(data[0].new_gapok)
       : value;
     setEmployees((prev) => prev.map((e) => e.id === empId ? { ...e, gaji_pokok: savedValue } : e));
+    await logAudit({
+      supabase,
+      action: "update",
+      entityType: "employee_gapok_history",
+      entityId: empId,
+      entityLabel: `Gapok ${empId} efektif ${gapokEffectiveDate}`,
+      metadata: { employee_id: empId, amount: savedValue, effective_date: gapokEffectiveDate },
+    });
     setGapokEditId(null);
     setGapokEditValue("");
-    showToast("success", "Gaji Pokok Diperbarui");
+    setGapokEffectiveDate("");
+    showToast("success", "Gaji Pokok Diperbarui", `Berlaku sejak ${gapokEffectiveDate}.`);
   };
 
   // ─── Gapok filter & paginate ───
@@ -2032,7 +1898,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         if (targetState.duplicates > 0) {
           showToast("error", "Data Payroll Duplikat", `Ditemukan payroll ganda untuk pegawai pada periode ${formatPeriodLabel(targetPeriod)}. Perhitungan dibatalkan.`);
         } else {
-          showToast("error", "Periode Sudah Memiliki Data", `Periode ${formatPeriodLabel(targetPeriod)} sudah memiliki ${targetState.total} baris payroll. Perhitungan dibatalkan agar tidak terjadi duplikasi. Gunakan “Refresh Sumber” untuk memperbarui data.`);
+          showToast("error", "Periode Sudah Memiliki Data", `Periode ${formatPeriodLabel(targetPeriod)} sudah memiliki ${targetState.total} baris payroll. Perhitungan dibatalkan agar tidak terjadi duplikasi. Muat ulang halaman untuk memperbarui Worksheet otomatis.`);
         }
         return;
       }
@@ -2068,7 +1934,18 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         return;
       }
 
-      // 2. Fetch delivery points, attendance, lembur dalam periode
+      // 2. Validasi data tanggal nonaktif: Tidak Aktif tanpa tanggal wajib diperbaiki dulu.
+      type Emp = { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null; tanggal_bergabung: string | null; non_active_periods: NonActivePeriod[] | null };
+      const typedEmps = allEmps as Emp[];
+      const missingExit = typedEmps.filter((e) => e.status === "Tidak Aktif" && !e.tanggal_keluar);
+      if (missingExit.length > 0) {
+        showToast("error", "Tanggal Nonaktif Belum Lengkap", `${missingExit.slice(0, 5).map((e) => e.nama).join(", ")}${missingExit.length > 5 ? ` (+${missingExit.length - 5} lainnya)` : ""} berstatus Tidak Aktif tanpa Tanggal Mulai Tidak Aktif. Lengkapi dulu sebelum Hitung Worksheet.`);
+        setWsComputing(false);
+        return;
+      }
+
+      // 3. Fetch delivery points, attendance, lembur dalam periode (dengan tanggal untuk filter aktif).
+      const totalDays = countDaysInRange(genPeriod.start, genPeriod.end);
       const [backupLiburSettings, dpData] = await Promise.all([
         fetchBackupLiburSettings(),
         fetchAllRanges<BackupLiburPoint & { total: number }>((from, to) =>
@@ -2077,17 +1954,24 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
             .select("employee_id, total, tanggal, status_id, role")
             .gte("tanggal", genPeriod.start)
             .lte("tanggal", genPeriod.end)
-            .in("employee_id", allEmps.map((e) => e.id))
+            .in("employee_id", typedEmps.map((e) => e.id))
             .order("id", { ascending: true })
             .range(from, to)
         ),
       ]);
+      const empMap = new Map(typedEmps.map((e) => [e.id, e]));
+      const isActiveFor = (employeeId: string, tanggal: string | null | undefined): boolean => {
+        const emp = empMap.get(employeeId);
+        if (!emp || !tanggal) return false;
+        return isEmployeeActiveOnDate(tanggal, emp);
+      };
+      const activeDpData = dpData.filter((d) => d.employee_id && d.tanggal && isActiveFor(d.employee_id, d.tanggal));
       const dpTotals = new Map<string, number>();
-      dpData.forEach((d) => {
+      activeDpData.forEach((d) => {
         if (!d.employee_id) return;
         dpTotals.set(d.employee_id, (dpTotals.get(d.employee_id) || 0) + d.total);
       });
-      const backupLiburByEmployee = calculateBackupLiburByEmployee(dpData, backupLiburSettings);
+      const backupLiburByEmployee = calculateBackupLiburByEmployee(activeDpData, backupLiburSettings);
 
       const attData = await fetchAllRanges<{ employee_id: string; denda: number; tanggal: string; status: string }>((from, to) =>
         supabase
@@ -2095,51 +1979,44 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
           .select("employee_id, denda, tanggal, status")
           .gte("tanggal", genPeriod.start)
           .lte("tanggal", genPeriod.end)
-          .in("employee_id", allEmps.map((e) => e.id))
+          .in("employee_id", typedEmps.map((e) => e.id))
           .order("id", { ascending: true })
           .range(from, to)
       );
       const dendaTotals = new Map<string, number>();
       attData.forEach((d) => {
+        if (!d.employee_id || !d.tanggal || !isActiveFor(d.employee_id, d.tanggal)) return;
         dendaTotals.set(d.employee_id, (dendaTotals.get(d.employee_id) || 0) + d.denda);
       });
 
-      const lemburData = await fetchAllRanges<{ employee_id: string; total_lembur: number | null }>((from, to) =>
+      const lemburData = await fetchAllRanges<{ employee_id: string; total_lembur: number | null; tanggal: string }>((from, to) =>
         supabase
           .from("overtime_requests")
-          .select("employee_id, total_lembur")
+          .select("employee_id, total_lembur, tanggal")
           .eq("status", "Disetujui")
           .gte("tanggal", genPeriod.start)
           .lte("tanggal", genPeriod.end)
-          .in("employee_id", allEmps.map((e) => e.id))
+          .in("employee_id", typedEmps.map((e) => e.id))
           .order("id", { ascending: true })
           .range(from, to)
       );
       const lemburTotals = new Map<string, number>();
       lemburData.forEach((d) => {
+        if (!d.employee_id || !d.tanggal || !isActiveFor(d.employee_id, d.tanggal)) return;
         lemburTotals.set(d.employee_id, (lemburTotals.get(d.employee_id) || 0) + (d.total_lembur || 0));
       });
 
-      // 3. Bangun insert rows untuk pegawai yang eligible.
-      type Emp = { id: string; nama: string; status: string; gaji_pokok?: number; tanggal_keluar: string | null; tanggal_bergabung: string | null; non_active_periods: NonActivePeriod[] | null };
-
-      const inserts = (allEmps as Emp[]).flatMap((e) => {
-        const gapokFull = e.gaji_pokok || 0;
-
-        // Skip jika tidak punya hari aktif dalam periode
+      // 4. Bangun insert rows untuk pegawai yang eligible, dengan prorata gapok.
+      const computedAt = new Date().toISOString();
+      const inserts = typedEmps.flatMap((e) => {
+        const monthly = e.gaji_pokok || 0;
         if (!hasActiveDayInPeriod(e, genPeriod.start, genPeriod.end)) return [];
-
-        // Fallback untuk Tidak Aktif tanpa tanggal_keluar: butuh catatan absen
-        if (e.status === "Tidak Aktif" && !e.tanggal_keluar) {
-          const hariDenganCatatan = new Set(
-            attData.filter((a) => a.employee_id === e.id).map((a) => a.tanggal)
-          ).size;
-          if (hariDenganCatatan === 0) return [];
-        }
+        const activeDays = countActiveDaysInPeriod(e, genPeriod.start, genPeriod.end);
+        if (activeDays <= 0) return [];
+        const prorata = computeGapokProrata(monthly, activeDays, totalDays, GAPOK_PRORATA_DIVISOR);
 
         const sourceTitik = dpTotals.get(e.id) || 0;
         const sourceLembur = lemburTotals.get(e.id) || 0;
-        const sourceGapok = gapokFull;
         const totalPotongan = dendaTotals.get(e.id) || 0;
 
         return [{
@@ -2147,7 +2024,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
           periode: targetPeriod,
           periode_mulai: genPeriod.start,
           periode_selesai: genPeriod.end,
-          gaji_pokok: sourceGapok,
+          gaji_pokok: prorata.amount,
           pendapatan_titik: sourceTitik,
           ...getBackupLiburPayrollValues(backupLiburByEmployee, e.id, backupLiburSettings),
           extra_job: 0,
@@ -2171,15 +2048,21 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
           koperasi_keterangan: null,
           pinjaman_perusahaan_keterangan: null,
           potongan_lain_keterangan: null,
-          last_recomputed_at: new Date().toISOString(),
-          source_gaji_pokok: sourceGapok,
+          last_recomputed_at: computedAt,
+          source_gaji_pokok: prorata.monthly,
           source_titik: sourceTitik,
           source_lembur: sourceLembur,
+          gapok_bulanan: prorata.monthly,
+          gapok_hari_aktif: prorata.activeDays,
+          gapok_total_hari: prorata.totalDays,
+          gapok_pembagi: prorata.divisor,
+          gapok_is_prorata: prorata.isProrata,
+          gapok_rincian: formatGapokProrataDetail(prorata),
         }];
       });
 
       if (inserts.length === 0) {
-        showToast("error", "Tidak Ada Data", "Tidak ada pegawai dengan catatan kehadiran di periode ini.");
+        showToast("error", "Tidak Ada Data", "Tidak ada pegawai aktif pada periode ini.");
         setWsComputing(false);
         return;
       }
@@ -2191,7 +2074,8 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         return;
       }
 
-      showToast("success", "Worksheet Diperbarui", `${inserts.length} baris worksheet di-recompute untuk ${formatPeriodLabel(targetPeriod)}.`);
+      const prorataCount = inserts.filter((r) => (r as { gapok_is_prorata?: boolean }).gapok_is_prorata).length;
+      showToast("success", "Worksheet Diperbarui", `${inserts.length} baris worksheet dihitung untuk ${formatPeriodLabel(targetPeriod)}${prorataCount > 0 ? ` (${prorataCount} prorata).` : "."}`);
       // Audit log
       await logAudit({
         supabase,
@@ -2201,6 +2085,8 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         metadata: {
           periode: targetPeriod,
           jumlah_baris: inserts.length,
+          jumlah_prorata: prorataCount,
+          prorata: { pembagi: GAPOK_PRORATA_DIVISOR, total_hari: totalDays },
           rentang: `${genPeriod.start} – ${genPeriod.end}`,
         },
       });
@@ -2216,7 +2102,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
 
   // ─── Salin input manual dari periode sebelumnya (isi yang masih kosong) ───
   const handleCopyInputsFromPrev = async () => {
-    if (!canEdit) {
+    if (!canEditWorksheet) {
       showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin mengubah worksheet.");
       return;
     }
@@ -2324,7 +2210,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     }
   };
 
-  // ─── Buat Slip dari Worksheet (Worksheet → Draft) ───
+  // ─── Buat Slip dari Worksheet (Worksheet → Draft, snapshot terkunci) ───
   const handleBuatSlip = async (ids: number[]) => {
     if (ids.length === 0) return;
     if (!canEdit) {
@@ -2336,13 +2222,23 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
       showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan pada slip yang dipilih.");
       return;
     }
-    const { error } = await supabase
+    const targets = payrolls.filter((p) => ids.includes(p.id));
+    if (targets.some((p) => p.status !== "Worksheet")) {
+      showToast("error", "Status Berubah", "Sebagian slip sudah tidak berstatus Worksheet. Muat ulang halaman.");
+      return;
+    }
+    if (targets.some((p) => p.gapok_bulanan == null || p.gapok_hari_aktif == null)) {
+      showToast("error", "Worksheet Belum Valid", "Sebagian Worksheet belum memiliki rincian prorata. Muat ulang halaman agar auto-refresh menghitung ulang, lalu coba lagi.");
+      return;
+    }
+    const { data, error } = await supabase
       .from("payrolls")
       .update({ status: "Draft", last_recomputed_at: null })
       .in("id", ids)
-      .eq("status", "Worksheet");
-    if (error) {
-      showToast("error", "Gagal", error.message);
+      .eq("status", "Worksheet")
+      .select("id");
+    if (error || !data || data.length !== ids.length) {
+      showToast("error", "Gagal", error?.message || "Sebagian slip gagal dipindahkan (kemungkinan status berubah). Muat ulang halaman.");
       return;
     }
     showToast("success", "Slip Berhasil Dibuat", `${ids.length} slip dipindahkan ke tab Draft.`);
@@ -2408,6 +2304,7 @@ wsComputeTotals={wsComputeTotals}
         }}
         copyInputsBusy={copyInputsBusy}
         canEdit={canEdit}
+        canEditWorksheet={canEditWorksheet}
         mode={activeMainTab === "laporan" ? "Final" : (activeMainTab.charAt(0).toUpperCase() + activeMainTab.slice(1)) as "Worksheet" | "Draft" | "Final"}
         orderSaving={orderSaving}
         orderSavedTick={orderSavedTick}
@@ -2605,22 +2502,33 @@ wsComputeTotals={wsComputeTotals}
                         </td>
                         <td className="px-5 py-3.5 text-right">
                           {isEditing ? (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <span className="text-xs text-muted-foreground">Rp</span>
-                              <input
-                                type="text"
-                                value={gapokEditValue}
-                                onChange={(e) => {
-                                  const raw = parseCurrencyInput(e.target.value);
-                                  setGapokEditValue(formatInputCurrency(raw));
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") handleGapokSave(emp.id);
-                                  if (e.key === "Escape") handleGapokCancel();
-                                }}
-                                autoFocus
-                                className="w-32 px-2 py-1.5 rounded-lg border border-primary bg-muted/30 text-sm text-right outline-none focus:ring-2 focus:ring-primary/20 text-foreground"
-                              />
+                            <div className="flex flex-col items-end gap-1.5">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <span className="text-xs text-muted-foreground">Rp</span>
+                                <input
+                                  type="text"
+                                  value={gapokEditValue}
+                                  onChange={(e) => {
+                                    const raw = parseCurrencyInput(e.target.value);
+                                    setGapokEditValue(formatInputCurrency(raw));
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") handleGapokSave(emp.id);
+                                    if (e.key === "Escape") handleGapokCancel();
+                                  }}
+                                  autoFocus
+                                  className="w-32 px-2 py-1.5 rounded-lg border border-primary bg-muted/30 text-sm text-right outline-none focus:ring-2 focus:ring-primary/20 text-foreground"
+                                />
+                              </div>
+                              <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                                Efektif
+                                <input
+                                  type="date"
+                                  value={gapokEffectiveDate}
+                                  onChange={(e) => setGapokEffectiveDate(e.target.value)}
+                                  className="px-1.5 py-1 rounded-lg border border-border bg-card text-[11px] text-foreground outline-none"
+                                />
+                              </label>
                             </div>
                           ) : (
                             <span className={cn("text-sm font-semibold", emp.gaji_pokok ? "text-foreground" : "text-muted-foreground italic")}>
@@ -2770,6 +2678,7 @@ wsComputeTotals={wsComputeTotals}
             setBuatSlipConfirm={setBuatSlipConfirm}
             onOpenBatchFill={() => { setBatchField(""); setBatchValue(""); setShowBatchFill(true); }}
             canEdit={canEdit}
+            canEditWorksheet={canEditWorksheet}
           />
         ) : (
           <EmptyState
@@ -3257,6 +3166,16 @@ wsComputeTotals={wsComputeTotals}
                                   readOnly={selectedPayroll.status === "Final" || !canEdit}
                                   className={cn(inputClass, "text-xs", (selectedPayroll.status === "Final" || !canEdit) && "bg-muted/60 text-muted-foreground cursor-not-allowed")}
                                 />
+                              </div>
+                            )}
+                            {f.key === "gaji_pokok" && selectedPayroll.gapok_rincian && (
+                              <div className="pl-[152px]">
+                                <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                  {selectedPayroll.gapok_rincian}
+                                  {selectedPayroll.gapok_bulanan != null && selectedPayroll.gapok_hari_aktif != null && selectedPayroll.gapok_total_hari != null
+                                    ? ` • Dasar ${formatCurrency(selectedPayroll.gapok_bulanan)} • Aktif ${selectedPayroll.gapok_hari_aktif}/${selectedPayroll.gapok_total_hari} hari`
+                                    : ""}
+                                </p>
                               </div>
                             )}
                             {isLembur && (

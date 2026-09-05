@@ -196,30 +196,22 @@ export function getAffectedEmployeeIds(
 }
 
 /**
- * Check whether `date` (YYYY-MM-DD) falls within ANY of the supplied historical
- * non-active periods (inclusive on both bounds). Used by auto-gen to skip generating
- * attendance records for dates when the employee was not active.
+ * Single source of truth untuk aktivitas pegawai ada di `@/lib/employee-activity`.
+ * Fungsi di bawah ini dipertahankan sebagai wrapper kompatibilitas agar tidak
+ * ada modul yang divergen: `tanggal_keluar` = hari pertama TIDAK aktif.
  */
-export function isInNonActivePeriod(
-  date: string,
-  periods: NonActivePeriod[] | null | undefined,
-): boolean {
-  if (!periods || periods.length === 0) return false;
-  for (const p of periods) {
-    if (date >= p.from && date <= p.to) return true;
-  }
-  return false;
-}
+export { isInNonActivePeriod } from "@/lib/employee-activity";
+
+import {
+  hasActiveDayInPeriod as hasActiveDayInPeriodCentral,
+  isEmployeeActiveOnDate as isEmployeeActiveOnDateCentral,
+} from "@/lib/employee-activity";
 
 export function isEmployeeActiveOnDate(date: string, employee: EmployeeActivityLite): boolean {
-  if (employee.status === "Tidak Aktif" && !employee.tanggal_keluar) return false;
-  if (employee.tanggal_bergabung && date < employee.tanggal_bergabung) return false;
-  if (employee.tanggal_keluar && date >= employee.tanggal_keluar) return false;
-  if (isInNonActivePeriod(date, employee.non_active_periods)) return false;
-  return true;
+  return isEmployeeActiveOnDateCentral(date, employee);
 }
 
 export function isEmployeeActiveInPeriod(period: { start: string; end: string }, employee: EmployeeActivityLite): boolean {
   if (!period.start || !period.end) return false;
-  return getDateRange(period.start, period.end).some((date) => isEmployeeActiveOnDate(date, employee));
+  return hasActiveDayInPeriodCentral(employee, period.start, period.end);
 }

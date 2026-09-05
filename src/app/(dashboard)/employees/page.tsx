@@ -436,8 +436,9 @@ export default function EmployeesPage() {
       statusUpdates.tanggal_keluar = null;
       if (oldKeluar) {
         const today = localDateStr();
+        // Kontrak: tanggal_keluar = hari pertama TIDAK aktif (inklusif nonaktif).
         const candidate: NonActivePeriod = {
-          from: addDaysLocal(oldKeluar, 1),
+          from: oldKeluar,
           to: addDaysLocal(today, -1),
         };
         if (candidate.from <= candidate.to) {
@@ -1724,7 +1725,7 @@ export default function EmployeesPage() {
                     <Field label="Tanggal Bergabung" value={selectedEmployee.tanggal_bergabung ? formatShortDate(selectedEmployee.tanggal_bergabung) : "-"} />
                     <Field label="Status" value={<Badge variant={statusVariant[selectedEmployee.status] || "muted"}>{selectedEmployee.status}</Badge>} />
                     {selectedEmployee.status === "Tidak Aktif" && (
-                      <Field label="Tanggal Keluar" value={selectedEmployee.tanggal_keluar ? formatShortDate(selectedEmployee.tanggal_keluar) : <span className="text-warning">Belum diisi</span>} />
+                      <Field label="Tanggal Mulai Tidak Aktif" value={selectedEmployee.tanggal_keluar ? formatShortDate(selectedEmployee.tanggal_keluar) : <span className="text-warning">Belum diisi</span>} />
                     )}
                     <Field label="Mulai PKWT" value={selectedEmployee.tanggal_mulai_pkwt ? formatShortDate(selectedEmployee.tanggal_mulai_pkwt) : "Pegawai Tetap"} />
                     <Field label="Berakhir PKWT" value={selectedEmployee.tanggal_berakhir_pkwt ? formatShortDate(selectedEmployee.tanggal_berakhir_pkwt) : "Pegawai Tetap"} />
@@ -2346,11 +2347,11 @@ export default function EmployeesPage() {
               </div>
               <h3 className="text-base font-bold text-foreground text-center">Nonaktifkan &ldquo;{exitModal.namaForDisplay}&rdquo;?</h3>
               <p className="text-sm text-muted-foreground mt-2 text-center">
-                Pegawai akan ditandai sebagai Tidak Aktif sejak tanggal yang dipilih. Akun login akan otomatis di-disable. Hari ini dan setelahnya tidak akan dihitung Alpha, dan absensi otomatis pada tanggal tersebut akan dihapus (record manual tetap disimpan).
+                Pegawai akan ditandai sebagai Tidak Aktif sejak tanggal yang dipilih. Akun login akan otomatis di-disable. Tanggal yang dipilih dan setelahnya tidak aktif (tidak dihitung prorata gapok/Alpha), dan absensi otomatis pada tanggal tersebut akan dihapus (record manual tetap disimpan).
               </p>
 
               <div className="mt-5">
-                <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Terakhir Aktif <span className="text-danger">*</span></label>
+                <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Mulai Tidak Aktif <span className="text-danger">*</span></label>
                 <DatePicker value={exitDate} onChange={setExitDate} placeholder="Pilih tanggal" />
                 <p className="text-[10px] text-muted-foreground mt-1.5">Default: hari ini. Boleh dimundurkan jika pegawai sebenarnya sudah berhenti sebelum admin klik tombol ini.</p>
               </div>

@@ -264,9 +264,14 @@ export async function exportPayrollSlipPdf(row: PayrollRow, periodRange: PeriodR
   for (let i = 0; i < maxRows; i += 1) {
     const p = PENDAPATAN_FIELDS[i];
     const t = POTONGAN_FIELDS[i];
+    const pKet = p?.keteranganKey
+      ? textValue(row, p.keteranganKey) || "-"
+      : p?.key === "gaji_pokok" && row.gapok_rincian
+        ? row.gapok_rincian
+        : "-";
     twoColBody.push([
       p ? p.label : "",
-      p?.keteranganKey ? textValue(row, p.keteranganKey) || "-" : "-",
+      pKet,
       p ? formatRupiah(amount(row, p.key)) : "",
       t ? t.label : "",
       t?.keteranganKey ? textValue(row, t.keteranganKey) || "-" : "-",
@@ -516,6 +521,7 @@ export async function exportPayrollRecapXlsx(rows: PayrollRow[], periodKey: stri
     "Total Potongan",
     "Netto Transfer",
     ...keteranganFields.map((field) => `Keterangan ${field.label}`),
+    "Rincian Gapok",
     "Catatan",
     "Status",
     "Final Snapshot",
@@ -548,6 +554,7 @@ export async function exportPayrollRecapXlsx(rows: PayrollRow[], periodKey: stri
       amount(row, "total_potongan"),
       amount(row, "netto"),
       ...keteranganFields.map((field) => field.keteranganKey ? textValue(row, field.keteranganKey) : ""),
+      row.gapok_rincian || "",
       row.catatan || "",
       row.status,
       row.final_snapshot_at || row.locked_at || "",

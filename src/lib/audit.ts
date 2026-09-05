@@ -63,6 +63,7 @@ export type AuditEntityType =
   | "backup_libur_settings"
   | "gapok_settings"
   | "gapok_increment_events"
+  | "employee_gapok_history"
   | "vehicle_odometer_logs"
   | "ga_asset_categories"
   | "ga_asset_locations"
@@ -248,6 +249,7 @@ export function entityLabel(entityType: string): string {
     backup_libur_settings: "Pengaturan Backup Libur",
     gapok_settings: "Pengaturan Gapok",
     gapok_increment_events: "Kenaikan Gapok",
+    employee_gapok_history: "Histori Gapok",
     vehicle_odometer_logs: "Log Odometer Kendaraan",
     ga_asset_categories: "Kategori Aset",
     ga_asset_locations: "Lokasi Aset",

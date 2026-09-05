@@ -55,6 +55,8 @@ interface WorksheetEditorProps {
   setBuatSlipConfirm: (v: { ids: number[]; mode: "single" | "bulk" } | null) => void;
   onOpenBatchFill: () => void;
   canEdit: boolean;
+  /** Izin isi manual sel Worksheet (payroll.input boleh, tanpa ubah status/hapus). */
+  canEditWorksheet?: boolean;
 }
 
 export default function WorksheetEditor({
@@ -88,7 +90,9 @@ export default function WorksheetEditor({
   setBuatSlipConfirm,
   onOpenBatchFill,
   canEdit,
+  canEditWorksheet,
 }: WorksheetEditorProps) {
+  const canWsEdit = canEditWorksheet ?? canEdit;
   const cellRefs = React.useRef<Map<string, HTMLInputElement>>(new Map());
   const edPendingFocus = React.useRef<{ rowId: number; colKey: string } | null>(null);
   /** Row yang diklik terakhir (highlight biru). */
@@ -165,11 +169,11 @@ export default function WorksheetEditor({
               className="bg-transparent text-[11px] outline-none w-full placeholder:text-muted-foreground/50 text-foreground" />
           </div>
 
-          {canEdit && <button onClick={onOpenBatchFill}
+          {canWsEdit && <button onClick={onOpenBatchFill}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors">
             <Zap className="w-3 h-3" />Batch Fill
           </button>}
-          {canEdit && wsRowsChanged > 0 && (
+          {canWsEdit && wsRowsChanged > 0 && (
             <div className="flex items-center gap-1.5">
               <button onClick={() => initWsData(payrolls)} disabled={wsSaving}
                 className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">
@@ -243,7 +247,12 @@ export default function WorksheetEditor({
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right text-xs font-medium text-foreground tabular-nums">{formatCurrency(vals.gaji_pokok || 0)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-medium text-foreground tabular-nums">
+                      <div>{formatCurrency(vals.gaji_pokok || 0)}</div>
+                      {row.gapok_is_prorata && row.gapok_rincian && (
+                        <div className="text-[9px] font-normal text-amber-600 dark:text-amber-400 mt-0.5" title={`Dasar ${formatCurrency(row.gapok_bulanan || 0)} • Aktif ${row.gapok_hari_aktif}/${row.gapok_total_hari} hari`}>{row.gapok_rincian}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right text-xs font-medium text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(vals.pendapatan_titik || 0)}</td>
                     <td className="px-4 py-3 text-right text-xs font-bold text-emerald-700 dark:text-emerald-400 tabular-nums bg-emerald-50/30 dark:bg-emerald-500/[0.02]">{formatCurrency(computed.totalPendapatan)}</td>
                     <td className="px-4 py-3 text-right text-xs font-bold text-rose-700 dark:text-rose-400 tabular-nums bg-rose-50/30 dark:bg-rose-500/[0.02]">{formatCurrency(computed.totalPotongan)}</td>
@@ -299,20 +308,20 @@ export default function WorksheetEditor({
                                             onKeyDown={(e) => {
                                               if (e.key === "Enter") {
                                                 e.preventDefault();
-                                                if (canEdit) {
+                                                if (canWsEdit) {
                                                   handleWsAutoSave(row.id, true);
                                                   focusNextRowField(row.id, f.key);
                                                 }
                                               }
                                             }}
                                             onBlur={() => {
-                                              if (canEdit) handleWsAutoSave(row.id, false);
+                                              if (canWsEdit) handleWsAutoSave(row.id, false);
                                             }}
-                                            readOnly={!canEdit}
+                                            readOnly={!canWsEdit}
                                             ref={registerCellRef(row.id, f.key)}
                                             className={cn(
                                               "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
-                                              !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
+                                              !canWsEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
                                               isCellChanged(row.id, f.key)
                                                 ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
                                                 : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
@@ -332,20 +341,20 @@ export default function WorksheetEditor({
                                           onKeyDown={(e) => {
                                             if (e.key === "Enter") {
                                               e.preventDefault();
-                                              if (canEdit) {
+                                              if (canWsEdit) {
                                                 handleWsAutoSave(row.id, true);
                                                 focusNextRowField(row.id, f.keteranganKey!);
                                               }
                                             }
                                           }}
                                           onBlur={() => {
-                                            if (canEdit) handleWsAutoSave(row.id, false);
+                                            if (canWsEdit) handleWsAutoSave(row.id, false);
                                           }}
-                                          readOnly={!canEdit}
+                                          readOnly={!canWsEdit}
                                           ref={registerCellRef(row.id, f.keteranganKey!)}
                                           className={cn(
                                             "w-full text-[10px] px-2 py-1 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
-                                            !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
+                                            !canWsEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
                                             isCellChanged(row.id, f.keteranganKey)
                                               ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
                                               : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
@@ -434,20 +443,20 @@ export default function WorksheetEditor({
                                             onKeyDown={(e) => {
                                               if (e.key === "Enter") {
                                                 e.preventDefault();
-                                                if (canEdit) {
+                                                if (canWsEdit) {
                                                   handleWsAutoSave(row.id, true);
                                                   focusNextRowField(row.id, f.key);
                                                 }
                                               }
                                             }}
                                             onBlur={() => {
-                                              if (canEdit) handleWsAutoSave(row.id, false);
+                                              if (canWsEdit) handleWsAutoSave(row.id, false);
                                             }}
-                                            readOnly={!canEdit}
+                                            readOnly={!canWsEdit}
                                             ref={registerCellRef(row.id, f.key)}
                                             className={cn(
                                               "w-full text-right text-[11px] tabular-nums pl-7 pr-2 py-1.5 rounded-lg border outline-none text-foreground placeholder:text-muted-foreground/30 transition-all",
-                                              !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
+                                              !canWsEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
                                               isCellChanged(row.id, f.key)
                                                 ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
                                                 : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
@@ -467,20 +476,20 @@ export default function WorksheetEditor({
                                           onKeyDown={(e) => {
                                             if (e.key === "Enter") {
                                               e.preventDefault();
-                                              if (canEdit) {
+                                              if (canWsEdit) {
                                                 handleWsAutoSave(row.id, true);
                                                 focusNextRowField(row.id, f.keteranganKey!);
                                               }
                                             }
                                           }}
                                           onBlur={() => {
-                                            if (canEdit) handleWsAutoSave(row.id, false);
+                                            if (canWsEdit) handleWsAutoSave(row.id, false);
                                           }}
-                                          readOnly={!canEdit}
+                                          readOnly={!canWsEdit}
                                           ref={registerCellRef(row.id, f.keteranganKey!)}
                                           className={cn(
                                             "w-full text-[10px] px-2 py-1 rounded-lg border outline-none text-muted-foreground placeholder:text-muted-foreground/30 transition-all",
-                                            !canEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
+                                            !canWsEdit && "!bg-muted/50 text-muted-foreground cursor-not-allowed",
                                             isCellChanged(row.id, f.keteranganKey)
                                               ? "border-amber-400 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/40 ring-1 ring-amber-200 dark:ring-amber-500/20"
                                               : "border-border/60 bg-card hover:border-border focus:border-primary focus:ring-1 focus:ring-primary/20"
@@ -554,7 +563,7 @@ export default function WorksheetEditor({
                           <span className="text-xs font-bold text-foreground">Gaji Bersih (Netto)</span>
                           <span className={cn("text-lg font-bold tabular-nums", computed.netto >= 0 ? "text-primary" : "text-danger")}>{formatCurrency(computed.netto)}</span>
                         </div>
-                        {canEdit && (
+                        {canWsEdit && (
                           <div className="mt-3 flex items-center justify-between gap-3 max-w-4xl rounded-xl border border-border bg-card px-4 py-3">
                             <div className="min-w-0">
                               <p className="text-xs font-bold text-foreground">Simpan perubahan pegawai ini</p>

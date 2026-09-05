@@ -411,7 +411,7 @@ export const OffDayModal = forwardRef<OffDayModalHandle, OffDayModalProps>(funct
         const emp = employees.find((e) => e.id === empId);
         if (!emp) continue;
         if (emp.tanggal_bergabung && tanggal < emp.tanggal_bergabung) continue;
-        if (emp.tanggal_keluar && tanggal > emp.tanggal_keluar) continue;
+        if (emp.tanggal_keluar && tanggal >= emp.tanggal_keluar) continue;
 
         const ex = existingMap.get(key);
         if (!ex) {
