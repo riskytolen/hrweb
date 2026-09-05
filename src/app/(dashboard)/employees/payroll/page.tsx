@@ -472,6 +472,7 @@ export default function PayrollPage() {
       const missingExitNames: string[] = [];
       let updated = 0;
       let failed = 0;
+      let firstUpdateError: string | null = null;
       for (const row of worksheetRows) {
         const emp = empMap.get(row.employee_id);
         if (!emp) continue;
@@ -544,8 +545,12 @@ export default function PayrollPage() {
           (payload.catatan !== undefined && row.catatan !== payload.catatan);
         if (!hasChange) continue;
         const { data, error } = await supabase.from("payrolls").update(payload).eq("id", row.id).eq("status", "Worksheet").select("id");
-        if (error || !data || data.length === 0) failed += 1;
-        else updated += 1;
+        if (error || !data || data.length === 0) {
+          failed += 1;
+          if (!firstUpdateError) {
+            firstUpdateError = error?.message || "Slip tidak ditemukan atau statusnya bukan Worksheet.";
+          }
+        } else updated += 1;
       }
 
       if (missingExitNames.length > 0) {
@@ -571,7 +576,7 @@ export default function PayrollPage() {
         });
       }
       if (failed > 0) {
-        showToast("error", "Sebagian Gagal", `${updated} slip berhasil di-refresh, ${failed} slip gagal.`);
+        showToast("error", "Sebagian Gagal", `${updated} slip berhasil di-refresh, ${failed} slip gagal. ${firstUpdateError || "Periksa izin dan status slip."}`);
       }
       return updated;
     } catch (e) {

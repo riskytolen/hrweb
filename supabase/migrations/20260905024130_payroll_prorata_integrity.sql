@@ -28,7 +28,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payrolls_status_check') THEN
     ALTER TABLE public.payrolls ADD CONSTRAINT payrolls_status_check CHECK (status IN ('Worksheet','Draft','Final'));
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payrolls_employee_periode_unique') THEN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.payrolls'::regclass
+      AND conname IN ('payrolls_employee_periode_unique', 'payrolls_unique_employee_period')
+  ) THEN
     -- Cegah duplikat pegawai per periode; pakai UNIQUE agar race insert gagal aman.
     -- Jika data lama sudah terlanjur ganda, jangan gagalkan migration: beri warning agar dibersihkan manual.
     IF EXISTS (
@@ -104,7 +109,7 @@ WHERE e.status = 'Applied'
 CREATE OR REPLACE FUNCTION public.set_employee_gapok(
   p_employee_id varchar,
   p_amount integer,
-  p_effective_date date DEFAULT CURRENT_DATE
+  p_effective_date date
 )
 RETURNS TABLE(old_gapok integer, new_gapok integer)
 LANGUAGE plpgsql
