@@ -269,6 +269,12 @@ export default function PayrollPage() {
   const [wsExpandedId, setWsExpandedId] = useState<number | null>(null);
   /** Loading state untuk computeWorksheet (auto-recompute) */
   const [wsComputing, setWsComputing] = useState(false);
+  const [wsRefreshProgress, setWsRefreshProgress] = useState({
+    active: false,
+    processed: 0,
+    total: 0,
+    stage: "Memuat sumber payroll...",
+  });
   /** Ref guard anti klik ganda / race condition saat hitung worksheet. */
   const wsComputingRef = useRef(false);
   const wsAutoRefreshRef = useRef(false);
@@ -419,6 +425,12 @@ export default function PayrollPage() {
     if (wsAutoRefreshRef.current) return 0;
     if (wsLiveRef.current.wsChangedCells.size > 0) return 0;
     wsAutoRefreshRef.current = true;
+    setWsRefreshProgress({
+      active: true,
+      processed: 0,
+      total: worksheetRows.length,
+      stage: "Memuat sumber payroll...",
+    });
     try {
       const employeeIds = worksheetRows.map((p) => p.employee_id);
       const refreshedAt = new Date().toISOString();
@@ -472,12 +484,23 @@ export default function PayrollPage() {
       const missingExitNames: string[] = [];
       let updated = 0;
       let failed = 0;
+      let unchanged = 0;
+      let skipped = 0;
       let firstUpdateError: string | null = null;
+      setWsRefreshProgress((current) => ({ ...current, stage: "Memperbarui Worksheet..." }));
       for (const row of worksheetRows) {
         const emp = empMap.get(row.employee_id);
-        if (!emp) continue;
+        if (!emp) {
+          failed += 1;
+          firstUpdateError ||= `Data pegawai ${row.pegawaiNama || row.employee_id} tidak ditemukan.`;
+          setWsRefreshProgress((current) => ({ ...current, processed: current.processed + 1 }));
+          continue;
+        }
         if (emp.status === "Tidak Aktif" && !emp.tanggal_keluar) {
           missingExitNames.push(row.pegawaiNama || row.employee_id);
+          failed += 1;
+          firstUpdateError ||= "Lengkapi Tanggal Mulai Tidak Aktif agar prorata dapat dihitung.";
+          setWsRefreshProgress((current) => ({ ...current, processed: current.processed + 1 }));
           continue;
         }
         const activity: EmployeeActivity = {
@@ -487,7 +510,12 @@ export default function PayrollPage() {
           status: emp.status,
         };
         const activeDays = countActiveDaysInPeriod(activity, targetPeriod.start, targetPeriod.end);
-        if (activeDays <= 0) continue; // Tidak eligible lagi; jangan hapus diam-diam.
+        if (activeDays <= 0) {
+          // Tidak eligible lagi; jangan hapus diam-diam.
+          skipped += 1;
+          setWsRefreshProgress((current) => ({ ...current, processed: current.processed + 1 }));
+          continue;
+        }
         const monthly = emp.gaji_pokok || 0;
         const prorata = computeGapokProrata(monthly, activeDays, totalDays, GAPOK_PRORATA_DIVISOR);
         const rincian = formatGapokProrataDetail(prorata);
@@ -543,7 +571,11 @@ export default function PayrollPage() {
           ((row.gapok_is_prorata ?? null) !== payload.gapok_is_prorata) ||
           ((row.gapok_rincian ?? null) !== payload.gapok_rincian) ||
           (payload.catatan !== undefined && row.catatan !== payload.catatan);
-        if (!hasChange) continue;
+        if (!hasChange) {
+          unchanged += 1;
+          setWsRefreshProgress((current) => ({ ...current, processed: current.processed + 1 }));
+          continue;
+        }
         const { data, error } = await supabase.from("payrolls").update(payload).eq("id", row.id).eq("status", "Worksheet").select("id");
         if (error || !data || data.length === 0) {
           failed += 1;
@@ -551,11 +583,10 @@ export default function PayrollPage() {
             firstUpdateError = error?.message || "Slip tidak ditemukan atau statusnya bukan Worksheet.";
           }
         } else updated += 1;
+        setWsRefreshProgress((current) => ({ ...current, processed: current.processed + 1 }));
       }
 
-      if (missingExitNames.length > 0) {
-        showToast("error", "Tanggal Nonaktif Belum Lengkap", `${missingExitNames.slice(0, 5).join(", ")}${missingExitNames.length > 5 ? ` (+${missingExitNames.length - 5} lainnya)` : ""} berstatus Tidak Aktif tanpa Tanggal Mulai Tidak Aktif. Lengkapi dulu agar prorata dapat dihitung.`);
-      }
+      setWsRefreshProgress((current) => ({ ...current, stage: "Menyelesaikan refresh..." }));
       if (updated > 0) {
         await logAudit({
           supabase,
@@ -576,7 +607,27 @@ export default function PayrollPage() {
         });
       }
       if (failed > 0) {
-        showToast("error", "Sebagian Gagal", `${updated} slip berhasil di-refresh, ${failed} slip gagal. ${firstUpdateError || "Periksa izin dan status slip."}`);
+        const completed = updated + unchanged;
+        const missingExitDetail = missingExitNames.length > 0
+          ? ` Belum ada tanggal nonaktif: ${missingExitNames.slice(0, 3).join(", ")}${missingExitNames.length > 3 ? ` (+${missingExitNames.length - 3} lainnya)` : ""}.`
+          : "";
+        showToast(
+          "error",
+          completed > 0 ? "Refresh Sebagian Berhasil" : "Refresh Gagal",
+          `${completed} slip berhasil diperiksa (${updated} diperbarui, ${unchanged} sudah terbaru), ${failed} gagal${skipped > 0 ? `, ${skipped} dilewati` : ""}. ${firstUpdateError || "Periksa izin dan status slip."}${missingExitDetail}`,
+        );
+      } else if (updated > 0) {
+        showToast(
+          "success",
+          "Refresh Berhasil",
+          `${updated} slip diperbarui, ${unchanged} slip sudah terbaru${skipped > 0 ? `, dan ${skipped} slip tidak aktif dilewati` : ""}.`,
+        );
+      } else {
+        showToast(
+          "success",
+          "Worksheet Sudah Terbaru",
+          `${unchanged} slip telah diperiksa dan tidak ada perubahan${skipped > 0 ? `; ${skipped} slip tidak aktif dilewati` : ""}.`,
+        );
       }
       return updated;
     } catch (e) {
@@ -584,6 +635,7 @@ export default function PayrollPage() {
       return 0;
     } finally {
       wsAutoRefreshRef.current = false;
+      setWsRefreshProgress((current) => ({ ...current, active: false }));
     }
   }, [canEdit, showToast]);
 
@@ -2278,6 +2330,10 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     setReloadKey((k) => k + 1);
   };
 
+  const wsRefreshPercent = wsRefreshProgress.total > 0
+    ? Math.min(100, Math.round((wsRefreshProgress.processed / wsRefreshProgress.total) * 100))
+    : 0;
+
   return (
     <>
     {sheetMode && (
@@ -2379,6 +2435,46 @@ wsComputeTotals={wsComputeTotals}
           </div>
         }
       />
+
+      {wsRefreshProgress.active && (
+        <div
+          className="relative overflow-hidden rounded-2xl border border-primary/20 bg-card px-4 py-3 shadow-sm animate-fade-in"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <RotateCcw className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-bold text-foreground">Menyegarkan data Worksheet</p>
+                  <p className="truncate text-[11px] text-muted-foreground">{wsRefreshProgress.stage}</p>
+                </div>
+                <span className="flex-shrink-0 text-[11px] font-semibold tabular-nums text-primary">
+                  {wsRefreshProgress.processed}/{wsRefreshProgress.total} slip
+                </span>
+              </div>
+              <div
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary/10"
+                role="progressbar"
+                aria-label="Progres refresh Worksheet"
+                aria-valuemin={0}
+                aria-valuemax={wsRefreshProgress.total}
+                aria-valuenow={wsRefreshProgress.processed}
+              >
+                <div
+                  className="relative h-full rounded-full bg-gradient-to-r from-primary via-sky-500 to-cyan-400 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                  style={{ width: `${wsRefreshPercent}%` }}
+                >
+                  <div className="absolute inset-0 bg-white/25 animate-pulse motion-reduce:animate-none" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ Toast ═══ */}
       {toast.show && (
