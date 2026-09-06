@@ -2213,6 +2213,14 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
           showToast("error", "Periode Sumber Belum Selesai", `Periode ${formatPeriodLabel(prevKey)} masih memiliki Worksheet. Finalisasi seluruh slip terlebih dahulu.`);
         } else if (msg.includes("source_period_has_draft")) {
           showToast("error", "Periode Sumber Belum Final", `Periode ${formatPeriodLabel(prevKey)} masih memiliki slip Draft. Finalisasi seluruh slip sebelum menyalin input.`);
+        } else if (msg.includes("insufficient_payroll_permission")) {
+          showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin menyalin input manual.");
+        } else if (msg.includes("invalid_period_format")) {
+          showToast("error", "Periode Tidak Valid", "Format periode tidak valid. Penyalinan dibatalkan.");
+        } else if (msg.includes("source_period_not_previous")) {
+          showToast("error", "Periode Sumber Tidak Valid", "Periode sumber harus tepat satu bulan sebelum periode target.");
+        } else if (msg.includes("duplicate_payroll_rows")) {
+          showToast("error", "Data Payroll Duplikat", "Ditemukan payroll ganda pada periode sumber atau target. Bersihkan duplikat terlebih dahulu.");
         } else {
           showToast("error", "Gagal Menyalin", copyErr.message || "Input manual tidak dapat disalin dari periode sebelumnya.");
         }
@@ -3623,8 +3631,8 @@ wsComputeTotals={wsComputeTotals}
         }}
         description={
           <div className="space-y-1.5">
-            <p>Input manual yang <strong>masih kosong</strong> di Worksheet periode <strong>{formatPeriodLabel(periodKey)}</strong> akan diisi dari slip Final periode {formatPeriodLabel(shiftPeriodKey(periodKey, -1))}.</p>
-            <p>Nilai otomatis (titik, absensi, lembur, gaji pokok) dan input manual yang sudah terisi <strong>tidak akan ditimpa</strong>.</p>
+            <p>Input manual yang <strong>masih kosong</strong> di Worksheet periode <strong>{formatPeriodLabel(periodKey)}</strong> akan diisi dari slip Final periode {formatPeriodLabel(shiftPeriodKey(periodKey, -1))}, termasuk <strong>catatan</strong> yang masih kosong sebagai pengingat inputan lalu.</p>
+            <p>Nilai otomatis (gaji pokok, titik, backup libur, lembur, potongan absensi, prorata) dan input manual yang sudah terisi <strong>tidak akan ditimpa</strong>. Nilai <strong>0 dianggap kosong</strong>.</p>
             <p>Sumber harus berstatus <strong>Final</strong> agar dapat disalin.</p>
           </div>
         }
