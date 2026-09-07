@@ -313,6 +313,10 @@ export default function PayrollPage() {
   const copyInputsRef = useRef(false);
   /** Konfirmasi reset input manual Worksheet (semua baris atau baris terpilih) */
   const [resetInputsConfirm, setResetInputsConfirm] = useState<{ scope: "all" | "selected"; employeeIds: string[] } | null>(null);
+  /** Konfirmasi hapus nilai satu kolom manual Worksheet */
+  const [resetColumnConfirm, setResetColumnConfirm] = useState<{ key: string; label: string } | null>(null);
+  /** Key kolom yang sedang dihapus (spinner pada ikon header) */
+  const [resettingColumnKey, setResettingColumnKey] = useState<string | null>(null);
   const [resetInputsBusy, setResetInputsBusy] = useState(false);
   const resetInputsRef = useRef(false);
   /** Sinyal untuk membersihkan seleksi baris di spreadsheet setelah reset terpilih */
@@ -2370,6 +2374,91 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     }
   };
 
+  // ─── Hapus nilai satu kolom manual Worksheet (semua baris periode aktif) ───
+  const handleResetColumn = async (columnKey: string, columnLabel: string) => {
+    if (!canEditWorksheet) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin mereset worksheet.");
+      return;
+    }
+    if (resetInputsRef.current) {
+      showToast("error", "Proses Sedang Berjalan", "Reset input manual masih berlangsung. Mohon tunggu sampai selesai.");
+      return;
+    }
+    if (wsChangedCells.size > 0) {
+      showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan. Simpan atau batalkan perubahan sebelum menghapus nilai kolom.");
+      return;
+    }
+    const worksheetCount = payrolls.filter((p) => p.status === "Worksheet").length;
+    if (worksheetCount === 0) {
+      showToast("error", "Tidak Ada Worksheet", "Tidak ada baris Worksheet pada periode ini. Hitung Worksheet terlebih dahulu.");
+      return;
+    }
+
+    resetInputsRef.current = true;
+    setResetInputsBusy(true);
+    setResettingColumnKey(columnKey);
+    try {
+      const { data: resetResult, error: resetErr } = await supabase.rpc(
+        "reset_payroll_manual_input_column",
+        { p_target_period: periodKey, p_column_key: columnKey }
+      );
+      if (resetErr) {
+        const msg = resetErr.message || "";
+        if (msg.includes("insufficient_payroll_permission")) {
+          showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin menghapus nilai kolom.");
+        } else if (msg.includes("invalid_period_format")) {
+          showToast("error", "Periode Tidak Valid", "Format periode tidak valid. Penghapusan dibatalkan.");
+        } else if (msg.includes("invalid_column_key")) {
+          showToast("error", "Kolom Tidak Valid", `Kolom ${columnLabel} bukan kolom manual yang dapat dikosongkan.`);
+        } else if (msg.includes("duplicate_payroll_rows")) {
+          showToast("error", "Data Payroll Duplikat", "Ditemukan payroll ganda pada periode ini. Bersihkan duplikat terlebih dahulu.");
+        } else {
+          showToast("error", "Gagal Menghapus", resetErr.message || "Nilai kolom tidak dapat dihapus.");
+        }
+        return;
+      }
+
+      const stats = (Array.isArray(resetResult) ? resetResult[0] : resetResult) as {
+        reset_count?: number;
+        already_empty_count?: number;
+      } | null;
+      const reset = Number(stats?.reset_count || 0);
+      const sudahKosong = Number(stats?.already_empty_count || 0);
+
+      if (reset > 0) {
+        await logAudit({
+          supabase,
+          action: "update",
+          entityType: "payrolls",
+          entityLabel: `Hapus kolom ${columnLabel} ${formatPeriodLabel(periodKey)}`,
+          metadata: {
+            periode: periodKey,
+            kolom: columnKey,
+            label_kolom: columnLabel,
+            jumlah_slip: reset,
+            jumlah_sudah_kosong: sudahKosong,
+          },
+        });
+      }
+
+      setWsAbsenBreakdown({});
+      setWsLemburBreakdown({});
+      await fetchPayrolls();
+
+      if (reset === 0) {
+        showToast("success", "Sudah Kosong", `Kolom ${columnLabel} sudah kosong pada seluruh Worksheet.`);
+      } else {
+        showToast("success", "Kolom Dikosongkan", `${reset} slip dikosongkan pada kolom ${columnLabel}${sudahKosong > 0 ? `, ${sudahKosong} slip sudah kosong` : ""}.`);
+      }
+    } catch (e) {
+      showToast("error", "Gagal Menghapus", e instanceof Error ? e.message : "Gagal menghapus nilai kolom.");
+    } finally {
+      resetInputsRef.current = false;
+      setResetInputsBusy(false);
+      setResettingColumnKey(null);
+    }
+  };
+
   // ─── Buat Slip dari Worksheet (Worksheet → Draft, snapshot terkunci) ───
   const handleBuatSlip = async (ids: number[]) => {
     if (ids.length === 0) return;
@@ -2475,6 +2564,14 @@ wsComputeTotals={wsComputeTotals}
           setResetInputsConfirm({ scope, employeeIds });
         }}
         resetInputsBusy={resetInputsBusy}
+        onResetColumn={(columnKey, columnLabel) => {
+          if (wsChangedCells.size > 0) {
+            showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan. Simpan atau batalkan perubahan sebelum menghapus nilai kolom.");
+            return;
+          }
+          setResetColumnConfirm({ key: columnKey, label: columnLabel });
+        }}
+        resettingColumnKey={resettingColumnKey}
         selectionClearTick={selectionClearTick}
         canEdit={canEdit}
         canEditWorksheet={canEditWorksheet}
@@ -3761,6 +3858,27 @@ wsComputeTotals={wsComputeTotals}
               : <>Seluruh input manual pada <strong>semua baris Worksheet</strong> periode <strong>{formatPeriodLabel(periodKey)}</strong> akan dikosongkan.</>}</p>
             <p>Nominal manual kembali ke <strong>0</strong>, keterangan dan catatan menjadi <strong>kosong</strong>. Nilai otomatis (gaji pokok, titik, backup libur, lembur, potongan absensi, prorata) <strong>tidak berubah</strong>.</p>
             <p>Tindakan ini <strong>tidak dapat dibatalkan</strong>, tetapi input dapat disalin ulang dari periode sebelumnya.</p>
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={resetColumnConfirm !== null}
+        title={resetColumnConfirm ? `Hapus Nilai Kolom ${resetColumnConfirm.label}?` : "Hapus Nilai Kolom?"}
+        variant="danger"
+        confirmLabel="Ya, Hapus"
+        loading={resetInputsBusy}
+        onCancel={() => setResetColumnConfirm(null)}
+        onConfirm={() => {
+          const target = resetColumnConfirm;
+          setResetColumnConfirm(null);
+          if (target) void handleResetColumn(target.key, target.label);
+        }}
+        description={
+          <div className="space-y-1.5">
+            <p>Seluruh nilai kolom <strong>{resetColumnConfirm?.label}</strong> pada <strong>semua baris Worksheet</strong> periode <strong>{formatPeriodLabel(periodKey)}</strong> akan dikosongkan.</p>
+            <p>Filter pencarian atau kelompok <strong>tidak membatasi</strong> cakupan. Kolom otomatis tidak terpengaruh.</p>
+            <p>Tindakan ini <strong>tidak dapat dibatalkan</strong>.</p>
           </div>
         }
       />

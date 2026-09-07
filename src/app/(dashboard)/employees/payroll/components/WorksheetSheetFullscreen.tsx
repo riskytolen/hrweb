@@ -52,6 +52,9 @@ interface WorksheetSheetFullscreenProps {
   copyInputsBusy: boolean;
   onResetInputs: (scope: "all" | "selected", employeeIds: string[]) => void;
   resetInputsBusy: boolean;
+  onResetColumn: (columnKey: string, columnLabel: string) => void;
+  /** Key kolom yang sedang dihapus nilainya; null jika tidak ada. */
+  resettingColumnKey: string | null;
   /** Naik setiap reset terpilih berhasil; dipakai untuk membersihkan seleksi baris. */
   selectionClearTick: number;
   canEdit: boolean;
@@ -128,6 +131,8 @@ export default function WorksheetSheetFullscreen({
   copyInputsBusy,
   onResetInputs,
   resetInputsBusy,
+  onResetColumn,
+  resettingColumnKey,
   selectionClearTick,
   canEdit,
   canEditWorksheet,
@@ -522,7 +527,7 @@ export default function WorksheetSheetFullscreen({
   }, [activeRowId, displayedRows, onClose]);
 
   // Column definition: label, key, group, width, editable
-  type SheetCol = { label: string; key: string; group: "info" | "pendapatan" | "potongan" | "netto" | "rekening"; width: string; editable: boolean };
+  type SheetCol = { label: string; key: string; group: "info" | "pendapatan" | "potongan" | "netto" | "rekening"; width: string; editable: boolean; clearLabel?: string };
   const sheetLabels: Record<string, string> = {
     gaji_pokok: "GAPOK",
     pendapatan_titik: "TITIK",
@@ -555,6 +560,7 @@ export default function WorksheetSheetFullscreen({
         group: "pendapatan" as const,
         width: f.key === "gaji_pokok" || f.key === "pendapatan_titik" ? "w-28" : f.key === "lembur" ? "w-28" : "w-24",
         editable: !f.readonly && !READONLY_KEYS.has(f.key),
+        clearLabel: f.label,
       }];
       if (f.key === "pendapatan_titik") cols.push({
         label: "TOTAL",
@@ -569,6 +575,7 @@ export default function WorksheetSheetFullscreen({
         group: "pendapatan" as const,
         width: "w-40",
         editable: true,
+        clearLabel: `Keterangan ${f.label}`,
       });
       return cols;
     }),
@@ -580,6 +587,7 @@ export default function WorksheetSheetFullscreen({
         group: "potongan" as const,
         width: "w-24",
         editable: !f.readonly && !READONLY_KEYS.has(f.key),
+        clearLabel: f.label,
       }];
       if (f.keteranganKey) cols.push({
         label: "KET",
@@ -587,6 +595,7 @@ export default function WorksheetSheetFullscreen({
         group: "potongan" as const,
         width: "w-40",
         editable: true,
+        clearLabel: `Keterangan ${f.label}`,
       });
       return cols;
     }),
@@ -671,6 +680,27 @@ export default function WorksheetSheetFullscreen({
   const leadingInfoCols = visibleSheetCols.filter((c) => ["_no", "_nik", "_nama", "_jabatan", "_status"].includes(c.key));
   const aksiCol = visibleSheetCols.find((c) => c.key === "_aksi");
   const nettoCol = visibleSheetCols.find((c) => c.key === "_netto");
+
+  /** Tombol hapus nilai kolom manual pada header (Worksheet + izin input saja). */
+  const HeaderClearButton = ({ col }: { col: SheetCol }) => {
+    if (!col.editable || mode !== "Worksheet" || !canWsEdit) return null;
+    const busy = resettingColumnKey === col.key;
+    const anyBusy = copyInputsBusy || resetInputsBusy || wsSaving || resettingColumnKey !== null;
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); if (!anyBusy) onResetColumn(col.key, col.clearLabel ?? col.label); }}
+        disabled={anyBusy}
+        title={`Hapus nilai kolom ${col.clearLabel ?? col.label} (semua Worksheet)`}
+        className={cn(
+          "inline-flex items-center justify-center rounded-sm p-0.5 align-middle transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+          "text-red-500/80 opacity-70 hover:opacity-100 hover:text-red-600 hover:bg-red-500/10",
+        )}
+      >
+        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+      </button>
+    );
+  };
 
   /** Tombol copy pada header kolom. */
   const HeaderCopyButton = ({ col }: { col: SheetCol }) => {
@@ -1116,6 +1146,7 @@ export default function WorksheetSheetFullscreen({
                   >
                     {c.label}
                     <HeaderCopyButton col={c} />
+                    <HeaderClearButton col={c} />
                   </th>
                 );
               })}
