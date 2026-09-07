@@ -311,6 +311,12 @@ export default function PayrollPage() {
   const [copyInputsConfirm, setCopyInputsConfirm] = useState(false);
   const [copyInputsBusy, setCopyInputsBusy] = useState(false);
   const copyInputsRef = useRef(false);
+  /** Konfirmasi reset input manual Worksheet (semua baris atau baris terpilih) */
+  const [resetInputsConfirm, setResetInputsConfirm] = useState<{ scope: "all" | "selected"; employeeIds: string[] } | null>(null);
+  const [resetInputsBusy, setResetInputsBusy] = useState(false);
+  const resetInputsRef = useRef(false);
+  /** Sinyal untuk membersihkan seleksi baris di spreadsheet setelah reset terpilih */
+  const [selectionClearTick, setSelectionClearTick] = useState(0);
 
   // ─── Delete confirm ───
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; nama: string } | null>(null);
@@ -2275,6 +2281,95 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
     }
   };
 
+  // ─── Reset input manual Worksheet (kosongkan nominal/keterangan/catatan manual) ───
+  const handleResetInputs = async (scope: "all" | "selected", employeeIds: string[]) => {
+    if (!canEditWorksheet) {
+      showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin mereset worksheet.");
+      return;
+    }
+    if (resetInputsRef.current) {
+      showToast("error", "Proses Sedang Berjalan", "Reset input manual masih berlangsung. Mohon tunggu sampai selesai.");
+      return;
+    }
+    if (wsChangedCells.size > 0) {
+      showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan. Simpan atau reset perubahan sebelum mereset input manual.");
+      return;
+    }
+    const worksheetRows = payrolls.filter((p) => p.status === "Worksheet");
+    if (worksheetRows.length === 0) {
+      showToast("error", "Tidak Ada Worksheet", "Tidak ada baris Worksheet pada periode ini untuk direset. Hitung Worksheet terlebih dahulu.");
+      return;
+    }
+    const targetIds = scope === "selected"
+      ? worksheetRows.filter((p) => employeeIds.includes(p.employee_id)).map((p) => p.employee_id)
+      : [];
+    if (scope === "selected" && targetIds.length === 0) {
+      showToast("error", "Tidak Ada Baris Terpilih", "Pilih minimal satu baris Worksheet pada mode spreadsheet untuk direset.");
+      return;
+    }
+
+    resetInputsRef.current = true;
+    setResetInputsBusy(true);
+    try {
+      const { data: resetResult, error: resetErr } = await supabase.rpc(
+        "reset_payroll_manual_inputs",
+        { p_target_period: periodKey, p_employee_ids: scope === "selected" ? targetIds : null }
+      );
+      if (resetErr) {
+        const msg = resetErr.message || "";
+        if (msg.includes("insufficient_payroll_permission")) {
+          showToast("error", "Tidak Diizinkan", "Anda tidak memiliki izin mereset input manual.");
+        } else if (msg.includes("invalid_period_format")) {
+          showToast("error", "Periode Tidak Valid", "Format periode tidak valid. Reset dibatalkan.");
+        } else if (msg.includes("duplicate_payroll_rows")) {
+          showToast("error", "Data Payroll Duplikat", "Ditemukan payroll ganda pada periode ini. Bersihkan duplikat terlebih dahulu.");
+        } else {
+          showToast("error", "Gagal Mereset", resetErr.message || "Input manual tidak dapat direset.");
+        }
+        return;
+      }
+
+      const stats = (Array.isArray(resetResult) ? resetResult[0] : resetResult) as {
+        reset_count?: number;
+        already_empty_count?: number;
+      } | null;
+      const reset = Number(stats?.reset_count || 0);
+      const sudahKosong = Number(stats?.already_empty_count || 0);
+
+      if (reset > 0) {
+        await logAudit({
+          supabase,
+          action: "update",
+          entityType: "payrolls",
+          entityLabel: `Reset input manual ${formatPeriodLabel(periodKey)}`,
+          metadata: {
+            periode: periodKey,
+            cakupan: scope,
+            jumlah_slip: reset,
+            jumlah_sudah_kosong: sudahKosong,
+            ...(scope === "selected" ? { employee_ids: targetIds } : {}),
+          },
+        });
+      }
+
+      setWsAbsenBreakdown({});
+      setWsLemburBreakdown({});
+      await fetchPayrolls();
+      if (scope === "selected") setSelectionClearTick((t) => t + 1);
+
+      if (reset === 0) {
+        showToast("success", "Sudah Kosong", "Seluruh input manual Worksheet yang diproses sudah kosong.");
+      } else {
+        showToast("success", "Input Manual Direset", `${reset} slip direset${sudahKosong > 0 ? `, ${sudahKosong} slip sudah kosong` : ""}. Nilai otomatis tidak berubah.`);
+      }
+    } catch (e) {
+      showToast("error", "Gagal Mereset", e instanceof Error ? e.message : "Gagal mereset input manual.");
+    } finally {
+      resetInputsRef.current = false;
+      setResetInputsBusy(false);
+    }
+  };
+
   // ─── Buat Slip dari Worksheet (Worksheet → Draft, snapshot terkunci) ───
   const handleBuatSlip = async (ids: number[]) => {
     if (ids.length === 0) return;
@@ -2372,6 +2467,15 @@ wsComputeTotals={wsComputeTotals}
           setCopyInputsConfirm(true);
         }}
         copyInputsBusy={copyInputsBusy}
+        onResetInputs={(scope, employeeIds) => {
+          if (wsChangedCells.size > 0) {
+            showToast("error", "Simpan Worksheet Dulu", "Ada perubahan worksheet yang belum disimpan. Simpan atau batalkan perubahan sebelum mereset input manual.");
+            return;
+          }
+          setResetInputsConfirm({ scope, employeeIds });
+        }}
+        resetInputsBusy={resetInputsBusy}
+        selectionClearTick={selectionClearTick}
         canEdit={canEdit}
         canEditWorksheet={canEditWorksheet}
         mode={activeMainTab === "laporan" ? "Final" : (activeMainTab.charAt(0).toUpperCase() + activeMainTab.slice(1)) as "Worksheet" | "Draft" | "Final"}
@@ -3634,6 +3738,29 @@ wsComputeTotals={wsComputeTotals}
             <p>Input manual yang <strong>masih kosong</strong> di Worksheet periode <strong>{formatPeriodLabel(periodKey)}</strong> akan diisi dari slip Final periode {formatPeriodLabel(shiftPeriodKey(periodKey, -1))}, termasuk <strong>catatan</strong> yang masih kosong sebagai pengingat inputan lalu.</p>
             <p>Nilai otomatis (gaji pokok, titik, backup libur, lembur, potongan absensi, prorata) dan input manual yang sudah terisi <strong>tidak akan ditimpa</strong>. Nilai <strong>0 dianggap kosong</strong>.</p>
             <p>Sumber harus berstatus <strong>Final</strong> agar dapat disalin.</p>
+          </div>
+        }
+      />
+
+      <ConfirmDialog
+        open={resetInputsConfirm !== null}
+        title={resetInputsConfirm?.scope === "selected" ? "Reset Input Manual Terpilih?" : "Reset Semua Input Manual?"}
+        variant="danger"
+        confirmLabel="Ya, Reset"
+        loading={resetInputsBusy}
+        onCancel={() => setResetInputsConfirm(null)}
+        onConfirm={() => {
+          const target = resetInputsConfirm;
+          setResetInputsConfirm(null);
+          if (target) void handleResetInputs(target.scope, target.employeeIds);
+        }}
+        description={
+          <div className="space-y-1.5">
+            <p>{resetInputsConfirm?.scope === "selected"
+              ? <>Seluruh input manual pada <strong>{resetInputsConfirm.employeeIds.length} baris Worksheet terpilih</strong> periode <strong>{formatPeriodLabel(periodKey)}</strong> akan dikosongkan.</>
+              : <>Seluruh input manual pada <strong>semua baris Worksheet</strong> periode <strong>{formatPeriodLabel(periodKey)}</strong> akan dikosongkan.</>}</p>
+            <p>Nominal manual kembali ke <strong>0</strong>, keterangan dan catatan menjadi <strong>kosong</strong>. Nilai otomatis (gaji pokok, titik, backup libur, lembur, potongan absensi, prorata) <strong>tidak berubah</strong>.</p>
+            <p>Tindakan ini <strong>tidak dapat dibatalkan</strong>, tetapi input dapat disalin ulang dari periode sebelumnya.</p>
           </div>
         }
       />

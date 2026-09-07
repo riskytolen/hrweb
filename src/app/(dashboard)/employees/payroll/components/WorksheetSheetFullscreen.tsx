@@ -15,6 +15,7 @@ import {
   GripVertical,
   CheckCircle2,
   Copy,
+  RotateCcw,
   Check,
   AlertTriangle,
   Users,
@@ -49,6 +50,10 @@ interface WorksheetSheetFullscreenProps {
   setBuatSlipConfirm: ((v: { ids: number[]; mode: "single" | "bulk" } | null) => void) | undefined;
   onCopyInputs: () => void;
   copyInputsBusy: boolean;
+  onResetInputs: (scope: "all" | "selected", employeeIds: string[]) => void;
+  resetInputsBusy: boolean;
+  /** Naik setiap reset terpilih berhasil; dipakai untuk membersihkan seleksi baris. */
+  selectionClearTick: number;
   canEdit: boolean;
   canEditWorksheet?: boolean;
   mode: "Worksheet" | "Draft" | "Final";
@@ -121,6 +126,9 @@ export default function WorksheetSheetFullscreen({
   setBuatSlipConfirm,
   onCopyInputs,
   copyInputsBusy,
+  onResetInputs,
+  resetInputsBusy,
+  selectionClearTick,
   canEdit,
   canEditWorksheet,
   mode,
@@ -189,6 +197,16 @@ export default function WorksheetSheetFullscreen({
     const t = setTimeout(() => setGroupSavedFlash(false), 2000);
     return () => clearTimeout(t);
   }, [groupSavedTick]);
+
+  // Bersihkan seleksi baris setelah reset input terpilih berhasil.
+  useEffect(() => {
+    if (selectionClearTick === 0) return;
+    const t = setTimeout(() => {
+      setSelIds(new Set());
+      selAnchor.current = null;
+    }, 0);
+    return () => clearTimeout(t);
+  }, [selectionClearTick]);
 
   const groupOf = (empId: string): number | null => employeeGroups.get(empId) ?? null;
   const groupById = (gid: number | null) => gid === null ? null : groups.find((g) => g.id === gid) ?? null;
@@ -828,7 +846,7 @@ export default function WorksheetSheetFullscreen({
             )}
           </div>
           <div className="flex items-center gap-2">
-            {canEdit && (
+            {(mode === "Worksheet" ? canWsEdit : canEdit) && (
               <button
                 onClick={() => { setSelectMode((v) => !v); clearSelection(); }}
                 className={cn(
@@ -844,12 +862,23 @@ export default function WorksheetSheetFullscreen({
             {mode === "Worksheet" && canWsEdit && (
               <button
                 onClick={onCopyInputs}
-                disabled={copyInputsBusy || wsSaving}
+                disabled={copyInputsBusy || resetInputsBusy || wsSaving}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Salin input manual dari periode sebelumnya"
               >
                 {copyInputsBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
                 <span className="hidden md:inline">{copyInputsBusy ? "Menyalin..." : "Salin Input Lalu"}</span>
+              </button>
+            )}
+            {mode === "Worksheet" && canWsEdit && (
+              <button
+                onClick={() => onResetInputs("all", [])}
+                disabled={copyInputsBusy || resetInputsBusy || wsSaving}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold bg-danger/10 text-danger hover:bg-danger/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Kosongkan seluruh input manual Worksheet (nominal, keterangan, catatan)"
+              >
+                {resetInputsBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                <span className="hidden md:inline">{resetInputsBusy ? "Mereset..." : "Reset Input Manual"}</span>
               </button>
             )}
             <div className="relative">
@@ -1567,6 +1596,16 @@ export default function WorksheetSheetFullscreen({
           >
             <Trash2 className="w-3.5 h-3.5" /> Hapus dari Kelompok
           </button>
+          {mode === "Worksheet" && canWsEdit && (
+            <button
+              onClick={() => onResetInputs("selected", [...selIds])}
+              disabled={resetInputsBusy || copyInputsBusy || wsSaving}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-red-600 hover:bg-red-500 transition-colors disabled:opacity-40"
+              title="Kosongkan input manual baris terpilih (nominal, keterangan, catatan)"
+            >
+              {resetInputsBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} Reset Input
+            </button>
+          )}
           <button
             onClick={clearSelection}
             className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-700 hover:bg-slate-600 transition-colors"
