@@ -20,6 +20,11 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_MIN_MESSAGE,
+  validatePasswordLength,
+} from "@/lib/password-policy";
 import { useAuth, type UserProfile } from "@/components/AuthProvider";
 import { createClient } from "@/lib/supabase-browser";
 import Portal from "@/components/ui/Portal";
@@ -311,8 +316,9 @@ export default function AccountsPage() {
         addToast("success", `Akun ${userForm.nama} berhasil diperbarui.`);
       } else {
         // Fix #1: Create new user via API Route (tidak mengganti session admin)
-        if (!userForm.password || userForm.password.length < 10) {
-          addToast("error", "Password minimal 10 karakter.");
+        const passwordError = validatePasswordLength(userForm.password);
+        if (passwordError) {
+          addToast("error", passwordError);
           setSaving(false);
           return;
         }
@@ -379,8 +385,9 @@ export default function AccountsPage() {
   const resetPassword = async () => {
     if (!resetPwUser || !newPassword) return;
 
-    if (newPassword.length < 10) {
-      addToast("error", "Password minimal 10 karakter.");
+    const newPasswordError = validatePasswordLength(newPassword);
+    if (newPasswordError) {
+      addToast("error", newPasswordError);
       return;
     }
 
@@ -1174,7 +1181,7 @@ export default function AccountsPage() {
                         type={showPassword ? "text" : "password"}
                         value={userForm.password}
                         onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                        placeholder="Minimal 10 karakter"
+                        placeholder={`Minimal ${MIN_PASSWORD_LENGTH} karakter`}
                         className="w-full px-3 py-2.5 pr-10 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
                       />
                       <button
@@ -1185,9 +1192,9 @@ export default function AccountsPage() {
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    {userForm.password.length > 0 && userForm.password.length < 10 && (
+                    {userForm.password.length > 0 && userForm.password.length < MIN_PASSWORD_LENGTH && (
                       <p className="text-[10px] text-danger mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" /> Minimal 10 karakter
+                        <AlertCircle className="w-3 h-3" /> {PASSWORD_MIN_MESSAGE}
                       </p>
                     )}
                   </div>
@@ -1247,7 +1254,7 @@ export default function AccountsPage() {
                   size="sm"
                   icon={editingUserId ? CheckCircle : Plus}
                   onClick={saveUser}
-                  disabled={saving || !userForm.nama || !userForm.email || !userForm.role_id || (!editingUserId && userForm.password.length < 10)}
+                  disabled={saving || !userForm.nama || !userForm.email || !userForm.role_id || (!editingUserId && userForm.password.length < MIN_PASSWORD_LENGTH)}
                 >
                   {saving ? "Menyimpan..." : editingUserId ? "Simpan" : "Buat Akun"}
                 </Button>
@@ -1334,7 +1341,7 @@ export default function AccountsPage() {
                       type={showNewPassword ? "text" : "password"}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Minimal 10 karakter"
+                      placeholder={`Minimal ${MIN_PASSWORD_LENGTH} karakter`}
                       autoComplete="new-password"
                       autoFocus
                       className="w-full px-3 py-2.5 pr-10 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
@@ -1347,9 +1354,9 @@ export default function AccountsPage() {
                       {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  {newPassword.length > 0 && newPassword.length < 10 && (
+                  {newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH && (
                     <p className="text-[10px] text-danger mt-1 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" /> Minimal 10 karakter
+                      <AlertCircle className="w-3 h-3" /> {PASSWORD_MIN_MESSAGE}
                     </p>
                   )}
                 </div>
@@ -1383,7 +1390,7 @@ export default function AccountsPage() {
                   size="sm"
                   icon={Lock}
                   onClick={resetPassword}
-                  disabled={resettingPw || currentPasswordLoading || newPassword.length < 10 || newPassword !== confirmPassword}
+                  disabled={resettingPw || currentPasswordLoading || newPassword.length < MIN_PASSWORD_LENGTH || newPassword !== confirmPassword}
                 >
                   {resettingPw ? "Menyimpan..." : "Simpan Password"}
                 </Button>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase-server";
 import { logAudit } from "@/lib/audit";
+import { validatePasswordLength } from "@/lib/password-policy";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -101,11 +102,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (password.length < 10) {
-      return NextResponse.json(
-        { error: "Password minimal 10 karakter." },
-        { status: 400 }
-      );
+    const passwordError = validatePasswordLength(password);
+    if (passwordError) {
+      return NextResponse.json({ error: passwordError }, { status: 400 });
     }
 
     const accountType = account_type === "external" ? "external" : "internal";
@@ -279,11 +278,9 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    if (password.length < 10) {
-      return NextResponse.json(
-        { error: "Password minimal 10 karakter." },
-        { status: 400 }
-      );
+    const passwordError = validatePasswordLength(password);
+    if (passwordError) {
+      return NextResponse.json({ error: passwordError }, { status: 400 });
     }
 
     if (!UUID_RE.test(userId)) {
