@@ -405,6 +405,17 @@ export interface DbAttendancePenaltyRate {
   divisions?: DbDivision;
 }
 
+export interface DbEmployeeOffDay {
+  id: number;
+  employee_id: string;
+  day_of_week: number;
+  /** Tanggal mulai jadwal berlaku (inklusif). */
+  effective_from: string;
+  /** Tanggal selesai jadwal berlaku (inklusif). NULL = masih aktif. */
+  effective_to: string | null;
+  created_at: string;
+}
+
 export interface DbAttendanceRecord {
   id: number;
   employee_id: string;

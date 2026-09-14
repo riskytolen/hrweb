@@ -25,6 +25,7 @@ import {
   computeLateness,
   computeDenda,
   computeDendaAlpha,
+  isWeeklyOffDay,
 } from "../lib/attendance-helpers";
 import type {
   EmployeeLite,
@@ -189,9 +190,8 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
     if (!editingId && form.employee_id && form.tanggal) {
       const [fy, fm, fd] = form.tanggal.split("-").map(Number);
       const formDow = new Date(Date.UTC(fy, fm - 1, fd)).getUTCDay();
-      const empOff = offDays.filter((od) => od.employee_id === form.employee_id);
       const empOverride = overrides.find((ov) => ov.employee_id === form.employee_id && ov.tanggal === form.tanggal);
-      const isLibur = empOverride?.type === "libur" || (!empOverride && empOff.some((od) => od.day_of_week === formDow));
+      const isLibur = empOverride?.type === "libur" || (!empOverride && isWeeklyOffDay(offDays, form.employee_id, formDow, form.tanggal));
       if (isLibur) {
         setError("Pegawai ini libur di tanggal tersebut. Tidak perlu input absen.");
         return;

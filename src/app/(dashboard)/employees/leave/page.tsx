@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { supabase, type DbLeaveRequest } from "@/lib/supabase";
 import { logAudit, getCurrentApprover } from "@/lib/audit";
 import { compressFile } from "@/lib/file-compression";
+import { isWeeklyOffDay } from "../attendance/lib/attendance-helpers";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 
@@ -391,10 +392,10 @@ export default function LeavePage() {
       if (isApprove) {
         const req = list.find((r) => r.id === approvalConfirm.id);
         if (req) {
-          // Fetch hari libur pegawai ini
+          // Fetch hari libur pegawai ini (dengan histori tanggal efektif)
           const { data: empOffDays } = await supabase
-            .from("employee_off_days").select("day_of_week").eq("employee_id", req.employee_id);
-          const offDaySet = new Set(empOffDays?.map((o) => o.day_of_week) || []);
+            .from("employee_off_days").select("day_of_week, effective_from, effective_to").eq("employee_id", req.employee_id);
+          const empOffList = (empOffDays as { day_of_week: number; effective_from: string | null; effective_to: string | null }[] | null) || [];
 
           // Fetch custom overrides untuk range ini
           const { data: empOverrides } = await supabase
@@ -419,7 +420,7 @@ export default function LeavePage() {
             const [ty, tm, td] = tanggal.split("-").map(Number);
             const dow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay();
             const override = overrideMap.get(tanggal);
-            const isOffDay = override === "libur" || (!override && offDaySet.has(dow));
+            const isOffDay = override === "libur" || (!override && isWeeklyOffDay(empOffList.map((o) => ({ employee_id: req.employee_id, ...o })), req.employee_id, dow, tanggal));
             const isMasukOverride = override === "masuk";
             if (isOffDay && !isMasukOverride) continue; // skip hari libur
 

@@ -11,6 +11,80 @@ export type PenaltyLite = {
 
 export type LatenessResult = { status: "Hadir" | "Terlambat"; durasi: number };
 
+export type OffDayLite = {
+  employee_id: string;
+  day_of_week: number;
+  effective_from?: string | null;
+  effective_to?: string | null;
+};
+
+/**
+ * Apakah satu baris jadwal mingguan berlaku pada tanggal tertentu.
+ * - effective_from NULL dianggap sejak MIN_DATE (jadwal lama sebelum migrasi).
+ * - effective_to NULL berarti masih aktif.
+ * - Batas inklusif di kedua sisi.
+ */
+export function isOffDayActiveOnDate(
+  row: OffDayLite,
+  dateStr: string,
+): boolean {
+  const from = row.effective_from ?? MIN_DATE;
+  if (dateStr < from) return false;
+  if (row.effective_to && dateStr > row.effective_to) return false;
+  return true;
+}
+
+/**
+ * Apakah pegawai libur mingguan pada tanggal tertentu (memakai histori efektif).
+ * `dayOfWeek`: 0 (Minggu) – 6 (Sabtu), konsisten dengan `getUTCDay()`.
+ */
+export function isWeeklyOffDay(
+  offDays: OffDayLite[],
+  employeeId: string,
+  dayOfWeek: number,
+  dateStr: string,
+): boolean {
+  return offDays.some(
+    (od) =>
+      od.employee_id === employeeId &&
+      od.day_of_week === dayOfWeek &&
+      isOffDayActiveOnDate(od, dateStr),
+  );
+}
+
+export type AutoAttendanceLite = {
+  status: string;
+  catatan: string | null;
+  is_manual: boolean;
+};
+
+/**
+ * Apakah record otomatis boleh dipulihkan menjadi Libur saat tanggal tersebut
+ * ternyata hari libur (jadwal efektif). Tidak pernah true untuk:
+ * - record manual, Hadir/Terlambat, atau Libur yang sudah benar.
+ * - Izin/Sakit/Cuti yang dibuat dari approval (catatan "Jenis: alasan"),
+ *   hanya yang auto-generated ("...otomatis...") yang boleh dipulihkan.
+ */
+export function isAutoRestorableToLibur(rec: AutoAttendanceLite): boolean {
+  if (rec.is_manual) return false;
+  if (rec.status === "Hadir" || rec.status === "Terlambat" || rec.status === "Libur") return false;
+  const note = rec.catatan || "";
+  if (rec.status === "Alpha") return note.startsWith("Alpha otomatis");
+  if (rec.status === "Izin" || rec.status === "Sakit" || rec.status === "Cuti") {
+    return note.includes("otomatis");
+  }
+  return false;
+}
+
+/** Baris jadwal aktif pada tanggal referensi (untuk modal/tampilan). */
+export function isOffDayRowActive(
+  row: OffDayLite,
+  refDate: string,
+): boolean {
+  if (row.effective_to) return row.effective_to >= refDate && (row.effective_from ?? MIN_DATE) <= refDate;
+  return (row.effective_from ?? MIN_DATE) <= refDate;
+}
+
 export type SummaryPeriod = { start: string; end: string; label: string };
 
 export type EmployeeActivityLite = {

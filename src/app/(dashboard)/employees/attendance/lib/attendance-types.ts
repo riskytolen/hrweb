@@ -10,7 +10,14 @@ export type EmployeeLite = {
   non_active_periods?: NonActivePeriod[];
 };
 
-export type OffDayEntry = { employee_id: string; day_of_week: number };
+export type OffDayEntry = {
+  employee_id: string;
+  day_of_week: number;
+  /** Tanggal mulai jadwal ini berlaku (inklusif). NULL = sejak MIN_DATE. */
+  effective_from?: string | null;
+  /** Tanggal selesai jadwal ini berlaku (inklusif). NULL = masih aktif. */
+  effective_to?: string | null;
+};
 
 export type OverrideEntry = {
   id: number;

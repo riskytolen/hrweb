@@ -7,8 +7,8 @@ import {
   AUTO_NOTE_PREFIXES,
   DEFAULT_DENDA_ALPHA,
 } from "../attendance-constants";
-import { localDateStr, computeDendaAlpha, isInNonActivePeriod } from "../attendance-helpers";
-import type { EmployeeLite, PenaltyLite, PublicHoliday } from "../attendance-types";
+import { localDateStr, computeDendaAlpha, isInNonActivePeriod, isWeeklyOffDay, isAutoRestorableToLibur } from "../attendance-helpers";
+import type { EmployeeLite, PenaltyLite, PublicHoliday, OffDayEntry } from "../attendance-types";
 
 type AutoGenArgs = {
   dateFilter: string;
@@ -45,14 +45,10 @@ export function useAttendanceAutoGen({
     const [y, m, d] = dateFilter.split("-").map(Number);
     const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 
-    const { data: allOffDays } = await supabase.from("employee_off_days").select("employee_id, day_of_week");
+    const { data: allOffDays } = await supabase.from("employee_off_days").select("employee_id, day_of_week, effective_from, effective_to");
     const { data: dayOverrides } = await supabase.from("employee_leave_overrides").select("employee_id, type").eq("tanggal", dateFilter);
 
-    const offDayMap = new Map<string, Set<number>>();
-    allOffDays?.forEach((od) => {
-      if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
-      offDayMap.get(od.employee_id)!.add(od.day_of_week);
-    });
+    const offDays: OffDayEntry[] = (allOffDays as OffDayEntry[] | null) || [];
 
     const overrideMap = new Map<string, string>();
     dayOverrides?.forEach((ov) => overrideMap.set(ov.employee_id, ov.type));
@@ -63,14 +59,15 @@ export function useAttendanceAutoGen({
 
     const { data: existingRecs } = await supabase
       .from("attendance_records")
-      .select("id, employee_id, status, catatan")
+      .select("id, employee_id, status, catatan, is_manual")
       .eq("tanggal", dateFilter);
 
-    const existingMap = new Map<string, { id: number; status: string; catatan: string | null }>();
-    existingRecs?.forEach((r) => existingMap.set(r.employee_id, { id: r.id, status: r.status, catatan: r.catatan }));
+    const existingMap = new Map<string, { id: number; status: string; catatan: string | null; is_manual: boolean }>();
+    existingRecs?.forEach((r) => existingMap.set(r.employee_id, { id: r.id, status: r.status, catatan: r.catatan, is_manual: r.is_manual }));
 
     const liburInserts: { employee_id: string; division_id: null; tanggal: string; jam_masuk: string; schedule_jam_masuk: string; toleransi_menit: number; status: string; durasi_telat: number; denda: number; catatan: string }[] = [];
     const staleLiburIds: number[] = [];
+    const restoreToLiburIds: number[] = [];
 
     for (const emp of employees) {
       if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
@@ -78,7 +75,6 @@ export function useAttendanceAutoGen({
       if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;
 
       const override = overrideMap.get(emp.id);
-      const empOffDays = offDayMap.get(emp.id);
 
       const applicableHoliday = holidaysForDate.find((h) =>
         h.berlaku_untuk === "semua" ||
@@ -88,7 +84,7 @@ export function useAttendanceAutoGen({
       const isMasukOverride = override === "masuk";
       const isOverrideLibur = override === "libur";
       const isPublicHoliday = !!applicableHoliday;
-      const isWeeklyOff = !override && !isPublicHoliday && empOffDays?.has(dow);
+      const isWeeklyOff = !override && !isPublicHoliday && isWeeklyOffDay(offDays, emp.id, dow, dateFilter);
 
       const shouldBeLibur = (isOverrideLibur || isPublicHoliday || isWeeklyOff) && !isMasukOverride;
       const holidayNama = applicableHoliday ? applicableHoliday.nama : null;
@@ -108,6 +104,8 @@ export function useAttendanceAutoGen({
           denda: 0,
           catatan: holidayNama ? AUTO_NOTES.LIBUR_NASIONAL(holidayNama) : AUTO_NOTES.HARI_LIBUR,
         });
+      } else if (shouldBeLibur && existing && isAutoRestorableToLibur(existing)) {
+        restoreToLiburIds.push(existing.id);
       } else if (!shouldBeLibur && existing && existing.status === "Libur" && (existing.catatan === AUTO_NOTES.HARI_LIBUR || existing.catatan?.startsWith(AUTO_NOTE_PREFIXES.LIBUR_NASIONAL))) {
         staleLiburIds.push(existing.id);
       }
@@ -116,6 +114,13 @@ export function useAttendanceAutoGen({
     let changed = false;
     if (staleLiburIds.length > 0) {
       await supabase.from("attendance_records").delete().in("id", staleLiburIds);
+      changed = true;
+    }
+    if (restoreToLiburIds.length > 0) {
+      await supabase
+        .from("attendance_records")
+        .update({ status: "Libur", denda: 0, durasi_telat: 0, catatan: AUTO_NOTES.HARI_LIBUR, jam_masuk: "00:00", schedule_jam_masuk: "00:00", toleransi_menit: 0 })
+        .in("id", restoreToLiburIds);
       changed = true;
     }
     if (liburInserts.length > 0) {
@@ -137,7 +142,7 @@ export function useAttendanceAutoGen({
     const [y, m, d] = dateFilter.split("-").map(Number);
     const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 
-    const { data: allOffDays } = await supabase.from("employee_off_days").select("employee_id, day_of_week");
+    const { data: allOffDays } = await supabase.from("employee_off_days").select("employee_id, day_of_week, effective_from, effective_to");
     const { data: dayOverrides } = await supabase.from("employee_leave_overrides").select("employee_id, type").eq("tanggal", dateFilter);
     const { data: approvedLeaves } = await supabase
       .from("leave_requests")
@@ -146,14 +151,14 @@ export function useAttendanceAutoGen({
       .lte("tanggal_mulai", dateFilter)
       .gte("tanggal_selesai", dateFilter);
 
-    const offDayMap = new Map<string, Set<number>>();
-    allOffDays?.forEach((od) => {
-      if (!offDayMap.has(od.employee_id)) offDayMap.set(od.employee_id, new Set());
-      offDayMap.get(od.employee_id)!.add(od.day_of_week);
-    });
+    const offDays: OffDayEntry[] = (allOffDays as OffDayEntry[] | null) || [];
 
     const overrideMap = new Map<string, string>();
     dayOverrides?.forEach((ov) => overrideMap.set(ov.employee_id, ov.type));
+
+    const holidaysForDate = publicHolidays.filter(
+      (h) => dateFilter >= h.tanggal && (h.tanggal_selesai ? dateFilter <= h.tanggal_selesai : dateFilter === h.tanggal)
+    );
 
     const leaveMap = new Map<string, { jenis: string, alasan: string }[]>();
     approvedLeaves?.forEach((l) => {
@@ -177,8 +182,12 @@ export function useAttendanceAutoGen({
       if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;
 
       const override = overrideMap.get(emp.id);
-      const empOffDays = offDayMap.get(emp.id);
-      const isLibur = override === "libur" || (!override && empOffDays?.has(dow));
+      const applicableHoliday = holidaysForDate.find((h) =>
+        h.berlaku_untuk === "semua" ||
+        (h.berlaku_untuk === "pegawai" && h.pegawai_ids?.includes(emp.id))
+      );
+      const isWeeklyOff = !override && !applicableHoliday && isWeeklyOffDay(offDays, emp.id, dow, dateFilter);
+      const isLibur = override === "libur" || !!applicableHoliday || (!override && isWeeklyOff);
       const isMasukOverride = override === "masuk";
       const shouldBeLibur = isLibur && !isMasukOverride;
 
@@ -200,6 +209,11 @@ export function useAttendanceAutoGen({
 
       const leave = leaveMap.get(emp.id);
       const primaryLeave = leave?.[0];
+
+      // Hari libur (jadwal efektif / override / public holiday) tidak boleh
+      // dibuatkan Alpha maupun Izin/Sakit/Cuti otomatis — generator Libur yang
+      // menangani tanggal tersebut (termasuk memulihkan record auto yang salah).
+      if (shouldBeLibur) continue;
 
       if (primaryLeave) {
         alphaInserts.push({
@@ -245,7 +259,7 @@ export function useAttendanceAutoGen({
       changed = true;
     }
     if (changed) await reloadRecords();
-  }, [dateFilter, employees, penalties, reloadRecords]);
+  }, [dateFilter, employees, penalties, publicHolidays, reloadRecords]);
 
   const staticDataReady = !staticLoading && employees.length > 0;
   useEffect(() => {

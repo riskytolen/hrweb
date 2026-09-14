@@ -62,7 +62,7 @@ export function useAttendanceStaticData() {
         .from("attendance_penalty_rates")
         .select("division_id, denda_per_menit, batas_menit, denda_maksimum, denda_alpha")
         .eq("status", "Aktif"),
-      supabase.from("employee_off_days").select("employee_id, day_of_week"),
+      supabase.from("employee_off_days").select("employee_id, day_of_week, effective_from, effective_to"),
       supabase.from("employee_leave_overrides").select("*").order("tanggal", { ascending: false }),
       supabase.from("public_holidays").select("*").order("tanggal", { ascending: true }),
     ]);
