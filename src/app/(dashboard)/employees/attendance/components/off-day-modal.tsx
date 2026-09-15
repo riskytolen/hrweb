@@ -290,7 +290,7 @@ export const OffDayModal = forwardRef<OffDayModalHandle, OffDayModalProps>(funct
         // Histori: tutup jadwal lama (berlaku s/d kemarin), JANGAN delete agar
         // tanggal historis tetap dihitung dengan jadwal yang benar saat itu.
         const { error: closeError } = await supabase.from("employee_off_days").update({ effective_to: yesterday })
-          .eq("employee_id", r.empId).eq("day_of_week", r.dow).is("effective_to", null);
+          .eq("employee_id", r.empId).eq("day_of_week", r.dow).is("effective_to", null).lte("effective_from", cutoff);
         if (closeError) throw closeError;
       }
       if (added.length > 0) {
