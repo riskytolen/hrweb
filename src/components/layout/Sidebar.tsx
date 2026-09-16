@@ -44,6 +44,8 @@ import {
   FileSpreadsheet,
   TrendingUp,
   Banknote,
+  Satellite,
+  Route,
   type LucideIcon,
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
@@ -169,6 +171,17 @@ const allSections: MenuSection[] = [
         href: "/legalitas",
         icon: FileText,
         permission: "legalitas",
+      },
+      {
+        kind: "group",
+        key: "tms",
+        label: "TMS",
+        icon: Truck,
+        basePath: "/tms",
+        items: [
+          { name: "Live View", href: "/tms/live-view", icon: Satellite, permission: "tms" },
+          { name: "Live Track Task", href: "/tms/live-track-task", icon: Route, permission: "tms" },
+        ],
       },
     ],
   },

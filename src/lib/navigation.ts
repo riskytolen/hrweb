@@ -16,6 +16,7 @@ export const ROUTE_BY_PERMISSION: { permission: string; href: string }[] = [
   { permission: "inventory-aset", href: "/general-affair/inventory-aset" },
   { permission: "finance", href: "/finance" },
   { permission: "legalitas", href: "/legalitas" },
+  { permission: "tms", href: "/tms/live-view" },
   { permission: "settings", href: "/settings/master-data" },
 ];
 

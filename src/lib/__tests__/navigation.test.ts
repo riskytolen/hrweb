@@ -12,4 +12,11 @@ describe("navigation permissions", () => {
     expect(getDefaultRouteForPermissions(["all"], "external")).toBe("/operasional-kendaraan/dashboard");
     expect(getDefaultRouteForPermissions(["vehicle-odometer.view"], "external")).toBe("/operasional-kendaraan/dashboard");
   });
+
+  it("routes internal tms users to the tms control tower", () => {
+    expect(permissionMatches(["tms"], "tms", "internal")).toBe(true);
+    expect(permissionMatches(["tms.view"], "tms", "internal")).toBe(true);
+    expect(permissionMatches(["dashboard"], "tms", "internal")).toBe(false);
+    expect(getDefaultRouteForPermissions(["tms"], "internal")).toBe("/tms/live-view");
+  });
 });

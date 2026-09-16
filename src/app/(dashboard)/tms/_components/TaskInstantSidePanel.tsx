@@ -1,0 +1,733 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  Expand,
+  Loader2,
+  MapPin,
+  Route as RouteIcon,
+  TriangleAlert,
+  Truck,
+  User,
+  X,
+} from "lucide-react";
+import Button from "@/components/ui/Button";
+import { cn } from "@/lib/utils";
+import {
+  normalizeFleetTaskInstantDetail,
+  normalizeFleetTaskTrack,
+  normalizeTripDetailTrail,
+  type FleetTaskInstantDetail as FleetTaskInstantDetailData,
+  type FleetTaskInstantItem,
+  type FleetTaskTimelinePoint,
+  type LatLng,
+} from "@/lib/fleet-task-track";
+import {
+  formatFullTimestamp,
+  formatRelativeTime,
+  normalizeMcEasyVehicleStatus,
+  type TmsVehicleStatus,
+} from "@/lib/tms-status";
+import TaskRouteMap from "./TaskRouteMap";
+import TaskStatusBadge from "./TaskStatusBadge";
+
+interface TaskDetailApiResponse {
+  data?: unknown;
+  error?: string;
+}
+
+interface TripTrailAttempt {
+  source: "trips" | "track";
+  identifier: string;
+  startDate: string | null;
+  endDate: string | null;
+  status: number | null;
+  count: number;
+  label?: string | null;
+}
+
+interface TripTrailWindow {
+  start: number;
+  end: number;
+  label: string;
+}
+
+/** WIB = UTC+7. */
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Batas hari kalender WIB untuk sebuah timestamp, dikembalikan dalam ms UTC. */
+function jakartaDayBounds(timestampMs: number): { startUtcMs: number; endUtcMs: number } {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(timestampMs));
+    const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+    const year = Number(get("year"));
+    const month = Number(get("month"));
+    const day = Number(get("day"));
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+      const startUtcMs = Date.UTC(year, month - 1, day, 0, 0, 0, 0) - WIB_OFFSET_MS;
+      return { startUtcMs, endUtcMs: startUtcMs + DAY_MS - 1 };
+    }
+  } catch {
+    // Fallthrough ke fallback lokal di bawah.
+  }
+  const fallback = new Date(timestampMs);
+  fallback.setHours(0, 0, 0, 0);
+  return { startUtcMs: fallback.getTime(), endUtcMs: fallback.getTime() + DAY_MS - 1 };
+}
+
+/**
+ * Susun window query dari sempit ke lebar: window task, hari WIB tanggal
+ * mulai, rentang hari WIB mulai-selesai, lalu rentang itu ±1 hari.
+ */
+function buildTripTrailWindows(startMs: number, endMs: number): TripTrailWindow[] {
+  const startDay = jakartaDayBounds(startMs);
+  const endDay = jakartaDayBounds(endMs);
+  const spanStart = Math.min(startDay.startUtcMs, endDay.startUtcMs);
+  const spanEnd = Math.max(startDay.endUtcMs, endDay.endUtcMs);
+  const windows: TripTrailWindow[] = [
+    { start: startMs - 60_000, end: endMs + 60_000, label: "task" },
+    { start: startDay.startUtcMs, end: startDay.endUtcMs, label: "hari-mulai" },
+  ];
+  if (spanEnd > startDay.endUtcMs || spanStart < startDay.startUtcMs) {
+    windows.push({ start: spanStart, end: spanEnd, label: "rentang-hari" });
+  }
+  windows.push({ start: spanStart - DAY_MS, end: spanEnd + DAY_MS, label: "h-1-h+1" });
+  return windows;
+}
+
+interface TripTrailDebug {
+  attempts: TripTrailAttempt[];
+  selected: string | null;
+}
+
+function isVisited(raw: string | null): boolean {
+  return raw === "VISITED" || raw === "ARRIVED";
+}
+
+function pointTime(point: FleetTaskTimelinePoint): { at: string | null; label: string } {
+  if (point.arrivalActual) return { at: point.arrivalActual, label: "Tiba" };
+  if (point.departureActual) return { at: point.departureActual, label: "Berangkat" };
+  if (point.arrivalTarget) return { at: point.arrivalTarget, label: "Target tiba" };
+  if (point.departureTarget) return { at: point.departureTarget, label: "Target berangkat" };
+  return { at: null, label: "" };
+}
+
+function isLatLng(value: unknown): value is LatLng {
+  if (!value || typeof value !== "object") return false;
+  const point = value as Record<string, unknown>;
+  return typeof point.latitude === "number" && typeof point.longitude === "number";
+}
+
+function extractTripTrail(payloadData: unknown): LatLng[] {
+  if (payloadData && typeof payloadData === "object" && !Array.isArray(payloadData)) {
+    const trail = (payloadData as { trail?: unknown }).trail;
+    if (Array.isArray(trail)) return trail.filter(isLatLng);
+  }
+  return normalizeTripDetailTrail(payloadData);
+}
+
+/**
+ * Daftar rute perjalanan (titik kunjungan) dari `timeline_route`.
+ * Titik pertama yang belum dikunjungi ditandai sebagai posisi saat ini.
+ */
+function RoutePointList({ detail }: { detail: FleetTaskInstantDetailData }) {
+  const points = detail.timeline;
+  if (points.length === 0) {
+    return (
+      <p className="py-4 text-center text-xs text-muted-foreground">
+        Daftar rute belum tersedia untuk task ini.
+      </p>
+    );
+  }
+
+  const firstPending = points.findIndex((p) => !isVisited(p.visitStatusRaw));
+
+  return (
+    <div>
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Rute Perjalanan ({points.length} titik)
+      </p>
+      <ol>
+        {points.map((point, index) => {
+          const visited = isVisited(point.visitStatusRaw);
+          const current = !visited && index === firstPending;
+          const time = pointTime(point);
+          const state = visited ? "done" : current ? "current" : "pending";
+          return (
+            <li key={`${point.sequence ?? index}-${point.name ?? index}`} className="relative flex gap-3 pb-4 last:pb-0">
+              <span className="flex flex-col items-center">
+                <span
+                  className={cn(
+                    "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold",
+                    state === "done" && "bg-[#16a34a] text-white",
+                    state === "current" && "bg-[#0284c7] text-white",
+                    state === "pending" && "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {point.sequence ?? index + 1}
+                </span>
+                {index < points.length - 1 && <span className="w-px flex-1 bg-border" />}
+              </span>
+              <div className="min-w-0 flex-1 pb-0.5">
+                <p className="truncate text-sm font-semibold text-foreground" title={point.name ?? undefined}>
+                  {point.name ?? `Titik ${point.sequence ?? index + 1}`}
+                </p>
+                {point.address && (
+                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground" title={point.address}>
+                    {point.address}
+                  </p>
+                )}
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] tabular-nums text-muted-foreground">
+                  {point.visitStatusName && (
+                    <span
+                      className={cn(
+                        "font-semibold",
+                        state === "done" && "text-[#16a34a]",
+                        state === "current" && "text-[#0284c7]",
+                      )}
+                    >
+                      {point.visitStatusName}
+                    </span>
+                  )}
+                  {time.at && (
+                    <span title={formatFullTimestamp(time.at)}>
+                      {time.label} {formatRelativeTime(time.at)}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+interface TaskInstantSidePanelProps {
+  item: FleetTaskInstantItem | null;
+  onBack: () => void;
+}
+
+/** Interval polling posisi kendaraan realtime (ms). */
+const VEHICLE_POLL_MS = 30_000;
+
+export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePanelProps) {
+  const [detail, setDetail] = useState<FleetTaskInstantDetailData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [vehicleStatus, setVehicleStatus] = useState<TmsVehicleStatus | null>(null);
+  // Jejak historis dari track endpoint (bila actual_trip tidak tersedia).
+  const [historyTrail, setHistoryTrail] = useState<LatLng[]>([]);
+  // Jejak yang terakumulasi dari polling realtime selama halaman dibuka.
+  const [liveTrail, setLiveTrail] = useState<LatLng[]>([]);
+  const [tripTrailDebug, setTripTrailDebug] = useState<TripTrailDebug>({
+    attempts: [],
+    selected: null,
+  });
+
+  useEffect(() => {
+    // Reset tampilan saat task yang dipilih berganti, lalu muat detail baru.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDetail(null);
+    setError(null);
+    setMapOpen(false);
+    setVehicleStatus(null);
+    setHistoryTrail([]);
+    setLiveTrail([]);
+    setTripTrailDebug({ attempts: [], selected: null });
+    if (!item) return;
+    const taskId = item.id;
+    const listTimeline = item.timeline;
+    const controller = new AbortController();
+    async function load() {
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/tms/fleet-task-instant/${encodeURIComponent(taskId)}`, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as TaskDetailApiResponse;
+        if (!response.ok) throw new Error(payload.error ?? "Gagal memuat detail task.");
+        const normalized = normalizeFleetTaskInstantDetail(payload.data);
+        if (!normalized) throw new Error("Detail task tidak dikenali. Coba lagi.");
+        // Endpoint Show tidak mengirim timeline_route, jadi pakai titik
+        // rute dari data Index bila detail tidak memilikinya.
+        setDetail({
+          ...normalized,
+          timeline: normalized.timeline.length > 0 ? normalized.timeline : listTimeline,
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setDetail(null);
+        setError(err instanceof Error && err.message ? err.message : "Gagal memuat detail task.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    void load();
+    return () => controller.abort();
+  }, [item]);
+
+  // Polling posisi kendaraan realtime tiap 30 detik selama task dipilih.
+  useEffect(() => {
+    const vehicleId = item?.vehicleId ?? null;
+    if (vehicleId === null) return;
+    let disposed = false;
+    const controller = new AbortController();
+
+    async function loadVehicle() {
+      try {
+        const response = await fetch(
+          `/api/tms/vehicle-statuses/${encodeURIComponent(String(vehicleId))}?withAddress=true`,
+          { headers: { Accept: "application/json" }, signal: controller.signal },
+        );
+        const payload = (await response.json()) as { data?: unknown };
+        if (!response.ok) return;
+        const normalized = normalizeMcEasyVehicleStatus(
+          (payload.data ?? {}) as Record<string, unknown>,
+        );
+        if (disposed) return;
+        setVehicleStatus(normalized);
+        // Simpan posisi baru sebagai jejak lintasan realtime.
+        if (
+          normalized &&
+          normalized.hasValidLocation &&
+          normalized.latitude !== null &&
+          normalized.longitude !== null
+        ) {
+          const point: LatLng = {
+            latitude: normalized.latitude,
+            longitude: normalized.longitude,
+          };
+          setLiveTrail((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.latitude === point.latitude && last.longitude === point.longitude) {
+              return prev;
+            }
+            return [...prev, point];
+          });
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        // Diamkan kegagalan polling; peta tetap menampilkan data rute.
+      }
+    }
+
+    void loadVehicle();
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void loadVehicle();
+    }, VEHICLE_POLL_MS);
+
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [item]);
+
+  // Jejak historis: sumber utama Detail Trip History (/trips/:id/detail).
+  // Coba license plate dulu (paling andal lintas endpoint), lalu vehicleId,
+  // dengan rentang waktu task dan fallback rentang harian. Bila tetap kosong,
+  // fallback ke track endpoint.
+  useEffect(() => {
+    if (!item) return;
+    const identifiers = [item.licensePlate, item.vehicleId !== null ? String(item.vehicleId) : null].filter(
+      (value): value is string => !!value,
+    );
+    if (identifiers.length === 0) return;
+    const startRaw = item.actualStartedOn ?? item.expectedStartedOn ?? item.createdOn;
+    if (!startRaw) return;
+    const startMs = Date.parse(startRaw);
+    if (Number.isNaN(startMs)) return;
+    const endMsRaw = item.actualArrivalOn ? Date.parse(item.actualArrivalOn) : NaN;
+    const endMs = Number.isNaN(endMsRaw) ? Date.now() : endMsRaw;
+
+    // Window dari sempit ke lebar (WIB-aware) agar trip yang tercatat di luar
+    // jam task tetap tertangkap.
+    const windows = buildTripTrailWindows(startMs, endMs);
+
+    let disposed = false;
+    const controller = new AbortController();
+
+    async function loadFallbackTrack() {
+      const trackId = item?.trackId;
+      if (!trackId) return;
+      try {
+        const response = await fetch(
+          `/api/tms/fleet-task-instant/track/${encodeURIComponent(trackId)}`,
+          { headers: { Accept: "application/json" }, signal: controller.signal },
+        );
+        const payload = (await response.json()) as { data?: unknown };
+        if (!response.ok) return;
+        const normalized = normalizeFleetTaskTrack(payload.data, trackId);
+        if (disposed) return;
+        setTripTrailDebug((prev) => ({
+          attempts: [
+            ...prev.attempts,
+            {
+              source: "track",
+              identifier: trackId,
+              startDate: null,
+              endDate: null,
+              status: response.status,
+              count: normalized.points.length,
+            },
+          ],
+          selected: normalized.points.length > 1 ? `track:${trackId}` : prev.selected,
+        }));
+        setHistoryTrail(
+          normalized.points.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+        );
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      }
+    }
+
+    async function tryFetchTrail(window: TripTrailWindow, identifier: string): Promise<LatLng[]> {
+      const startDate = new Date(window.start).toISOString();
+      const endDate = new Date(window.end).toISOString();
+      const url =
+        `/api/tms/trips/${encodeURIComponent(identifier)}/detail` +
+        `?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&speedLimit=120`;
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      const payload = (await response.json().catch(() => ({}))) as { data?: unknown; meta?: { total?: unknown } };
+      const trail = response.ok ? extractTripTrail(payload.data) : [];
+      const count = typeof payload.meta?.total === "number" ? payload.meta.total : trail.length;
+      if (disposed) return [];
+      setTripTrailDebug((prev) => ({
+        attempts: [
+          ...prev.attempts,
+          { source: "trips", identifier, startDate, endDate, status: response.status, count, label: window.label },
+        ],
+        selected: trail.length > 1 ? `trips:${identifier}` : prev.selected,
+      }));
+      if (!response.ok) return [];
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[tms-trip-trail]", { identifier, label: window.label, startDate, endDate, count: trail.length });
+      }
+      return trail;
+    }
+
+    async function loadHistory() {
+      try {
+        for (const identifier of identifiers) {
+          for (const window of windows) {
+            const trail = await tryFetchTrail(window, identifier);
+            if (disposed) return;
+            if (trail.length > 1) {
+              setHistoryTrail(trail);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      }
+      await loadFallbackTrack();
+    }
+
+    void loadHistory();
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, [item]);
+
+  const shown = detail ?? item;
+
+  // Progress: pakai current/total bila ada, fallback ke timeline visited.
+  let doneCount = 0;
+  let totalCount = 0;
+  if (shown && (shown.totalPoint ?? 0) > 0) {
+    doneCount = shown.currentPoint ?? 0;
+    totalCount = shown.totalPoint ?? 0;
+  } else if (detail && detail.timeline.length > 0) {
+    totalCount = detail.timeline.length;
+    doneCount = detail.timeline.filter((p) => isVisited(p.visitStatusRaw)).length;
+  }
+  const percent = totalCount > 0 ? Math.min(100, Math.round((doneCount / totalCount) * 100)) : 0;
+
+  // Koordinat titik rute — dipakai sebagai sumber peta bila polyline
+  // planned_trip/actual_trip tidak tersedia (umum pada task terjadwal).
+  const timelineCoords: LatLng[] = [];
+  if (detail) {
+    for (const point of detail.timeline) {
+      if (point.latitude !== null && point.longitude !== null) {
+        timelineCoords.push({ latitude: point.latitude, longitude: point.longitude });
+      }
+    }
+  }
+  const hasPolylines = !!detail && (detail.plannedRoutes.length > 0 || detail.actualRoutes.length > 0);
+  // Hanya gambar polyline asli dari API. Titik kunjungan tidak dihubungkan
+  // dengan garis agar peta menampilkan lokasi tanpa rute semu.
+  const mapPlanned = detail?.plannedRoutes ?? [];
+  const mapActual = detail?.actualRoutes ?? [];
+  const hasPlannedRoute = mapPlanned.length > 0;
+  const hasActualRoute = mapActual.length > 0;
+
+  // Jejak lintasan: gabungkan jejak historis (track endpoint) dengan jejak
+  // realtime hasil polling, lalu buang titik berurutan yang duplikat.
+  const trail = useMemo(() => {
+    const combined = historyTrail.length > 0 ? [...historyTrail, ...liveTrail] : liveTrail;
+    const result: LatLng[] = [];
+    for (const point of combined) {
+      const last = result[result.length - 1];
+      if (last && last.latitude === point.latitude && last.longitude === point.longitude) continue;
+      result.push(point);
+    }
+    return result;
+  }, [historyTrail, liveTrail]);
+  const hasTrail = trail.length > 1;
+
+  const hasMapData = hasPolylines || timelineCoords.length > 0 || trail.length > 0;
+
+  const routeNames = detail && detail.timeline.length > 0
+    ? detail.timeline
+        .map((p) => p.name)
+        .filter((n): n is string => !!n)
+    : [];
+  const routeSummary =
+    routeNames.length >= 2
+      ? `${routeNames[0]} → ${routeNames[routeNames.length - 1]}`
+      : (shown?.currentPointName ?? null);
+
+  return (
+    <div className="space-y-4">
+      {/* Live Fleet Overview */}
+      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <div className="flex items-center gap-2 px-4 py-3">
+          <h3 className="text-sm font-bold text-foreground">Live Fleet Overview</h3>
+          {hasMapData && detail && (
+            <button
+              type="button"
+              onClick={() => setMapOpen(true)}
+              className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+            >
+              <Expand className="h-3.5 w-3.5" />
+              View Full Map
+            </button>
+          )}
+        </div>
+        <div className="px-4 pb-4">
+          {!item ? (
+            <div className="flex h-56 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center">
+              <MapPin className="h-6 w-6 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">
+                Pilih task pada tabel untuk melihat rute di peta.
+              </p>
+            </div>
+          ) : loading && !detail ? (
+            <div className="h-56 animate-pulse rounded-xl bg-muted" />
+          ) : hasMapData ? (
+            <div className="relative z-0 h-56 overflow-hidden rounded-xl ring-1 ring-border">
+              <TaskRouteMap
+                key={`mini-${detail?.id ?? item?.id ?? "task"}`}
+                planned={mapPlanned}
+                actual={mapActual}
+                trail={trail}
+                timeline={detail?.timeline ?? []}
+                vehicle={vehicleStatus}
+                scrollWheel={false}
+              />
+            </div>
+          ) : (
+            <div className="flex h-56 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/40 px-4 text-center">
+              <RouteIcon className="h-6 w-6 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">
+                {error ?? "Data rute tidak tersedia untuk task ini."}
+              </p>
+            </div>
+          )}
+          {(hasPlannedRoute || hasActualRoute || hasTrail) && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-muted-foreground">
+              {hasPlannedRoute && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-[#0284c7]" />
+                  Rencana
+                </span>
+              )}
+              {hasActualRoute && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-1 w-5 rounded bg-[#16a34a]" />
+                  Realisasi
+                </span>
+              )}
+              {hasTrail && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-1 w-5 rounded bg-[#f97316]" />
+                  Jejak Mobil
+                </span>
+              )}
+              {detail && detail.timeline.length > 0 && (
+                <>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#16a34a]" />
+                    Dikunjungi
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#94a3b8]" />
+                    Belum
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+          {!loading && detail && !hasTrail && (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Jejak lintasan trip belum tersedia dari layanan tracking.
+            </p>
+          )}
+          {!loading && !hasTrail && tripTrailDebug.attempts.length > 0 && (
+            <div className="mt-2 rounded-lg border border-dashed border-border bg-muted/40 p-2 text-[11px] text-muted-foreground">
+              <p className="font-bold text-foreground">Diagnostik jejak trip</p>
+              <div className="mt-1 space-y-1">
+                {tripTrailDebug.attempts.map((attempt, index) => (
+                  <p key={`${attempt.source}-${attempt.identifier}-${index}`} className="break-words tabular-nums">
+                    {attempt.source}
+                    {attempt.label ? ` (${attempt.label})` : ""} / {attempt.identifier} / HTTP {attempt.status ?? "-"} /{" "}
+                    {attempt.count} titik
+                    {attempt.startDate && attempt.endDate
+                      ? ` / ${attempt.startDate} sampai ${attempt.endDate}`
+                      : ""}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-bold text-foreground">Task Details</h3>
+          {item && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+              Tutup
+            </button>
+          )}
+        </div>
+
+        {!shown ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            Belum ada task dipilih.
+          </p>
+        ) : (
+          <div className="mt-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-base font-extrabold text-foreground">
+                {shown.number ?? shown.id.slice(0, 8)}
+              </span>
+              <TaskStatusBadge
+                color={shown.statusColor}
+                label={shown.statusName ?? "–"}
+                className="ml-auto"
+              />
+            </div>
+            {routeSummary && (
+              <p className="truncate text-xs text-muted-foreground" title={routeSummary}>
+                {routeSummary}
+              </p>
+            )}
+            <div className="space-y-2 rounded-xl bg-muted/50 p-3">
+              <p className="flex items-center gap-2 text-sm">
+                <Truck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="font-bold tabular-nums text-foreground">
+                  {shown.licensePlate ?? "–"}
+                </span>
+              </p>
+              <p className="flex items-center gap-2 text-sm">
+                <User className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="truncate font-medium text-foreground">
+                  {shown.driverName ?? "–"}
+                </span>
+              </p>
+            </div>
+
+            {loading && !detail ? (
+              <div className="h-32 animate-pulse rounded-xl bg-muted" />
+            ) : (
+              detail && <RoutePointList detail={detail} />
+            )}
+
+            {error && (
+              <div className="flex items-start gap-2 text-xs text-danger">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <p>{error}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Instant Point Progress */}
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-sm font-bold text-foreground">Instant Point Progress</h3>
+          <span className="ml-auto text-lg font-extrabold tabular-nums text-foreground">
+            {totalCount > 0 ? `${percent}%` : "–"}
+          </span>
+        </div>
+        <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-[#16a34a] transition-all"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {totalCount > 0
+            ? `${doneCount} of ${totalCount} instant points completed`
+            : "Data titik belum tersedia."}
+        </p>
+      </div>
+
+      {/* Full map overlay */}
+      {mapOpen && detail && (
+        <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/60 p-4">
+          <div className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-card shadow-2xl">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+              <h3 className="text-sm font-bold text-foreground">
+                Rute {detail.number ?? detail.id.slice(0, 8)}
+              </h3>
+              <Button size="sm" variant="outline" className="ml-auto" icon={X} onClick={() => setMapOpen(false)}>
+                Tutup
+              </Button>
+            </div>
+            <div className="relative z-0 h-[70vh]">
+              <TaskRouteMap
+                key={`full-${detail.id}`}
+                planned={mapPlanned}
+                actual={mapActual}
+                trail={trail}
+                timeline={detail.timeline}
+                vehicle={vehicleStatus}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Memuat detail task…
+        </div>
+      )}
+    </div>
+  );
+}
