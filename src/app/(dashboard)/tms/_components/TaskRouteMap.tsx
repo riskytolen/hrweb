@@ -12,6 +12,23 @@ const TRACK_TILE_ATTRIBUTION =
 
 const CAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg>`;
 
+/** Status titik yang dianggap sudah dikunjungi (sinkron dengan side panel). */
+const VISITED_STATUSES = new Set([
+  "VISITED",
+  "ARRIVED",
+  "DONE",
+  "COMPLETED",
+  "FINISHED",
+  "ENDED",
+  "DEPARTED",
+  "SKIPPED",
+]);
+
+function isVisitedStatus(raw: string | null): boolean {
+  if (!raw) return false;
+  return VISITED_STATUSES.has(raw.toUpperCase());
+}
+
 interface TaskRouteMapProps {
   planned: LatLng[][];
   actual: LatLng[][];
@@ -97,15 +114,14 @@ export default function TaskRouteMap({
     }
 
     // Titik pertama yang belum dikunjungi dianggap posisi saat ini.
-    const firstPending = current.timeline.findIndex(
-      (p) => p.visitStatusRaw !== "VISITED" && p.visitStatusRaw !== "ARRIVED",
-    );
+    const firstPending = current.timeline.findIndex((p) => !isVisitedStatus(p.visitStatusRaw));
 
     current.timeline.forEach((point, index) => {
       if (point.latitude === null || point.longitude === null) return;
       bounds.push([point.latitude, point.longitude]);
-      const visited = point.visitStatusRaw === "VISITED" || point.visitStatusRaw === "ARRIVED";
+      const visited = isVisitedStatus(point.visitStatusRaw);
       const isCurrent = !visited && index === firstPending;
+      // Hijau = sudah dikunjungi, biru = posisi saat ini, abu-abu = belum.
       const color = visited ? "#16a34a" : isCurrent ? "#0284c7" : "#94a3b8";
       const icon = L.divIcon({
         className: "task-timeline-marker",

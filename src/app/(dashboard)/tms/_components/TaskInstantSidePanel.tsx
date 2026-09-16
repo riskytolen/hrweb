@@ -191,6 +191,7 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
           const current = !visited && index === firstPending;
           const time = pointTime(point);
           const state = visited ? "done" : current ? "current" : "pending";
+          const nextVisited = index + 1 < points.length && isVisited(points[index + 1].visitStatusRaw);
           return (
             <li key={`${point.sequence ?? index}-${point.name ?? index}`} className="relative flex gap-3 pb-4 last:pb-0">
               <span className="flex flex-col items-center">
@@ -199,15 +200,35 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
                     "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold",
                     state === "done" && "bg-[#16a34a] text-white",
                     state === "current" && "bg-[#0284c7] text-white",
-                    state === "pending" && "bg-muted text-muted-foreground",
+                    state === "pending" && "bg-[#e2e8f0] text-[#64748b] ring-1 ring-[#cbd5e1]",
                   )}
                 >
                   {point.sequence ?? index + 1}
                 </span>
-                {index < points.length - 1 && <span className="w-px flex-1 bg-border" />}
+                {index < points.length - 1 && (
+                  <span
+                    className={cn(
+                      "w-0.5 flex-1 rounded-full",
+                      visited && nextVisited ? "bg-[#16a34a]" : "bg-[#e2e8f0]",
+                    )}
+                  />
+                )}
               </span>
-              <div className="min-w-0 flex-1 pb-0.5">
-                <p className="truncate text-sm font-semibold text-foreground" title={point.name ?? undefined}>
+              <div
+                className={cn(
+                  "min-w-0 flex-1 pb-0.5",
+                  state === "pending" && "opacity-70",
+                )}
+              >
+                <p
+                  className={cn(
+                    "truncate text-sm font-semibold",
+                    state === "done" && "text-[#15803d]",
+                    state === "current" && "text-[#0284c7]",
+                    state === "pending" && "text-muted-foreground",
+                  )}
+                  title={point.name ?? undefined}
+                >
                   {point.name ?? `Titik ${point.sequence ?? index + 1}`}
                 </p>
                 {point.address && (
@@ -216,17 +237,16 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
                   </p>
                 )}
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] tabular-nums text-muted-foreground">
-                  {point.visitStatusName && (
-                    <span
-                      className={cn(
-                        "font-semibold",
-                        state === "done" && "text-[#16a34a]",
-                        state === "current" && "text-[#0284c7]",
-                      )}
-                    >
-                      {point.visitStatusName}
-                    </span>
-                  )}
+                  <span
+                    className={cn(
+                      "font-semibold",
+                      state === "done" && "text-[#16a34a]",
+                      state === "current" && "text-[#0284c7]",
+                      state === "pending" && "text-[#94a3b8]",
+                    )}
+                  >
+                    {point.visitStatusName ?? (state === "done" ? "Dikunjungi" : state === "pending" ? "Belum dikunjungi" : "Sedang dikunjungi")}
+                  </span>
                   {time.at && (
                     <span title={formatFullTimestamp(time.at)}>
                       {time.label} {formatRelativeTime(time.at)}
@@ -630,6 +650,10 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                   <span className="inline-flex items-center gap-1.5">
                     <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#16a34a]" />
                     Dikunjungi
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#0284c7]" />
+                    Sedang
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#94a3b8]" />
