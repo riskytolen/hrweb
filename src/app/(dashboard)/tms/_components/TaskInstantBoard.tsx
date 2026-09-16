@@ -194,6 +194,14 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
     if (!loading) void fetchPage(page, search);
   };
 
+  // Kirim snapshot terbaru ke panel detail saat daftar diperbarui, agar
+  // progres/status task terpilih tidak tertinggal snapshot lama.
+  useEffect(() => {
+    if (!selectedId) return;
+    const updated = items.find((entry) => entry.id === selectedId);
+    if (updated) onSelect(updated);
+  }, [items, selectedId, onSelect]);
+
   const visibleItems =
     statusFilter === "ALL" ? items : items.filter((item) => item.statusRaw === statusFilter);
 

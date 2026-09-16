@@ -106,8 +106,41 @@ interface TripTrailDebug {
   selected: string | null;
 }
 
+const VISITED_STATUSES = new Set([
+  "VISITED",
+  "ARRIVED",
+  "DONE",
+  "COMPLETED",
+  "FINISHED",
+  "ENDED",
+  "DEPARTED",
+  "SKIPPED",
+]);
+
 function isVisited(raw: string | null): boolean {
-  return raw === "VISITED" || raw === "ARRIVED";
+  if (!raw) return false;
+  return VISITED_STATUSES.has(raw.toUpperCase());
+}
+
+/**
+ * Selaraskan status titik rute dengan progres task. Endpoint Show sering
+ * tidak mengirim `timeline_route`, sehingga timeline fallback dari Index bisa
+ * tertinggal. Bila task sudah berjalan/selesai, titik yang sudah terlewati
+ * (berdasarkan `currentPoint`) ditandai selesai agar tidak "stuck" di titik 1.
+ */
+function withTaskProgress(
+  timeline: FleetTaskTimelinePoint[],
+  currentPoint: number | null,
+  statusRaw: string | null,
+): FleetTaskTimelinePoint[] {
+  const ended = statusRaw === "ENDED";
+  const doneCount = ended ? timeline.length : Math.max(0, currentPoint ?? 0);
+  if (doneCount <= 0) return timeline;
+  return timeline.map((point, index) => {
+    if (isVisited(point.visitStatusRaw)) return point;
+    const reached = index < doneCount || (point.sequence !== null && point.sequence <= doneCount);
+    return reached ? { ...point, visitStatusRaw: "VISITED" } : point;
+  });
 }
 
 function pointTime(point: FleetTaskTimelinePoint): { at: string | null; label: string } {
@@ -136,8 +169,7 @@ function extractTripTrail(payloadData: unknown): LatLng[] {
  * Daftar rute perjalanan (titik kunjungan) dari `timeline_route`.
  * Titik pertama yang belum dikunjungi ditandai sebagai posisi saat ini.
  */
-function RoutePointList({ detail }: { detail: FleetTaskInstantDetailData }) {
-  const points = detail.timeline;
+function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
   if (points.length === 0) {
     return (
       <p className="py-4 text-center text-xs text-muted-foreground">
@@ -218,6 +250,9 @@ interface TaskInstantSidePanelProps {
 /** Interval polling posisi kendaraan realtime (ms). */
 const VEHICLE_POLL_MS = 30_000;
 
+/** Interval refresh detail task terpilih agar progres tidak basi (ms). */
+const DETAIL_POLL_MS = 30_000;
+
 export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePanelProps) {
   const [detail, setDetail] = useState<FleetTaskInstantDetailData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -246,9 +281,10 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     if (!item) return;
     const taskId = item.id;
     const listTimeline = item.timeline;
+    let disposed = false;
     const controller = new AbortController();
-    async function load() {
-      setLoading(true);
+    async function load(isInitial: boolean) {
+      if (isInitial) setLoading(true);
       try {
         const response = await fetch(`/api/tms/fleet-task-instant/${encodeURIComponent(taskId)}`, {
           headers: { Accept: "application/json" },
@@ -258,22 +294,36 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
         if (!response.ok) throw new Error(payload.error ?? "Gagal memuat detail task.");
         const normalized = normalizeFleetTaskInstantDetail(payload.data);
         if (!normalized) throw new Error("Detail task tidak dikenali. Coba lagi.");
+        if (disposed) return;
         // Endpoint Show tidak mengirim timeline_route, jadi pakai titik
         // rute dari data Index bila detail tidak memilikinya.
         setDetail({
           ...normalized,
           timeline: normalized.timeline.length > 0 ? normalized.timeline : listTimeline,
         });
+        setError(null);
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setDetail(null);
-        setError(err instanceof Error && err.message ? err.message : "Gagal memuat detail task.");
+        if (disposed) return;
+        // Jangan hapus data lama saat refresh berkala gagal.
+        if (isInitial) {
+          setDetail(null);
+          setError(err instanceof Error && err.message ? err.message : "Gagal memuat detail task.");
+        }
       } finally {
-        setLoading(false);
+        if (isInitial && !disposed) setLoading(false);
       }
     }
-    void load();
-    return () => controller.abort();
+    void load(true);
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void load(false);
+    }, DETAIL_POLL_MS);
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.clearInterval(timer);
+    };
   }, [item]);
 
   // Polling posisi kendaraan realtime tiap 30 detik selama task dipilih.
@@ -447,26 +497,31 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
 
   const shown = detail ?? item;
 
+  // Timeline efektif: fallback dari Index + selaras dengan progres task
+  // (endpoint Show sering tidak mengirim timeline_route terbaru).
+  const effectiveTimeline = useMemo(() => {
+    const base = detail?.timeline ?? item?.timeline ?? [];
+    return withTaskProgress(base, shown?.currentPoint ?? null, shown?.statusRaw ?? null);
+  }, [detail, item, shown?.currentPoint, shown?.statusRaw]);
+
   // Progress: pakai current/total bila ada, fallback ke timeline visited.
   let doneCount = 0;
   let totalCount = 0;
   if (shown && (shown.totalPoint ?? 0) > 0) {
-    doneCount = shown.currentPoint ?? 0;
+    doneCount = shown.statusRaw === "ENDED" ? (shown.totalPoint ?? 0) : (shown.currentPoint ?? 0);
     totalCount = shown.totalPoint ?? 0;
-  } else if (detail && detail.timeline.length > 0) {
-    totalCount = detail.timeline.length;
-    doneCount = detail.timeline.filter((p) => isVisited(p.visitStatusRaw)).length;
+  } else if (effectiveTimeline.length > 0) {
+    totalCount = effectiveTimeline.length;
+    doneCount = effectiveTimeline.filter((p) => isVisited(p.visitStatusRaw)).length;
   }
   const percent = totalCount > 0 ? Math.min(100, Math.round((doneCount / totalCount) * 100)) : 0;
 
   // Koordinat titik rute — dipakai sebagai sumber peta bila polyline
   // planned_trip/actual_trip tidak tersedia (umum pada task terjadwal).
   const timelineCoords: LatLng[] = [];
-  if (detail) {
-    for (const point of detail.timeline) {
-      if (point.latitude !== null && point.longitude !== null) {
-        timelineCoords.push({ latitude: point.latitude, longitude: point.longitude });
-      }
+  for (const point of effectiveTimeline) {
+    if (point.latitude !== null && point.longitude !== null) {
+      timelineCoords.push({ latitude: point.latitude, longitude: point.longitude });
     }
   }
   const hasPolylines = !!detail && (detail.plannedRoutes.length > 0 || detail.actualRoutes.length > 0);
@@ -493,8 +548,8 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
 
   const hasMapData = hasPolylines || timelineCoords.length > 0 || trail.length > 0;
 
-  const routeNames = detail && detail.timeline.length > 0
-    ? detail.timeline
+  const routeNames = effectiveTimeline.length > 0
+    ? effectiveTimeline
         .map((p) => p.name)
         .filter((n): n is string => !!n)
     : [];
@@ -537,7 +592,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                 planned={mapPlanned}
                 actual={mapActual}
                 trail={trail}
-                timeline={detail?.timeline ?? []}
+                timeline={effectiveTimeline}
                 vehicle={vehicleStatus}
                 scrollWheel={false}
               />
@@ -570,7 +625,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                   Jejak Mobil
                 </span>
               )}
-              {detail && detail.timeline.length > 0 && (
+              {effectiveTimeline.length > 0 && (
                 <>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#16a34a]" />
@@ -662,7 +717,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
             {loading && !detail ? (
               <div className="h-32 animate-pulse rounded-xl bg-muted" />
             ) : (
-              detail && <RoutePointList detail={detail} />
+              <RoutePointList points={effectiveTimeline} />
             )}
 
             {error && (
@@ -714,7 +769,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                 planned={mapPlanned}
                 actual={mapActual}
                 trail={trail}
-                timeline={detail.timeline}
+                timeline={effectiveTimeline}
                 vehicle={vehicleStatus}
               />
             </div>
