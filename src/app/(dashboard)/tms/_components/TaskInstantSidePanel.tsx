@@ -122,6 +122,17 @@ function isVisited(raw: string | null): boolean {
   return VISITED_STATUSES.has(raw.toUpperCase());
 }
 
+/** Nama status yang tidak ditampilkan di daftar rute. */
+const HIDDEN_VISIT_STATUSES = new Set(["TERLAMBAT", "LATE"]);
+
+function visitStatusLabel(point: FleetTaskTimelinePoint, state: "done" | "current" | "pending"): string {
+  const raw = point.visitStatusName?.trim();
+  if (raw && !HIDDEN_VISIT_STATUSES.has(raw.toUpperCase())) return raw;
+  if (state === "done") return "Dikunjungi";
+  if (state === "pending") return "Belum dikunjungi";
+  return "Sedang dikunjungi";
+}
+
 /**
  * Selaraskan status titik rute dengan progres task. Endpoint Show sering
  * tidak mengirim `timeline_route`, sehingga timeline fallback dari Index bisa
@@ -245,7 +256,7 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
                       state === "pending" && "text-[#94a3b8]",
                     )}
                   >
-                    {point.visitStatusName ?? (state === "done" ? "Dikunjungi" : state === "pending" ? "Belum dikunjungi" : "Sedang dikunjungi")}
+                    {visitStatusLabel(point, state)}
                   </span>
                   {time.at && (
                     <span title={formatFullTimestamp(time.at)}>
