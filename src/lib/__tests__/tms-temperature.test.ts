@@ -37,6 +37,12 @@ describe("normalizeTemperatureWebhook", () => {
     ).toMatchObject({ licensePlate: null, imei: "999", temperature: -18, engineOn: true });
   });
 
+  it("accepts coolant temperature data update aliases", () => {
+    expect(
+      normalizeTemperatureWebhook({ licensePlate: "B 9448 BRO", coolantTemperature: "82.5" }),
+    ).toMatchObject({ licensePlate: "B 9448 BRO", temperature: 82.5 });
+  });
+
   it("rejects payloads without temperature or vehicle identity", () => {
     expect(normalizeTemperatureWebhook(null)).toBeNull();
     expect(normalizeTemperatureWebhook({ license_plate: "B 1" })).toBeNull();

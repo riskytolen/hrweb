@@ -40,27 +40,50 @@ describe("POST /api/tms/webhooks/mceasy", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(insert).toHaveBeenCalledTimes(1);
-    const rows = insert.mock.calls[0][0] as Array<Record<string, unknown>>;
+    expect(insert).toHaveBeenCalledTimes(2);
+    expect(insert.mock.calls[0][0]).toMatchObject({
+      provider: "mceasy",
+      payload_valid: true,
+      normalized_count: 1,
+    });
+    const rows = insert.mock.calls[1][0] as Array<Record<string, unknown>>;
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       license_plate: "B 9402 BCU",
       temperature: 4.5,
       temperature_num: 1,
     });
-    expect(await response.json()).toMatchObject({ ok: true, inserted: 1 });
+    expect(await response.json()).toMatchObject({ ok: true, received: true, normalized: 1, inserted: 1 });
   });
 
-  it("rejects payloads without valid temperature data with 400", async () => {
+  it("stores raw payloads without valid temperature data for diagnosis", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    createAdminClientMock.mockReturnValue({ from: () => ({ insert }) } as never);
+
     const response = await POST(request({ license_plate: "B 9402 BCU" }));
-    expect(response.status).toBe(400);
-    expect(createAdminClientMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(insert.mock.calls[0][0]).toMatchObject({
+      provider: "mceasy",
+      payload_valid: true,
+      normalized_count: 0,
+    });
+    expect(await response.json()).toMatchObject({ ok: true, received: true, normalized: 0, inserted: 0 });
   });
 
-  it("rejects invalid JSON with 400", async () => {
+  it("logs invalid JSON and acknowledges the webhook", async () => {
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    createAdminClientMock.mockReturnValue({ from: () => ({ insert }) } as never);
+
     const response = await POST(request("bukan-json"));
-    expect(response.status).toBe(400);
-    expect(createAdminClientMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(insert.mock.calls[0][0]).toMatchObject({
+      provider: "mceasy",
+      payload_valid: false,
+      payload_error: "Payload JSON tidak valid.",
+      normalized_count: 0,
+    });
   });
 
   it("returns 500 when the insert fails", async () => {

@@ -67,7 +67,17 @@ export function normalizeTemperatureWebhook(raw: unknown): TemperatureWebhookEve
   const source = raw as Record<string, unknown>;
 
   const temperature = toFiniteNumber(
-    pickFirst(source, ["temperature", "temp", "temperature_value", "temperatureValue", "value"]),
+    pickFirst(source, [
+      "temperature",
+      "temp",
+      "temperature_value",
+      "temperatureValue",
+      "coolant_temperature",
+      "coolantTemperature",
+      "coolant_temp",
+      "coolantTemp",
+      "value",
+    ]),
   );
   if (temperature === null) return null;
 
