@@ -98,6 +98,7 @@ const PERMISSION_OPTIONS = [
   { key: "data-mobil", label: "Data Mobil" },
   { key: "inventory-aset", label: "Aset" },
   { key: "vehicle-odometer", label: "Operasional Kendaraan" },
+  { key: "tms", label: "TMS" },
   { key: "finance", label: "Finance" },
   { key: "legalitas", label: "Legalitas" },
   { key: "settings", label: "Pengaturan" },
