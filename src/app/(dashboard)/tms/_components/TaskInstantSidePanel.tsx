@@ -6,7 +6,6 @@ import {
   Loader2,
   MapPin,
   Route as RouteIcon,
-  Thermometer,
   TriangleAlert,
   Truck,
   User,
@@ -29,7 +28,6 @@ import {
   normalizeMcEasyVehicleStatus,
   type TmsVehicleStatus,
 } from "@/lib/tms-status";
-import { pointTemperatureLabel } from "@/lib/tms-temperature";
 import TaskRouteMap from "./TaskRouteMap";
 import TaskStatusBadge from "./TaskStatusBadge";
 
@@ -203,31 +201,11 @@ function extractTripTrail(payloadData: unknown): LatLng[] {
   return normalizeTripDetailTrail(payloadData);
 }
 
-interface PointTemperatureInfo {
-  temperature: number;
-  temperatureNum: number | null;
-  recordedAt: string;
-}
-
-/** Suhu per titik rute, dikunci berdasarkan `plan_sequence`. */
-type PointTemperatureMap = Record<string, PointTemperatureInfo>;
-
-function temperatureKey(sequence: number | null): string | null {
-  return sequence === null ? null : `seq:${sequence}`;
-}
-
 /**
  * Daftar rute perjalanan (titik kunjungan) dari `timeline_route`.
  * Titik pertama yang belum dikunjungi ditandai sebagai posisi saat ini.
- * Suhu hanya ditampilkan pada titik yang sudah selesai dikunjungi.
  */
-function RoutePointList({
-  points,
-  temperatures,
-}: {
-  points: FleetTaskTimelinePoint[];
-  temperatures: PointTemperatureMap;
-}) {
+function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
   if (points.length === 0) {
     return (
       <p className="py-4 text-center text-xs text-muted-foreground">
@@ -250,8 +228,6 @@ function RoutePointList({
           const time = pointTime(point);
           const state = visited ? "done" : current ? "current" : "pending";
           const nextVisited = index + 1 < points.length && isPointVisited(points[index + 1]);
-          const tempKey = temperatureKey(point.sequence);
-          const temp = tempKey ? temperatures[tempKey] : undefined;
           return (
             <li key={`${point.sequence ?? index}-${point.name ?? index}`} className="relative flex gap-3 pb-4 last:pb-0">
               <span className="flex flex-col items-center">
@@ -313,19 +289,6 @@ function RoutePointList({
                       {time.kind === "actual" && ` · ${formatRelativeTime(time.at)}`}
                     </span>
                   )}
-                  {visited && temp && (
-                    <span
-                      className="inline-flex items-center gap-1 font-semibold text-foreground"
-                      title={
-                        temp.recordedAt
-                          ? `Suhu tercatat ${formatFullTimestamp(temp.recordedAt)}`
-                          : undefined
-                      }
-                    >
-                      <Thermometer className="h-3 w-3" />
-                      {pointTemperatureLabel(temp.temperatureNum, temp.temperature)}
-                    </span>
-                  )}
                 </p>
               </div>
             </li>
@@ -361,8 +324,6 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     attempts: [],
     selected: null,
   });
-  // Suhu per titik rute dari webhook, dikunci berdasarkan `plan_sequence`.
-  const [pointTemperatures, setPointTemperatures] = useState<PointTemperatureMap>({});
 
   useEffect(() => {
     // Reset tampilan saat task yang dipilih berganti, lalu muat detail baru.
@@ -374,7 +335,6 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     setHistoryTrail([]);
     setLiveTrail([]);
     setTripTrailDebug({ attempts: [], selected: null });
-    setPointTemperatures({});
     if (!item) return;
     const taskId = item.id;
     const listTimeline = item.timeline;
@@ -452,53 +412,6 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     }
     return latest;
   }, [effectiveTimeline]);
-
-  // Muat suhu per titik dari webhook untuk task yang dipilih.
-  // Kegagalan dim diamkan — daftar rute tetap tampil tanpa suhu.
-  useEffect(() => {
-    if (!item?.id) return;
-    const taskId: string = item.id;
-    let disposed = false;
-    const controller = new AbortController();
-    async function loadTemperatures() {
-      try {
-        const response = await fetch(
-          `/api/tms/fleet-task-instant/${encodeURIComponent(taskId)}/temperatures`,
-          { headers: { Accept: "application/json" }, signal: controller.signal },
-        );
-        const payload = (await response.json().catch(() => ({}))) as {
-          data?: Array<{
-            sequence?: unknown;
-            temperature?: unknown;
-            temperatureNum?: unknown;
-            recordedAt?: unknown;
-          }>;
-        };
-        if (!response.ok || disposed) return;
-        const map: PointTemperatureMap = {};
-        for (const entry of payload.data ?? []) {
-          if (typeof entry?.sequence !== "number" || typeof entry?.temperature !== "number") {
-            continue;
-          }
-          if (!Number.isFinite(entry.temperature)) continue;
-          map[`seq:${entry.sequence}`] = {
-            temperature: entry.temperature,
-            temperatureNum:
-              typeof entry.temperatureNum === "number" ? entry.temperatureNum : null,
-            recordedAt: typeof entry.recordedAt === "string" ? entry.recordedAt : "",
-          };
-        }
-        setPointTemperatures(map);
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-      }
-    }
-    void loadTemperatures();
-    return () => {
-      disposed = true;
-      controller.abort();
-    };
-  }, [item?.id]);
 
   // Polling posisi kendaraan realtime tiap 30 detik selama task dipilih.
   useEffect(() => {
@@ -919,7 +832,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
             {loading && !detail ? (
               <div className="h-32 animate-pulse rounded-xl bg-muted" />
             ) : (
-              <RoutePointList points={effectiveTimeline} temperatures={pointTemperatures} />
+              <RoutePointList points={effectiveTimeline} />
             )}
 
             {error && (
