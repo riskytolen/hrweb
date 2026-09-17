@@ -423,6 +423,36 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     };
   }, [item]);
 
+  const shown = detail ?? item;
+
+  // Timeline efektif: fallback dari Index + selaras dengan progres task
+  // (endpoint Show sering tidak mengirim timeline_route terbaru).
+  const effectiveTimeline = useMemo(() => {
+    const base = detail?.timeline ?? item?.timeline ?? [];
+    return withTaskProgress(base, shown?.currentPoint ?? null, shown?.statusRaw ?? null);
+  }, [detail, item, shown?.currentPoint, shown?.statusRaw]);
+
+  /** True bila semua titik rute sudah dikunjungi. */
+  const allRoutePointsVisited =
+    effectiveTimeline.length > 0 && effectiveTimeline.every((point) => isPointVisited(point));
+
+  /**
+   * Waktu selesai kunjungan terakhir (ms). Dipakai sebagai batas akhir
+   * riwayat trip agar garis berhenti setelah semua titik dikunjungi.
+   */
+  const routeCompletedAtMs = useMemo(() => {
+    let latest: number | null = null;
+    for (const point of effectiveTimeline) {
+      for (const at of [point.arrivalActual, point.departureActual]) {
+        if (!at) continue;
+        const parsed = Date.parse(at);
+        if (Number.isNaN(parsed)) continue;
+        if (latest === null || parsed > latest) latest = parsed;
+      }
+    }
+    return latest;
+  }, [effectiveTimeline]);
+
   // Muat suhu per titik dari webhook untuk task yang dipilih.
   // Kegagalan dim diamkan — daftar rute tetap tampil tanpa suhu.
   useEffect(() => {
@@ -501,13 +531,17 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
             latitude: normalized.latitude,
             longitude: normalized.longitude,
           };
-          setLiveTrail((prev) => {
-            const last = prev[prev.length - 1];
-            if (last && last.latitude === point.latitude && last.longitude === point.longitude) {
-              return prev;
-            }
-            return [...prev, point];
-          });
+          // Setelah semua titik selesai dikunjungi, garis jejak tidak
+          // ditambah lagi; marker kendaraan tetap diperbarui.
+          if (!allRoutePointsVisited) {
+            setLiveTrail((prev) => {
+              const last = prev[prev.length - 1];
+              if (last && last.latitude === point.latitude && last.longitude === point.longitude) {
+                return prev;
+              }
+              return [...prev, point];
+            });
+          }
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -526,7 +560,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [item]);
+  }, [item, allRoutePointsVisited]);
 
   // Jejak historis: sumber utama Detail Trip History (/trips/:id/detail).
   // Coba license plate dulu (paling andal lintas endpoint), lalu vehicleId,
@@ -543,7 +577,15 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     const startMs = Date.parse(startRaw);
     if (Number.isNaN(startMs)) return;
     const endMsRaw = item.actualArrivalOn ? Date.parse(item.actualArrivalOn) : NaN;
-    const endMs = Number.isNaN(endMsRaw) ? Date.now() : endMsRaw;
+    // Bila semua titik sudah dikunjungi, hentikan riwayat trip pada waktu
+    // kunjungan terakhir agar garis tidak lanjut setelah toko terakhir.
+    // Tanpa waktu cutoff yang akurat, pakai waktu sekarang seperti semula.
+    const endMs =
+      !Number.isNaN(endMsRaw)
+        ? endMsRaw
+        : allRoutePointsVisited && routeCompletedAtMs !== null
+          ? routeCompletedAtMs
+          : Date.now();
 
     // Window dari sempit ke lebar (WIB-aware) agar trip yang tercatat di luar
     // jam task tetap tertangkap.
@@ -658,16 +700,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       disposed = true;
       controller.abort();
     };
-  }, [item]);
-
-  const shown = detail ?? item;
-
-  // Timeline efektif: fallback dari Index + selaras dengan progres task
-  // (endpoint Show sering tidak mengirim timeline_route terbaru).
-  const effectiveTimeline = useMemo(() => {
-    const base = detail?.timeline ?? item?.timeline ?? [];
-    return withTaskProgress(base, shown?.currentPoint ?? null, shown?.statusRaw ?? null);
-  }, [detail, item, shown?.currentPoint, shown?.statusRaw]);
+  }, [item, allRoutePointsVisited, routeCompletedAtMs]);
 
   // Progress: pakai current/total bila ada, fallback ke timeline visited.
   let doneCount = 0;
