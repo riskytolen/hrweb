@@ -84,12 +84,15 @@ export async function GET(
   }
 
   const speedLimitRaw = request.nextUrl.searchParams.get("speedLimit");
-  const speedLimitParsed = speedLimitRaw === null ? 120 : Number(speedLimitRaw);
+  const speedLimitParsed = speedLimitRaw === null ? null : Number(speedLimitRaw);
   const speedLimit =
-    Number.isFinite(speedLimitParsed) && speedLimitParsed > 0 ? Math.trunc(speedLimitParsed) : 120;
+    speedLimitParsed !== null && Number.isFinite(speedLimitParsed) && speedLimitParsed > 0
+      ? Math.trunc(speedLimitParsed)
+      : undefined;
 
   try {
-    const raw = await fetchMcEasyTripDetail(id, { startDate, endDate, speedLimit });
+    const query = speedLimit === undefined ? { startDate, endDate } : { startDate, endDate, speedLimit };
+    const raw = await fetchMcEasyTripDetail(id, query);
     const trail = normalizeTripDetailTrail(raw);
     return NextResponse.json(
       { data: { trail }, meta: { total: trail.length, fetchedAt: new Date().toISOString() } },

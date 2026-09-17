@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
-import { fetchFleetTaskInstantList, McEasyError } from "@/lib/mceasy-server";
+import {
+  fetchFleetTaskInstantList,
+  McEasyError,
+  normalizeFleetTaskInstantStatus,
+} from "@/lib/mceasy-server";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +71,7 @@ export async function GET(request: Request) {
       page: Number.isFinite(page) ? page : 1,
       search: url.searchParams.get("search") ?? undefined,
       sort: url.searchParams.get("sort") ?? undefined,
+      status: normalizeFleetTaskInstantStatus(url.searchParams.get("status")) ?? undefined,
     });
     return NextResponse.json(
       {

@@ -14,6 +14,10 @@ vi.mock("@/lib/mceasy-server", () => ({
     }
   },
   fetchFleetTaskInstantList: vi.fn(),
+  normalizeFleetTaskInstantStatus: (value: unknown) => {
+    const upper = typeof value === "string" ? value.trim().toUpperCase() : "";
+    return ["DRAFT", "SCHEDULED", "STARTED", "ENDED", "CANCELED"].includes(upper) ? upper : null;
+  },
 }));
 
 import { createClient } from "@/lib/supabase-server";
@@ -84,6 +88,7 @@ describe("GET /api/tms/fleet-task-instant", () => {
       page: 1,
       search: "FO-92",
       sort: undefined,
+      status: undefined,
     });
     const payload = (await response.json()) as {
       data: unknown[];
@@ -92,5 +97,46 @@ describe("GET /api/tms/fleet-task-instant", () => {
     expect(payload.data).toHaveLength(1);
     expect(payload.meta.total).toBe(7714);
     expect(payload.meta.counts.ended).toBe(7673);
+  });
+
+  it("forwards a valid status filter to the list fetcher", async () => {
+    mockProfile(["tms"]);
+    fetchListMock.mockResolvedValue({
+      items: [{ id: "uuid-2", number: "FO-9263" }],
+      total: 7673,
+      page: 1,
+      counts: { draft: 16, scheduled: 11, started: 0, ended: 7673, canceled: 14 },
+    });
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/tms/fleet-task-instant?limit=10&page=1&status=ended"),
+    );
+    expect(response.status).toBe(200);
+    expect(fetchListMock).toHaveBeenCalledWith({
+      limit: 10,
+      page: 1,
+      search: undefined,
+      sort: undefined,
+      status: "ENDED",
+    });
+    const payload = (await response.json()) as {
+      data: unknown[];
+      meta: { total: number };
+    };
+    expect(payload.data).toHaveLength(1);
+    expect(payload.meta.total).toBe(7673);
+  });
+
+  it("drops an unknown status filter", async () => {
+    mockProfile(["tms"]);
+    fetchListMock.mockResolvedValue({ items: [], total: 0, page: 1, counts: null });
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/tms/fleet-task-instant?status=ngawur"),
+    );
+    expect(response.status).toBe(200);
+    expect(fetchListMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: undefined }),
+    );
   });
 });

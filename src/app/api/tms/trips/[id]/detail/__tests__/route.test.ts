@@ -93,7 +93,6 @@ describe("GET /api/tms/trips/[id]/detail", () => {
     expect(fetchTripDetailMock).toHaveBeenCalledWith("11418", {
       startDate: "2026-09-09T00:00:00.000Z",
       endDate: "2026-09-09T12:00:00.000Z",
-      speedLimit: 120,
     });
 
     const payload = (await response.json()) as {

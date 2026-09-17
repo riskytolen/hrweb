@@ -6,6 +6,7 @@ import {
   Loader2,
   MapPin,
   Route as RouteIcon,
+  Thermometer,
   TriangleAlert,
   Truck,
   User,
@@ -28,6 +29,7 @@ import {
   normalizeMcEasyVehicleStatus,
   type TmsVehicleStatus,
 } from "@/lib/tms-status";
+import { pointTemperatureLabel } from "@/lib/tms-temperature";
 import TaskRouteMap from "./TaskRouteMap";
 import TaskStatusBadge from "./TaskStatusBadge";
 
@@ -122,12 +124,24 @@ function isVisited(raw: string | null): boolean {
   return VISITED_STATUSES.has(raw.toUpperCase());
 }
 
-/** Nama status yang tidak ditampilkan di daftar rute. */
-const HIDDEN_VISIT_STATUSES = new Set(["TERLAMBAT", "LATE"]);
+/**
+ * Titik dianggap sudah dikunjungi bila status menandai visited ATAU sudah ada
+ * waktu tiba/berangkat aktual. Ini penting karena sebagian respons hanya
+ * mengisi `arrivalActual` tanpa memperbarui `visitStatusRaw`.
+ */
+function isPointVisited(point: FleetTaskTimelinePoint): boolean {
+  return isVisited(point.visitStatusRaw) || !!point.arrivalActual || !!point.departureActual;
+}
+
+/** Nama status yang tidak ditampilkan di daftar rute (mis. "Terlambat", "Potensi Terlambat"). */
+function isHiddenVisitStatus(raw: string): boolean {
+  const upper = raw.toUpperCase();
+  return upper.includes("TERLAMBAT") || upper.includes("LATE");
+}
 
 function visitStatusLabel(point: FleetTaskTimelinePoint, state: "done" | "current" | "pending"): string {
   const raw = point.visitStatusName?.trim();
-  if (raw && !HIDDEN_VISIT_STATUSES.has(raw.toUpperCase())) return raw;
+  if (raw && !isHiddenVisitStatus(raw)) return raw;
   if (state === "done") return "Dikunjungi";
   if (state === "pending") return "Belum dikunjungi";
   return "Sedang dikunjungi";
@@ -146,20 +160,33 @@ function withTaskProgress(
 ): FleetTaskTimelinePoint[] {
   const ended = statusRaw === "ENDED";
   const doneCount = ended ? timeline.length : Math.max(0, currentPoint ?? 0);
-  if (doneCount <= 0) return timeline;
   return timeline.map((point, index) => {
-    if (isVisited(point.visitStatusRaw)) return point;
+    if (isPointVisited(point)) return point;
     const reached = index < doneCount || (point.sequence !== null && point.sequence <= doneCount);
     return reached ? { ...point, visitStatusRaw: "VISITED" } : point;
   });
 }
 
-function pointTime(point: FleetTaskTimelinePoint): { at: string | null; label: string } {
-  if (point.arrivalActual) return { at: point.arrivalActual, label: "Tiba" };
-  if (point.departureActual) return { at: point.departureActual, label: "Berangkat" };
-  if (point.arrivalTarget) return { at: point.arrivalTarget, label: "Target tiba" };
-  if (point.departureTarget) return { at: point.departureTarget, label: "Target berangkat" };
-  return { at: null, label: "" };
+/** Jam lokal (mis. "13:42") dari timestamp ISO. */
+function formatClock(iso: string): string {
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return "-";
+  return new Intl.DateTimeFormat("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(parsed));
+}
+
+function pointTime(point: FleetTaskTimelinePoint): {
+  at: string | null;
+  label: string;
+  kind: "actual" | "target";
+} {
+  if (point.arrivalActual) return { at: point.arrivalActual, label: "Tiba", kind: "actual" };
+  if (point.departureActual) return { at: point.departureActual, label: "Berangkat", kind: "actual" };
+  if (point.arrivalTarget) return { at: point.arrivalTarget, label: "Target tiba", kind: "target" };
+  if (point.departureTarget) return { at: point.departureTarget, label: "Target berangkat", kind: "target" };
+  return { at: null, label: "", kind: "target" };
 }
 
 function isLatLng(value: unknown): value is LatLng {
@@ -176,11 +203,31 @@ function extractTripTrail(payloadData: unknown): LatLng[] {
   return normalizeTripDetailTrail(payloadData);
 }
 
+interface PointTemperatureInfo {
+  temperature: number;
+  temperatureNum: number | null;
+  recordedAt: string;
+}
+
+/** Suhu per titik rute, dikunci berdasarkan `plan_sequence`. */
+type PointTemperatureMap = Record<string, PointTemperatureInfo>;
+
+function temperatureKey(sequence: number | null): string | null {
+  return sequence === null ? null : `seq:${sequence}`;
+}
+
 /**
  * Daftar rute perjalanan (titik kunjungan) dari `timeline_route`.
  * Titik pertama yang belum dikunjungi ditandai sebagai posisi saat ini.
+ * Suhu hanya ditampilkan pada titik yang sudah selesai dikunjungi.
  */
-function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
+function RoutePointList({
+  points,
+  temperatures,
+}: {
+  points: FleetTaskTimelinePoint[];
+  temperatures: PointTemperatureMap;
+}) {
   if (points.length === 0) {
     return (
       <p className="py-4 text-center text-xs text-muted-foreground">
@@ -189,7 +236,7 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
     );
   }
 
-  const firstPending = points.findIndex((p) => !isVisited(p.visitStatusRaw));
+  const firstPending = points.findIndex((p) => !isPointVisited(p));
 
   return (
     <div>
@@ -198,11 +245,13 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
       </p>
       <ol>
         {points.map((point, index) => {
-          const visited = isVisited(point.visitStatusRaw);
+          const visited = isPointVisited(point);
           const current = !visited && index === firstPending;
           const time = pointTime(point);
           const state = visited ? "done" : current ? "current" : "pending";
-          const nextVisited = index + 1 < points.length && isVisited(points[index + 1].visitStatusRaw);
+          const nextVisited = index + 1 < points.length && isPointVisited(points[index + 1]);
+          const tempKey = temperatureKey(point.sequence);
+          const temp = tempKey ? temperatures[tempKey] : undefined;
           return (
             <li key={`${point.sequence ?? index}-${point.name ?? index}`} className="relative flex gap-3 pb-4 last:pb-0">
               <span className="flex flex-col items-center">
@@ -260,7 +309,21 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
                   </span>
                   {time.at && (
                     <span title={formatFullTimestamp(time.at)}>
-                      {time.label} {formatRelativeTime(time.at)}
+                      {time.label} {formatClock(time.at)}
+                      {time.kind === "actual" && ` · ${formatRelativeTime(time.at)}`}
+                    </span>
+                  )}
+                  {visited && temp && (
+                    <span
+                      className="inline-flex items-center gap-1 font-semibold text-foreground"
+                      title={
+                        temp.recordedAt
+                          ? `Suhu tercatat ${formatFullTimestamp(temp.recordedAt)}`
+                          : undefined
+                      }
+                    >
+                      <Thermometer className="h-3 w-3" />
+                      {pointTemperatureLabel(temp.temperatureNum, temp.temperature)}
                     </span>
                   )}
                 </p>
@@ -298,6 +361,8 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     attempts: [],
     selected: null,
   });
+  // Suhu per titik rute dari webhook, dikunci berdasarkan `plan_sequence`.
+  const [pointTemperatures, setPointTemperatures] = useState<PointTemperatureMap>({});
 
   useEffect(() => {
     // Reset tampilan saat task yang dipilih berganti, lalu muat detail baru.
@@ -309,6 +374,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     setHistoryTrail([]);
     setLiveTrail([]);
     setTripTrailDebug({ attempts: [], selected: null });
+    setPointTemperatures({});
     if (!item) return;
     const taskId = item.id;
     const listTimeline = item.timeline;
@@ -356,6 +422,53 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       window.clearInterval(timer);
     };
   }, [item]);
+
+  // Muat suhu per titik dari webhook untuk task yang dipilih.
+  // Kegagalan dim diamkan — daftar rute tetap tampil tanpa suhu.
+  useEffect(() => {
+    if (!item?.id) return;
+    const taskId: string = item.id;
+    let disposed = false;
+    const controller = new AbortController();
+    async function loadTemperatures() {
+      try {
+        const response = await fetch(
+          `/api/tms/fleet-task-instant/${encodeURIComponent(taskId)}/temperatures`,
+          { headers: { Accept: "application/json" }, signal: controller.signal },
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          data?: Array<{
+            sequence?: unknown;
+            temperature?: unknown;
+            temperatureNum?: unknown;
+            recordedAt?: unknown;
+          }>;
+        };
+        if (!response.ok || disposed) return;
+        const map: PointTemperatureMap = {};
+        for (const entry of payload.data ?? []) {
+          if (typeof entry?.sequence !== "number" || typeof entry?.temperature !== "number") {
+            continue;
+          }
+          if (!Number.isFinite(entry.temperature)) continue;
+          map[`seq:${entry.sequence}`] = {
+            temperature: entry.temperature,
+            temperatureNum:
+              typeof entry.temperatureNum === "number" ? entry.temperatureNum : null,
+            recordedAt: typeof entry.recordedAt === "string" ? entry.recordedAt : "",
+          };
+        }
+        setPointTemperatures(map);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      }
+    }
+    void loadTemperatures();
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, [item?.id]);
 
   // Polling posisi kendaraan realtime tiap 30 detik selama task dipilih.
   useEffect(() => {
@@ -473,12 +586,16 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       }
     }
 
-    async function tryFetchTrail(window: TripTrailWindow, identifier: string): Promise<LatLng[]> {
+    async function tryFetchTrail(
+      window: TripTrailWindow,
+      identifier: string,
+      speedLimit?: number,
+    ): Promise<LatLng[]> {
       const startDate = new Date(window.start).toISOString();
       const endDate = new Date(window.end).toISOString();
-      const url =
-        `/api/tms/trips/${encodeURIComponent(identifier)}/detail` +
-        `?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&speedLimit=120`;
+      const params = new URLSearchParams({ startDate, endDate });
+      if (speedLimit !== undefined) params.set("speedLimit", String(speedLimit));
+      const url = `/api/tms/trips/${encodeURIComponent(identifier)}/detail?${params.toString()}`;
       const response = await fetch(url, {
         headers: { Accept: "application/json" },
         signal: controller.signal,
@@ -490,13 +607,28 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       setTripTrailDebug((prev) => ({
         attempts: [
           ...prev.attempts,
-          { source: "trips", identifier, startDate, endDate, status: response.status, count, label: window.label },
+          {
+            source: "trips",
+            identifier,
+            startDate,
+            endDate,
+            status: response.status,
+            count,
+            label: `${window.label}, ${speedLimit === undefined ? "no-speedLimit" : `speedLimit=${speedLimit}`}`,
+          },
         ],
         selected: trail.length > 1 ? `trips:${identifier}` : prev.selected,
       }));
       if (!response.ok) return [];
       if (process.env.NODE_ENV !== "production") {
-        console.debug("[tms-trip-trail]", { identifier, label: window.label, startDate, endDate, count: trail.length });
+        console.debug("[tms-trip-trail]", {
+          identifier,
+          label: window.label,
+          speedLimit,
+          startDate,
+          endDate,
+          count: trail.length,
+        });
       }
       return trail;
     }
@@ -505,11 +637,13 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       try {
         for (const identifier of identifiers) {
           for (const window of windows) {
-            const trail = await tryFetchTrail(window, identifier);
-            if (disposed) return;
-            if (trail.length > 1) {
-              setHistoryTrail(trail);
-              return;
+            for (const speedLimit of [undefined, 120] as const) {
+              const trail = await tryFetchTrail(window, identifier, speedLimit);
+              if (disposed) return;
+              if (trail.length > 1) {
+                setHistoryTrail(trail);
+                return;
+              }
             }
           }
         }
@@ -543,7 +677,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     totalCount = shown.totalPoint ?? 0;
   } else if (effectiveTimeline.length > 0) {
     totalCount = effectiveTimeline.length;
-    doneCount = effectiveTimeline.filter((p) => isVisited(p.visitStatusRaw)).length;
+    doneCount = effectiveTimeline.filter((p) => isPointVisited(p)).length;
   }
   const percent = totalCount > 0 ? Math.min(100, Math.round((doneCount / totalCount) * 100)) : 0;
 
@@ -652,7 +786,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
               )}
               {hasTrail && (
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="inline-block h-1 w-5 rounded bg-[#f97316]" />
+                  <span className="inline-block h-1 w-5 rounded bg-[#2563eb]" />
                   Jejak Mobil
                 </span>
               )}
@@ -752,7 +886,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
             {loading && !detail ? (
               <div className="h-32 animate-pulse rounded-xl bg-muted" />
             ) : (
-              <RoutePointList points={effectiveTimeline} />
+              <RoutePointList points={effectiveTimeline} temperatures={pointTemperatures} />
             )}
 
             {error && (

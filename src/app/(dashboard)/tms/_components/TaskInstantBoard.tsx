@@ -138,7 +138,7 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const fetchPage = useCallback(async (targetPage: number, term: string) => {
+  const fetchPage = useCallback(async (targetPage: number, term: string, status: StatusFilter) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -150,6 +150,7 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
       params.set("page", String(targetPage));
       params.set("sort", "created_on desc");
       if (term.trim()) params.set("search", term.trim());
+      if (status !== "ALL") params.set("status", status);
       const response = await fetch(`/api/tms/fleet-task-instant?${params.toString()}`, {
         headers: { Accept: "application/json" },
         signal: controller.signal,
@@ -176,13 +177,13 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
     }
   }, []);
 
-  // Muat ulang setiap halaman/search berubah.
+  // Muat ulang setiap halaman/search/filter status berubah.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchPage(page, search);
+    void fetchPage(page, search, statusFilter);
     return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search]);
+  }, [page, search, statusFilter]);
 
   const handleSearchSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -190,8 +191,14 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
     setSearch(searchInput);
   };
 
+  const handleStatusFilter = (filter: StatusFilter) => {
+    if (filter === statusFilter) return;
+    setStatusFilter(filter);
+    setPage(1);
+  };
+
   const handleRefresh = () => {
-    if (!loading) void fetchPage(page, search);
+    if (!loading) void fetchPage(page, search, statusFilter);
   };
 
   // Kirim snapshot terbaru ke panel detail saat daftar diperbarui, agar
@@ -202,8 +209,9 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
     if (updated) onSelect(updated);
   }, [items, selectedId, onSelect]);
 
-  const visibleItems =
-    statusFilter === "ALL" ? items : items.filter((item) => item.statusRaw === statusFilter);
+  // Filter status sudah diterapkan di server (filtered pagination),
+  // jadi tampilkan semua item dari halaman aktif apa adanya.
+  const visibleItems = items;
 
   const totalPages = total !== null ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : 1;
   const rangeStart = total !== null && total > 0 ? (page - 1) * PAGE_SIZE + 1 : 0;
@@ -253,7 +261,7 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
               <button
                 key={filter.key}
                 type="button"
-                onClick={() => setStatusFilter(filter.key)}
+                onClick={() => handleStatusFilter(filter.key)}
                 aria-pressed={active}
                 className={cn(
                   "rounded-full px-3 py-1.5 text-xs font-bold tabular-nums transition-colors",
@@ -272,11 +280,6 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
             );
           })}
         </div>
-        {statusFilter !== "ALL" && (
-          <p className="text-[11px] text-muted-foreground">
-            Filter status berlaku untuk task yang sudah dimuat di halaman ini.
-          </p>
-        )}
       </div>
 
       {/* KPI cards */}
@@ -314,9 +317,7 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
           </div>
         ) : visibleItems.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-            {items.length === 0
-              ? "Tidak ada task ditemukan. Ubah kata kunci pencarian."
-              : "Tidak ada task berstatus ini di halaman ini. Coba halaman lain atau ubah filter."}
+            Tidak ada task ditemukan. Ubah filter status atau kata kunci pencarian.
           </p>
         ) : (
           <>

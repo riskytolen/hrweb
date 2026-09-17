@@ -144,6 +144,69 @@ describe("fetchFleetTaskInstantList", () => {
     await expect(fetchFleetTaskInstantList()).rejects.toThrow("MCEASY_API_TOKEN");
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("scans upstream pages until the requested filtered page is filled", async () => {
+    const ended = (id: string) => ({ id, status: { raw_type: "ENDED", name: "Selesai" } });
+    const started = (id: string) => ({ id, status: { raw_type: "STARTED", name: "Berjalan" } });
+    // Halaman upstream penuh (100 item) kecuali halaman terakhir,
+    // meniru paginasi upstream yang sebenarnya.
+    const page1 = Array.from({ length: 100 }, (_, i) => started(`s-${i + 1}`));
+    const page2 = Array.from({ length: 12 }, (_, i) => ended(`e-${i + 1}`));
+    const pages: Record<string, unknown[]> = { "1": page1, "2": page2 };
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async (url) => {
+      const page = new URL(url).searchParams.get("page") ?? "1";
+      return jsonResponse({
+        metadata: {
+          total_count: 112,
+          page: Number(page),
+          total_count_draft: 0,
+          total_count_scheduled: 0,
+          total_count_started: 100,
+          total_count_ended: 12,
+          total_count_canceled: 0,
+        },
+        data: { paginated_result: pages[page] ?? [] },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchFleetTaskInstantList } = await loadModule();
+    const result = await fetchFleetTaskInstantList({ limit: 10, page: 1, status: "ENDED" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.items).toHaveLength(10);
+    expect(result.items[0]).toMatchObject({ id: "e-1" });
+    expect(result.items.every((item) => (item as { id: string }).id.startsWith("e-"))).toBe(true);
+    expect(result.total).toBe(12);
+    expect(result.page).toBe(1);
+    expect(result.counts).toMatchObject({ ended: 12, started: 100 });
+  });
+
+  it("slices the correct window for later filtered pages", async () => {
+    const ended = (id: string) => ({ id, status: { raw_type: "ENDED" } });
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
+      jsonResponse({
+        metadata: {
+          total_count: 3,
+          page: 1,
+          total_count_draft: 0,
+          total_count_scheduled: 0,
+          total_count_started: 0,
+          total_count_ended: 3,
+          total_count_canceled: 0,
+        },
+        data: { paginated_result: [ended("e-1"), ended("e-2"), ended("e-3")] },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchFleetTaskInstantList } = await loadModule();
+    const result = await fetchFleetTaskInstantList({ limit: 2, page: 2, status: "ENDED" });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ id: "e-3" });
+    expect(result.total).toBe(3);
+  });
 });
 
 describe("fetchFleetTaskInstantDetail", () => {
@@ -195,10 +258,27 @@ describe("fetchMcEasyTripDetail", () => {
     const parsed = new URL(url);
     expect(parsed.searchParams.get("startDate")).toBe("2026-09-09T00:00:00.000Z");
     expect(parsed.searchParams.get("endDate")).toBe("2026-09-09T12:00:00.000Z");
-    expect(parsed.searchParams.get("speedLimit")).toBe("120");
+    expect(parsed.searchParams.has("speedLimit")).toBe(false);
     expect((init?.headers as Record<string, string>).Authorization).toBe(
       "Bearer test-token-tidak-asli",
     );
+  });
+
+  it("passes speedLimit only when explicitly provided", async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
+      jsonResponse({ message: "ok", data: [] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchMcEasyTripDetail } = await loadModule();
+    await fetchMcEasyTripDetail("11418", {
+      startDate: "2026-09-09T00:00:00.000Z",
+      endDate: "2026-09-09T12:00:00.000Z",
+      speedLimit: 120,
+    });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(new URL(url).searchParams.get("speedLimit")).toBe("120");
   });
 
   it("rejects a blank id or missing range without calling fetch", async () => {

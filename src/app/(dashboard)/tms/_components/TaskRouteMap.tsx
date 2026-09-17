@@ -29,6 +29,14 @@ function isVisitedStatus(raw: string | null): boolean {
   return VISITED_STATUSES.has(raw.toUpperCase());
 }
 
+/**
+ * Titik sudah dikunjungi bila status menandai visited atau sudah ada waktu
+ * tiba/berangkat aktual (menjaga konsistensi dengan daftar rute).
+ */
+function isTimelinePointVisited(point: FleetTaskTimelinePoint): boolean {
+  return isVisitedStatus(point.visitStatusRaw) || !!point.arrivalActual || !!point.departureActual;
+}
+
 interface TaskRouteMapProps {
   planned: LatLng[][];
   actual: LatLng[][];
@@ -104,22 +112,22 @@ export default function TaskRouteMap({
     drawRoutes(current.planned, "#0284c7", "8 6");
     drawRoutes(current.actual, "#16a34a");
 
-    // Jejak lintasan mobil: casing putih tipis + garis orange tebal agar
+    // Jejak lintasan mobil: casing putih tipis + garis biru tebal agar
     // menonjol di atas basemap dan garis rute lain.
     if (current.trail.length > 1) {
       const latLngs = current.trail.map((p) => [p.latitude, p.longitude] as [number, number]);
       for (const latLng of latLngs) bounds.push(latLng);
       L.polyline(latLngs, { color: "#ffffff", weight: 8, opacity: 0.85 }).addTo(layer);
-      L.polyline(latLngs, { color: "#f97316", weight: 5, opacity: 1 }).addTo(layer);
+      L.polyline(latLngs, { color: "#2563eb", weight: 5, opacity: 1 }).addTo(layer);
     }
 
     // Titik pertama yang belum dikunjungi dianggap posisi saat ini.
-    const firstPending = current.timeline.findIndex((p) => !isVisitedStatus(p.visitStatusRaw));
+    const firstPending = current.timeline.findIndex((p) => !isTimelinePointVisited(p));
 
     current.timeline.forEach((point, index) => {
       if (point.latitude === null || point.longitude === null) return;
       bounds.push([point.latitude, point.longitude]);
-      const visited = isVisitedStatus(point.visitStatusRaw);
+      const visited = isTimelinePointVisited(point);
       const isCurrent = !visited && index === firstPending;
       // Hijau = sudah dikunjungi, biru = posisi saat ini, abu-abu = belum.
       const color = visited ? "#16a34a" : isCurrent ? "#0284c7" : "#94a3b8";

@@ -255,7 +255,7 @@ export interface TripDetailQuery {
   startDate: string;
   /** Akhir rentang dalam ISO UTC. */
   endDate: string;
-  /** Batas kecepatan untuk pemecahan trip; default 120. */
+  /** Batas kecepatan untuk pemecahan trip; dikirim hanya bila diisi. */
   speedLimit?: number;
 }
 
@@ -285,7 +285,9 @@ export async function fetchMcEasyTripDetail(
   const params = new URLSearchParams();
   params.set("startDate", startDate);
   params.set("endDate", endDate);
-  params.set("speedLimit", String(query.speedLimit ?? 120));
+  if (query.speedLimit !== undefined) {
+    params.set("speedLimit", String(query.speedLimit));
+  }
 
   const response = await fetchMcEasy(
     `/trips/${encodeURIComponent(identifier)}/detail`,
@@ -562,11 +564,31 @@ async function readFleetPlanningJson(
   }
 }
 
+export type FleetTaskInstantStatus = "DRAFT" | "SCHEDULED" | "STARTED" | "ENDED" | "CANCELED";
+
+const FLEET_TASK_STATUSES: readonly FleetTaskInstantStatus[] = [
+  "DRAFT",
+  "SCHEDULED",
+  "STARTED",
+  "ENDED",
+  "CANCELED",
+];
+
+/** Normalisasi param status; nilai tak dikenal (termasuk "ALL") berarti tanpa filter. */
+export function normalizeFleetTaskInstantStatus(value: unknown): FleetTaskInstantStatus | null {
+  if (typeof value !== "string") return null;
+  const upper = value.trim().toUpperCase();
+  return (FLEET_TASK_STATUSES as readonly string[]).includes(upper)
+    ? (upper as FleetTaskInstantStatus)
+    : null;
+}
+
 export interface FleetTaskInstantListQuery {
   limit?: number;
   page?: number;
   search?: string;
   sort?: string;
+  status?: FleetTaskInstantStatus | null;
 }
 
 export interface FleetTaskInstantListResult {
@@ -586,19 +608,19 @@ function toNullableCount(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-/**
- * Mengambil daftar Fleet Task Instant (Index). Endpoint ini mewajibkan
- * autentikasi vendor sehingga request membawa Bearer token server-side.
- *
- * Catatan: parameter `filter` status saat diverifikasi tidak berpengaruh
- * di sisi upstream, jadi filter status dilakukan di UI/API kita.
- */
-export async function fetchFleetTaskInstantList(
-  query: FleetTaskInstantListQuery = {},
+interface FleetTaskInstantUpstreamQuery {
+  limit: number;
+  page?: number;
+  search?: string;
+  sort?: string;
+}
+
+async function fetchFleetTaskInstantUpstreamPage(
+  query: FleetTaskInstantUpstreamQuery,
   options: McEasyFetchOptions = {},
 ): Promise<FleetTaskInstantListResult> {
   const params = new URLSearchParams();
-  const limit = Math.min(Math.max(Math.trunc(query.limit ?? 20), 1), 100);
+  const limit = Math.min(Math.max(Math.trunc(query.limit), 1), 100);
   params.set("limit", String(limit));
   if (query.page !== undefined && Number.isFinite(query.page) && query.page >= 1) {
     params.set("page", String(Math.trunc(query.page)));
@@ -644,6 +666,113 @@ export async function fetchFleetTaskInstantList(
       canceled: toNullableCount(metadata.total_count_canceled),
     },
   };
+}
+
+/** Ambil `status.raw_type` mentah dari satu row list upstream. */
+function extractListStatusRaw(item: unknown): string | null {
+  if (!item || typeof item !== "object") return null;
+  const statusRaw = (item as Record<string, unknown>).status;
+  if (!statusRaw || typeof statusRaw !== "object") return null;
+  const status = statusRaw as Record<string, unknown>;
+  for (const key of ["raw_type", "rawType", "code", "key"]) {
+    const value = status[key];
+    if (typeof value === "string" && value.trim()) return value.trim().toUpperCase();
+  }
+  return null;
+}
+
+function countForStatus(
+  counts: FleetTaskInstantListResult["counts"],
+  status: FleetTaskInstantStatus,
+): number | null {
+  if (!counts) return null;
+  switch (status) {
+    case "DRAFT":
+      return counts.draft;
+    case "SCHEDULED":
+      return counts.scheduled;
+    case "STARTED":
+      return counts.started;
+    case "ENDED":
+      return counts.ended;
+    case "CANCELED":
+      return counts.canceled;
+  }
+}
+
+/**
+ * Scan upstream per batch besar sampai terkumpul cukup item berstatus
+ * yang diminta untuk halaman target. Dibatasi agar tidak berlarut-larut
+ * bila status yang dicari langka.
+ */
+const STATUS_SCAN_UPSTREAM_LIMIT = 100;
+const STATUS_SCAN_MAX_PAGES = 30;
+
+async function fetchFleetTaskInstantListFiltered(
+  args: { pageSize: number; page: number; search?: string; sort?: string; status: FleetTaskInstantStatus },
+  options: McEasyFetchOptions = {},
+): Promise<FleetTaskInstantListResult> {
+  const needed = args.page * args.pageSize;
+  const matches: unknown[] = [];
+  let counts: FleetTaskInstantListResult["counts"] = null;
+  let upstreamPage = 0;
+  let exhausted = false;
+
+  while (matches.length < needed && upstreamPage < STATUS_SCAN_MAX_PAGES && !exhausted) {
+    upstreamPage += 1;
+    const result = await fetchFleetTaskInstantUpstreamPage(
+      { limit: STATUS_SCAN_UPSTREAM_LIMIT, page: upstreamPage, search: args.search, sort: args.sort },
+      options,
+    );
+    if (counts === null) counts = result.counts;
+    if (result.items.length === 0) break;
+    for (const item of result.items) {
+      if (extractListStatusRaw(item) === args.status) {
+        matches.push(item);
+        if (matches.length >= needed) break;
+      }
+    }
+    if (result.items.length < STATUS_SCAN_UPSTREAM_LIMIT) exhausted = true;
+  }
+
+  const start = (args.page - 1) * args.pageSize;
+  return {
+    items: matches.slice(start, start + args.pageSize),
+    total: countForStatus(counts, args.status) ?? (exhausted ? matches.length : null),
+    page: args.page,
+    counts,
+  };
+}
+
+/**
+ * Mengambil daftar Fleet Task Instant (Index). Endpoint ini mewajibkan
+ * autentikasi vendor sehingga request membawa Bearer token server-side.
+ *
+ * Catatan: parameter `filter` status saat diverifikasi tidak berpengaruh
+ * di sisi upstream, sehingga untuk `status` kita lakukan filtered
+ * pagination sendiri: scan halaman upstream sampai halaman yang diminta
+ * terisi item berstatus tersebut.
+ */
+export async function fetchFleetTaskInstantList(
+  query: FleetTaskInstantListQuery = {},
+  options: McEasyFetchOptions = {},
+): Promise<FleetTaskInstantListResult> {
+  const status = normalizeFleetTaskInstantStatus(query.status ?? null);
+  if (status) {
+    const pageSize = Math.min(Math.max(Math.trunc(query.limit ?? 20), 1), 100);
+    const page =
+      query.page !== undefined && Number.isFinite(query.page) && query.page >= 1
+        ? Math.trunc(query.page)
+        : 1;
+    return fetchFleetTaskInstantListFiltered(
+      { pageSize, page, search: query.search, sort: query.sort, status },
+      options,
+    );
+  }
+  return fetchFleetTaskInstantUpstreamPage(
+    { limit: query.limit ?? 20, page: query.page, search: query.search, sort: query.sort },
+    options,
+  );
 }
 
 /**
