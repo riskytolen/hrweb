@@ -28,10 +28,22 @@ import {
   normalizeMcEasyVehicleStatus,
   type TmsVehicleStatus,
 } from "@/lib/tms-status";
+import {
+  formatCapturedPointTemperature,
+  indexPointTemperaturesBySequence,
+  normalizePointTemperatureList,
+  resolveRoutePointSequence,
+  type TmsRoutePointTemperature,
+} from "@/lib/tms-point-temperature";
 import TaskRouteMap from "./TaskRouteMap";
 import TaskStatusBadge from "./TaskStatusBadge";
 
 interface TaskDetailApiResponse {
+  data?: unknown;
+  error?: string;
+}
+
+interface PointTemperatureApiResponse {
   data?: unknown;
   error?: string;
 }
@@ -205,7 +217,13 @@ function extractTripTrail(payloadData: unknown): LatLng[] {
  * Daftar rute perjalanan (titik kunjungan) dari `timeline_route`.
  * Titik pertama yang belum dikunjungi ditandai sebagai posisi saat ini.
  */
-function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
+function RoutePointList({
+  points,
+  pointTemperatures,
+}: {
+  points: FleetTaskTimelinePoint[];
+  pointTemperatures: Map<number, TmsRoutePointTemperature>;
+}) {
   if (points.length === 0) {
     return (
       <p className="py-4 text-center text-xs text-muted-foreground">
@@ -226,6 +244,10 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
           const visited = isPointVisited(point);
           const current = !visited && index === firstPending;
           const time = pointTime(point);
+          const sequence = resolveRoutePointSequence(point, index);
+          const temperatureLabel = visited
+            ? formatCapturedPointTemperature(pointTemperatures.get(sequence))
+            : null;
           const state = visited ? "done" : current ? "current" : "pending";
           const nextVisited = index + 1 < points.length && isPointVisited(points[index + 1]);
           return (
@@ -289,6 +311,9 @@ function RoutePointList({ points }: { points: FleetTaskTimelinePoint[] }) {
                       {time.kind === "actual" && ` · ${formatRelativeTime(time.at)}`}
                     </span>
                   )}
+                  {temperatureLabel && (
+                    <span title="Suhu kendaraan saat berada pada titik ini">{temperatureLabel}</span>
+                  )}
                 </p>
               </div>
             </li>
@@ -316,6 +341,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
   const [error, setError] = useState<string | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [vehicleStatus, setVehicleStatus] = useState<TmsVehicleStatus | null>(null);
+  const [pointTemperatures, setPointTemperatures] = useState<TmsRoutePointTemperature[]>([]);
   // Jejak historis dari track endpoint (bila actual_trip tidak tersedia).
   const [historyTrail, setHistoryTrail] = useState<LatLng[]>([]);
   // Jejak yang terakumulasi dari polling realtime selama halaman dibuka.
@@ -332,6 +358,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     setError(null);
     setMapOpen(false);
     setVehicleStatus(null);
+    setPointTemperatures([]);
     setHistoryTrail([]);
     setLiveTrail([]);
     setTripTrailDebug({ attempts: [], selected: null });
@@ -383,6 +410,40 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     };
   }, [item]);
 
+  useEffect(() => {
+    const taskId = item?.id;
+    if (typeof taskId !== "string" || !taskId) return;
+    const activeTaskId: string = taskId;
+    let disposed = false;
+    const controller = new AbortController();
+
+    async function loadPointTemperatures() {
+      try {
+        const response = await fetch(
+          `/api/tms/fleet-task-instant/${encodeURIComponent(activeTaskId)}/point-temperatures`,
+          { headers: { Accept: "application/json" }, signal: controller.signal },
+        );
+        const payload = (await response.json()) as PointTemperatureApiResponse;
+        if (!response.ok || disposed) return;
+        setPointTemperatures(normalizePointTemperatureList(payload.data));
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (!disposed) setPointTemperatures([]);
+      }
+    }
+
+    void loadPointTemperatures();
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void loadPointTemperatures();
+    }, DETAIL_POLL_MS);
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [item?.id]);
+
   const shown = detail ?? item;
 
   // Timeline efektif: fallback dari Index + selaras dengan progres task
@@ -391,6 +452,11 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     const base = detail?.timeline ?? item?.timeline ?? [];
     return withTaskProgress(base, shown?.currentPoint ?? null, shown?.statusRaw ?? null);
   }, [detail, item, shown?.currentPoint, shown?.statusRaw]);
+
+  const pointTemperatureBySequence = useMemo(
+    () => indexPointTemperaturesBySequence(pointTemperatures),
+    [pointTemperatures],
+  );
 
   /** True bila semua titik rute sudah dikunjungi. */
   const allRoutePointsVisited =
@@ -832,7 +898,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
             {loading && !detail ? (
               <div className="h-32 animate-pulse rounded-xl bg-muted" />
             ) : (
-              <RoutePointList points={effectiveTimeline} />
+              <RoutePointList points={effectiveTimeline} pointTemperatures={pointTemperatureBySequence} />
             )}
 
             {error && (
