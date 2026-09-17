@@ -715,6 +715,7 @@ async function fetchFleetTaskInstantListFiltered(
   const needed = args.page * args.pageSize;
   const matches: unknown[] = [];
   let counts: FleetTaskInstantListResult["counts"] = null;
+  let statusTotal: number | null = null;
   let upstreamPage = 0;
   let exhausted = false;
 
@@ -724,14 +725,19 @@ async function fetchFleetTaskInstantListFiltered(
       { limit: STATUS_SCAN_UPSTREAM_LIMIT, page: upstreamPage, search: args.search, sort: args.sort },
       options,
     );
-    if (counts === null) counts = result.counts;
+    if (counts === null) {
+      counts = result.counts;
+      statusTotal = countForStatus(counts, args.status);
+      if (statusTotal === 0) break;
+    }
     if (result.items.length === 0) break;
     for (const item of result.items) {
       if (extractListStatusRaw(item) === args.status) {
         matches.push(item);
-        if (matches.length >= needed) break;
+        if (matches.length >= needed || (statusTotal !== null && matches.length >= statusTotal)) break;
       }
     }
+    if (statusTotal !== null && matches.length >= Math.min(needed, statusTotal)) break;
     if (result.items.length < STATUS_SCAN_UPSTREAM_LIMIT) exhausted = true;
   }
 
