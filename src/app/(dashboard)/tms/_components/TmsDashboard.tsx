@@ -315,7 +315,7 @@ export default function TmsDashboard() {
 
           {/* Detail panel floating */}
           {selectedVehicle && (
-            <div className="absolute bottom-16 right-4 top-[72px] z-[1000] w-[320px] overflow-y-auto rounded-2xl">
+            <div className="absolute right-4 top-[72px] z-[1000] w-[320px] rounded-2xl">
               <VehicleDetailPanel
                 vehicle={selectedVehicle}
                 now={now}
@@ -443,7 +443,7 @@ export default function TmsDashboard() {
       {/* Bottom sheet detail pada mobile */}
       {selectedVehicle && (
         <div className="fixed inset-x-0 bottom-0 z-50 p-3 lg:hidden">
-          <div className="mx-auto max-h-[58dvh] max-w-lg overflow-y-auto rounded-2xl">
+          <div className="mx-auto max-w-lg rounded-2xl">
             <VehicleDetailPanel
               vehicle={selectedVehicle}
               now={now}
