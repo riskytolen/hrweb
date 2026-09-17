@@ -8,6 +8,7 @@ import {
   formatRelativeTime,
   formatSignalLabel,
   formatSpeedShort,
+  formatVehicleTemperatures,
   googleMapsUrl,
   type TmsVehicleStatus,
 } from "@/lib/tms-status";
@@ -48,7 +49,7 @@ export default function VehicleDetailPanel({ vehicle, now, onFocusMap, onClose }
           {shortAddress}
         </p>
 
-        <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-xl bg-white/10 px-2 py-2.5 text-center">
             <p className="truncate text-sm font-extrabold tabular-nums">{formatSpeedShort(vehicle)}</p>
             <p className="mt-0.5 text-[10px] text-slate-300">Kecepatan</p>
@@ -62,6 +63,15 @@ export default function VehicleDetailPanel({ vehicle, now, onFocusMap, onClose }
           <div className="rounded-xl bg-white/10 px-2 py-2.5 text-center">
             <p className="truncate text-sm font-extrabold">{formatSignalLabel(vehicle.signalStrength)}</p>
             <p className="mt-0.5 text-[10px] text-slate-300">Sinyal GPS</p>
+          </div>
+          <div className="rounded-xl bg-white/10 px-2 py-2.5 text-center">
+            <p
+              className="truncate text-sm font-extrabold tabular-nums"
+              title={formatVehicleTemperatures(vehicle.temperatures)}
+            >
+              {formatVehicleTemperatures(vehicle.temperatures)}
+            </p>
+            <p className="mt-0.5 text-[10px] text-slate-300">Suhu</p>
           </div>
         </div>
       </div>

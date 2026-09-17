@@ -89,6 +89,7 @@ describe("GET /api/tms/vehicle-statuses", () => {
         district: "",
         vehicleGroups: [],
         driverName: null,
+        temperatures: [8],
         signalStrength: 5,
         status: "moving",
         hasValidLocation: true,

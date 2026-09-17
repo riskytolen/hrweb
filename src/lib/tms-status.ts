@@ -31,6 +31,7 @@ export interface TmsVehicleStatus {
   district: string;
   vehicleGroups: string[];
   driverName: string | null;
+  temperatures: (number | null)[];
   signalStrength: number | null;
   status: TmsOperationalStatus;
   hasValidLocation: boolean;
@@ -122,6 +123,14 @@ function toStringArray(value: unknown): string[] {
   return value
     .map((item) => toTrimmedString(item))
     .filter((item) => item.length > 0);
+}
+
+function toTemperatureArray(value: unknown): (number | null)[] {
+  if (!Array.isArray(value)) {
+    const single = toNullableNumber(value);
+    return single === null ? [] : [single];
+  }
+  return value.map((item) => toNullableNumber(item));
 }
 
 function isValidCoordinate(latitude: number | null, longitude: number | null): boolean {
@@ -235,6 +244,7 @@ export function normalizeMcEasyVehicleStatus(
     district: addressDetail ? toTrimmedString(addressDetail.district) : "",
     vehicleGroups: toStringArray(raw.vehicleGroups ?? raw.vehicle_groups),
     driverName: driver ? toTrimmedString(driver.fullname ?? driver.full_name) || null : null,
+    temperatures: toTemperatureArray(raw.temperature ?? raw.temp),
     signalStrength: toNullableNumber(raw.signalStrength ?? raw.signal_strength),
     status,
     hasValidLocation: status !== "offline" && isValidCoordinate(latitude, longitude),
@@ -344,6 +354,23 @@ export function formatSignalLabel(strength: number | null): string {
   if (strength >= 4) return "Kuat";
   if (strength >= 2) return "Sedang";
   return "Lemah";
+}
+
+export function formatTemperature(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  const rounded = Math.round(value * 10) / 10;
+  return `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 }).format(rounded)}°C`;
+}
+
+export function formatVehicleTemperatures(temperatures: (number | null)[]): string {
+  const valid = temperatures
+    .map((temperature, index) => ({ temperature, index }))
+    .filter((entry): entry is { temperature: number; index: number } =>
+      typeof entry.temperature === "number" && Number.isFinite(entry.temperature),
+    );
+  if (valid.length === 0) return "-";
+  if (valid.length === 1) return formatTemperature(valid[0].temperature);
+  return valid.map((entry) => `S${entry.index + 1} ${formatTemperature(entry.temperature)}`).join(" • ");
 }
 
 export function formatRelativeTime(iso: string | null, now: number = Date.now()): string {

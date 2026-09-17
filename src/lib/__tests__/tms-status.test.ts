@@ -6,6 +6,8 @@ import {
   formatRelativeTime,
   formatSignalLabel,
   formatSpeedKmh,
+  formatTemperature,
+  formatVehicleTemperatures,
   normalizeMcEasyVehicleStatus,
   normalizeMcEasyVehicleStatusList,
   sortFleet,
@@ -40,6 +42,7 @@ function makeVehicle(overrides: Partial<TmsVehicleStatus> = {}): TmsVehicleStatu
     district: "",
     vehicleGroups: ["Group 1"],
     driverName: null,
+    temperatures: [],
     signalStrength: null,
     status: "parked",
     hasValidLocation: true,
@@ -93,6 +96,7 @@ describe("tms status helpers", () => {
         address: "Surabaya",
         vehicleGroups: ["Group 1", "Group 2"],
         driver1: { fullname: "Joko" },
+        temperature: [0, null, "4.55", "invalid"],
       },
       NOW,
     );
@@ -101,6 +105,7 @@ describe("tms status helpers", () => {
       licensePlate: "L 123 TES",
       status: "moving",
       driverName: "Joko",
+      temperatures: [0, null, 4.55, null],
       hasValidLocation: true,
     });
 
@@ -163,5 +168,13 @@ describe("tms status helpers", () => {
     expect(formatSignalLabel(3)).toBe("Sedang");
     expect(formatSignalLabel(1)).toBe("Lemah");
     expect(formatSignalLabel(null)).toBe("-");
+  });
+
+  it("formats vehicle temperature sensors", () => {
+    expect(formatTemperature(4.55)).toBe("4,6°C");
+    expect(formatVehicleTemperatures([])).toBe("-");
+    expect(formatVehicleTemperatures([null])).toBe("-");
+    expect(formatVehicleTemperatures([0])).toBe("0°C");
+    expect(formatVehicleTemperatures([0, null, 4.5])).toBe("S1 0°C • S3 4,5°C");
   });
 });
