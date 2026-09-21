@@ -518,6 +518,10 @@ export function normalizeFleetTaskInstantItem(raw: unknown): FleetTaskInstantIte
 export interface FleetTaskTimelinePoint {
   sequence: number | null;
   pointType: string | null;
+  /** ID titik dari vendor (`timeline_route[].id`); dipakai sebagai identitas e-POD. */
+  pointId: string | null;
+  /** ID alamat vendor (`address.id`); bagian dari snapshot e-POD. */
+  addressId: string | null;
   name: string | null;
   address: string | null;
   latitude: number | null;
@@ -570,6 +574,8 @@ function normalizeTimelinePoint(item: unknown): FleetTaskTimelinePoint | null {
   return {
     sequence: toFiniteNumber(pickFirst(source, ["plan_sequence", "planSequence", "sequence", "order"])),
     pointType: toTrimmedString(pickFirst(source, ["point_type", "pointType", "type"]), 40),
+    pointId: toTrimmedString(pickFirst(source, ["id", "point_id", "pointId"]), 100),
+    addressId: toTrimmedString(pickFirst(addressSource, ["id", "address_id", "addressId"]), 100),
     name,
     address,
     latitude: latitude !== null && longitude !== null && isValidCoordinate(latitude, longitude) ? latitude : null,

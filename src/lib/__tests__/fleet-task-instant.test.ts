@@ -86,6 +86,37 @@ describe("normalizeFleetTaskInstantItem", () => {
     expect(item?.timeline[0].name).toBe("Titik 1");
     expect(item?.timeline[1].name).toBe("Titik 2");
   });
+
+  it("keeps vendor point and address ids for epod identity", () => {
+    const item = normalizeFleetTaskInstantItem({
+      ...LIST_FIXTURE,
+      timeline_route: [
+        {
+          id: "point-abc",
+          plan_sequence: 1,
+          point_type: "START",
+          address: { id: "addr-xyz", name: "Gudang", full_name: "Jl. Gudang" },
+          visit_status: { raw_type: "VISITED", name: "Dikunjungi" },
+        },
+      ],
+    });
+    expect(item?.timeline[0].pointId).toBe("point-abc");
+    expect(item?.timeline[0].addressId).toBe("addr-xyz");
+  });
+
+  it("leaves vendor ids null when upstream omits them", () => {
+    const item = normalizeFleetTaskInstantItem({
+      ...LIST_FIXTURE,
+      timeline_route: [
+        {
+          plan_sequence: 1,
+          address: { name: "Gudang", full_name: "Jl. Gudang" },
+        },
+      ],
+    });
+    expect(item?.timeline[0].pointId).toBeNull();
+    expect(item?.timeline[0].addressId).toBeNull();
+  });
 });
 
 describe("normalizeFleetTaskInstantDetail", () => {

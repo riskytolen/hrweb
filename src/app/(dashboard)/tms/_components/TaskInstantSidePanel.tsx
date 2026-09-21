@@ -35,6 +35,18 @@ import {
   resolveRoutePointSequence,
   type TmsRoutePointTemperature,
 } from "@/lib/tms-point-temperature";
+import { useAuth } from "@/components/AuthProvider";
+import { canViewTmsEpod } from "@/lib/permissions";
+import {
+  EPOD_ASSIGNMENT_STATUS_LABEL,
+  EPOD_RESULT_LABEL,
+  normalizeEpodStop,
+  normalizeEpodSubmission,
+  type EpodAssignmentStatus,
+  type EpodStop,
+  type EpodStopType,
+  type EpodSubmission,
+} from "@/lib/tms-epod";
 import TaskRouteMap from "./TaskRouteMap";
 import TaskStatusBadge from "./TaskStatusBadge";
 
@@ -205,6 +217,76 @@ function isLatLng(value: unknown): value is LatLng {
   return typeof point.latitude === "number" && typeof point.longitude === "number";
 }
 
+interface EpodPointState {
+  stopType: EpodStopType;
+  submission: EpodSubmission | null;
+}
+
+interface EpodTaskSummaryData {
+  assignment: {
+    status: EpodAssignmentStatus;
+    loadingStatus: "PENDING_LOADING" | "LOADING_COMPLETED";
+    deliveryDoneCount: number;
+    deliveryTotalCount: number;
+  };
+  stops: EpodStop[];
+  currentByStop: Record<string, EpodSubmission>;
+}
+
+/** Normalisasi ringkasan e-POD dari endpoint `by-task` (client-safe). */
+function normalizeEpodTaskSummary(value: unknown): EpodTaskSummaryData | null {
+  if (!value || typeof value !== "object") return null;
+  const source = value as Record<string, unknown>;
+  const assignmentRaw = source.assignment;
+  if (!assignmentRaw || typeof assignmentRaw !== "object") return null;
+  const assignment = assignmentRaw as Record<string, unknown>;
+
+  const stops = Array.isArray(source.stops)
+    ? source.stops.map(normalizeEpodStop).filter((stop): stop is EpodStop => stop !== null)
+    : [];
+
+  const currentByStop: Record<string, EpodSubmission> = {};
+  const rawCurrent = source.currentByStop;
+  if (rawCurrent && typeof rawCurrent === "object") {
+    for (const [key, entry] of Object.entries(rawCurrent as Record<string, unknown>)) {
+      const submission = normalizeEpodSubmission(entry);
+      if (submission) currentByStop[key] = submission;
+    }
+  }
+
+  const status = String(assignment.status ?? "OPEN") as EpodAssignmentStatus;
+
+  return {
+    assignment: {
+      status,
+      loadingStatus: assignment.loadingStatus === "LOADING_COMPLETED" ? "LOADING_COMPLETED" : "PENDING_LOADING",
+      deliveryDoneCount: Number(assignment.deliveryDoneCount ?? 0) || 0,
+      deliveryTotalCount: Number(assignment.deliveryTotalCount ?? 0) || 0,
+    },
+    stops,
+    currentByStop,
+  };
+}
+
+/** Label ringkas e-POD untuk satu titik. */
+function epodPointLabel(state: EpodPointState): { text: string; tone: string } {
+  if (state.stopType === "LOADING") {
+    return state.submission
+      ? { text: "Loading selesai", tone: "bg-emerald-500/10 text-emerald-600" }
+      : { text: "Loading belum", tone: "bg-slate-500/10 text-slate-600" };
+  }
+  if (state.submission?.result) {
+    const tone =
+      state.submission.result === "DELIVERED"
+        ? "bg-emerald-500/10 text-emerald-600"
+        : state.submission.result === "PARTIAL"
+          ? "bg-amber-500/10 text-amber-600"
+          : "bg-rose-500/10 text-rose-600";
+    return { text: EPOD_RESULT_LABEL[state.submission.result], tone };
+  }
+  return { text: "Belum ada e-POD", tone: "bg-muted text-muted-foreground" };
+}
+
 function extractTripTrail(payloadData: unknown): LatLng[] {
   if (payloadData && typeof payloadData === "object" && !Array.isArray(payloadData)) {
     const trail = (payloadData as { trail?: unknown }).trail;
@@ -220,9 +302,11 @@ function extractTripTrail(payloadData: unknown): LatLng[] {
 function RoutePointList({
   points,
   pointTemperatures,
+  epodBySequence,
 }: {
   points: FleetTaskTimelinePoint[];
   pointTemperatures: Map<number, TmsRoutePointTemperature>;
+  epodBySequence: Map<number, EpodPointState>;
 }) {
   if (points.length === 0) {
     return (
@@ -248,6 +332,7 @@ function RoutePointList({
           const temperatureLabel = visited
             ? formatCapturedPointTemperature(pointTemperatures.get(sequence))
             : null;
+          const epodState = epodBySequence.get(sequence) ?? null;
           const state = visited ? "done" : current ? "current" : "pending";
           const nextVisited = index + 1 < points.length && isPointVisited(points[index + 1]);
           return (
@@ -314,6 +399,17 @@ function RoutePointList({
                   {temperatureLabel && (
                     <span title="Suhu kendaraan saat berada pada titik ini">{temperatureLabel}</span>
                   )}
+                  {epodState && (() => {
+                    const label = epodPointLabel(epodState);
+                    return (
+                      <span
+                        className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", label.tone)}
+                        title="Status e-POD titik ini"
+                      >
+                        {label.text}
+                      </span>
+                    );
+                  })()}
                 </p>
               </div>
             </li>
@@ -342,6 +438,11 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
   const [mapOpen, setMapOpen] = useState(false);
   const [vehicleStatus, setVehicleStatus] = useState<TmsVehicleStatus | null>(null);
   const [pointTemperatures, setPointTemperatures] = useState<TmsRoutePointTemperature[]>([]);
+  const { profile } = useAuth();
+  const canViewEpod = canViewTmsEpod(profile?.roles?.permissions ?? [], profile?.account_type ?? "internal");
+  // Ringkasan e-POD disimpan bersama taskId agar badge task lama tidak
+  // sempat tampil saat task berganti.
+  const [epodData, setEpodData] = useState<{ taskId: string; summary: EpodTaskSummaryData | null } | null>(null);
   // Jejak historis dari track endpoint (bila actual_trip tidak tersedia).
   const [historyTrail, setHistoryTrail] = useState<LatLng[]>([]);
   // Jejak yang terakumulasi dari polling realtime selama halaman dibuka.
@@ -444,6 +545,42 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     };
   }, [item?.id]);
 
+  // Ringkasan e-POD per titik (badge loading/pengantaran) tiap 30 detik.
+  useEffect(() => {
+    const taskId = item?.id;
+    if (typeof taskId !== "string" || !taskId || !canViewEpod) return;
+    const activeTaskId: string = taskId;
+    let disposed = false;
+    const controller = new AbortController();
+
+    async function loadEpod() {
+      try {
+        const response = await fetch(
+          `/api/tms/epod/by-task/${encodeURIComponent(activeTaskId)}`,
+          { headers: { Accept: "application/json" }, signal: controller.signal },
+        );
+        if (!response.ok) return;
+        const payload = (await response.json()) as { data?: unknown };
+        if (disposed) return;
+        setEpodData({ taskId: activeTaskId, summary: normalizeEpodTaskSummary(payload.data) });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (!disposed) setEpodData({ taskId: activeTaskId, summary: null });
+      }
+    }
+
+    void loadEpod();
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      void loadEpod();
+    }, DETAIL_POLL_MS);
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [item?.id, canViewEpod]);
+
   const shown = detail ?? item;
 
   // Timeline efektif: fallback dari Index + selaras dengan progres task
@@ -457,6 +594,20 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     () => indexPointTemperaturesBySequence(pointTemperatures),
     [pointTemperatures],
   );
+
+  const epodSummary = epodData && epodData.taskId === item?.id ? epodData.summary : null;
+
+  const epodBySequence = useMemo(() => {
+    const map = new Map<number, EpodPointState>();
+    if (!epodSummary) return map;
+    for (const stop of epodSummary.stops) {
+      map.set(stop.sequence, {
+        stopType: stop.stopType,
+        submission: epodSummary.currentByStop[stop.id] ?? null,
+      });
+    }
+    return map;
+  }, [epodSummary]);
 
   /** True bila semua titik rute sudah dikunjungi. */
   const allRoutePointsVisited =
@@ -898,7 +1049,33 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
             {loading && !detail ? (
               <div className="h-32 animate-pulse rounded-xl bg-muted" />
             ) : (
-              <RoutePointList points={effectiveTimeline} pointTemperatures={pointTemperatureBySequence} />
+              <>
+                {epodSummary && (
+                  <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 font-semibold",
+                        epodSummary.assignment.loadingStatus === "LOADING_COMPLETED"
+                          ? "bg-emerald-500/10 text-emerald-600"
+                          : "bg-slate-500/10 text-slate-600",
+                      )}
+                    >
+                      Loading {epodSummary.assignment.loadingStatus === "LOADING_COMPLETED" ? "selesai" : "belum"}
+                    </span>
+                    <span className="rounded-full bg-muted px-2 py-0.5 font-semibold tabular-nums">
+                      e-POD {epodSummary.assignment.deliveryDoneCount}/{epodSummary.assignment.deliveryTotalCount}
+                    </span>
+                    <span className="rounded-full bg-muted px-2 py-0.5 font-semibold">
+                      {EPOD_ASSIGNMENT_STATUS_LABEL[epodSummary.assignment.status]}
+                    </span>
+                  </p>
+                )}
+                <RoutePointList
+                  points={effectiveTimeline}
+                  pointTemperatures={pointTemperatureBySequence}
+                  epodBySequence={epodBySequence}
+                />
+              </>
             )}
 
             {error && (

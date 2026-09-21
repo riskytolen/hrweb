@@ -1,3 +1,8 @@
+import {
+  permissionMatches,
+  type AccountType,
+} from "@/lib/permissions";
+
 export const ROUTE_BY_PERMISSION: { permission: string; href: string }[] = [
   { permission: "dashboard", href: "/dashboard" },
   { permission: "vehicle-odometer", href: "/operasional-kendaraan/dashboard" },
@@ -16,35 +21,14 @@ export const ROUTE_BY_PERMISSION: { permission: string; href: string }[] = [
   { permission: "inventory-aset", href: "/general-affair/inventory-aset" },
   { permission: "finance", href: "/finance" },
   { permission: "legalitas", href: "/legalitas" },
+  // Entri `tms` harus tetap lebih dulu agar role TMS lama mendarat di Live View.
   { permission: "tms", href: "/tms/live-view" },
+  { permission: "tms.epod", href: "/tms/epod" },
   { permission: "settings", href: "/settings/master-data" },
 ];
 
-type AccountType = "internal" | "external";
-
-function externalPermissionMatches(permissions: string[], permission: string): boolean {
-  if (permission !== "vehicle-odometer") return false;
-  return permissions.some(
-    (p) =>
-      p === "all" ||
-      p === "vehicle-odometer" ||
-      p === "vehicle-odometer.view" ||
-      p === "vehicle-odometer.input" ||
-      p === "vehicle-odometer.manage",
-  );
-}
-
-export function permissionMatches(permissions: string[], permission: string, accountType: AccountType = "internal"): boolean {
-  if (accountType === "external") return externalPermissionMatches(permissions, permission);
-  if (permissions.includes("all")) return true;
-  return permissions.some(
-    (p) =>
-      p === permission ||
-      p === `${permission}.view` ||
-      p === `${permission}.input` ||
-      permission.startsWith(`${p}.`),
-  );
-}
+export { permissionMatches };
+export type { AccountType };
 
 export function getDefaultRouteForPermissions(
   permissions: string[] | null | undefined,
@@ -53,4 +37,18 @@ export function getDefaultRouteForPermissions(
   const safePermissions = permissions ?? [];
   const match = ROUTE_BY_PERMISSION.find((route) => permissionMatches(safePermissions, route.permission, accountType));
   return match?.href ?? "/dashboard";
+}
+
+/**
+ * Route default khusus area TMS. Dipakai oleh redirect `/tms` agar user
+ * yang hanya punya akses e-POD tidak mendarat di Live View.
+ */
+export function getTmsDefaultRoute(
+  permissions: string[] | null | undefined,
+  accountType: AccountType = "internal",
+): string {
+  const safePermissions = permissions ?? [];
+  if (permissionMatches(safePermissions, "tms", accountType)) return "/tms/live-view";
+  if (permissionMatches(safePermissions, "tms.epod", accountType)) return "/tms/epod";
+  return "/dashboard";
 }

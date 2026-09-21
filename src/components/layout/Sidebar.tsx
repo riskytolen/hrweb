@@ -46,9 +46,11 @@ import {
   Banknote,
   Satellite,
   Route,
+  PackageCheck,
   type LucideIcon,
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
+import { canViewTmsEpod } from "@/lib/permissions";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -181,6 +183,7 @@ const allSections: MenuSection[] = [
         items: [
           { name: "Live View", href: "/tms/live-view", icon: Satellite, permission: "tms" },
           { name: "Live Track Task", href: "/tms/live-track-task", icon: Route, permission: "tms" },
+          { name: "Monitoring e-POD", href: "/tms/epod", icon: PackageCheck, permission: "tms.epod" },
         ],
       },
     ],
@@ -230,6 +233,9 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
             if (item.href === "/settings/accounts") return isSuperAdmin;
             if (item.href === "/settings/audit-logs") return isSuperAdmin;
             if (item.href === "/settings/storage-usage") return isSuperAdmin;
+            if (item.href === "/tms/epod") {
+              return canViewTmsEpod(profile.roles?.permissions ?? [], profile.account_type);
+            }
             if (!item.permission) return true;
             return hasPermission(item.permission) || hasPermission(item.permission + ".view") || hasPermission(item.permission + ".input");
           });

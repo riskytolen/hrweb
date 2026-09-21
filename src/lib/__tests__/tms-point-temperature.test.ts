@@ -84,6 +84,8 @@ describe("tms point temperature helpers", () => {
         {
           sequence: 1,
           pointType: null,
+          pointId: null,
+          addressId: null,
           name: "Titik 1",
           address: null,
           latitude: -6.2,
@@ -98,6 +100,8 @@ describe("tms point temperature helpers", () => {
         {
           sequence: 2,
           pointType: null,
+          pointId: null,
+          addressId: null,
           name: "Titik 2",
           address: null,
           latitude: -6.2005,
@@ -122,6 +126,8 @@ describe("tms point temperature helpers", () => {
           {
             sequence: 1,
             pointType: null,
+            pointId: null,
+            addressId: null,
             name: "Titik 1",
             address: null,
             latitude: null,

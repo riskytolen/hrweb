@@ -9,6 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import {
+  externalCanViewVehicleOdometer,
+  permissionGranted,
+} from "@/lib/permissions";
 import type { User, Session } from "@supabase/supabase-js";
 
 // ─── Types ───
@@ -72,18 +76,6 @@ const AuthContext = createContext<AuthContextType>({
 
 export function useAuth() {
   return useContext(AuthContext);
-}
-
-function externalCanViewVehicleOdometer(permissions: string[], permission: string): boolean {
-  if (permission !== "vehicle-odometer" && permission !== "vehicle-odometer.view") return false;
-  return permissions.some(
-    (p) =>
-      p === "all" ||
-      p === "vehicle-odometer" ||
-      p === "vehicle-odometer.view" ||
-      p === "vehicle-odometer.input" ||
-      p === "vehicle-odometer.manage",
-  );
 }
 
 // ─── Provider ───
@@ -176,13 +168,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         return externalCanViewVehicleOdometer(perms, permission);
       }
 
-      // "all" = akses penuh
-      if (perms.includes("all")) return true;
-      // Cek exact match atau parent match (e.g. "employees" covers "employees.view")
-      // Juga: "employees.input" covers "employees.view"
-      return perms.some(
-        (p) => p === permission || permission.startsWith(p + ".")
-      );
+      return permissionGranted(perms, permission);
     },
     [profile]
   );

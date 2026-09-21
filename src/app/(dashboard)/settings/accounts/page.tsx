@@ -104,6 +104,17 @@ const PERMISSION_OPTIONS = [
   { key: "settings", label: "Pengaturan" },
 ];
 
+/** Label khusus permission e-POD yang punya mode sendiri (Lihat/Kelola). */
+const EPOD_PERMISSION_LABELS: Record<string, string> = {
+  "tms.epod": "TMS e-POD (Kelola)",
+  "tms.epod.view": "TMS e-POD (Lihat)",
+  "tms.epod.manage": "TMS e-POD (Kelola)",
+};
+
+function epodPermissionLabel(key: string): string | null {
+  return EPOD_PERMISSION_LABELS[key] ?? null;
+}
+
 export default function AccountsPage() {
   // Fix #4: Supabase instance dibuat sekali via useState
   const [supabase] = useState(() => createClient());
@@ -550,6 +561,25 @@ export default function AccountsPage() {
     });
   };
 
+  // Permission e-POD punya mode sendiri: tidak tampil / lihat / kelola.
+  const getEpodState = (): "none" | "view" | "manage" => {
+    if (roleForm.permissions.includes("tms.epod.manage")) return "manage";
+    if (roleForm.permissions.includes("tms.epod.view")) return "view";
+    if (roleForm.permissions.includes("tms.epod")) return "manage";
+    return "none";
+  };
+
+  const setEpodState = (state: "none" | "view" | "manage") => {
+    setRoleForm((prev) => {
+      const cleaned = prev.permissions.filter(
+        (p) => p !== "tms.epod" && p !== "tms.epod.view" && p !== "tms.epod.manage",
+      );
+      if (state === "view") return { ...prev, permissions: [...cleaned, "tms.epod.view"] };
+      if (state === "manage") return { ...prev, permissions: [...cleaned, "tms.epod.manage"] };
+      return { ...prev, permissions: cleaned };
+    });
+  };
+
   // ─── Filter (memoized) ───
   const filteredUsers = useMemo(
     () =>
@@ -961,16 +991,18 @@ export default function AccountsPage() {
                       </span>
                     ) : r.permissions.length > 0 ? (
                       r.permissions.map((p) => {
-                        const isView = p.endsWith(".view");
-                        const isInput = p.endsWith(".input");
+                        const epodLabel = epodPermissionLabel(p);
+                        const isEpodView = p === "tms.epod.view";
+                        const isView = !epodLabel && p.endsWith(".view");
+                        const isInput = !epodLabel && p.endsWith(".input");
                         const baseKey = isView ? p.replace(".view", "") : isInput ? p.replace(".input", "") : p;
-                        const label = PERMISSION_OPTIONS.find((o) => o.key === baseKey)?.label || p;
+                        const label = epodLabel || PERMISSION_OPTIONS.find((o) => o.key === baseKey)?.label || p;
                         return (
                           <span
                             key={p}
                             className={cn(
                               "px-2 py-0.5 rounded-full text-[11px] font-medium",
-                              isView
+                              isView || isEpodView
                                 ? "bg-amber-500/10 text-amber-600"
                                 : isInput
                                   ? "bg-emerald-500/10 text-emerald-600"
@@ -1574,6 +1606,53 @@ export default function AccountsPage() {
                           </div>
                         );
                       })}
+
+                      {/* e-POD: mode khusus Lihat / Kelola */}
+                      {(() => {
+                        const epodState = getEpodState();
+                        return (
+                          <div
+                            className={cn(
+                              "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+                              epodState === "manage"
+                                ? "border-primary/30 bg-primary/5"
+                                : epodState === "view"
+                                  ? "border-amber-500/30 bg-amber-500/5"
+                                  : "border-border"
+                            )}
+                          >
+                            <div>
+                              <span className="text-xs font-medium text-foreground">TMS e-POD</span>
+                              <p className="text-[10px] text-muted-foreground">Monitoring & kelola bukti pengiriman</p>
+                            </div>
+                            <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+                              {([
+                                { value: "none" as const, label: "Tidak Tampil" },
+                                { value: "view" as const, label: "Lihat" },
+                                { value: "manage" as const, label: "Kelola" },
+                              ]).map((s) => (
+                                <button
+                                  key={s.value}
+                                  type="button"
+                                  onClick={() => setEpodState(s.value)}
+                                  className={cn(
+                                    "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                                    epodState === s.value
+                                      ? s.value === "manage"
+                                        ? "bg-primary text-white shadow-sm"
+                                        : s.value === "view"
+                                          ? "bg-amber-500 text-white shadow-sm"
+                                          : "bg-card text-muted-foreground shadow-sm"
+                                      : "text-muted-foreground/60 hover:text-muted-foreground"
+                                  )}
+                                >
+                                  {s.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
