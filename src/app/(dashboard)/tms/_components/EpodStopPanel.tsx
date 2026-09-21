@@ -2,14 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  CalendarDays,
   Camera,
-  ChevronDown,
+  Check,
   ChevronRight,
   Loader2,
   MapPin,
+  Package,
+  RefreshCw,
+  Route as RouteIcon,
   Trash2,
   TriangleAlert,
-  X,
+  Truck,
+  User,
+  Users,
+  type LucideIcon,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
@@ -27,7 +35,12 @@ import {
   type EpodStop,
   type EpodSubmission,
 } from "@/lib/tms-epod";
-import { EpodAssignmentBadge, EpodResultBadge } from "./EpodStatusBadge";
+import {
+  EpodAssignmentBadge,
+  EpodLoadingBadge,
+  EpodResultBadge,
+  EpodStopTypeBadge,
+} from "./EpodStatusBadge";
 import EpodEvidenceGallery from "./EpodEvidenceGallery";
 
 interface AssignmentDetail {
@@ -163,29 +176,36 @@ function RosterEditor({
   }
 
   const renderSelect = (role: "DRIVER" | "HELPER", value: string | null, options: EmployeeOption[]) => (
-    <label className="flex items-center gap-2 text-xs">
-      <span className="w-14 shrink-0 font-semibold text-muted-foreground">{role === "DRIVER" ? "Driver" : "Helper"}</span>
-      <select
-        className="min-w-0 flex-1 rounded-lg border border-border bg-card px-2 py-1.5 text-xs text-foreground"
-        value={value ?? ""}
-        disabled={saving !== null}
-        onChange={(event) => void save(role, event.target.value)}
-      >
-        <option value="">Belum ditetapkan</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.nama}
-          </option>
-        ))}
-      </select>
-      {saving === role && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+    <label className="flex flex-col gap-1.5 text-xs">
+      <span className="flex items-center gap-1.5 font-semibold text-muted-foreground">
+        {role === "DRIVER" ? <User className="h-3.5 w-3.5" /> : <Users className="h-3.5 w-3.5" />}
+        {role === "DRIVER" ? "Driver" : "Helper"}
+      </span>
+      <span className="flex items-center gap-2">
+        <select
+          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
+          value={value ?? ""}
+          disabled={saving !== null}
+          onChange={(event) => void save(role, event.target.value)}
+        >
+          <option value="">Belum ditetapkan</option>
+          {options.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.nama}
+            </option>
+          ))}
+        </select>
+        {saving === role && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />}
+      </span>
     </label>
   );
 
   return (
-    <div className="space-y-2">
-      {renderSelect("DRIVER", driverEmployeeId, drivers)}
-      {renderSelect("HELPER", helperEmployeeId, helpers)}
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {renderSelect("DRIVER", driverEmployeeId, drivers)}
+        {renderSelect("HELPER", helperEmployeeId, helpers)}
+      </div>
       {error && (
         <p className="flex items-center gap-1.5 text-[11px] text-danger">
           <TriangleAlert className="h-3.5 w-3.5" /> {error}
@@ -493,6 +513,90 @@ function StopSubmissionForm({
   );
 }
 
+/** Baris informasi ringkas pada kartu Informasi Pengiriman. */
+function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-3 py-2.5">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="ml-auto min-w-0 truncate text-right font-semibold text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * Stepper 3 langkah sesuai data e-POD kita:
+ * Loading -> Pengantaran -> Selesai.
+ */
+function EpodProgressStepper({
+  loadingCompleted,
+  allDelivered,
+  completed,
+}: {
+  loadingCompleted: boolean;
+  allDelivered: boolean;
+  completed: boolean;
+}) {
+  const steps: { label: string; caption: string; state: "done" | "active" | "pending" }[] = [
+    {
+      label: "Loading",
+      caption: "Persiapan barang",
+      state: loadingCompleted ? "done" : "active",
+    },
+    {
+      label: "Pengantaran",
+      caption: "Dalam perjalanan",
+      state: allDelivered ? "done" : loadingCompleted ? "active" : "pending",
+    },
+    {
+      label: "Selesai",
+      caption: "Semua bukti lengkap",
+      state: completed ? "done" : "pending",
+    },
+  ];
+
+  return (
+    <div className="flex items-start">
+      {steps.map((step, index) => (
+        <div
+          key={step.label}
+          className={cn("flex items-center gap-2", index < steps.length - 1 && "flex-1")}
+        >
+          <div className="flex w-24 shrink-0 flex-col items-center gap-1 text-center">
+            <span
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-full text-xs font-extrabold",
+                step.state === "done" && "bg-primary text-white",
+                step.state === "active" && "bg-primary/15 text-primary ring-2 ring-primary/30",
+                step.state === "pending" && "bg-muted text-muted-foreground",
+              )}
+            >
+              {step.state === "done" ? <Check className="h-4 w-4" /> : index + 1}
+            </span>
+            <span
+              className={cn(
+                "text-[11px] font-semibold",
+                step.state === "pending" ? "text-muted-foreground" : "text-foreground",
+              )}
+            >
+              {step.label}
+            </span>
+            <span className="text-[10px] text-muted-foreground">{step.caption}</span>
+          </div>
+          {index < steps.length - 1 && (
+            <span
+              className={cn(
+                "mb-8 h-0.5 flex-1 rounded-full",
+                step.state === "done" ? "bg-primary" : "bg-muted",
+              )}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function EpodStopPanel({
   assignmentId,
   canManage,
@@ -588,147 +692,230 @@ export default function EpodStopPanel({
   const { assignment, stops, currentByStop, driverName, helperName } = detail;
   const loadingCompleted = assignment.loadingStatus === "LOADING_COMPLETED";
   const locked = assignment.frozenAt !== null;
+  const allDelivered =
+    assignment.deliveryTotalCount > 0 && assignment.deliveryDoneCount >= assignment.deliveryTotalCount;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between gap-3 border-b border-border p-4">
+    <div className="space-y-5">
+      {/* Bar atas: kembali, snapshot, muat ulang */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Button size="sm" variant="outline" icon={ArrowLeft} onClick={onClose}>
+          Kembali ke Daftar
+        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+            <CalendarDays className="h-3.5 w-3.5" />
+            <span className="font-semibold text-foreground">Snapshot</span>
+            <span className="tabular-nums">{formatDateTime(assignment.snapshotAt)}</span>
+          </span>
+          <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={refreshAll}>
+            Muat ulang
+          </Button>
+        </div>
+      </div>
+
+      {/* Hero */}
+      <div className="flex items-center gap-4 rounded-2xl border border-border bg-card p-5">
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <Package className="h-7 w-7" />
+        </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-foreground">{assignment.taskNumber ?? assignment.taskId}</p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          <p className="truncate text-xl font-extrabold text-foreground">
+            {assignment.taskNumber ?? assignment.taskId}
+          </p>
+          <p className="mt-0.5 truncate text-sm text-muted-foreground">
             {[assignment.licensePlate, assignment.vendorDriverName].filter(Boolean).join(" • ") || "–"}
           </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <EpodAssignmentBadge status={assignment.status} />
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-              Loading {loadingCompleted ? "selesai" : "belum"}
-            </span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums">
+            <EpodLoadingBadge completed={loadingCompleted} />
+            <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-[11px] font-bold tabular-nums text-muted-foreground">
               e-POD {assignment.deliveryDoneCount}/{assignment.deliveryTotalCount}
             </span>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
-          aria-label="Tutup detail"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        <section>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Tim</p>
-          {canManage ? (
-            <RosterEditor
-              assignmentId={assignment.id}
-              driverEmployeeId={assignment.driverEmployeeId}
-              helperEmployeeId={assignment.helperEmployeeId}
-              locked={locked}
-              onSaved={refreshAll}
-            />
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Driver: {driverName ?? "Belum ditetapkan"} · Helper: {helperName ?? "Belum ditetapkan"}
-            </p>
-          )}
-        </section>
+      <div className="grid gap-5 lg:grid-cols-3">
+        {/* Kolom kiri */}
+        <div className="space-y-5 lg:col-span-2">
+          {/* Tim Pengiriman */}
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
+              <Users className="h-4 w-4 text-muted-foreground" /> Tim Pengiriman
+            </h2>
+            <div className="mt-3">
+              {canManage ? (
+                <RosterEditor
+                  assignmentId={assignment.id}
+                  driverEmployeeId={assignment.driverEmployeeId}
+                  helperEmployeeId={assignment.helperEmployeeId}
+                  locked={locked}
+                  onSaved={refreshAll}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Driver: {driverName ?? "Belum ditetapkan"} · Helper: {helperName ?? "Belum ditetapkan"}
+                </p>
+              )}
+            </div>
+          </section>
 
-        <section>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Titik ({stops.length})
-          </p>
-          <ol className="space-y-2">
-            {stops.map((stop) => {
-              const current = currentByStop[stop.id];
-              const expanded = expandedStopId === stop.id;
-              const isLockedDelivery = stop.stopType === "DELIVERY" && !loadingCompleted;
-              return (
-                <li key={stop.id} className="rounded-xl border border-border">
-                  <button
-                    type="button"
-                    onClick={() => setExpandedStopId(expanded ? null : stop.id)}
-                    className="flex w-full items-center gap-2 p-3 text-left"
-                  >
-                    {expanded ? (
-                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          {/* Progres */}
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
+              <RouteIcon className="h-4 w-4 text-muted-foreground" /> Progres Pengiriman
+            </h2>
+            <div className="mt-4">
+              <EpodProgressStepper
+                loadingCompleted={loadingCompleted}
+                allDelivered={allDelivered}
+                completed={assignment.status === "COMPLETED"}
+              />
+            </div>
+          </section>
+
+          {/* Daftar Titik */}
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
+              <MapPin className="h-4 w-4 text-muted-foreground" /> Daftar Titik Pengiriman ({stops.length})
+            </h2>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              Urutan pengiriman sesuai rute yang telah ditentukan
+            </p>
+
+            <ol className="mt-4 space-y-2">
+              {stops.map((stop) => {
+                const current = currentByStop[stop.id];
+                const expanded = expandedStopId === stop.id;
+                const isLockedDelivery = stop.stopType === "DELIVERY" && !loadingCompleted;
+                const isLoading = stop.stopType === "LOADING";
+                return (
+                  <li
+                    key={stop.id}
+                    className={cn(
+                      "overflow-hidden rounded-xl border border-border border-l-4",
+                      isLoading ? "border-l-orange-400" : "border-l-sky-400",
                     )}
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs font-bold text-foreground">
-                          {stop.sequence}. {stop.pointName ?? "Titik"}
-                        </span>
-                        <span
-                          className={cn(
-                            "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-                            stop.stopType === "LOADING"
-                              ? "bg-indigo-500/10 text-indigo-600"
-                              : "bg-sky-500/10 text-sky-600",
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setExpandedStopId(expanded ? null : stop.id)}
+                      aria-expanded={expanded}
+                      className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-muted/40"
+                    >
+                      <span
+                        className={cn(
+                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold",
+                          isLoading
+                            ? "bg-orange-500/15 text-orange-600"
+                            : "bg-sky-500/15 text-sky-600",
+                        )}
+                      >
+                        {stop.sequence}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-bold text-foreground">
+                            {stop.pointName ?? "Titik"}
+                          </span>
+                          <EpodStopTypeBadge stopType={stop.stopType} />
+                          {current?.result && <EpodResultBadge result={current.result} />}
+                          {isLoading && current && (
+                            <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600">
+                              Bukti terkirim
+                            </span>
                           )}
-                        >
-                          {stop.stopType === "LOADING" ? "Loading" : "Pengantaran"}
                         </span>
-                        {current?.result && <EpodResultBadge result={current.result} />}
-                        {stop.stopType === "LOADING" && current && (
-                          <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600">
-                            Bukti terkirim
+                        {stop.address && (
+                          <span className="mt-0.5 flex items-start gap-1 text-[11px] text-muted-foreground">
+                            <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
+                            <span className="line-clamp-2">{stop.address}</span>
+                          </span>
+                        )}
+                        {isLoading && (
+                          <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <Package className="h-3 w-3 shrink-0" />
+                            Titik awal · Proses loading barang dari gudang
                           </span>
                         )}
                       </span>
-                      {stop.address && (
-                        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{stop.address}</span>
-                      )}
-                    </span>
-                  </button>
+                      <ChevronRight
+                        className={cn(
+                          "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                          expanded && "rotate-90",
+                        )}
+                      />
+                    </button>
 
-                  {expanded && (
-                    <div className="space-y-3 border-t border-border p-3">
-                      {canManage && assignment.status !== "CANCELLED" && (
-                        <StopSubmissionForm
-                          stop={stop}
-                          loadingCompleted={loadingCompleted}
-                          onSubmitted={refreshAll}
-                        />
-                      )}
-                      {!canManage && isLockedDelivery && (
-                        <p className="text-[11px] text-muted-foreground">
-                          Menunggu bukti loading sebelum pengantaran.
-                        </p>
-                      )}
-                      <EpodEvidenceGallery stopId={stop.id} refreshKey={galleryKey} />
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        </section>
+                    {expanded && (
+                      <div className="space-y-3 border-t border-border p-3">
+                        {canManage && assignment.status !== "CANCELLED" && (
+                          <StopSubmissionForm
+                            stop={stop}
+                            loadingCompleted={loadingCompleted}
+                            onSubmitted={refreshAll}
+                          />
+                        )}
+                        {!canManage && isLockedDelivery && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Menunggu bukti loading sebelum pengantaran.
+                          </p>
+                        )}
+                        <EpodEvidenceGallery stopId={stop.id} refreshKey={galleryKey} />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
 
-        {canManage && assignment.status !== "CANCELLED" && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={cancelling}
-            onClick={() => void cancelAssignment()}
-          >
-            {cancelling ? "Membatalkan…" : "Batalkan assignment"}
-          </Button>
-        )}
+          {canManage && assignment.status !== "CANCELLED" && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              icon={Trash2}
+              disabled={cancelling}
+              onClick={() => void cancelAssignment()}
+              className="border-danger/40 text-danger hover:bg-danger/5"
+            >
+              {cancelling ? "Membatalkan…" : "Batalkan assignment"}
+            </Button>
+          )}
 
-        {error && (
-          <p className="flex items-center gap-1.5 text-[11px] text-danger">
-            <TriangleAlert className="h-3.5 w-3.5" /> {error}
+          {error && (
+            <p className="flex items-center gap-1.5 text-[11px] text-danger">
+              <TriangleAlert className="h-3.5 w-3.5" /> {error}
+            </p>
+          )}
+
+          <p className="text-[10px] text-muted-foreground">
+            Snapshot: {formatDateTime(assignment.snapshotAt)}
+            {locked && " · Terkunci sejak bukti pertama"}
           </p>
-        )}
+        </div>
 
-        <p className="text-[10px] text-muted-foreground">
-          Snapshot: {formatDateTime(assignment.snapshotAt)}
-          {locked && " · Terkunci sejak bukti pertama"}
-        </p>
+        {/* Kolom kanan */}
+        <div className="space-y-5">
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
+              <Truck className="h-4 w-4 text-muted-foreground" /> Informasi Pengiriman
+            </h2>
+            <dl className="mt-2 divide-y divide-border text-xs">
+              <InfoRow icon={Package} label="No. FO" value={assignment.taskNumber ?? assignment.taskId} />
+              <InfoRow icon={Truck} label="No. Kendaraan" value={assignment.licensePlate ?? "–"} />
+              <InfoRow icon={User} label="Nama Driver" value={assignment.vendorDriverName ?? "–"} />
+              <InfoRow icon={MapPin} label="Total Titik" value={`${stops.length} titik`} />
+              <InfoRow
+                icon={RouteIcon}
+                label="e-POD Selesai"
+                value={`${assignment.deliveryDoneCount} dari ${assignment.deliveryTotalCount}`}
+              />
+            </dl>
+          </section>
+        </div>
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import {
   EPOD_RESULT_LABEL,
   type EpodAssignmentStatus,
   type EpodDeliveryResult,
+  type EpodStopType,
 } from "@/lib/tms-epod";
 
 const ASSIGNMENT_TONE: Record<EpodAssignmentStatus, string> = {
@@ -72,6 +73,36 @@ export function EpodLoadingBadge({ completed, className }: { completed: boolean;
       )}
     >
       {completed ? "Loading selesai" : "Loading belum"}
+    </span>
+  );
+}
+
+const STOP_TYPE_LABEL: Record<EpodStopType, string> = {
+  LOADING: "Loading",
+  DELIVERY: "Pengantaran",
+};
+
+const STOP_TYPE_TONE: Record<EpodStopType, string> = {
+  LOADING: "bg-orange-500/10 text-orange-600",
+  DELIVERY: "bg-sky-500/10 text-sky-600",
+};
+
+export function EpodStopTypeBadge({
+  stopType,
+  className,
+}: {
+  stopType: EpodStopType;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap",
+        STOP_TYPE_TONE[stopType],
+        className,
+      )}
+    >
+      {STOP_TYPE_LABEL[stopType]}
     </span>
   );
 }

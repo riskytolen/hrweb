@@ -137,7 +137,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
 
   if (selectedId) {
     return (
-      <div className="h-[calc(100vh-9rem)] overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="space-y-5">
         <EpodStopPanel
           assignmentId={selectedId}
           canManage={canManage}
