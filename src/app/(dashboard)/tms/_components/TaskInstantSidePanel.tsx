@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  ChevronDown,
   Expand,
   Loader2,
   MapPin,
@@ -49,6 +50,7 @@ import {
 } from "@/lib/tms-epod";
 import TaskRouteMap from "./TaskRouteMap";
 import TaskStatusBadge from "./TaskStatusBadge";
+import EpodEvidenceGallery from "./EpodEvidenceGallery";
 
 interface TaskDetailApiResponse {
   data?: unknown;
@@ -218,6 +220,7 @@ function isLatLng(value: unknown): value is LatLng {
 }
 
 interface EpodPointState {
+  stopId: string;
   stopType: EpodStopType;
   submission: EpodSubmission | null;
 }
@@ -308,6 +311,9 @@ function RoutePointList({
   pointTemperatures: Map<number, TmsRoutePointTemperature>;
   epodBySequence: Map<number, EpodPointState>;
 }) {
+  // Titik e-POD yang sedang dibuka detail buktinya.
+  const [expandedStopId, setExpandedStopId] = useState<string | null>(null);
+
   if (points.length === 0) {
     return (
       <p className="py-4 text-center text-xs text-muted-foreground">
@@ -401,16 +407,39 @@ function RoutePointList({
                   )}
                   {epodState && (() => {
                     const label = epodPointLabel(epodState);
+                    if (!epodState.submission) {
+                      return (
+                        <span
+                          className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", label.tone)}
+                          title="Status e-POD titik ini"
+                        >
+                          {label.text}
+                        </span>
+                      );
+                    }
+                    const expanded = expandedStopId === epodState.stopId;
                     return (
-                      <span
-                        className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", label.tone)}
-                        title="Status e-POD titik ini"
+                      <button
+                        type="button"
+                        onClick={() => setExpandedStopId(expanded ? null : epodState.stopId)}
+                        aria-expanded={expanded}
+                        title={expanded ? "Tutup detail e-POD" : "Lihat detail e-POD"}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold transition-colors",
+                          label.tone,
+                        )}
                       >
                         {label.text}
-                      </span>
+                        <ChevronDown className={cn("h-3 w-3 transition-transform", expanded && "rotate-180")} />
+                      </button>
                     );
                   })()}
                 </p>
+                {epodState && epodState.submission && expandedStopId === epodState.stopId && (
+                  <div className="mt-2">
+                    <EpodEvidenceGallery stopId={epodState.stopId} refreshKey={0} />
+                  </div>
+                )}
               </div>
             </li>
           );
@@ -602,6 +631,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     if (!epodSummary) return map;
     for (const stop of epodSummary.stops) {
       map.set(stop.sequence, {
+        stopId: stop.id,
         stopType: stop.stopType,
         submission: epodSummary.currentByStop[stop.id] ?? null,
       });
@@ -1071,6 +1101,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                   </p>
                 )}
                 <RoutePointList
+                  key={item?.id ?? "none"}
                   points={effectiveTimeline}
                   pointTemperatures={pointTemperatureBySequence}
                   epodBySequence={epodBySequence}
