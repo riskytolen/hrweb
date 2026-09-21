@@ -6,6 +6,7 @@ import {
   normalizeEpodStop,
   normalizeEpodSubmission,
   type EpodAssignment,
+  type EpodAssignmentListItem,
   type EpodStop,
   type EpodSubmission,
 } from "./tms-epod";
@@ -14,10 +15,7 @@ const ASSIGNMENTS = "tms_epod_assignments";
 const STOPS = "tms_epod_stops";
 const SUBMISSIONS = "tms_epod_submissions";
 
-export interface EpodAssignmentListItem extends EpodAssignment {
-  driverName: string | null;
-  helperName: string | null;
-}
+export type { EpodAssignmentListItem };
 
 export interface EpodAssignmentDetail {
   assignment: EpodAssignment;

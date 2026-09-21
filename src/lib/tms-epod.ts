@@ -124,6 +124,22 @@ function toBool(value: unknown): boolean | null {
   return null;
 }
 
+/**
+ * Ambil nilai pertama yang ada dari beberapa kunci.
+ *
+ * Normalizer dipakai dua kali: di server untuk baris database (snake_case)
+ * dan di client untuk payload API yang sudah dinormalkan (camelCase). Helper
+ * ini membuat satu normalizer aman untuk kedua bentuk sehingga tidak ada
+ * lagi normalisasi ganda yang saling mengosongkan.
+ */
+function pick(source: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
 const ASSIGNMENT_STATUSES: readonly EpodAssignmentStatus[] = [
   "OPEN",
   "CLAIMED",
@@ -134,106 +150,130 @@ const ASSIGNMENT_STATUSES: readonly EpodAssignmentStatus[] = [
 
 export function normalizeEpodAssignment(raw: unknown): EpodAssignment | null {
   const source = asRecord(raw);
-  const id = toStr(source.id, 60);
-  const taskId = toStr(source.task_id, 100);
+  const id = toStr(pick(source, "id"), 60);
+  const taskId = toStr(pick(source, "task_id", "taskId"), 100);
   if (!id || !taskId) return null;
-  const status = toStr(source.status, 20) as EpodAssignmentStatus | null;
+  const status = toStr(pick(source, "status"), 20) as EpodAssignmentStatus | null;
   return {
     id,
     taskId,
-    taskNumber: toStr(source.task_number, 60),
+    taskNumber: toStr(pick(source, "task_number", "taskNumber"), 60),
     status: status && ASSIGNMENT_STATUSES.includes(status) ? status : "OPEN",
-    taskStatusRaw: toStr(source.task_status_raw, 40),
-    vehicleId: toNum(source.vehicle_id),
-    licensePlate: toStr(source.license_plate, 40),
-    vendorDriverName: toStr(source.vendor_driver_name, 120),
-    driverEmployeeId: toStr(source.driver_employee_id, 60),
-    helperEmployeeId: toStr(source.helper_employee_id, 60),
-    loadingStatus: toStr(source.loading_status, 30) === "LOADING_COMPLETED" ? "LOADING_COMPLETED" : "PENDING_LOADING",
-    loadingCompletedAt: toStr(source.loading_completed_at, 40),
-    deliveryDoneCount: toInt(source.delivery_done_count),
-    deliveryTotalCount: toInt(source.delivery_total_count),
-    snapshotAt: toStr(source.snapshot_at, 40) ?? new Date(0).toISOString(),
-    frozenAt: toStr(source.frozen_at, 40),
-    lastSyncedAt: toStr(source.last_synced_at, 40),
+    taskStatusRaw: toStr(pick(source, "task_status_raw", "taskStatusRaw"), 40),
+    vehicleId: toNum(pick(source, "vehicle_id", "vehicleId")),
+    licensePlate: toStr(pick(source, "license_plate", "licensePlate"), 40),
+    vendorDriverName: toStr(pick(source, "vendor_driver_name", "vendorDriverName"), 120),
+    driverEmployeeId: toStr(pick(source, "driver_employee_id", "driverEmployeeId"), 60),
+    helperEmployeeId: toStr(pick(source, "helper_employee_id", "helperEmployeeId"), 60),
+    loadingStatus:
+      toStr(pick(source, "loading_status", "loadingStatus"), 30) === "LOADING_COMPLETED"
+        ? "LOADING_COMPLETED"
+        : "PENDING_LOADING",
+    loadingCompletedAt: toStr(pick(source, "loading_completed_at", "loadingCompletedAt"), 40),
+    deliveryDoneCount: toInt(pick(source, "delivery_done_count", "deliveryDoneCount")),
+    deliveryTotalCount: toInt(pick(source, "delivery_total_count", "deliveryTotalCount")),
+    snapshotAt: toStr(pick(source, "snapshot_at", "snapshotAt"), 40) ?? new Date(0).toISOString(),
+    frozenAt: toStr(pick(source, "frozen_at", "frozenAt"), 40),
+    lastSyncedAt: toStr(pick(source, "last_synced_at", "lastSyncedAt"), 40),
   };
 }
 
 export function normalizeEpodStop(raw: unknown): EpodStop | null {
   const source = asRecord(raw);
-  const id = toStr(source.id, 60);
-  const assignmentId = toStr(source.assignment_id, 60);
+  const id = toStr(pick(source, "id"), 60);
+  const assignmentId = toStr(pick(source, "assignment_id", "assignmentId"), 60);
   if (!id || !assignmentId) return null;
   return {
     id,
     assignmentId,
-    sequence: toInt(source.stop_sequence),
-    stopType: toStr(source.stop_type, 20) === "LOADING" ? "LOADING" : "DELIVERY",
-    vendorPointId: toStr(source.vendor_point_id, 100),
-    vendorAddressId: toStr(source.vendor_address_id, 100),
-    pointName: toStr(source.point_name, 200),
-    address: toStr(source.address, 300),
-    latitude: toNum(source.latitude),
-    longitude: toNum(source.longitude),
-    arrivalActual: toStr(source.arrival_actual, 40),
-    departureActual: toStr(source.departure_actual, 40),
-    visitStatusRaw: toStr(source.visit_status_raw, 40),
+    sequence: toInt(pick(source, "stop_sequence", "sequence")),
+    stopType: toStr(pick(source, "stop_type", "stopType"), 20) === "LOADING" ? "LOADING" : "DELIVERY",
+    vendorPointId: toStr(pick(source, "vendor_point_id", "vendorPointId"), 100),
+    vendorAddressId: toStr(pick(source, "vendor_address_id", "vendorAddressId"), 100),
+    pointName: toStr(pick(source, "point_name", "pointName"), 200),
+    address: toStr(pick(source, "address"), 300),
+    latitude: toNum(pick(source, "latitude")),
+    longitude: toNum(pick(source, "longitude")),
+    arrivalActual: toStr(pick(source, "arrival_actual", "arrivalActual"), 40),
+    departureActual: toStr(pick(source, "departure_actual", "departureActual"), 40),
+    visitStatusRaw: toStr(pick(source, "visit_status_raw", "visitStatusRaw"), 40),
   };
 }
 
 export function normalizeEpodSubmission(raw: unknown): EpodSubmission | null {
   const source = asRecord(raw);
-  const id = toStr(source.id, 60);
-  const stopId = toStr(source.stop_id, 60);
+  const id = toStr(pick(source, "id"), 60);
+  const stopId = toStr(pick(source, "stop_id", "stopId"), 60);
   if (!id || !stopId) return null;
-  const result = toStr(source.result, 20);
-  const actorType = toStr(source.actor_type, 20);
-  const sourceType = toStr(source.source, 20);
+  const result = toStr(pick(source, "result"), 20);
+  const actorType = toStr(pick(source, "actor_type", "actorType"), 20);
+  const sourceType = toStr(pick(source, "source"), 20);
   return {
     id,
     stopId,
-    version: toInt(source.version, 1),
+    version: toInt(pick(source, "version"), 1),
     result: result === "DELIVERED" || result === "PARTIAL" || result === "REJECTED" ? result : null,
-    recipientName: toStr(source.recipient_name, 200),
-    note: toStr(source.note, 1000),
-    latitude: toNum(source.latitude),
-    longitude: toNum(source.longitude),
-    accuracyMeters: toNum(source.accuracy_meters),
-    distanceMeters: toNum(source.distance_meters),
-    geofenceOk: toBool(source.geofence_ok),
-    outOfRadiusReason: toStr(source.out_of_radius_reason, 500),
-    capturedAtDevice: toStr(source.captured_at_device, 40),
-    capturedAtServer: toStr(source.captured_at_server, 40) ?? new Date(0).toISOString(),
-    actorType:
-      actorType === "DRIVER" || actorType === "HELPER" ? actorType : "WEB_ADMIN",
-    actorEmployeeId: toStr(source.actor_employee_id, 60),
+    recipientName: toStr(pick(source, "recipient_name", "recipientName"), 200),
+    note: toStr(pick(source, "note"), 1000),
+    latitude: toNum(pick(source, "latitude")),
+    longitude: toNum(pick(source, "longitude")),
+    accuracyMeters: toNum(pick(source, "accuracy_meters", "accuracyMeters")),
+    distanceMeters: toNum(pick(source, "distance_meters", "distanceMeters")),
+    geofenceOk: toBool(pick(source, "geofence_ok", "geofenceOk")),
+    outOfRadiusReason: toStr(pick(source, "out_of_radius_reason", "outOfRadiusReason"), 500),
+    capturedAtDevice: toStr(pick(source, "captured_at_device", "capturedAtDevice"), 40),
+    capturedAtServer: toStr(pick(source, "captured_at_server", "capturedAtServer"), 40) ?? new Date(0).toISOString(),
+    actorType: actorType === "DRIVER" || actorType === "HELPER" ? actorType : "WEB_ADMIN",
+    actorEmployeeId: toStr(pick(source, "actor_employee_id", "actorEmployeeId"), 60),
     source: sourceType === "MOBILE" ? "MOBILE" : "WEB",
-    isCurrent: source.is_current !== false,
-    evidencePurgedAt: toStr(source.evidence_purged_at, 40),
+    isCurrent: pick(source, "is_current", "isCurrent") !== false,
+    evidencePurgedAt: toStr(pick(source, "evidence_purged_at", "evidencePurgedAt"), 40),
   };
 }
 
 export function normalizeEpodEvidence(raw: unknown): EpodEvidence | null {
   const source = asRecord(raw);
-  const id = toStr(source.id, 60);
-  const submissionId = toStr(source.submission_id, 60);
-  const objectPath = toStr(source.object_path, 500);
+  const id = toStr(pick(source, "id"), 60);
+  const submissionId = toStr(pick(source, "submission_id", "submissionId"), 60);
+  const objectPath = toStr(pick(source, "object_path", "objectPath"), 500);
   if (!id || !submissionId || !objectPath) return null;
   return {
     id,
     submissionId,
-    bucketId: toStr(source.bucket_id, 100) ?? TMS_EPOD_BUCKET,
+    bucketId: toStr(pick(source, "bucket_id", "bucketId"), 100) ?? TMS_EPOD_BUCKET,
     objectPath,
-    mimeType: toStr(source.mime_type, 100),
-    sizeBytes: toNum(source.size_bytes),
-    originalFilename: toStr(source.original_filename, 200),
-    sortOrder: toInt(source.sort_order),
+    mimeType: toStr(pick(source, "mime_type", "mimeType"), 100),
+    sizeBytes: toNum(pick(source, "size_bytes", "sizeBytes")),
+    originalFilename: toStr(pick(source, "original_filename", "originalFilename"), 200),
+    sortOrder: toInt(pick(source, "sort_order", "sortOrder")),
   };
 }
 
-export function normalizeEpodAssignmentList(value: unknown): EpodAssignment[] {
+/**
+ * Item daftar e-POD: assignment ditambah nama driver/helper hasil join.
+ * Bentuk ini adalah kontrak respons `GET /api/tms/epod`.
+ */
+export interface EpodAssignmentListItem extends EpodAssignment {
+  driverName: string | null;
+  helperName: string | null;
+}
+
+export function normalizeEpodAssignmentListItem(raw: unknown): EpodAssignmentListItem | null {
+  const base = normalizeEpodAssignment(raw);
+  if (!base) return null;
+  const source = asRecord(raw);
+  return {
+    ...base,
+    driverName: toStr(pick(source, "driver_name", "driverName"), 120),
+    helperName: toStr(pick(source, "helper_name", "helperName"), 120),
+  };
+}
+
+export function normalizeEpodAssignmentList(value: unknown): EpodAssignmentListItem[] {
   if (!Array.isArray(value)) return [];
-  return value.map(normalizeEpodAssignment).filter((item): item is EpodAssignment => item !== null);
+  return value
+    .map(normalizeEpodAssignmentListItem)
+    .filter((item): item is EpodAssignmentListItem => item !== null);
 }
 
 // ─── Aturan bisnis ───

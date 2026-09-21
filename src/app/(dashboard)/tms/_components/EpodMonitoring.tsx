@@ -18,16 +18,11 @@ import { cn } from "@/lib/utils";
 import { canManageTmsEpod, canViewTmsEpod } from "@/lib/permissions";
 import {
   normalizeEpodAssignmentList,
-  type EpodAssignment,
+  type EpodAssignmentListItem,
   type EpodAssignmentStatus,
 } from "@/lib/tms-epod";
 import { EpodAssignmentBadge } from "./EpodStatusBadge";
 import EpodStopPanel from "./EpodStopPanel";
-
-interface AssignmentListItem extends EpodAssignment {
-  driverName: string | null;
-  helperName: string | null;
-}
 
 interface StatusCounts {
   open: number;
@@ -89,7 +84,7 @@ function KpiCard({
 }
 
 function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
-  const [items, setItems] = useState<AssignmentListItem[]>([]);
+  const [items, setItems] = useState<EpodAssignmentListItem[]>([]);
   const [counts, setCounts] = useState<StatusCounts | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -118,7 +113,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
         setItems([]);
         return;
       }
-      setItems(normalizeEpodAssignmentList(payload.data) as AssignmentListItem[]);
+      setItems(normalizeEpodAssignmentList(payload.data));
       setCounts(payload.meta?.counts ?? null);
       setTotal(payload.meta?.total ?? 0);
     } catch {

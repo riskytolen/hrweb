@@ -214,6 +214,93 @@ describe("normalizer baris database", () => {
   });
 });
 
+/**
+ * Regresi: Route Handler mengembalikan payload yang SUDAH dinormalkan
+ * (camelCase). Normalizer yang sama dipakai ulang di client, jadi ia wajib
+ * menerima kedua bentuk. Sebelumnya bentuk camelCase menghasilkan array
+ * kosong sehingga tabel e-POD tidak menampilkan data.
+ */
+describe("normalizer menerima payload API (camelCase)", () => {
+  it("menormalkan item daftar beserta nama driver dan helper", () => {
+    const items = normalizeEpodAssignmentList([
+      {
+        id: "a1",
+        taskId: "t1",
+        taskNumber: "FO-1",
+        status: "IN_PROGRESS",
+        loadingStatus: "LOADING_COMPLETED",
+        deliveryDoneCount: 3,
+        deliveryTotalCount: 6,
+        snapshotAt: "2026-09-22T00:00:00Z",
+        driverName: "Andi",
+        helperName: "Budi",
+      },
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0].taskId).toBe("t1");
+    expect(items[0].status).toBe("IN_PROGRESS");
+    expect(items[0].loadingStatus).toBe("LOADING_COMPLETED");
+    expect(items[0].deliveryDoneCount).toBe(3);
+    expect(items[0].deliveryTotalCount).toBe(6);
+    expect(items[0].driverName).toBe("Andi");
+    expect(items[0].helperName).toBe("Budi");
+  });
+
+  it("menormalkan stop camelCase", () => {
+    const stop = normalizeEpodStop({
+      id: "s1",
+      assignmentId: "a1",
+      sequence: 1,
+      stopType: "LOADING",
+      vendorPointId: "p1",
+      pointName: "Gudang",
+      latitude: -6.2,
+      longitude: 106.8,
+    });
+    expect(stop?.assignmentId).toBe("a1");
+    expect(stop?.sequence).toBe(1);
+    expect(stop?.stopType).toBe("LOADING");
+    expect(stop?.vendorPointId).toBe("p1");
+    expect(stop?.pointName).toBe("Gudang");
+  });
+
+  it("menormalkan submission camelCase", () => {
+    const submission = normalizeEpodSubmission({
+      id: "sub1",
+      stopId: "s1",
+      version: 2,
+      result: "PARTIAL",
+      distanceMeters: 123.4,
+      geofenceOk: false,
+      capturedAtServer: "2026-09-22T01:00:00Z",
+      actorType: "DRIVER",
+      isCurrent: true,
+    });
+    expect(submission?.stopId).toBe("s1");
+    expect(submission?.result).toBe("PARTIAL");
+    expect(submission?.distanceMeters).toBeCloseTo(123.4, 3);
+    expect(submission?.geofenceOk).toBe(false);
+    expect(submission?.actorType).toBe("DRIVER");
+    expect(submission?.capturedAtServer).toBe("2026-09-22T01:00:00Z");
+  });
+
+  it("menormalkan evidence camelCase", () => {
+    const evidence = normalizeEpodEvidence({
+      id: "e1",
+      submissionId: "sub1",
+      bucketId: "tms-epod-evidence",
+      objectPath: "assignments/a1/stops/s1/foto.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 1024,
+      sortOrder: 0,
+    });
+    expect(evidence?.submissionId).toBe("sub1");
+    expect(evidence?.objectPath).toBe("assignments/a1/stops/s1/foto.jpg");
+    expect(evidence?.sizeBytes).toBe(1024);
+  });
+});
+
 describe("formatDistance", () => {
   it("memformat meter dan kilometer", () => {
     expect(formatDistance(250)).toBe("250 m");
