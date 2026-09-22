@@ -108,18 +108,6 @@ const allSections: MenuSection[] = [
       },
       {
         kind: "group",
-        key: "operasional-kendaraan",
-        label: "Operasional Kendaraan",
-        icon: Gauge,
-        basePath: "/operasional-kendaraan",
-        items: [
-          { name: "Dashboard", href: "/operasional-kendaraan/dashboard", icon: Gauge, permission: "vehicle-odometer" },
-          { name: "Input Odometer", href: "/operasional-kendaraan/input", icon: ClipboardList, permission: "vehicle-odometer.manage" },
-          { name: "Laporan", href: "/operasional-kendaraan/laporan", icon: FileSpreadsheet, permission: "vehicle-odometer" },
-        ],
-      },
-      {
-        kind: "group",
         key: "hrm",
         label: "HRM",
         icon: UsersRound,
@@ -184,6 +172,9 @@ const allSections: MenuSection[] = [
           { name: "Live View", href: "/tms/live-view", icon: Satellite, permission: "tms" },
           { name: "Live Track Task", href: "/tms/live-track-task", icon: Route, permission: "tms" },
           { name: "Monitoring e-POD", href: "/tms/epod", icon: PackageCheck, permission: "tms.epod" },
+          { name: "Dashboard Kendaraan", href: "/operasional-kendaraan/dashboard", icon: Gauge, permission: "vehicle-odometer" },
+          { name: "Input Odometer", href: "/operasional-kendaraan/input", icon: ClipboardList, permission: "vehicle-odometer.manage" },
+          { name: "Laporan Kendaraan", href: "/operasional-kendaraan/laporan", icon: FileSpreadsheet, permission: "vehicle-odometer" },
         ],
       },
     ],

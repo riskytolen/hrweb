@@ -82,27 +82,64 @@ interface Toast {
 }
 
 // ─── Permission Options ───
-const PERMISSION_OPTIONS = [
-  { key: "dashboard", label: "Dashboard" },
-  { key: "employees", label: "Data Pegawai" },
-  { key: "attendance", label: "Absensi" },
-  { key: "leave", label: "Cuti & Izin" },
-  { key: "overtime", label: "Lembur" },
-  { key: "income", label: "Rekap Titik" },
-  { key: "payroll", label: "Penggajian" },
-  { key: "recruitment", label: "Rekrutmen" },
-  { key: "performance", label: "Kinerja" },
-  { key: "legal", label: "Legal & Administrasi" },
-  { key: "announcements", label: "Pengumuman" },
-  { key: "petty-cash", label: "Petty Cash" },
-  { key: "data-mobil", label: "Data Mobil" },
-  { key: "inventory-aset", label: "Aset" },
-  { key: "vehicle-odometer", label: "Operasional Kendaraan" },
-  { key: "tms", label: "TMS" },
-  { key: "finance", label: "Finance" },
-  { key: "legalitas", label: "Legalitas" },
-  { key: "settings", label: "Pengaturan" },
+// Dikelompokkan per section agar sesuai struktur menu sidebar. Operasional
+// Kendaraan berada di dalam TMS karena menunya tampil di grup TMS.
+interface PermissionOption {
+  key: string;
+  label: string;
+}
+
+interface PermissionSection {
+  title: string;
+  options: PermissionOption[];
+}
+
+const PERMISSION_SECTIONS: PermissionSection[] = [
+  { title: "Umum", options: [{ key: "dashboard", label: "Dashboard" }] },
+  {
+    title: "HRM",
+    options: [
+      { key: "employees", label: "Data Pegawai" },
+      { key: "attendance", label: "Absensi" },
+      { key: "leave", label: "Cuti & Izin" },
+      { key: "overtime", label: "Lembur" },
+      { key: "income", label: "Rekap Titik" },
+      { key: "payroll", label: "Penggajian" },
+      { key: "recruitment", label: "Rekrutmen" },
+      { key: "performance", label: "Kinerja" },
+      { key: "legal", label: "Legal & Administrasi" },
+      { key: "announcements", label: "Pengumuman" },
+    ],
+  },
+  {
+    title: "General Affair",
+    options: [
+      { key: "petty-cash", label: "Petty Cash" },
+      { key: "data-mobil", label: "Data Mobil" },
+      { key: "inventory-aset", label: "Aset" },
+    ],
+  },
+  {
+    title: "TMS",
+    options: [
+      { key: "tms", label: "TMS (Live View & Track)" },
+      { key: "vehicle-odometer", label: "Operasional Kendaraan" },
+    ],
+  },
+  { title: "Finance", options: [{ key: "finance", label: "Finance" }] },
+  {
+    title: "Lainnya",
+    options: [
+      { key: "legalitas", label: "Legalitas" },
+      { key: "settings", label: "Pengaturan" },
+    ],
+  },
 ];
+
+// Daftar flat untuk lookup label (badge role, dsb).
+const PERMISSION_OPTIONS: PermissionOption[] = PERMISSION_SECTIONS.flatMap(
+  (section) => section.options,
+);
 
 /** Label khusus permission e-POD yang punya mode sendiri (Lihat/Kelola). */
 const EPOD_PERMISSION_LABELS: Record<string, string> = {
@@ -578,6 +615,104 @@ export default function AccountsPage() {
       if (state === "manage") return { ...prev, permissions: [...cleaned, "tms.epod.manage"] };
       return { ...prev, permissions: cleaned };
     });
+  };
+
+  // Baris satu modul dengan mode Tidak Tampil / Lihat / Input / Edit.
+  const renderModuleRow = (opt: PermissionOption) => {
+    const state = getPermissionState(opt.key);
+    return (
+      <div
+        key={opt.key}
+        className={cn(
+          "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+          state === "edit"
+            ? "border-primary/30 bg-primary/5"
+            : state === "input"
+              ? "border-emerald-500/30 bg-emerald-500/5"
+              : state === "view"
+                ? "border-amber-500/30 bg-amber-500/5"
+                : "border-border"
+        )}
+      >
+        <span className="text-xs font-medium text-foreground">{opt.label}</span>
+        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+          {([
+            { value: "none" as const, label: "Tidak Tampil" },
+            { value: "view" as const, label: "Lihat" },
+            { value: "input" as const, label: "Input" },
+            { value: "edit" as const, label: "Edit" },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => setPermissionState(opt.key, s.value)}
+              className={cn(
+                "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                state === s.value
+                  ? s.value === "edit"
+                    ? "bg-primary text-white shadow-sm"
+                    : s.value === "input"
+                      ? "bg-emerald-500 text-white shadow-sm"
+                      : s.value === "view"
+                        ? "bg-amber-500 text-white shadow-sm"
+                        : "bg-card text-muted-foreground shadow-sm"
+                  : "text-muted-foreground/60 hover:text-muted-foreground"
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Baris khusus TMS e-POD: mode Tidak Tampil / Lihat / Kelola.
+  const renderEpodRow = () => {
+    const epodState = getEpodState();
+    return (
+      <div
+        key="tms.epod"
+        className={cn(
+          "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+          epodState === "manage"
+            ? "border-primary/30 bg-primary/5"
+            : epodState === "view"
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-border"
+        )}
+      >
+        <div>
+          <span className="text-xs font-medium text-foreground">TMS e-POD</span>
+          <p className="text-[10px] text-muted-foreground">Monitoring & kelola bukti pengiriman</p>
+        </div>
+        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+          {([
+            { value: "none" as const, label: "Tidak Tampil" },
+            { value: "view" as const, label: "Lihat" },
+            { value: "manage" as const, label: "Kelola" },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => setEpodState(s.value)}
+              className={cn(
+                "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                epodState === s.value
+                  ? s.value === "manage"
+                    ? "bg-primary text-white shadow-sm"
+                    : s.value === "view"
+                      ? "bg-amber-500 text-white shadow-sm"
+                      : "bg-card text-muted-foreground shadow-sm"
+                  : "text-muted-foreground/60 hover:text-muted-foreground"
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   // ─── Filter (memoized) ───
@@ -1557,102 +1692,17 @@ export default function AccountsPage() {
                   </label>
 
                   {!roleForm.permissions.includes("all") && (
-                    <div className="space-y-1.5">
-                      {PERMISSION_OPTIONS.map((opt) => {
-                        const state = getPermissionState(opt.key);
-                        return (
-                          <div
-                            key={opt.key}
-                            className={cn(
-                              "flex items-center justify-between p-2.5 rounded-xl border transition-all",
-                              state === "edit"
-                                ? "border-primary/30 bg-primary/5"
-                                : state === "input"
-                                  ? "border-emerald-500/30 bg-emerald-500/5"
-                                  : state === "view"
-                                    ? "border-amber-500/30 bg-amber-500/5"
-                                    : "border-border"
-                            )}
-                          >
-                            <span className="text-xs font-medium text-foreground">{opt.label}</span>
-                            <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
-                              {([
-                                { value: "none" as const, label: "Tidak Tampil" },
-                                { value: "view" as const, label: "Lihat" },
-                                { value: "input" as const, label: "Input" },
-                                { value: "edit" as const, label: "Edit" },
-                              ]).map((s) => (
-                                <button
-                                  key={s.value}
-                                  type="button"
-                                  onClick={() => setPermissionState(opt.key, s.value)}
-                                  className={cn(
-                                    "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
-                                    state === s.value
-                                      ? s.value === "edit"
-                                        ? "bg-primary text-white shadow-sm"
-                                        : s.value === "input"
-                                          ? "bg-emerald-500 text-white shadow-sm"
-                                          : s.value === "view"
-                                            ? "bg-amber-500 text-white shadow-sm"
-                                            : "bg-card text-muted-foreground shadow-sm"
-                                      : "text-muted-foreground/60 hover:text-muted-foreground"
-                                  )}
-                                >
-                                  {s.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {/* e-POD: mode khusus Lihat / Kelola */}
-                      {(() => {
-                        const epodState = getEpodState();
-                        return (
-                          <div
-                            className={cn(
-                              "flex items-center justify-between p-2.5 rounded-xl border transition-all",
-                              epodState === "manage"
-                                ? "border-primary/30 bg-primary/5"
-                                : epodState === "view"
-                                  ? "border-amber-500/30 bg-amber-500/5"
-                                  : "border-border"
-                            )}
-                          >
-                            <div>
-                              <span className="text-xs font-medium text-foreground">TMS e-POD</span>
-                              <p className="text-[10px] text-muted-foreground">Monitoring & kelola bukti pengiriman</p>
-                            </div>
-                            <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
-                              {([
-                                { value: "none" as const, label: "Tidak Tampil" },
-                                { value: "view" as const, label: "Lihat" },
-                                { value: "manage" as const, label: "Kelola" },
-                              ]).map((s) => (
-                                <button
-                                  key={s.value}
-                                  type="button"
-                                  onClick={() => setEpodState(s.value)}
-                                  className={cn(
-                                    "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
-                                    epodState === s.value
-                                      ? s.value === "manage"
-                                        ? "bg-primary text-white shadow-sm"
-                                        : s.value === "view"
-                                          ? "bg-amber-500 text-white shadow-sm"
-                                          : "bg-card text-muted-foreground shadow-sm"
-                                      : "text-muted-foreground/60 hover:text-muted-foreground"
-                                  )}
-                                >
-                                  {s.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })()}
+                    <div className="space-y-3">
+                      {PERMISSION_SECTIONS.map((section) => (
+                        <div key={section.title} className="space-y-1.5">
+                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                            {section.title}
+                          </p>
+                          {section.options.map((opt) => renderModuleRow(opt))}
+                          {/* TMS e-POD memakai mode khusus Lihat / Kelola. */}
+                          {section.title === "TMS" && renderEpodRow()}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
