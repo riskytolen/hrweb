@@ -12,11 +12,16 @@ import {
   type EpodStop,
   type EpodSubmission,
 } from "./tms-epod";
+import {
+  normalizePointTemperatureList,
+  type TmsRoutePointTemperature,
+} from "./tms-point-temperature";
 
 const ASSIGNMENTS = "tms_epod_assignments";
 const STOPS = "tms_epod_stops";
 const SUBMISSIONS = "tms_epod_submissions";
 const EVIDENCE = "tms_epod_evidence";
+const POINT_TEMPERATURES = "tms_route_point_temperatures";
 
 /** Masa berlaku signed URL foto pada laporan PDF. */
 const EXPORT_SIGNED_URL_TTL_SECONDS = 600;
@@ -293,11 +298,14 @@ export interface EpodExportEvidence extends EpodEvidence {
 export interface EpodAssignmentExport extends EpodAssignmentDetail {
   /** Foto per submission aktif, sudah dilengkapi signed URL untuk laporan PDF. */
   evidenceBySubmission: Record<string, EpodExportEvidence[]>;
+  /** Snapshot suhu kendaraan per titik rute (hasil capture otomatis). */
+  pointTemperatures: TmsRoutePointTemperature[];
 }
 
 /**
  * Data lengkap satu assignment untuk laporan PDF: ringkasan, seluruh titik,
- * submission aktif tiap titik, dan foto buktinya (signed URL 10 menit).
+ * submission aktif tiap titik, foto bukti (signed URL 10 menit), dan suhu
+ * kendaraan per titik rute.
  */
 export async function getAssignmentExportData(
   assignmentId: string,
@@ -331,5 +339,12 @@ export async function getAssignmentExportData(
     }
   }
 
-  return { ...detail, evidenceBySubmission };
+  const { data: temperatureRows, error: temperatureError } = await admin
+    .from(POINT_TEMPERATURES)
+    .select("*")
+    .eq("task_id", detail.assignment.taskId);
+  if (temperatureError) throw new Error(temperatureError.message);
+  const pointTemperatures = normalizePointTemperatureList(temperatureRows);
+
+  return { ...detail, evidenceBySubmission, pointTemperatures };
 }

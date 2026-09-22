@@ -349,13 +349,28 @@ describe("GET /api/tms/epod/by-task/[taskId]/export", () => {
       stops: [],
       currentByStop: {},
       evidenceBySubmission: {},
+      pointTemperatures: [
+        {
+          taskId: "t1",
+          routeSequence: 2,
+          pointName: "Toko A",
+          temperatures: [18.9],
+          measuredAt: "2026-09-22T03:15:00Z",
+          arrivalActual: null,
+          distanceMeters: 12.4,
+          capturedAt: "2026-09-22T03:15:01Z",
+        },
+      ],
     } as never);
 
     const response = await exportEpod(new NextRequest("http://localhost/api/tms/epod/by-task/t1/export"), context);
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(getAssignmentExportDataMock).toHaveBeenCalledWith("a1");
-    const payload = (await response.json()) as { data: { driverName: string | null } };
+    const payload = (await response.json()) as {
+      data: { driverName: string | null; pointTemperatures: unknown[] };
+    };
     expect(payload.data.driverName).toBe("Andi");
+    expect(payload.data.pointTemperatures).toHaveLength(1);
   });
 });

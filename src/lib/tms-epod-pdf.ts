@@ -15,6 +15,11 @@ import {
   type EpodStop,
   type EpodSubmission,
 } from "./tms-epod";
+import {
+  formatCapturedPointTemperature,
+  indexPointTemperaturesBySequence,
+  type TmsRoutePointTemperature,
+} from "./tms-point-temperature";
 
 /** Lebar maksimum sisi foto di dalam PDF (px). */
 const PHOTO_MAX_DIMENSION = 1280;
@@ -34,6 +39,7 @@ export interface EpodAssignmentExportData {
   stops: EpodStop[];
   currentByStop: Record<string, EpodSubmission>;
   evidenceBySubmission: Record<string, EpodExportEvidence[]>;
+  pointTemperatures: TmsRoutePointTemperature[];
 }
 
 export async function fetchEpodExportData(taskId: string): Promise<EpodAssignmentExportData> {
@@ -122,7 +128,8 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
   const contentWidth = pageWidth - margin * 2;
   const bottomLimit = pageHeight - 18;
   const accent: [number, number, number] = [41, 128, 185];
-  const { assignment, driverName, helperName, stops, currentByStop, evidenceBySubmission } = data;
+  const { assignment, driverName, helperName, stops, currentByStop, evidenceBySubmission, pointTemperatures } = data;
+  const temperatureBySequence = indexPointTemperaturesBySequence(pointTemperatures);
   let y = margin;
 
   const newPage = () => {
@@ -279,6 +286,15 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
       `Titik ${stop.sequence} — ${stop.pointName ?? "Titik"} (${isDelivery ? "Pengantaran" : "Loading"})`,
     );
     labelValue("Alamat", stop.address ?? "-");
+
+    const temperature = temperatureBySequence.get(stop.sequence);
+    const temperatureLabel = formatCapturedPointTemperature(temperature);
+    if (temperature && temperatureLabel) {
+      labelValue(
+        "Suhu kendaraan",
+        `${temperatureLabel} (diukur ${formatDateTime(temperature.measuredAt)})`,
+      );
+    }
 
     if (!submission) {
       paragraph("Belum ada bukti e-POD untuk titik ini.");
