@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  filledEpodItems,
   formatDistance,
   haversineMeters,
   normalizeEpodAssignment,
@@ -8,6 +9,7 @@ import {
   normalizeEpodStop,
   normalizeEpodSubmission,
   resolveLoadingStopSequence,
+  toEpodItemPayload,
   validateEpodSubmission,
   TMS_EPOD_GEOFENCE_METERS,
   TMS_EPOD_RETENTION_MONTHS,
@@ -86,6 +88,7 @@ function validInput(overrides: Partial<EpodSubmissionInput> = {}): EpodSubmissio
     longitude: 106.8,
     distanceMeters: 10,
     outOfRadiusReason: "",
+    items: [{ name: "Kopi Arabika", quantity: "2", unit: "karton" }],
     ...overrides,
   };
 }
@@ -139,6 +142,66 @@ describe("validateEpodSubmission", () => {
     const input = validInput({ distanceMeters: TMS_EPOD_GEOFENCE_METERS + 1 });
     expect(validateEpodSubmission(input)).toContain("Alasan");
     expect(validateEpodSubmission({ ...input, outOfRadiusReason: "jalan buntu" })).toBeNull();
+  });
+
+  it("mewajibkan minimal satu barang pada pengantaran", () => {
+    expect(validateEpodSubmission(validInput({ items: [] }))).toContain("Minimal satu barang");
+  });
+
+  it("menolak barang tanpa nama atau kuantitas tidak valid", () => {
+    expect(validateEpodSubmission(validInput({ items: [{ name: "  ", quantity: "2", unit: "" }] }))).toContain(
+      "Nama barang",
+    );
+    expect(validateEpodSubmission(validInput({ items: [{ name: "Kopi", quantity: "0", unit: "" }] }))).toContain(
+      "Kuantitas",
+    );
+    expect(validateEpodSubmission(validInput({ items: [{ name: "Kopi", quantity: "abc", unit: "" }] }))).toContain(
+      "Kuantitas",
+    );
+  });
+
+  it("tidak mewajibkan barang pada titik loading", () => {
+    expect(
+      validateEpodSubmission(
+        validInput({ stopType: "LOADING", result: null, recipientName: "", items: [] }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("helper barang e-POD", () => {
+  it("menyaring baris kosong", () => {
+    const filled = filledEpodItems([
+      { name: "Kopi", quantity: "2", unit: "" },
+      { name: "", quantity: "", unit: "" },
+    ]);
+    expect(filled).toHaveLength(1);
+  });
+
+  it("mengubah input menjadi payload angka", () => {
+    expect(
+      toEpodItemPayload([
+        { name: " Kopi ", quantity: "2.5", unit: " karton " },
+        { name: "", quantity: "", unit: "" },
+      ]),
+    ).toEqual([{ name: "Kopi", quantity: 2.5, unit: "karton" }]);
+  });
+
+  it("menormalisasi daftar barang dari payload submission", () => {
+    const submission = normalizeEpodSubmission({
+      id: "sub1",
+      stop_id: "s1",
+      items: [
+        { name: "Kopi", quantity: 2, unit: "karton" },
+        { name: "Gula", quantity: "1.5", unit: null },
+        { name: "", quantity: 3 },
+        { name: "Tanpa kuantitas" },
+      ],
+    });
+    expect(submission?.items).toEqual([
+      { name: "Kopi", quantity: 2, unit: "karton" },
+      { name: "Gula", quantity: 1.5, unit: null },
+    ]);
   });
 });
 

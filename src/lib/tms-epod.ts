@@ -12,6 +12,7 @@ import type { FleetTaskTimelinePoint } from "./fleet-task-track";
 export const TMS_EPOD_BUCKET = "tms-epod-evidence";
 export const TMS_EPOD_MIN_PHOTOS = 1;
 export const TMS_EPOD_MAX_PHOTOS = 5;
+export const TMS_EPOD_MAX_ITEMS = 20;
 export const TMS_EPOD_MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 export const TMS_EPOD_COMPRESS_KB = 1024;
 export const TMS_EPOD_GEOFENCE_METERS = 500;
@@ -63,6 +64,13 @@ export interface EpodStop {
   visitStatusRaw: string | null;
 }
 
+/** Satu barang yang diantar pada sebuah titik pengantaran. */
+export interface EpodItem {
+  name: string;
+  quantity: number;
+  unit: string | null;
+}
+
 export interface EpodSubmission {
   id: string;
   stopId: string;
@@ -70,6 +78,7 @@ export interface EpodSubmission {
   result: EpodDeliveryResult | null;
   recipientName: string | null;
   note: string | null;
+  items: EpodItem[];
   latitude: number | null;
   longitude: number | null;
   accuracyMeters: number | null;
@@ -138,6 +147,21 @@ function pick(source: Record<string, unknown>, ...keys: string[]): unknown {
     if (value !== undefined && value !== null) return value;
   }
   return undefined;
+}
+
+/** Normalisasi daftar barang dari payload submission. */
+function normalizeEpodItems(value: unknown): EpodItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: EpodItem[] = [];
+  for (const entry of value) {
+    const source = asRecord(entry);
+    const name = toStr(pick(source, "name"), 200);
+    const quantity = toNum(pick(source, "quantity", "qty"));
+    if (!name || quantity === null || quantity <= 0) continue;
+    items.push({ name, quantity, unit: toStr(pick(source, "unit"), 40) });
+    if (items.length >= TMS_EPOD_MAX_ITEMS) break;
+  }
+  return items;
 }
 
 const ASSIGNMENT_STATUSES: readonly EpodAssignmentStatus[] = [
@@ -215,6 +239,7 @@ export function normalizeEpodSubmission(raw: unknown): EpodSubmission | null {
     result: result === "DELIVERED" || result === "PARTIAL" || result === "REJECTED" ? result : null,
     recipientName: toStr(pick(source, "recipient_name", "recipientName"), 200),
     note: toStr(pick(source, "note"), 1000),
+    items: normalizeEpodItems(pick(source, "items")),
     latitude: toNum(pick(source, "latitude")),
     longitude: toNum(pick(source, "longitude")),
     accuracyMeters: toNum(pick(source, "accuracy_meters", "accuracyMeters")),
@@ -307,6 +332,13 @@ export function haversineMeters(
   return earthRadius * 2 * Math.asin(Math.sqrt(a));
 }
 
+/** Nilai mentah baris barang dari form (kuantitas masih berupa teks). */
+export interface EpodItemInput {
+  name: string;
+  quantity: string;
+  unit: string;
+}
+
 export interface EpodSubmissionInput {
   stopType: EpodStopType;
   result: EpodDeliveryResult | null;
@@ -317,6 +349,41 @@ export interface EpodSubmissionInput {
   longitude: number | null;
   distanceMeters: number | null;
   outOfRadiusReason: string;
+  items: EpodItemInput[];
+}
+
+/** Baris yang benar-benar diisi pengguna (mengabaikan baris kosong). */
+export function filledEpodItems(items: EpodItemInput[]): EpodItemInput[] {
+  return items.filter((item) => item.name.trim() || item.quantity.trim() || item.unit.trim());
+}
+
+/** Ubah input form menjadi payload yang dikirim ke API. */
+export function toEpodItemPayload(
+  items: EpodItemInput[],
+): { name: string; quantity: number; unit: string | null }[] {
+  return filledEpodItems(items).map((item) => ({
+    name: item.name.trim(),
+    quantity: Number(item.quantity),
+    unit: item.unit.trim() || null,
+  }));
+}
+
+/** Validasi daftar barang: wajib minimal 1, nama terisi, kuantitas > 0. */
+export function validateEpodItems(items: EpodItemInput[]): string | null {
+  const filled = filledEpodItems(items);
+  if (filled.length < 1) return "Minimal satu barang wajib diisi.";
+  if (filled.length > TMS_EPOD_MAX_ITEMS) {
+    return `Jumlah barang maksimal ${TMS_EPOD_MAX_ITEMS}.`;
+  }
+  for (const item of filled) {
+    const name = item.name.trim();
+    if (!name) return "Nama barang wajib diisi.";
+    const quantity = Number(item.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return `Kuantitas barang "${name}" harus lebih dari 0.`;
+    }
+  }
+  return null;
 }
 
 /** Validasi bersama client & server. Mengembalikan pesan error atau null. */
@@ -332,6 +399,8 @@ export function validateEpodSubmission(input: EpodSubmissionInput): string | nul
     return null;
   }
   if (input.result === null) return "Hasil pengiriman wajib dipilih.";
+  const itemsError = validateEpodItems(input.items);
+  if (itemsError) return itemsError;
   if (input.result !== "REJECTED" && !input.recipientName.trim()) {
     return "Nama penerima wajib diisi.";
   }

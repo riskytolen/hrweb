@@ -10,6 +10,7 @@ import {
   Loader2,
   MapPin,
   Package,
+  Plus,
   RefreshCw,
   Route as RouteIcon,
   Trash2,
@@ -24,14 +25,18 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase-browser";
 import { compressFile, formatFileSize } from "@/lib/file-compression";
 import {
+  filledEpodItems,
   formatDistance,
   haversineMeters,
+  toEpodItemPayload,
   TMS_EPOD_COMPRESS_KB,
   TMS_EPOD_GEOFENCE_METERS,
+  TMS_EPOD_MAX_ITEMS,
   TMS_EPOD_MAX_PHOTOS,
   validateEpodSubmission,
   type EpodAssignment,
   type EpodDeliveryResult,
+  type EpodItemInput,
   type EpodStop,
   type EpodSubmission,
 } from "@/lib/tms-epod";
@@ -227,6 +232,7 @@ function StopSubmissionForm({
   const [result, setResult] = useState<EpodDeliveryResult>("DELIVERED");
   const [recipientName, setRecipientName] = useState("");
   const [note, setNote] = useState("");
+  const [items, setItems] = useState<EpodItemInput[]>([{ name: "", quantity: "", unit: "" }]);
   const [outOfRadiusReason, setOutOfRadiusReason] = useState("");
   const [evidence, setEvidence] = useState<UploadedEvidence[]>([]);
   const [geo, setGeo] = useState<GeoPoint | null>(null);
@@ -328,6 +334,7 @@ function StopSubmissionForm({
       longitude: geo?.longitude ?? null,
       distanceMeters: distance,
       outOfRadiusReason,
+      items,
     });
     if (validationError) {
       setError(validationError);
@@ -343,6 +350,7 @@ function StopSubmissionForm({
           result: isDelivery ? result : null,
           recipientName,
           note,
+          items: isDelivery ? toEpodItemPayload(items) : [],
           latitude: geo?.latitude ?? null,
           longitude: geo?.longitude ?? null,
           accuracyMeters: geo?.accuracy ?? null,
@@ -359,6 +367,7 @@ function StopSubmissionForm({
       setEvidence([]);
       setRecipientName("");
       setNote("");
+      setItems([{ name: "", quantity: "", unit: "" }]);
       setOutOfRadiusReason("");
       onSubmitted();
     } catch {
@@ -371,6 +380,7 @@ function StopSubmissionForm({
     evidence,
     geo,
     isDelivery,
+    items,
     note,
     onSubmitted,
     outOfRadiusReason,
@@ -424,6 +434,67 @@ function StopSubmissionForm({
           onChange={(event) => setNote(event.target.value)}
         />
       </div>
+
+      {isDelivery && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-muted-foreground">
+            Barang ({filledEpodItems(items).length}) <span className="font-normal">· wajib minimal 1</span>
+          </p>
+          {items.map((item, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <input
+                className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2.5 py-2 text-xs"
+                placeholder="Nama barang"
+                value={item.name}
+                onChange={(event) =>
+                  setItems((prev) =>
+                    prev.map((entry, i) => (i === index ? { ...entry, name: event.target.value } : entry)),
+                  )
+                }
+              />
+              <input
+                className="w-20 shrink-0 rounded-lg border border-border bg-background px-2.5 py-2 text-xs tabular-nums"
+                inputMode="decimal"
+                placeholder="Qty"
+                value={item.quantity}
+                onChange={(event) =>
+                  setItems((prev) =>
+                    prev.map((entry, i) => (i === index ? { ...entry, quantity: event.target.value } : entry)),
+                  )
+                }
+              />
+              <input
+                className="w-24 shrink-0 rounded-lg border border-border bg-background px-2.5 py-2 text-xs"
+                placeholder="Satuan"
+                value={item.unit}
+                onChange={(event) =>
+                  setItems((prev) =>
+                    prev.map((entry, i) => (i === index ? { ...entry, unit: event.target.value } : entry)),
+                  )
+                }
+              />
+              <button
+                type="button"
+                disabled={items.length <= 1}
+                onClick={() => setItems((prev) => prev.filter((_, i) => i !== index))}
+                className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-danger disabled:opacity-40"
+                aria-label="Hapus barang"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+          {items.length < TMS_EPOD_MAX_ITEMS && (
+            <button
+              type="button"
+              onClick={() => setItems((prev) => [...prev, { name: "", quantity: "", unit: "" }])}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted"
+            >
+              <Plus className="h-3.5 w-3.5" /> Tambah barang
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         <button

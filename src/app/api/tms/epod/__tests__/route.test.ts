@@ -22,6 +22,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
 import { countAssignmentsByStatus, getStopDetail, listAssignments } from "@/lib/tms-epod-data";
 import { GET as listEpod } from "@/app/api/tms/epod/route";
 import { POST as createUpload } from "@/app/api/tms/epod/uploads/route";
+import { POST as submitStop } from "@/app/api/tms/epod/stops/[stopId]/submissions/route";
 
 const createClientMock = vi.mocked(createClient);
 const createAdminMock = vi.mocked(createAdminClient);
@@ -204,6 +205,92 @@ describe("POST /api/tms/epod/uploads", () => {
     expect(createSignedUploadUrl).toHaveBeenCalledWith(
       expect.stringMatching(/^assignments\/a1\/stops\/s1\/.+\.jpg$/),
       { upsert: false },
+    );
+  });
+});
+
+describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
+  const deliveryStop = {
+    stop: {
+      id: "s1",
+      assignmentId: "a1",
+      sequence: 2,
+      stopType: "DELIVERY",
+      vendorPointId: null,
+      vendorAddressId: null,
+      pointName: "Toko A",
+      address: null,
+      latitude: -6.2,
+      longitude: 106.8,
+      arrivalActual: null,
+      departureActual: null,
+      visitStatusRaw: null,
+    },
+    assignment: { id: "a1", status: "IN_PROGRESS" },
+    submissions: [],
+  };
+
+  function submitRequest(body: unknown) {
+    return new NextRequest("http://localhost/api/tms/epod/stops/s1/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  const context = { params: Promise.resolve({ stopId: "s1" }) };
+
+  it("menolak pengantaran tanpa barang", async () => {
+    mockProfile(["tms.epod.manage"]);
+    getStopDetailMock.mockResolvedValue(deliveryStop as never);
+
+    const response = await submitStop(
+      submitRequest({
+        result: "DELIVERED",
+        recipientName: "Budi",
+        latitude: -6.2,
+        longitude: 106.8,
+        evidence: [{ path: "a/b.jpg" }],
+        items: [],
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(400);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain("Minimal satu barang");
+  });
+
+  it("meneruskan daftar barang ke RPC sebagai p_items", async () => {
+    mockProfile(["tms.epod.manage"]);
+    getStopDetailMock.mockResolvedValue(deliveryStop as never);
+    const rpc = vi.fn().mockResolvedValue({ data: { id: "sub1" }, error: null });
+    createAdminMock.mockReturnValue({ rpc } as never);
+
+    const response = await submitStop(
+      submitRequest({
+        result: "DELIVERED",
+        recipientName: "Budi",
+        latitude: -6.2,
+        longitude: 106.8,
+        evidence: [{ path: "a/b.jpg" }],
+        items: [
+          { name: "Kopi", quantity: "2", unit: "karton" },
+          { name: "Gula", quantity: "1.5", unit: "" },
+        ],
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith(
+      "tms_epod_submit",
+      expect.objectContaining({
+        p_items: [
+          { name: "Kopi", quantity: 2, unit: "karton" },
+          { name: "Gula", quantity: 1.5, unit: null },
+        ],
+      }),
     );
   });
 });

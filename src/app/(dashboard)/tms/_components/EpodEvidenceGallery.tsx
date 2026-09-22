@@ -159,6 +159,27 @@ export default function EpodEvidenceGallery({
               )}
             </dl>
 
+            {submission.items.length > 0 && (
+              <div className="mt-2">
+                <p className="text-[11px] font-semibold text-muted-foreground">
+                  Barang ({submission.items.length})
+                </p>
+                <ul className="mt-1 space-y-0.5">
+                  {submission.items.map((item, index) => (
+                    <li key={`${item.name}-${index}`} className="flex items-baseline gap-2 text-[11px]">
+                      <span className="min-w-0 flex-1 truncate text-foreground" title={item.name}>
+                        {item.name}
+                      </span>
+                      <span className="shrink-0 font-semibold tabular-nums text-foreground">
+                        {item.quantity}
+                        {item.unit ? ` ${item.unit}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {evidence.length > 0 ? (
               <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {evidence.map((item) => (
