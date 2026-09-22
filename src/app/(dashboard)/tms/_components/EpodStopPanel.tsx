@@ -18,6 +18,7 @@ import {
   Truck,
   User,
   Users,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
@@ -454,7 +455,7 @@ function StopSubmissionForm({
                 }
               />
               <input
-                className="w-20 shrink-0 rounded-lg border border-border bg-background px-2.5 py-2 text-xs tabular-nums"
+                className="w-16 shrink-0 rounded-lg border border-border bg-background px-2.5 py-2 text-xs tabular-nums"
                 inputMode="decimal"
                 placeholder="Qty"
                 value={item.quantity}
@@ -465,7 +466,7 @@ function StopSubmissionForm({
                 }
               />
               <input
-                className="w-24 shrink-0 rounded-lg border border-border bg-background px-2.5 py-2 text-xs"
+                className="w-20 shrink-0 rounded-lg border border-border bg-background px-2.5 py-2 text-xs"
                 placeholder="Satuan"
                 value={item.unit}
                 onChange={(event) =>
@@ -683,9 +684,10 @@ export default function EpodStopPanel({
   const [detail, setDetail] = useState<AssignmentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedStopId, setExpandedStopId] = useState<string | null>(null);
+  const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [galleryKey, setGalleryKey] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const detailCardRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -739,6 +741,17 @@ export default function EpodStopPanel({
     }
   }, [assignmentId, refreshAll]);
 
+  const selectStop = useCallback((stopId: string) => {
+    setSelectedStopId((prev) => (prev === stopId ? null : stopId));
+  }, []);
+
+  /** Di layar kecil kolom kanan menumpuk di bawah, jadi gulirkan ke kartu detail. */
+  useEffect(() => {
+    if (!selectedStopId) return;
+    if (typeof window === "undefined" || !window.matchMedia("(max-width: 1023px)").matches) return;
+    detailCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selectedStopId]);
+
   if (loading && !detail) {
     return (
       <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
@@ -766,6 +779,11 @@ export default function EpodStopPanel({
   const locked = assignment.frozenAt !== null;
   const allDelivered =
     assignment.deliveryTotalCount > 0 && assignment.deliveryDoneCount >= assignment.deliveryTotalCount;
+
+  // Titik yang dipilih untuk ditampilkan di kolom kanan.
+  const selectedStop = selectedStopId ? stops.find((stop) => stop.id === selectedStopId) ?? null : null;
+  const selectedSubmission = selectedStop ? currentByStop[selectedStop.id] ?? null : null;
+  const selectedLockedDelivery = selectedStop?.stopType === "DELIVERY" && !loadingCompleted;
 
   return (
     <div className="space-y-5">
@@ -808,9 +826,9 @@ export default function EpodStopPanel({
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div className="grid gap-5 lg:grid-cols-5">
         {/* Kolom kiri */}
-        <div className="space-y-5 lg:col-span-2">
+        <div className="space-y-5 lg:col-span-3">
           {/* Tim Pengiriman */}
           <section className="rounded-2xl border border-border bg-card p-5">
             <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
@@ -859,19 +877,24 @@ export default function EpodStopPanel({
             <ol className="mt-4 space-y-2.5">
               {stops.map((stop) => {
                 const current = currentByStop[stop.id];
-                const expanded = expandedStopId === stop.id;
-                const isLockedDelivery = stop.stopType === "DELIVERY" && !loadingCompleted;
+                const selected = selectedStopId === stop.id;
                 const isLoading = stop.stopType === "LOADING";
                 return (
                   <li
                     key={stop.id}
-                    className="overflow-hidden rounded-2xl border border-border bg-card"
+                    className={cn(
+                      "overflow-hidden rounded-2xl border bg-card transition-colors",
+                      selected ? "border-primary/40 ring-1 ring-primary/30" : "border-border",
+                    )}
                   >
                     <button
                       type="button"
-                      onClick={() => setExpandedStopId(expanded ? null : stop.id)}
-                      aria-expanded={expanded}
-                      className="flex w-full items-center gap-3.5 p-4 text-left transition-colors hover:bg-muted/40"
+                      onClick={() => selectStop(stop.id)}
+                      aria-pressed={selected}
+                      className={cn(
+                        "flex w-full items-center gap-3.5 p-4 text-left transition-colors",
+                        selected ? "bg-primary/5" : "hover:bg-muted/40",
+                      )}
                     >
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-600">
                         {stop.sequence}
@@ -900,30 +923,17 @@ export default function EpodStopPanel({
                           </span>
                         )}
                       </span>
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <span
+                        className={cn(
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+                          selected ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+                        )}
+                      >
                         <ChevronRight
-                          className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")}
+                          className={cn("h-4 w-4 transition-transform", selected && "rotate-90")}
                         />
                       </span>
                     </button>
-
-                    {expanded && (
-                      <div className="space-y-3 border-t border-border p-3">
-                        {canManage && assignment.status !== "CANCELLED" && (
-                          <StopSubmissionForm
-                            stop={stop}
-                            loadingCompleted={loadingCompleted}
-                            onSubmitted={refreshAll}
-                          />
-                        )}
-                        {!canManage && isLockedDelivery && (
-                          <p className="text-[11px] text-muted-foreground">
-                            Menunggu bukti loading sebelum pengantaran.
-                          </p>
-                        )}
-                        <EpodEvidenceGallery stopId={stop.id} refreshKey={galleryKey} />
-                      </div>
-                    )}
                   </li>
                 );
               })}
@@ -956,8 +966,58 @@ export default function EpodStopPanel({
           </p>
         </div>
 
-        {/* Kolom kanan */}
-        <div className="space-y-5">
+        {/* Kolom kanan: detail titik terpilih + informasi pengiriman */}
+        <div className="space-y-5 lg:col-span-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
+          {selectedStop && (
+            <section ref={detailCardRef} className="rounded-2xl border border-border bg-card p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
+                    <MapPin className="h-4 w-4 text-muted-foreground" /> Detail Titik
+                  </h2>
+                  <p className="mt-1 truncate text-sm font-bold text-foreground">
+                    {selectedStop.sequence}. {selectedStop.pointName ?? "Titik"}
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <EpodStopTypeBadge stopType={selectedStop.stopType} />
+                    {selectedSubmission?.result && <EpodResultBadge result={selectedSubmission.result} />}
+                    {selectedStop.stopType === "LOADING" && selectedSubmission && <EpodSentBadge />}
+                  </div>
+                  {selectedStop.address && (
+                    <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                      <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
+                      <span>{selectedStop.address}</span>
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedStopId(null)}
+                  className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
+                  aria-label="Tutup detail titik"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {canManage && assignment.status !== "CANCELLED" && (
+                  <StopSubmissionForm
+                    stop={selectedStop}
+                    loadingCompleted={loadingCompleted}
+                    onSubmitted={refreshAll}
+                  />
+                )}
+                {!canManage && selectedLockedDelivery && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Menunggu bukti loading sebelum pengantaran.
+                  </p>
+                )}
+                <EpodEvidenceGallery stopId={selectedStop.id} refreshKey={galleryKey} />
+              </div>
+            </section>
+          )}
+
           <section className="rounded-2xl border border-border bg-card p-5">
             <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
               <Truck className="h-4 w-4 text-muted-foreground" /> Informasi Pengiriman
