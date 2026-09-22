@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "./supabase-admin";
 import {
+  EPOD_PETUGAS_ROLE_LABELS,
   normalizeEpodAssignment,
   normalizeEpodEvidence,
   normalizeEpodStop,
@@ -9,6 +10,7 @@ import {
   type EpodAssignment,
   type EpodAssignmentListItem,
   type EpodEvidence,
+  type EpodPetugasRole,
   type EpodStop,
   type EpodSubmission,
 } from "./tms-epod";
@@ -30,8 +32,8 @@ export type { EpodAssignmentListItem };
 
 export interface EpodAssignmentDetail {
   assignment: EpodAssignment;
-  driverName: string | null;
-  helperName: string | null;
+  assignedName: string | null;
+  assignedRoleLabel: string | null;
   stops: EpodStop[];
   currentByStop: Record<string, EpodSubmission>;
 }
@@ -51,18 +53,45 @@ export interface EpodAssignmentFilters {
   limit: number;
 }
 
-async function loadEmployeeNames(
+interface EpodPetugasInfo {
+  nama: string;
+  jabatanNama: string | null;
+}
+
+async function loadPetugasInfo(
   admin: ReturnType<typeof createAdminClient>,
   ids: string[],
-): Promise<Map<string, string>> {
-  const names = new Map<string, string>();
+): Promise<Map<string, EpodPetugasInfo>> {
+  const info = new Map<string, EpodPetugasInfo>();
   const unique = [...new Set(ids.filter(Boolean))];
-  if (unique.length === 0) return names;
-  const { data } = await admin.from("pegawai").select("id,nama").in("id", unique);
+  if (unique.length === 0) return info;
+  const { data } = await admin
+    .from("pegawai")
+    .select("id,nama,jabatan:jabatan_id(nama)")
+    .in("id", unique);
   for (const row of data ?? []) {
-    names.set(String((row as { id: string }).id), String((row as { nama: string }).nama));
+    const record = row as {
+      id: string;
+      nama: string;
+      jabatan: { nama: string } | { nama: string }[] | null;
+    };
+    const jabatan = Array.isArray(record.jabatan) ? record.jabatan[0] : record.jabatan;
+    info.set(String(record.id), {
+      nama: String(record.nama),
+      jabatanNama: jabatan ? String(jabatan.nama) : null,
+    });
   }
-  return names;
+  return info;
+}
+
+/** Label tampil role petugas: label baku untuk 4 role operasional, nama jabatan untuk OTHER. */
+export function resolvePetugasRoleLabel(
+  role: EpodAssignment["assignedRole"],
+  jabatanNama: string | null,
+): string | null {
+  if (!role) return null;
+  if (role === "OTHER") return jabatanNama ?? "Petugas";
+  return EPOD_PETUGAS_ROLE_LABELS[role] ?? role;
 }
 
 export async function listAssignments(
@@ -90,17 +119,22 @@ export async function listAssignments(
     .map(normalizeEpodAssignment)
     .filter((item): item is EpodAssignment => item !== null);
 
-  const names = await loadEmployeeNames(
+  const info = await loadPetugasInfo(
     admin,
-    assignments.flatMap((item) => [item.driverEmployeeId, item.helperEmployeeId].filter((v): v is string => !!v)),
+    assignments.map((item) => item.assignedEmployeeId).filter((v): v is string => !!v),
   );
 
   return {
-    items: assignments.map((item) => ({
-      ...item,
-      driverName: item.driverEmployeeId ? names.get(item.driverEmployeeId) ?? null : null,
-      helperName: item.helperEmployeeId ? names.get(item.helperEmployeeId) ?? null : null,
-    })),
+    items: assignments.map((item) => {
+      const petugas = item.assignedEmployeeId ? info.get(item.assignedEmployeeId) : undefined;
+      return {
+        ...item,
+        assignedName: petugas?.nama ?? null,
+        assignedRoleLabel: item.assignedEmployeeId
+          ? resolvePetugasRoleLabel(item.assignedRole, petugas?.jabatanNama ?? null)
+          : null,
+      };
+    }),
     total: count ?? assignments.length,
   };
 }
@@ -142,15 +176,18 @@ export async function getAssignmentDetail(
     }
   }
 
-  const names = await loadEmployeeNames(
+  const info = await loadPetugasInfo(
     admin,
-    [assignment.driverEmployeeId, assignment.helperEmployeeId].filter((v): v is string => !!v),
+    [assignment.assignedEmployeeId].filter((v): v is string => !!v),
   );
+  const petugas = assignment.assignedEmployeeId ? info.get(assignment.assignedEmployeeId) : undefined;
 
   return {
     assignment,
-    driverName: assignment.driverEmployeeId ? names.get(assignment.driverEmployeeId) ?? null : null,
-    helperName: assignment.helperEmployeeId ? names.get(assignment.helperEmployeeId) ?? null : null,
+    assignedName: petugas?.nama ?? null,
+    assignedRoleLabel: assignment.assignedEmployeeId
+      ? resolvePetugasRoleLabel(assignment.assignedRole, petugas?.jabatanNama ?? null)
+      : null,
     stops,
     currentByStop,
   };
@@ -210,61 +247,62 @@ export async function getAssignmentByTask(taskId: string): Promise<EpodTaskSumma
   return { assignment: detail.assignment, stops: detail.stops, currentByStop: detail.currentByStop };
 }
 
-export interface EpodEligibleEmployee {
+export interface EpodPetugasOption {
   id: string;
   nama: string;
   jabatanId: number | null;
-  role: "DRIVER" | "HELPER" | null;
+  jabatanNama: string | null;
+  /** Role e-POD bila jabatan termasuk mapping mobile, selain itu null (OTHER). */
+  role: EpodPetugasRole | null;
+  /** True bila pegawai boleh claim sendiri via aplikasi mobile. */
+  mobileAllowed: boolean;
 }
 
 /**
- * Daftar pegawai yang boleh dipilih sebagai petugas e-POD, memakai acuan
- * jabatan dari gapok_settings (Driver/Helper). Role ditentukan server dari
- * jabatan agar pemilih di web tidak perlu menentukan peran sendiri. Filter
- * `role` opsional dipertahankan untuk pemakaian yang butuh satu peran saja.
+ * Seluruh pegawai aktif untuk dropdown Petugas e-POD web. Role operasional
+ * (Driver/Helper/Koordinator/Wakil Koordinator) dibaca dari mapping
+ * `tms_epod_claim_roles` berbasis jabatan HRM; jabatan lain tetap bisa
+ * dipilih sebagai OTHER dengan alasan wajib di sisi RPC.
  */
-export async function listEligibleEmployees(
-  role?: "DRIVER" | "HELPER",
-): Promise<EpodEligibleEmployee[]> {
+export async function listEpodPetugas(): Promise<EpodPetugasOption[]> {
   const admin = createAdminClient();
-  const { data: settings, error: settingsError } = await admin
-    .from("gapok_settings")
-    .select("driver_jabatan_id,helper_jabatan_id")
-    .order("effective_from", { ascending: false, nullsFirst: false })
-    .order("id", { ascending: false })
-    .limit(1);
-  if (settingsError) throw new Error(settingsError.message);
 
-  const setting = (settings ?? [])[0] as
-    | { driver_jabatan_id: number | null; helper_jabatan_id: number | null }
-    | undefined;
-  const driverJabatan = setting?.driver_jabatan_id ?? null;
-  const helperJabatan = setting?.helper_jabatan_id ?? null;
+  const { data: roleRows, error: roleError } = await admin
+    .from("tms_epod_claim_roles")
+    .select("jabatan_id,role_code");
+  if (roleError) throw new Error(roleError.message);
+  const roleByJabatan = new Map<number, EpodPetugasRole>();
+  for (const row of roleRows ?? []) {
+    const record = row as { jabatan_id: number; role_code: EpodPetugasRole };
+    roleByJabatan.set(Number(record.jabatan_id), record.role_code);
+  }
 
-  const jabatanIds = [driverJabatan, helperJabatan].filter((id): id is number => id !== null);
-  let query = admin.from("pegawai").select("id,nama,jabatan_id").eq("status", "Aktif");
-  if (jabatanIds.length > 0) query = query.in("jabatan_id", jabatanIds);
-
-  const { data, error } = await query.order("nama", { ascending: true });
+  const { data, error } = await admin
+    .from("pegawai")
+    .select("id,nama,jabatan_id,jabatan:jabatan_id(nama)")
+    .eq("status", "Aktif")
+    .order("nama", { ascending: true });
   if (error) throw new Error(error.message);
 
-  const employees: EpodEligibleEmployee[] = (data ?? []).map((row) => {
-    const record = row as { id: string; nama: string; jabatan_id: number | null };
-    const employeeRole: "DRIVER" | "HELPER" | null =
-      driverJabatan !== null && record.jabatan_id === driverJabatan
-        ? "DRIVER"
-        : helperJabatan !== null && record.jabatan_id === helperJabatan
-          ? "HELPER"
-          : null;
+  return (data ?? []).map((row) => {
+    const record = row as {
+      id: string;
+      nama: string;
+      jabatan_id: number | null;
+      jabatan: { nama: string } | { nama: string }[] | null;
+    };
+    const jabatan = Array.isArray(record.jabatan) ? record.jabatan[0] : record.jabatan;
+    const role =
+      record.jabatan_id !== null ? (roleByJabatan.get(Number(record.jabatan_id)) ?? null) : null;
     return {
       id: String(record.id),
       nama: String(record.nama),
       jabatanId: record.jabatan_id,
-      role: employeeRole,
+      jabatanNama: jabatan ? String(jabatan.nama) : null,
+      role,
+      mobileAllowed: role !== null,
     };
   });
-
-  return role ? employees.filter((item) => item.role === role) : employees;
 }
 
 export async function getAssignmentById(assignmentId: string): Promise<EpodAssignment | null> {

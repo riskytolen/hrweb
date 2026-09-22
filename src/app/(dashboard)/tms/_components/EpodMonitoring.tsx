@@ -254,7 +254,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
                         {item.deliveryDoneCount}/{item.deliveryTotalCount}
                       </td>
                       <td className="max-w-40 truncate px-4 py-3 text-muted-foreground">
-                        {item.driverName ?? item.helperName ?? "–"}
+                        {item.assignedName ?? "–"}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <EpodAssignmentBadge status={item.status} />
@@ -281,7 +281,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
                         <EpodAssignmentBadge status={item.status} />
                       </div>
                       <p className="mt-1 truncate text-xs text-muted-foreground">
-                        {[item.licensePlate, item.driverName ?? item.helperName].filter(Boolean).join(" • ") || "–"}
+                        {[item.licensePlate, item.assignedName].filter(Boolean).join(" • ") || "–"}
                       </p>
                       <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
                         Loading {item.loadingStatus === "LOADING_COMPLETED" ? "selesai" : "belum"} · e-POD{" "}

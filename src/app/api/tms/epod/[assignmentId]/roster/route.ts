@@ -40,11 +40,20 @@ export async function PATCH(
         : undefined;
   if (employeeId === undefined) return epodError("ID pegawai tidak valid.", 400);
 
+  const reason =
+    source.reason === null || source.reason === undefined
+      ? null
+      : typeof source.reason === "string"
+        ? source.reason.trim() || null
+        : undefined;
+  if (reason === undefined) return epodError("Alasan tidak valid.", 400);
+
   try {
     const admin = createAdminClient();
     const { error } = await admin.rpc("tms_epod_set_petugas", {
       p_assignment_id: assignmentId,
       p_employee_id: employeeId,
+      p_reason: reason,
       p_actor_user: auth.context.userId,
     });
     if (error) {

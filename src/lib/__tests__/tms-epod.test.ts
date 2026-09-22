@@ -284,7 +284,7 @@ describe("normalizer baris database", () => {
  * kosong sehingga tabel e-POD tidak menampilkan data.
  */
 describe("normalizer menerima payload API (camelCase)", () => {
-  it("menormalkan item daftar beserta nama driver dan helper", () => {
+  it("menormalkan item daftar beserta nama dan label peran petugas", () => {
     const items = normalizeEpodAssignmentList([
       {
         id: "a1",
@@ -295,8 +295,10 @@ describe("normalizer menerima payload API (camelCase)", () => {
         deliveryDoneCount: 3,
         deliveryTotalCount: 6,
         snapshotAt: "2026-09-22T00:00:00Z",
-        driverName: "Andi",
-        helperName: "Budi",
+        assignedEmployeeId: "e1",
+        assignedRole: "COORDINATOR",
+        assignedName: "Andi",
+        assignedRoleLabel: "Koordinator",
       },
     ]);
 
@@ -306,8 +308,10 @@ describe("normalizer menerima payload API (camelCase)", () => {
     expect(items[0].loadingStatus).toBe("LOADING_COMPLETED");
     expect(items[0].deliveryDoneCount).toBe(3);
     expect(items[0].deliveryTotalCount).toBe(6);
-    expect(items[0].driverName).toBe("Andi");
-    expect(items[0].helperName).toBe("Budi");
+    expect(items[0].assignedEmployeeId).toBe("e1");
+    expect(items[0].assignedRole).toBe("COORDINATOR");
+    expect(items[0].assignedName).toBe("Andi");
+    expect(items[0].assignedRoleLabel).toBe("Koordinator");
   });
 
   it("menormalkan stop camelCase", () => {

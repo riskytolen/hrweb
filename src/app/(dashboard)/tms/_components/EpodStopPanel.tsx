@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase-browser";
 import { compressFile, formatFileSize } from "@/lib/file-compression";
 import {
+  EPOD_PETUGAS_ROLE_LABELS,
   filledEpodItems,
   formatDistance,
   haversineMeters,
@@ -40,6 +41,7 @@ import {
   type EpodAssignment,
   type EpodDeliveryResult,
   type EpodItemInput,
+  type EpodPetugasRole,
   type EpodStop,
   type EpodSubmission,
 } from "@/lib/tms-epod";
@@ -54,8 +56,8 @@ import EpodEvidenceGallery from "./EpodEvidenceGallery";
 
 interface AssignmentDetail {
   assignment: EpodAssignment;
-  driverName: string | null;
-  helperName: string | null;
+  assignedName: string | null;
+  assignedRoleLabel: string | null;
   stops: EpodStop[];
   currentByStop: Record<string, EpodSubmission>;
 }
@@ -68,7 +70,16 @@ interface DetailResponse {
 interface EmployeeOption {
   id: string;
   nama: string;
-  role: "DRIVER" | "HELPER" | null;
+  role: EpodPetugasRole | null;
+  mobileAllowed: boolean;
+  jabatanNama: string | null;
+}
+
+function petugasOptionLabel(option: EmployeeOption): string {
+  const label = option.role
+    ? EPOD_PETUGAS_ROLE_LABELS[option.role]
+    : (option.jabatanNama ?? "Petugas");
+  return `${option.nama} - ${label}`;
 }
 
 interface UploadedEvidence {
@@ -115,16 +126,21 @@ function getPosition(): Promise<GeoPoint> {
 function RosterEditor({
   assignmentId,
   petugasId,
+  petugasName,
+  petugasRoleLabel,
   locked,
   onSaved,
 }: {
   assignmentId: string;
   petugasId: string | null;
+  petugasName: string | null;
+  petugasRoleLabel: string | null;
   locked: boolean;
   onSaved: () => void;
 }) {
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [selected, setSelected] = useState<string>(petugasId ?? "");
+  const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,39 +161,42 @@ function RosterEditor({
     };
   }, []);
 
-  const save = useCallback(
-    async (employeeId: string) => {
-      const previous = selected;
-      setSelected(employeeId);
-      setSaving(true);
-      setError(null);
-      try {
-        const response = await fetch(`/api/tms/epod/${assignmentId}/roster`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ employeeId: employeeId || null }),
-        });
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok || payload.error) {
-          setError(payload.error ?? "Gagal menyimpan petugas.");
-          setSelected(previous);
-          return;
-        }
-        onSaved();
-      } catch {
-        setError("Gagal menyimpan petugas e-POD.");
-        setSelected(previous);
-      } finally {
-        setSaving(false);
+  const selectedEmployee = employees.find((item) => item.id === selected) ?? null;
+  const needsReason = selected !== "" && selectedEmployee !== null && !selectedEmployee.mobileAllowed;
+
+  const save = useCallback(async () => {
+    if (needsReason && !reason.trim()) {
+      setError("Penugasan untuk jabatan ini wajib menyertakan alasan.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/tms/epod/${assignmentId}/roster`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId: selected || null, reason: reason.trim() || null }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok || payload.error) {
+        setError(payload.error ?? "Gagal menyimpan petugas.");
+        return;
       }
-    },
-    [assignmentId, onSaved, selected],
-  );
+      setReason("");
+      onSaved();
+    } catch {
+      setError("Gagal menyimpan petugas e-POD.");
+    } finally {
+      setSaving(false);
+    }
+  }, [assignmentId, onSaved, selected, reason, needsReason]);
 
   if (locked) {
     return (
       <p className="text-[11px] text-muted-foreground">
-        Petugas terkunci karena bukti sudah dikirim. Hubungi admin untuk perubahan.
+        {petugasName ?? "Belum ditetapkan"}
+        {petugasRoleLabel ? ` - ${petugasRoleLabel}` : ""}. Petugas terkunci karena bukti sudah
+        dikirim. Hubungi admin untuk perubahan.
       </p>
     );
   }
@@ -188,26 +207,45 @@ function RosterEditor({
         <span className="flex items-center gap-1.5 font-semibold text-muted-foreground">
           <User className="h-3.5 w-3.5" /> Petugas e-POD
         </span>
-        <span className="flex items-center gap-2">
-          <select
-            className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
-            value={selected}
-            disabled={saving}
-            onChange={(event) => void save(event.target.value)}
-          >
-            <option value="">Belum ditetapkan</option>
-            {employees.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.nama}
-                {option.role ? ` - ${option.role === "DRIVER" ? "Driver" : "Helper"}` : ""}
-              </option>
-            ))}
-          </select>
-          {saving && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />}
-        </span>
+        <select
+          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
+          value={selected}
+          disabled={saving}
+          onChange={(event) => {
+            setSelected(event.target.value);
+            if (event.target.value === "") setReason("");
+          }}
+        >
+          <option value="">Belum ditetapkan</option>
+          {employees.map((option) => (
+            <option key={option.id} value={option.id}>
+              {petugasOptionLabel(option)}
+            </option>
+          ))}
+        </select>
       </label>
+      {needsReason && (
+        <label className="flex flex-col gap-1.5 text-xs">
+          <span className="font-semibold text-muted-foreground">
+            Alasan penugasan (wajib untuk jabatan {selectedEmployee?.jabatanNama ?? "ini"})
+          </span>
+          <input
+            className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
+            placeholder="mis. Koordinator turun lapangan menggantikan driver"
+            value={reason}
+            disabled={saving}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+      )}
+      <div>
+        <Button size="sm" disabled={saving} onClick={() => void save()}>
+          {saving ? "Menyimpan…" : "Simpan petugas"}
+        </Button>
+      </div>
       <p className="text-[10px] text-muted-foreground">
-        Satu FO hanya untuk satu petugas (Driver atau Helper).
+        Satu FO hanya untuk satu petugas. Jabatan selain Driver, Helper, Koordinator, dan Wakil
+        Koordinator wajib menyertakan alasan.
       </p>
       {error && (
         <p className="flex items-center gap-1.5 text-[11px] text-danger">
@@ -812,9 +850,8 @@ export default function EpodStopPanel({
   }
 
   if (!detail) return null;
-  const { assignment, stops, currentByStop, driverName, helperName } = detail;
-  const petugasId = assignment.driverEmployeeId ?? assignment.helperEmployeeId;
-  const petugasName = driverName ?? helperName;
+  const { assignment, stops, currentByStop, assignedName, assignedRoleLabel } = detail;
+  const petugasId = assignment.assignedEmployeeId;
   const loadingCompleted = assignment.loadingStatus === "LOADING_COMPLETED";
   const locked = assignment.frozenAt !== null;
   const allDelivered =
@@ -897,12 +934,15 @@ export default function EpodStopPanel({
                 <RosterEditor
                   assignmentId={assignment.id}
                   petugasId={petugasId}
+                  petugasName={assignedName}
+                  petugasRoleLabel={assignedRoleLabel}
                   locked={locked}
                   onSaved={refreshAll}
                 />
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  {petugasName ?? "Belum ditetapkan"}
+                  {assignedName ?? "Belum ditetapkan"}
+                  {assignedRoleLabel ? ` - ${assignedRoleLabel}` : ""}
                 </p>
               )}
             </div>

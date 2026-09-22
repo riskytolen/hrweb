@@ -54,8 +54,8 @@ export interface EpodExportEvidence extends EpodEvidence {
 
 export interface EpodAssignmentExportData {
   assignment: EpodAssignment;
-  driverName: string | null;
-  helperName: string | null;
+  assignedName: string | null;
+  assignedRoleLabel: string | null;
   stops: EpodStop[];
   currentByStop: Record<string, EpodSubmission>;
   evidenceBySubmission: Record<string, EpodExportEvidence[]>;
@@ -145,6 +145,9 @@ const ACTOR_LABEL: Record<EpodSubmission["actorType"], string> = {
   WEB_ADMIN: "Admin Web",
   DRIVER: "Driver",
   HELPER: "Helper",
+  COORDINATOR: "Koordinator",
+  DEPUTY_COORDINATOR: "Wakil Koordinator",
+  OTHER: "Petugas",
 };
 
 interface BadgeTone {
@@ -195,8 +198,8 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
 
   const {
     assignment,
-    driverName,
-    helperName,
+    assignedName,
+    assignedRoleLabel,
     stops,
     currentByStop,
     evidenceBySubmission,
@@ -482,7 +485,8 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
   metaGrid([
     ["No. Kendaraan", assignment.licensePlate ?? "-"],
     ["Driver (vendor)", assignment.vendorDriverName ?? "-"],
-    ["Petugas e-POD", driverName ?? helperName ?? "Belum ditetapkan"],
+    ["Petugas e-POD", assignedName ?? "Belum ditetapkan"],
+    ["Peran petugas", assignedRoleLabel ?? "-"],
     [
       "Progress e-POD",
       `${assignment.deliveryDoneCount} dari ${assignment.deliveryTotalCount} titik pengantaran`,

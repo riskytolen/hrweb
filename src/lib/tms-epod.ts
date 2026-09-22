@@ -25,9 +25,18 @@ export type EpodStopType = "LOADING" | "DELIVERY";
 export type EpodAssignmentStatus = "OPEN" | "CLAIMED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
 export type EpodLoadingStatus = "PENDING_LOADING" | "LOADING_COMPLETED";
 export type EpodDeliveryResult = "DELIVERED" | "PARTIAL" | "REJECTED";
-export type EpodActorType = "WEB_ADMIN" | "DRIVER" | "HELPER";
+export type EpodActorType = "WEB_ADMIN" | "DRIVER" | "HELPER" | "COORDINATOR" | "DEPUTY_COORDINATOR" | "OTHER";
 export type EpodSource = "WEB" | "MOBILE";
-export type EpodRosterRole = "DRIVER" | "HELPER";
+export type EpodPetugasRole = "DRIVER" | "HELPER" | "COORDINATOR" | "DEPUTY_COORDINATOR" | "OTHER";
+
+/** Label tampil role petugas e-POD (untuk OTHER, UI memakai nama jabatan). */
+export const EPOD_PETUGAS_ROLE_LABELS: Record<EpodPetugasRole, string> = {
+  DRIVER: "Driver",
+  HELPER: "Helper",
+  COORDINATOR: "Koordinator",
+  DEPUTY_COORDINATOR: "Wakil Koordinator",
+  OTHER: "Petugas",
+};
 
 export interface EpodAssignment {
   id: string;
@@ -38,8 +47,12 @@ export interface EpodAssignment {
   vehicleId: number | null;
   licensePlate: string | null;
   vendorDriverName: string | null;
-  driverEmployeeId: string | null;
-  helperEmployeeId: string | null;
+  assignedEmployeeId: string | null;
+  assignedRole: EpodPetugasRole | null;
+  assignedSource: EpodSource | null;
+  assignedReason: string | null;
+  assignedAt: string | null;
+  assignedJabatanId: number | null;
   loadingStatus: EpodLoadingStatus;
   loadingCompletedAt: string | null;
   deliveryDoneCount: number;
@@ -129,6 +142,50 @@ function toInt(value: unknown, fallback = 0): number {
   return num === null ? fallback : Math.trunc(num);
 }
 
+function toIntOrNull(value: unknown): number | null {
+  const num = toNum(value);
+  return num === null ? null : Math.trunc(num);
+}
+
+const PETUGAS_ROLES: readonly EpodPetugasRole[] = [
+  "DRIVER",
+  "HELPER",
+  "COORDINATOR",
+  "DEPUTY_COORDINATOR",
+  "OTHER",
+];
+
+function toPetugasRole(value: unknown): EpodPetugasRole | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  return (PETUGAS_ROLES as readonly string[]).includes(normalized)
+    ? (normalized as EpodPetugasRole)
+    : null;
+}
+
+function toAssignedSource(value: unknown): EpodSource | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  return normalized === "MOBILE" || normalized === "WEB" ? normalized : null;
+}
+
+const ACTOR_TYPES: readonly EpodActorType[] = [
+  "WEB_ADMIN",
+  "DRIVER",
+  "HELPER",
+  "COORDINATOR",
+  "DEPUTY_COORDINATOR",
+  "OTHER",
+];
+
+function toActorType(value: unknown): EpodActorType {
+  if (typeof value !== "string") return "WEB_ADMIN";
+  const normalized = value.trim().toUpperCase();
+  return (ACTOR_TYPES as readonly string[]).includes(normalized)
+    ? (normalized as EpodActorType)
+    : "WEB_ADMIN";
+}
+
 function toBool(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   return null;
@@ -188,8 +245,12 @@ export function normalizeEpodAssignment(raw: unknown): EpodAssignment | null {
     vehicleId: toNum(pick(source, "vehicle_id", "vehicleId")),
     licensePlate: toStr(pick(source, "license_plate", "licensePlate"), 40),
     vendorDriverName: toStr(pick(source, "vendor_driver_name", "vendorDriverName"), 120),
-    driverEmployeeId: toStr(pick(source, "driver_employee_id", "driverEmployeeId"), 60),
-    helperEmployeeId: toStr(pick(source, "helper_employee_id", "helperEmployeeId"), 60),
+    assignedEmployeeId: toStr(pick(source, "assigned_employee_id", "assignedEmployeeId"), 60),
+    assignedRole: toPetugasRole(pick(source, "assigned_role", "assignedRole")),
+    assignedSource: toAssignedSource(pick(source, "assigned_source", "assignedSource")),
+    assignedReason: toStr(pick(source, "assigned_reason", "assignedReason"), 500),
+    assignedAt: toStr(pick(source, "assigned_at", "assignedAt"), 40),
+    assignedJabatanId: toIntOrNull(pick(source, "assigned_jabatan_id", "assignedJabatanId")),
     loadingStatus:
       toStr(pick(source, "loading_status", "loadingStatus"), 30) === "LOADING_COMPLETED"
         ? "LOADING_COMPLETED"
@@ -231,7 +292,6 @@ export function normalizeEpodSubmission(raw: unknown): EpodSubmission | null {
   const stopId = toStr(pick(source, "stop_id", "stopId"), 60);
   if (!id || !stopId) return null;
   const result = toStr(pick(source, "result"), 20);
-  const actorType = toStr(pick(source, "actor_type", "actorType"), 20);
   const sourceType = toStr(pick(source, "source"), 20);
   return {
     id,
@@ -249,7 +309,7 @@ export function normalizeEpodSubmission(raw: unknown): EpodSubmission | null {
     outOfRadiusReason: toStr(pick(source, "out_of_radius_reason", "outOfRadiusReason"), 500),
     capturedAtDevice: toStr(pick(source, "captured_at_device", "capturedAtDevice"), 40),
     capturedAtServer: toStr(pick(source, "captured_at_server", "capturedAtServer"), 40) ?? new Date(0).toISOString(),
-    actorType: actorType === "DRIVER" || actorType === "HELPER" ? actorType : "WEB_ADMIN",
+    actorType: toActorType(pick(source, "actor_type", "actorType")),
     actorEmployeeId: toStr(pick(source, "actor_employee_id", "actorEmployeeId"), 60),
     source: sourceType === "MOBILE" ? "MOBILE" : "WEB",
     isCurrent: pick(source, "is_current", "isCurrent") !== false,
@@ -280,8 +340,8 @@ export function normalizeEpodEvidence(raw: unknown): EpodEvidence | null {
  * Bentuk ini adalah kontrak respons `GET /api/tms/epod`.
  */
 export interface EpodAssignmentListItem extends EpodAssignment {
-  driverName: string | null;
-  helperName: string | null;
+  assignedName: string | null;
+  assignedRoleLabel: string | null;
 }
 
 export function normalizeEpodAssignmentListItem(raw: unknown): EpodAssignmentListItem | null {
@@ -290,8 +350,8 @@ export function normalizeEpodAssignmentListItem(raw: unknown): EpodAssignmentLis
   const source = asRecord(raw);
   return {
     ...base,
-    driverName: toStr(pick(source, "driver_name", "driverName"), 120),
-    helperName: toStr(pick(source, "helper_name", "helperName"), 120),
+    assignedName: toStr(pick(source, "assigned_name", "assignedName"), 120),
+    assignedRoleLabel: toStr(pick(source, "assigned_role_label", "assignedRoleLabel"), 120),
   };
 }
 

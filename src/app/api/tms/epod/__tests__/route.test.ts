@@ -118,8 +118,12 @@ describe("GET /api/tms/epod", () => {
           vehicleId: 1,
           licensePlate: "B 1",
           vendorDriverName: null,
-          driverEmployeeId: null,
-          helperEmployeeId: null,
+          assignedEmployeeId: null,
+          assignedRole: null,
+          assignedSource: null,
+          assignedReason: null,
+          assignedAt: null,
+          assignedJabatanId: null,
           loadingStatus: "PENDING_LOADING",
           loadingCompletedAt: null,
           deliveryDoneCount: 0,
@@ -127,8 +131,8 @@ describe("GET /api/tms/epod", () => {
           snapshotAt: "2026-09-22T00:00:00Z",
           frozenAt: null,
           lastSyncedAt: null,
-          driverName: null,
-          helperName: null,
+          assignedName: null,
+          assignedRoleLabel: null,
         },
       ],
       total: 1,
@@ -389,10 +393,30 @@ describe("PATCH /api/tms/epod/[assignmentId]/roster", () => {
     expect(rpc).toHaveBeenCalledWith("tms_epod_set_petugas", {
       p_assignment_id: "a1",
       p_employee_id: "e1",
+      p_reason: null,
       p_actor_user: "user-1",
     });
     const payload = (await response.json()) as { data: { assignment: { status: string } } };
     expect(payload.data.assignment.status).toBe("CLAIMED");
+  });
+
+  it("meneruskan alasan penugasan ke RPC set_petugas", async () => {
+    mockProfile(["tms.epod.manage"]);
+    const rpc = vi.fn().mockResolvedValue({ data: { id: "a1", status: "CLAIMED" }, error: null });
+    createAdminMock.mockReturnValue({ rpc } as never);
+    getAssignmentDetailMock.mockResolvedValue({ assignment: { id: "a1", status: "CLAIMED" } } as never);
+
+    const response = await patchRoster(
+      rosterRequest({ employeeId: "e1", reason: "Koordinator turun lapangan" }),
+      context,
+    );
+    expect(response.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith("tms_epod_set_petugas", {
+      p_assignment_id: "a1",
+      p_employee_id: "e1",
+      p_reason: "Koordinator turun lapangan",
+      p_actor_user: "user-1",
+    });
   });
 
   it("mengosongkan petugas saat employeeId null", async () => {
@@ -460,8 +484,8 @@ describe("GET /api/tms/epod/by-task/[taskId]/export", () => {
     } as never);
     getAssignmentExportDataMock.mockResolvedValue({
       assignment: { id: "a1", status: "COMPLETED" },
-      driverName: "Andi",
-      helperName: null,
+      assignedName: "Andi",
+      assignedRoleLabel: "Driver",
       stops: [],
       currentByStop: {},
       evidenceBySubmission: {},
@@ -484,9 +508,9 @@ describe("GET /api/tms/epod/by-task/[taskId]/export", () => {
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(getAssignmentExportDataMock).toHaveBeenCalledWith("a1");
     const payload = (await response.json()) as {
-      data: { driverName: string | null; pointTemperatures: unknown[] };
+      data: { assignedName: string | null; pointTemperatures: unknown[] };
     };
-    expect(payload.data.driverName).toBe("Andi");
+    expect(payload.data.assignedName).toBe("Andi");
     expect(payload.data.pointTemperatures).toHaveLength(1);
   });
 });
