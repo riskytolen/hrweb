@@ -36,6 +36,7 @@ import { POST as submitStop } from "@/app/api/tms/epod/stops/[stopId]/submission
 import { GET as exportEpod } from "@/app/api/tms/epod/by-task/[taskId]/export/route";
 import { POST as revertAssignment } from "@/app/api/tms/epod/[assignmentId]/revert/route";
 import { PATCH as patchRoster } from "@/app/api/tms/epod/[assignmentId]/roster/route";
+import { POST as forceRelease } from "@/app/api/tms/epod/[assignmentId]/force-release/route";
 
 const createClientMock = vi.mocked(createClient);
 const createAdminMock = vi.mocked(createAdminClient);
@@ -443,6 +444,112 @@ describe("PATCH /api/tms/epod/[assignmentId]/roster", () => {
 
     const response = await patchRoster(rosterRequest({ employeeId: "e1" }), context);
     expect(response.status).toBe(404);
+  });
+});
+
+describe("POST /api/tms/epod/[assignmentId]/force-release", () => {
+  const context = { params: Promise.resolve({ assignmentId: "a1" }) };
+
+  function releaseRequest(body: unknown) {
+    return new NextRequest("http://localhost/api/tms/epod/a1/force-release", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function mockAdminWithData({
+    stops = [] as { id: string }[],
+    submissions = [] as { id: string }[],
+    evidence = [] as { bucket_id: string; object_path: string }[],
+    rpcError = null as { message: string } | null,
+    removeError = null as { message: string } | null,
+  } = {}) {
+    const remove = vi.fn().mockResolvedValue({ error: removeError });
+    const rpc = vi.fn().mockResolvedValue({
+      data: { id: "a1", status: "OPEN" },
+      error: rpcError,
+    });
+    const select = vi.fn().mockImplementation((columns: string) => {
+      if (columns === "id") {
+        return {
+          eq: async () => ({ data: stops, error: null }),
+          in: async () => ({ data: submissions, error: null }),
+        };
+      }
+      return {
+        in: async () => ({ data: evidence, error: null }),
+      };
+    });
+    createAdminMock.mockReturnValue({
+      from: () => ({ select }),
+      rpc,
+      storage: { from: () => ({ remove }) },
+    } as never);
+    return { remove, rpc };
+  }
+
+  it("menolak user view-only dengan 403", async () => {
+    mockProfile(["tms.epod.view"]);
+    const response = await forceRelease(
+      releaseRequest({ reason: "reset" }),
+      context,
+    );
+    expect(response.status).toBe(403);
+    expect(createAdminMock).not.toHaveBeenCalled();
+  });
+
+  it("menolak tanpa alasan dengan 400", async () => {
+    mockProfile(["tms.epod.manage"]);
+    const response = await forceRelease(releaseRequest({ reason: "  " }), context);
+    expect(response.status).toBe(400);
+    expect(createAdminMock).not.toHaveBeenCalled();
+  });
+
+  it("memanggil force_release lalu menghapus file Storage", async () => {
+    mockProfile(["tms.epod.manage"]);
+    const { remove, rpc } = mockAdminWithData({
+      stops: [{ id: "s1" }],
+      submissions: [{ id: "sub1" }],
+      evidence: [{ bucket_id: "tms-epod-evidence", object_path: "a/foto.jpg" }],
+    });
+    getAssignmentDetailMock.mockResolvedValue({ assignment: { id: "a1", status: "OPEN" } } as never);
+
+    const response = await forceRelease(
+      releaseRequest({ reason: "Salah petugas" }),
+      context,
+    );
+    expect(response.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith("tms_epod_force_release", {
+      p_assignment_id: "a1",
+      p_reason: "Salah petugas",
+      p_actor_user: "user-1",
+    });
+    expect(remove).toHaveBeenCalledWith(["a/foto.jpg"]);
+  });
+
+  it("mengembalikan 404 bila assignment tidak ditemukan", async () => {
+    mockProfile(["tms.epod.manage"]);
+    mockAdminWithData({ rpcError: { message: "Assignment e-POD tidak ditemukan." } });
+
+    const response = await forceRelease(releaseRequest({ reason: "reset" }), context);
+    expect(response.status).toBe(404);
+  });
+
+  it("memberi warning bila penghapusan Storage gagal", async () => {
+    mockProfile(["tms.epod.manage"]);
+    mockAdminWithData({
+      stops: [{ id: "s1" }],
+      submissions: [{ id: "sub1" }],
+      evidence: [{ bucket_id: "tms-epod-evidence", object_path: "a/foto.jpg" }],
+      removeError: { message: "storage down" },
+    });
+    getAssignmentDetailMock.mockResolvedValue({ assignment: { id: "a1", status: "OPEN" } } as never);
+
+    const response = await forceRelease(releaseRequest({ reason: "reset" }), context);
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { warning?: string };
+    expect(payload.warning).toContain("storage down");
   });
 });
 

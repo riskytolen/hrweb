@@ -143,6 +143,8 @@ function RosterEditor({
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseReason, setReleaseReason] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -191,13 +193,79 @@ function RosterEditor({
     }
   }, [assignmentId, onSaved, selected, reason, needsReason]);
 
+  const forceRelease = useCallback(async () => {
+    if (!releaseReason.trim()) {
+      setError("Alasan reset e-POD wajib diisi.");
+      return;
+    }
+    const confirmed = window.confirm(
+      "SEMUA foto bukti dan hasil e-POD pada FO ini akan dihapus permanen, " +
+        "petugas dilepas, dan pekerjaan harus submit ulang dari awal. Lanjutkan?",
+    );
+    if (!confirmed) return;
+    setReleasing(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/tms/epod/${assignmentId}/force-release`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: releaseReason.trim() }),
+      });
+      const payload = (await response.json()) as { error?: string; warning?: string };
+      if (!response.ok || payload.error) {
+        setError(payload.error ?? "Gagal mereset e-POD.");
+        return;
+      }
+      setReleaseReason("");
+      onSaved();
+    } catch {
+      setError("Gagal mereset e-POD.");
+    } finally {
+      setReleasing(false);
+    }
+  }, [assignmentId, onSaved, releaseReason]);
+
   if (locked) {
     return (
-      <p className="text-[11px] text-muted-foreground">
-        {petugasName ?? "Belum ditetapkan"}
-        {petugasRoleLabel ? ` - ${petugasRoleLabel}` : ""}. Petugas terkunci karena bukti sudah
-        dikirim. Hubungi admin untuk perubahan.
-      </p>
+      <div className="space-y-3">
+        <p className="text-[11px] text-muted-foreground">
+          {petugasName ?? "Belum ditetapkan"}
+          {petugasRoleLabel ? ` - ${petugasRoleLabel}` : ""}. Petugas terkunci karena bukti sudah
+          dikirim.
+        </p>
+        <label className="flex flex-col gap-1.5 text-xs">
+          <span className="font-semibold text-muted-foreground">
+            Alasan reset (wajib) — semua evidence akan dihapus permanen
+          </span>
+          <input
+            className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
+            placeholder="mis. Salah petugas, evidence perlu submit ulang"
+            value={releaseReason}
+            disabled={releasing}
+            onChange={(event) => setReleaseReason(event.target.value)}
+          />
+        </label>
+        <div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={releasing || !releaseReason.trim()}
+            onClick={() => void forceRelease()}
+            className="border-danger/40 text-danger hover:bg-danger/5"
+          >
+            {releasing ? "Mereset…" : "Reset eviden & lepas petugas"}
+          </Button>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          Tindakan ini menghapus seluruh foto dan hasil e-POD FO ini, melepas petugas, dan membuka
+          kunci agar bisa dikerjakan ulang.
+        </p>
+        {error && (
+          <p className="flex items-start gap-1.5 text-[11px] text-danger">
+            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {error}
+          </p>
+        )}
+      </div>
     );
   }
 
@@ -1073,7 +1141,7 @@ export default function EpodStopPanel({
 
           <p className="text-[10px] text-muted-foreground">
             Snapshot: {formatDateTime(assignment.snapshotAt)}
-            {locked && " · Terkunci sejak bukti pertama"}
+            {locked && " · Terkunci sejak bukti pertama — bisa di-reset dari kartu Petugas"}
           </p>
         </div>
 
