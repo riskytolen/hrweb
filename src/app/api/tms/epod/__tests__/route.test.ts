@@ -35,6 +35,7 @@ import { POST as createUpload } from "@/app/api/tms/epod/uploads/route";
 import { POST as submitStop } from "@/app/api/tms/epod/stops/[stopId]/submissions/route";
 import { GET as exportEpod } from "@/app/api/tms/epod/by-task/[taskId]/export/route";
 import { POST as revertAssignment } from "@/app/api/tms/epod/[assignmentId]/revert/route";
+import { PATCH as patchRoster } from "@/app/api/tms/epod/[assignmentId]/roster/route";
 
 const createClientMock = vi.mocked(createClient);
 const createAdminMock = vi.mocked(createAdminClient);
@@ -356,6 +357,68 @@ describe("POST /api/tms/epod/[assignmentId]/revert", () => {
       data: { assignment: { status: string } };
     };
     expect(payload.data.assignment.status).toBe("CLAIMED");
+  });
+});
+
+describe("PATCH /api/tms/epod/[assignmentId]/roster", () => {
+  const context = { params: Promise.resolve({ assignmentId: "a1" }) };
+
+  function rosterRequest(body: unknown) {
+    return new NextRequest("http://localhost/api/tms/epod/a1/roster", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("menolak user view-only dengan 403", async () => {
+    mockProfile(["tms.epod.view"]);
+    const response = await patchRoster(rosterRequest({ employeeId: "e1" }), context);
+    expect(response.status).toBe(403);
+    expect(createAdminMock).not.toHaveBeenCalled();
+  });
+
+  it("menetapkan petugas lewat RPC set_petugas", async () => {
+    mockProfile(["tms.epod.manage"]);
+    const rpc = vi.fn().mockResolvedValue({ data: { id: "a1", status: "CLAIMED" }, error: null });
+    createAdminMock.mockReturnValue({ rpc } as never);
+    getAssignmentDetailMock.mockResolvedValue({ assignment: { id: "a1", status: "CLAIMED" } } as never);
+
+    const response = await patchRoster(rosterRequest({ employeeId: "e1" }), context);
+    expect(response.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith("tms_epod_set_petugas", {
+      p_assignment_id: "a1",
+      p_employee_id: "e1",
+      p_actor_user: "user-1",
+    });
+    const payload = (await response.json()) as { data: { assignment: { status: string } } };
+    expect(payload.data.assignment.status).toBe("CLAIMED");
+  });
+
+  it("mengosongkan petugas saat employeeId null", async () => {
+    mockProfile(["tms.epod.manage"]);
+    const rpc = vi.fn().mockResolvedValue({ data: { id: "a1", status: "OPEN" }, error: null });
+    createAdminMock.mockReturnValue({ rpc } as never);
+    getAssignmentDetailMock.mockResolvedValue({ assignment: { id: "a1", status: "OPEN" } } as never);
+
+    const response = await patchRoster(rosterRequest({ employeeId: null }), context);
+    expect(response.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith(
+      "tms_epod_set_petugas",
+      expect.objectContaining({ p_employee_id: null }),
+    );
+  });
+
+  it("mengembalikan 404 bila assignment tidak ditemukan", async () => {
+    mockProfile(["tms.epod.manage"]);
+    const rpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "Assignment e-POD tidak ditemukan." },
+    });
+    createAdminMock.mockReturnValue({ rpc } as never);
+
+    const response = await patchRoster(rosterRequest({ employeeId: "e1" }), context);
+    expect(response.status).toBe(404);
   });
 });
 

@@ -68,6 +68,7 @@ interface DetailResponse {
 interface EmployeeOption {
   id: string;
   nama: string;
+  role: "DRIVER" | "HELPER" | null;
 }
 
 interface UploadedEvidence {
@@ -113,35 +114,28 @@ function getPosition(): Promise<GeoPoint> {
 
 function RosterEditor({
   assignmentId,
-  driverEmployeeId,
-  helperEmployeeId,
+  petugasId,
   locked,
   onSaved,
 }: {
   assignmentId: string;
-  driverEmployeeId: string | null;
-  helperEmployeeId: string | null;
+  petugasId: string | null;
   locked: boolean;
   onSaved: () => void;
 }) {
-  const [drivers, setDrivers] = useState<EmployeeOption[]>([]);
-  const [helpers, setHelpers] = useState<EmployeeOption[]>([]);
-  const [saving, setSaving] = useState<"DRIVER" | "HELPER" | null>(null);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [selected, setSelected] = useState<string>(petugasId ?? "");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        const [driverResponse, helperResponse] = await Promise.all([
-          fetch("/api/tms/epod/employees?role=DRIVER", { cache: "no-store" }),
-          fetch("/api/tms/epod/employees?role=HELPER", { cache: "no-store" }),
-        ]);
-        const driverPayload = (await driverResponse.json()) as { data?: EmployeeOption[] };
-        const helperPayload = (await helperResponse.json()) as { data?: EmployeeOption[] };
+        const response = await fetch("/api/tms/epod/employees", { cache: "no-store" });
+        const payload = (await response.json()) as { data?: EmployeeOption[] };
         if (!active) return;
-        setDrivers(driverPayload.data ?? []);
-        setHelpers(helperPayload.data ?? []);
+        setEmployees(payload.data ?? []);
       } catch {
         if (active) setError("Gagal memuat daftar pegawai.");
       }
@@ -152,69 +146,69 @@ function RosterEditor({
   }, []);
 
   const save = useCallback(
-    async (role: "DRIVER" | "HELPER", employeeId: string) => {
-      setSaving(role);
+    async (employeeId: string) => {
+      const previous = selected;
+      setSelected(employeeId);
+      setSaving(true);
       setError(null);
       try {
         const response = await fetch(`/api/tms/epod/${assignmentId}/roster`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role, employeeId: employeeId || null }),
+          body: JSON.stringify({ employeeId: employeeId || null }),
         });
         const payload = (await response.json()) as { error?: string };
         if (!response.ok || payload.error) {
-          setError(payload.error ?? "Gagal menyimpan tim.");
+          setError(payload.error ?? "Gagal menyimpan petugas.");
+          setSelected(previous);
           return;
         }
         onSaved();
       } catch {
-        setError("Gagal menyimpan tim e-POD.");
+        setError("Gagal menyimpan petugas e-POD.");
+        setSelected(previous);
       } finally {
-        setSaving(null);
+        setSaving(false);
       }
     },
-    [assignmentId, onSaved],
+    [assignmentId, onSaved, selected],
   );
 
   if (locked) {
     return (
       <p className="text-[11px] text-muted-foreground">
-        Tim terkunci karena bukti sudah dikirim. Hubungi admin untuk perubahan.
+        Petugas terkunci karena bukti sudah dikirim. Hubungi admin untuk perubahan.
       </p>
     );
   }
 
-  const renderSelect = (role: "DRIVER" | "HELPER", value: string | null, options: EmployeeOption[]) => (
-    <label className="flex flex-col gap-1.5 text-xs">
-      <span className="flex items-center gap-1.5 font-semibold text-muted-foreground">
-        {role === "DRIVER" ? <User className="h-3.5 w-3.5" /> : <Users className="h-3.5 w-3.5" />}
-        {role === "DRIVER" ? "Driver" : "Helper"}
-      </span>
-      <span className="flex items-center gap-2">
-        <select
-          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
-          value={value ?? ""}
-          disabled={saving !== null}
-          onChange={(event) => void save(role, event.target.value)}
-        >
-          <option value="">Belum ditetapkan</option>
-          {options.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.nama}
-            </option>
-          ))}
-        </select>
-        {saving === role && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />}
-      </span>
-    </label>
-  );
-
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        {renderSelect("DRIVER", driverEmployeeId, drivers)}
-        {renderSelect("HELPER", helperEmployeeId, helpers)}
-      </div>
+      <label className="flex flex-col gap-1.5 text-xs">
+        <span className="flex items-center gap-1.5 font-semibold text-muted-foreground">
+          <User className="h-3.5 w-3.5" /> Petugas e-POD
+        </span>
+        <span className="flex items-center gap-2">
+          <select
+            className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
+            value={selected}
+            disabled={saving}
+            onChange={(event) => void save(event.target.value)}
+          >
+            <option value="">Belum ditetapkan</option>
+            {employees.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.nama}
+                {option.role ? ` - ${option.role === "DRIVER" ? "Driver" : "Helper"}` : ""}
+              </option>
+            ))}
+          </select>
+          {saving && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />}
+        </span>
+      </label>
+      <p className="text-[10px] text-muted-foreground">
+        Satu FO hanya untuk satu petugas (Driver atau Helper).
+      </p>
       {error && (
         <p className="flex items-center gap-1.5 text-[11px] text-danger">
           <TriangleAlert className="h-3.5 w-3.5" /> {error}
@@ -819,6 +813,8 @@ export default function EpodStopPanel({
 
   if (!detail) return null;
   const { assignment, stops, currentByStop, driverName, helperName } = detail;
+  const petugasId = assignment.driverEmployeeId ?? assignment.helperEmployeeId;
+  const petugasName = driverName ?? helperName;
   const loadingCompleted = assignment.loadingStatus === "LOADING_COMPLETED";
   const locked = assignment.frozenAt !== null;
   const allDelivered =
@@ -891,23 +887,22 @@ export default function EpodStopPanel({
       <div className="grid items-start gap-5 lg:grid-cols-5">
         {/* Kolom kiri */}
         <div className="space-y-5 lg:col-span-3">
-          {/* Tim Pengiriman */}
+          {/* Petugas e-POD */}
           <section className="rounded-2xl border border-border bg-card p-5">
             <h2 className="flex items-center gap-2 text-sm font-bold text-foreground">
-              <Users className="h-4 w-4 text-muted-foreground" /> Tim Pengiriman
+              <Users className="h-4 w-4 text-muted-foreground" /> Petugas e-POD
             </h2>
             <div className="mt-3">
               {canManage ? (
                 <RosterEditor
                   assignmentId={assignment.id}
-                  driverEmployeeId={assignment.driverEmployeeId}
-                  helperEmployeeId={assignment.helperEmployeeId}
+                  petugasId={petugasId}
                   locked={locked}
                   onSaved={refreshAll}
                 />
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Driver: {driverName ?? "Belum ditetapkan"} · Helper: {helperName ?? "Belum ditetapkan"}
+                  {petugasName ?? "Belum ditetapkan"}
                 </p>
               )}
             </div>

@@ -214,13 +214,18 @@ export interface EpodEligibleEmployee {
   id: string;
   nama: string;
   jabatanId: number | null;
+  role: "DRIVER" | "HELPER" | null;
 }
 
 /**
- * Daftar pegawai yang boleh dipilih untuk peran tertentu, memakai acuan
- * jabatan dari gapok_settings (Driver/Helper).
+ * Daftar pegawai yang boleh dipilih sebagai petugas e-POD, memakai acuan
+ * jabatan dari gapok_settings (Driver/Helper). Role ditentukan server dari
+ * jabatan agar pemilih di web tidak perlu menentukan peran sendiri. Filter
+ * `role` opsional dipertahankan untuk pemakaian yang butuh satu peran saja.
  */
-export async function listEligibleEmployees(role: "DRIVER" | "HELPER"): Promise<EpodEligibleEmployee[]> {
+export async function listEligibleEmployees(
+  role?: "DRIVER" | "HELPER",
+): Promise<EpodEligibleEmployee[]> {
   const admin = createAdminClient();
   const { data: settings, error: settingsError } = await admin
     .from("gapok_settings")
@@ -233,18 +238,33 @@ export async function listEligibleEmployees(role: "DRIVER" | "HELPER"): Promise<
   const setting = (settings ?? [])[0] as
     | { driver_jabatan_id: number | null; helper_jabatan_id: number | null }
     | undefined;
-  const jabatanId = role === "DRIVER" ? setting?.driver_jabatan_id ?? null : setting?.helper_jabatan_id ?? null;
+  const driverJabatan = setting?.driver_jabatan_id ?? null;
+  const helperJabatan = setting?.helper_jabatan_id ?? null;
 
+  const jabatanIds = [driverJabatan, helperJabatan].filter((id): id is number => id !== null);
   let query = admin.from("pegawai").select("id,nama,jabatan_id").eq("status", "Aktif");
-  if (jabatanId !== null) query = query.eq("jabatan_id", jabatanId);
+  if (jabatanIds.length > 0) query = query.in("jabatan_id", jabatanIds);
 
   const { data, error } = await query.order("nama", { ascending: true });
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map((row) => {
+  const employees: EpodEligibleEmployee[] = (data ?? []).map((row) => {
     const record = row as { id: string; nama: string; jabatan_id: number | null };
-    return { id: String(record.id), nama: String(record.nama), jabatanId: record.jabatan_id };
+    const employeeRole: "DRIVER" | "HELPER" | null =
+      driverJabatan !== null && record.jabatan_id === driverJabatan
+        ? "DRIVER"
+        : helperJabatan !== null && record.jabatan_id === helperJabatan
+          ? "HELPER"
+          : null;
+    return {
+      id: String(record.id),
+      nama: String(record.nama),
+      jabatanId: record.jabatan_id,
+      role: employeeRole,
+    };
   });
+
+  return role ? employees.filter((item) => item.role === role) : employees;
 }
 
 export async function getAssignmentById(assignmentId: string): Promise<EpodAssignment | null> {

@@ -222,8 +222,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
                     <th className="px-4 py-2.5 font-semibold">Unit</th>
                     <th className="px-4 py-2.5 font-semibold">Loading</th>
                     <th className="px-4 py-2.5 font-semibold">e-POD</th>
-                    <th className="px-4 py-2.5 font-semibold">Driver</th>
-                    <th className="px-4 py-2.5 font-semibold">Helper</th>
+                    <th className="px-4 py-2.5 font-semibold">Petugas</th>
                     <th className="px-4 py-2.5 font-semibold">Status</th>
                   </tr>
                 </thead>
@@ -255,10 +254,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
                         {item.deliveryDoneCount}/{item.deliveryTotalCount}
                       </td>
                       <td className="max-w-40 truncate px-4 py-3 text-muted-foreground">
-                        {item.driverName ?? "–"}
-                      </td>
-                      <td className="max-w-40 truncate px-4 py-3 text-muted-foreground">
-                        {item.helperName ?? "–"}
+                        {item.driverName ?? item.helperName ?? "–"}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <EpodAssignmentBadge status={item.status} />
@@ -285,7 +281,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
                         <EpodAssignmentBadge status={item.status} />
                       </div>
                       <p className="mt-1 truncate text-xs text-muted-foreground">
-                        {[item.licensePlate, item.driverName, item.helperName].filter(Boolean).join(" • ") || "–"}
+                        {[item.licensePlate, item.driverName ?? item.helperName].filter(Boolean).join(" • ") || "–"}
                       </p>
                       <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
                         Loading {item.loadingStatus === "LOADING_COMPLETED" ? "selesai" : "belum"} · e-POD{" "}

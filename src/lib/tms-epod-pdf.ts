@@ -482,8 +482,7 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
   metaGrid([
     ["No. Kendaraan", assignment.licensePlate ?? "-"],
     ["Driver (vendor)", assignment.vendorDriverName ?? "-"],
-    ["Driver", driverName ?? "Belum ditetapkan"],
-    ["Helper", helperName ?? "Belum ditetapkan"],
+    ["Petugas e-POD", driverName ?? helperName ?? "Belum ditetapkan"],
     [
       "Progress e-POD",
       `${assignment.deliveryDoneCount} dari ${assignment.deliveryTotalCount} titik pengantaran`,

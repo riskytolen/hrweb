@@ -32,9 +32,6 @@ export async function PATCH(
   }
 
   const source = (body ?? {}) as Record<string, unknown>;
-  const role = source.role === "DRIVER" || source.role === "HELPER" ? source.role : null;
-  if (!role) return epodError("Peran harus DRIVER atau HELPER.", 400);
-
   const employeeId =
     source.employeeId === null || source.employeeId === undefined
       ? null
@@ -45,9 +42,8 @@ export async function PATCH(
 
   try {
     const admin = createAdminClient();
-    const { error } = await admin.rpc("tms_epod_set_roster", {
+    const { error } = await admin.rpc("tms_epod_set_petugas", {
       p_assignment_id: assignmentId,
-      p_role: role,
       p_employee_id: employeeId,
       p_actor_user: auth.context.userId,
     });

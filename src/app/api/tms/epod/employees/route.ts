@@ -9,12 +9,12 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const roleParam = url.searchParams.get("role");
-  if (roleParam !== "DRIVER" && roleParam !== "HELPER") {
+  if (roleParam !== null && roleParam !== "DRIVER" && roleParam !== "HELPER") {
     return epodError("Peran harus DRIVER atau HELPER.", 400);
   }
 
   try {
-    const employees = await listEligibleEmployees(roleParam);
+    const employees = await listEligibleEmployees(roleParam ?? undefined);
     return epodJson({ data: employees });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gagal memuat daftar pegawai.";
