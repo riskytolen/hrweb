@@ -17,6 +17,7 @@ import {
   Trash2,
   TriangleAlert,
   Truck,
+  Undo2,
   User,
   Users,
   X,
@@ -688,6 +689,7 @@ export default function EpodStopPanel({
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [galleryKey, setGalleryKey] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [reverting, setReverting] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const detailCardRef = useRef<HTMLDivElement | null>(null);
@@ -741,6 +743,29 @@ export default function EpodStopPanel({
       setError("Gagal membatalkan assignment.");
     } finally {
       setCancelling(false);
+    }
+  }, [assignmentId, refreshAll]);
+
+  const revertAssignment = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Kembalikan assignment ini? Status akan dipulihkan sesuai data terakhir.",
+    );
+    if (!confirmed) return;
+    setReverting(true);
+    try {
+      const response = await fetch(`/api/tms/epod/${assignmentId}/revert`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok || payload.error) {
+        setError(payload.error ?? "Gagal mengembalikan assignment.");
+        return;
+      }
+      refreshAll();
+    } catch {
+      setError("Gagal mengembalikan assignment.");
+    } finally {
+      setReverting(false);
     }
   }, [assignmentId, refreshAll]);
 
@@ -988,6 +1013,20 @@ export default function EpodStopPanel({
               className="border-danger/40 text-danger hover:bg-danger/5"
             >
               {cancelling ? "Membatalkan…" : "Batalkan assignment"}
+            </Button>
+          )}
+
+          {canManage && assignment.status === "CANCELLED" && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              icon={reverting ? Loader2 : Undo2}
+              disabled={reverting}
+              onClick={() => void revertAssignment()}
+              className="border-success/40 text-success hover:bg-success/5"
+            >
+              {reverting ? "Mengembalikan…" : "Kembalikan assignment"}
             </Button>
           )}
 

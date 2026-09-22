@@ -17,6 +17,7 @@ vi.mock("@/lib/tms-epod-data", () => ({
   getStopDetail: vi.fn(),
   getAssignmentByTask: vi.fn(),
   getAssignmentExportData: vi.fn(),
+  getAssignmentDetail: vi.fn(),
 }));
 
 import { createClient } from "@/lib/supabase-server";
@@ -24,6 +25,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
 import {
   countAssignmentsByStatus,
   getAssignmentByTask,
+  getAssignmentDetail,
   getAssignmentExportData,
   getStopDetail,
   listAssignments,
@@ -32,12 +34,14 @@ import { GET as listEpod } from "@/app/api/tms/epod/route";
 import { POST as createUpload } from "@/app/api/tms/epod/uploads/route";
 import { POST as submitStop } from "@/app/api/tms/epod/stops/[stopId]/submissions/route";
 import { GET as exportEpod } from "@/app/api/tms/epod/by-task/[taskId]/export/route";
+import { POST as revertAssignment } from "@/app/api/tms/epod/[assignmentId]/revert/route";
 
 const createClientMock = vi.mocked(createClient);
 const createAdminMock = vi.mocked(createAdminClient);
 const listAssignmentsMock = vi.mocked(listAssignments);
 const countMock = vi.mocked(countAssignmentsByStatus);
 const getStopDetailMock = vi.mocked(getStopDetail);
+const getAssignmentDetailMock = vi.mocked(getAssignmentDetail);
 const getAssignmentByTaskMock = vi.mocked(getAssignmentByTask);
 const getAssignmentExportDataMock = vi.mocked(getAssignmentExportData);
 
@@ -303,6 +307,55 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
         ],
       }),
     );
+  });
+});
+
+describe("POST /api/tms/epod/[assignmentId]/revert", () => {
+  const context = { params: Promise.resolve({ assignmentId: "a1" }) };
+
+  function revertRequest() {
+    return new NextRequest("http://localhost/api/tms/epod/a1/revert", { method: "POST" });
+  }
+
+  it("menolak user view-only dengan 403", async () => {
+    mockProfile(["tms.epod.view"]);
+    const response = await revertAssignment(revertRequest(), context);
+    expect(response.status).toBe(403);
+    expect(createAdminMock).not.toHaveBeenCalled();
+  });
+
+  it("mengembalikan 404 bila assignment tidak ditemukan", async () => {
+    mockProfile(["tms.epod.manage"]);
+    const rpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "Assignment e-POD tidak ditemukan." },
+    });
+    createAdminMock.mockReturnValue({ rpc } as never);
+
+    const response = await revertAssignment(revertRequest(), context);
+    expect(response.status).toBe(404);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain("tidak ditemukan");
+  });
+
+  it("memulihkan assignment dan mengembalikan detail", async () => {
+    mockProfile(["tms.epod.manage"]);
+    const rpc = vi.fn().mockResolvedValue({ data: { id: "a1", status: "CLAIMED" }, error: null });
+    createAdminMock.mockReturnValue({ rpc } as never);
+    getAssignmentDetailMock.mockResolvedValue({
+      assignment: { id: "a1", status: "CLAIMED" },
+    } as never);
+
+    const response = await revertAssignment(revertRequest(), context);
+    expect(response.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith("tms_epod_revert_cancellation", {
+      p_assignment_id: "a1",
+      p_actor_user: "user-1",
+    });
+    const payload = (await response.json()) as {
+      data: { assignment: { status: string } };
+    };
+    expect(payload.data.assignment.status).toBe("CLAIMED");
   });
 });
 
