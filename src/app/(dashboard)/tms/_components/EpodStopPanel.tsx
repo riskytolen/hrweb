@@ -24,6 +24,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
+import Portal from "@/components/ui/Portal";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase-browser";
 import { compressFile, formatFileSize } from "@/lib/file-compression";
@@ -144,7 +145,9 @@ function RosterEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
+  const [releaseOpen, setReleaseOpen] = useState(false);
   const [releaseReason, setReleaseReason] = useState("");
+  const [releaseError, setReleaseError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -195,16 +198,11 @@ function RosterEditor({
 
   const forceRelease = useCallback(async () => {
     if (!releaseReason.trim()) {
-      setError("Alasan reset e-POD wajib diisi.");
+      setReleaseError("Alasan reset e-POD wajib diisi.");
       return;
     }
-    const confirmed = window.confirm(
-      "SEMUA foto bukti dan hasil e-POD pada FO ini akan dihapus permanen, " +
-        "petugas dilepas, dan pekerjaan harus submit ulang dari awal. Lanjutkan?",
-    );
-    if (!confirmed) return;
     setReleasing(true);
-    setError(null);
+    setReleaseError(null);
     try {
       const response = await fetch(`/api/tms/epod/${assignmentId}/force-release`, {
         method: "POST",
@@ -213,17 +211,34 @@ function RosterEditor({
       });
       const payload = (await response.json()) as { error?: string; warning?: string };
       if (!response.ok || payload.error) {
-        setError(payload.error ?? "Gagal mereset e-POD.");
+        setReleaseError(payload.error ?? "Gagal mereset e-POD.");
         return;
       }
       setReleaseReason("");
+      setReleaseOpen(false);
       onSaved();
     } catch {
-      setError("Gagal mereset e-POD.");
+      setReleaseError("Gagal mereset e-POD.");
     } finally {
       setReleasing(false);
     }
   }, [assignmentId, onSaved, releaseReason]);
+
+  const closeRelease = useCallback(() => {
+    if (releasing) return;
+    setReleaseOpen(false);
+    setReleaseError(null);
+    setReleaseReason("");
+  }, [releasing]);
+
+  useEffect(() => {
+    if (!releaseOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeRelease();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [releaseOpen, closeRelease]);
 
   if (locked) {
     return (
@@ -233,37 +248,96 @@ function RosterEditor({
           {petugasRoleLabel ? ` - ${petugasRoleLabel}` : ""}. Petugas terkunci karena bukti sudah
           dikirim.
         </p>
-        <label className="flex flex-col gap-1.5 text-xs">
-          <span className="font-semibold text-muted-foreground">
-            Alasan reset (wajib) — semua evidence akan dihapus permanen
-          </span>
-          <input
-            className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
-            placeholder="mis. Salah petugas, evidence perlu submit ulang"
-            value={releaseReason}
-            disabled={releasing}
-            onChange={(event) => setReleaseReason(event.target.value)}
-          />
-        </label>
-        <div>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={releasing || !releaseReason.trim()}
-            onClick={() => void forceRelease()}
-            className="border-danger/40 text-danger hover:bg-danger/5"
-          >
-            {releasing ? "Mereset…" : "Reset eviden & lepas petugas"}
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          icon={Trash2}
+          onClick={() => setReleaseOpen(true)}
+          className="border-danger/40 text-danger hover:bg-danger/5"
+        >
+          Reset eviden & lepas petugas
+        </Button>
         <p className="text-[10px] text-muted-foreground">
-          Tindakan ini menghapus seluruh foto dan hasil e-POD FO ini, melepas petugas, dan membuka
-          kunci agar bisa dikerjakan ulang.
+          Menghapus seluruh foto dan hasil e-POD FO ini, melepas petugas, dan membuka kunci agar bisa
+          dikerjakan ulang.
         </p>
-        {error && (
-          <p className="flex items-start gap-1.5 text-[11px] text-danger">
-            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {error}
-          </p>
+
+        {releaseOpen && (
+          <Portal>
+            <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/60 p-4">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Reset e-POD dan lepas petugas"
+                className="w-full max-w-md overflow-hidden rounded-2xl bg-card shadow-2xl"
+              >
+                <div className="flex items-start gap-3 border-b border-border px-5 py-4">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-danger/10">
+                    <TriangleAlert className="h-5 w-5 text-danger" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-bold text-foreground">
+                      Reset e-POD & lepas petugas?
+                    </h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {petugasName ?? "Petugas"}
+                      {petugasRoleLabel ? ` - ${petugasRoleLabel}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeRelease}
+                    disabled={releasing}
+                    aria-label="Tutup"
+                    className="rounded-lg p-1 text-muted-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 px-5 py-4">
+                  <div className="rounded-xl border border-danger/30 bg-danger/5 p-3 text-[11px] text-danger">
+                    Semua foto bukti dan hasil e-POD FO ini akan <strong>dihapus permanen</strong>.
+                    Petugas dilepas, kunci dibuka, dan FO harus dikerjakan ulang dari awal.
+                  </div>
+                  <label className="flex flex-col gap-1.5 text-xs">
+                    <span className="font-semibold text-muted-foreground">Alasan reset (wajib)</span>
+                    <input
+                      autoFocus
+                      className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground"
+                      placeholder="mis. Salah petugas, evidence perlu submit ulang"
+                      value={releaseReason}
+                      disabled={releasing}
+                      onChange={(event) => {
+                        setReleaseReason(event.target.value);
+                        if (releaseError) setReleaseError(null);
+                      }}
+                    />
+                  </label>
+                  {releaseError && (
+                    <p className="flex items-start gap-1.5 text-[11px] text-danger">
+                      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {releaseError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
+                  <Button size="sm" variant="outline" disabled={releasing} onClick={closeRelease}>
+                    Batal
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    icon={releasing ? Loader2 : Trash2}
+                    disabled={releasing || !releaseReason.trim()}
+                    onClick={() => void forceRelease()}
+                  >
+                    {releasing ? "Mereset…" : "Ya, reset & lepas petugas"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Portal>
         )}
       </div>
     );
