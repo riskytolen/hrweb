@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   Expand,
+  FileDown,
   Loader2,
   MapPin,
   Route as RouteIcon,
@@ -472,6 +473,8 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
   // Ringkasan e-POD disimpan bersama taskId agar badge task lama tidak
   // sempat tampil saat task berganti.
   const [epodData, setEpodData] = useState<{ taskId: string; summary: EpodTaskSummaryData | null } | null>(null);
+  const [exportingEpod, setExportingEpod] = useState(false);
+  const [epodExportError, setEpodExportError] = useState<string | null>(null);
   // Jejak historis dari track endpoint (bila actual_trip tidak tersedia).
   const [historyTrail, setHistoryTrail] = useState<LatLng[]>([]);
   // Jejak yang terakumulasi dari polling realtime selama halaman dibuka.
@@ -625,6 +628,22 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
   );
 
   const epodSummary = epodData && epodData.taskId === item?.id ? epodData.summary : null;
+
+  /** Buat laporan PDF e-POD (hanya saat seluruh e-POD selesai). */
+  const handleExportEpod = useCallback(async () => {
+    const taskId = item?.id;
+    if (!taskId) return;
+    setExportingEpod(true);
+    setEpodExportError(null);
+    try {
+      const { exportEpodPdf } = await import("@/lib/tms-epod-pdf");
+      await exportEpodPdf(taskId);
+    } catch (caught) {
+      setEpodExportError(caught instanceof Error ? caught.message : "Gagal membuat laporan PDF e-POD.");
+    } finally {
+      setExportingEpod(false);
+    }
+  }, [item?.id]);
 
   const epodBySequence = useMemo(() => {
     const map = new Map<number, EpodPointState>();
@@ -1081,24 +1100,47 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
             ) : (
               <>
                 {epodSummary && (
-                  <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 font-semibold",
-                        epodSummary.assignment.loadingStatus === "LOADING_COMPLETED"
-                          ? "bg-emerald-500/10 text-emerald-600"
-                          : "bg-slate-500/10 text-slate-600",
-                      )}
-                    >
-                      Loading {epodSummary.assignment.loadingStatus === "LOADING_COMPLETED" ? "selesai" : "belum"}
-                    </span>
-                    <span className="rounded-full bg-muted px-2 py-0.5 font-semibold tabular-nums">
-                      e-POD {epodSummary.assignment.deliveryDoneCount}/{epodSummary.assignment.deliveryTotalCount}
-                    </span>
-                    <span className="rounded-full bg-muted px-2 py-0.5 font-semibold">
-                      {EPOD_ASSIGNMENT_STATUS_LABEL[epodSummary.assignment.status]}
-                    </span>
-                  </p>
+                  <div className="mb-2 space-y-2">
+                    <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 font-semibold",
+                          epodSummary.assignment.loadingStatus === "LOADING_COMPLETED"
+                            ? "bg-emerald-500/10 text-emerald-600"
+                            : "bg-slate-500/10 text-slate-600",
+                        )}
+                      >
+                        Loading {epodSummary.assignment.loadingStatus === "LOADING_COMPLETED" ? "selesai" : "belum"}
+                      </span>
+                      <span className="rounded-full bg-muted px-2 py-0.5 font-semibold tabular-nums">
+                        e-POD {epodSummary.assignment.deliveryDoneCount}/{epodSummary.assignment.deliveryTotalCount}
+                      </span>
+                      <span className="rounded-full bg-muted px-2 py-0.5 font-semibold">
+                        {EPOD_ASSIGNMENT_STATUS_LABEL[epodSummary.assignment.status]}
+                      </span>
+                    </p>
+                    {epodSummary.assignment.status === "COMPLETED" && (
+                      <>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          icon={exportingEpod ? Loader2 : FileDown}
+                          disabled={exportingEpod}
+                          onClick={() => void handleExportEpod()}
+                          className="w-full"
+                        >
+                          {exportingEpod ? "Menyiapkan PDF…" : "Export PDF e-POD"}
+                        </Button>
+                        {epodExportError && (
+                          <p className="flex items-start gap-1.5 text-[11px] text-danger">
+                            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span>{epodExportError}</span>
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
                 )}
                 <RoutePointList
                   key={item?.id ?? "none"}

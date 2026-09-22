@@ -3,10 +3,12 @@ import "server-only";
 import { createAdminClient } from "./supabase-admin";
 import {
   normalizeEpodAssignment,
+  normalizeEpodEvidence,
   normalizeEpodStop,
   normalizeEpodSubmission,
   type EpodAssignment,
   type EpodAssignmentListItem,
+  type EpodEvidence,
   type EpodStop,
   type EpodSubmission,
 } from "./tms-epod";
@@ -14,6 +16,10 @@ import {
 const ASSIGNMENTS = "tms_epod_assignments";
 const STOPS = "tms_epod_stops";
 const SUBMISSIONS = "tms_epod_submissions";
+const EVIDENCE = "tms_epod_evidence";
+
+/** Masa berlaku signed URL foto pada laporan PDF. */
+const EXPORT_SIGNED_URL_TTL_SECONDS = 600;
 
 export type { EpodAssignmentListItem };
 
@@ -278,4 +284,52 @@ export async function countAssignmentsByStatus(): Promise<EpodStatusCounts> {
     cancelled: counts.CANCELLED ?? 0,
     total,
   };
+}
+
+export interface EpodExportEvidence extends EpodEvidence {
+  signedUrl: string | null;
+}
+
+export interface EpodAssignmentExport extends EpodAssignmentDetail {
+  /** Foto per submission aktif, sudah dilengkapi signed URL untuk laporan PDF. */
+  evidenceBySubmission: Record<string, EpodExportEvidence[]>;
+}
+
+/**
+ * Data lengkap satu assignment untuk laporan PDF: ringkasan, seluruh titik,
+ * submission aktif tiap titik, dan foto buktinya (signed URL 10 menit).
+ */
+export async function getAssignmentExportData(
+  assignmentId: string,
+): Promise<EpodAssignmentExport | null> {
+  const detail = await getAssignmentDetail(assignmentId);
+  if (!detail) return null;
+
+  const admin = createAdminClient();
+  const submissionIds = Object.values(detail.currentByStop).map((submission) => submission.id);
+  const evidenceBySubmission: Record<string, EpodExportEvidence[]> = {};
+
+  if (submissionIds.length > 0) {
+    const { data, error } = await admin
+      .from(EVIDENCE)
+      .select("*")
+      .in("submission_id", submissionIds)
+      .order("sort_order", { ascending: true });
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? [])
+      .map(normalizeEpodEvidence)
+      .filter((item): item is EpodEvidence => item !== null);
+
+    for (const row of rows) {
+      const { data: signed } = await admin.storage
+        .from(row.bucketId)
+        .createSignedUrl(row.objectPath, EXPORT_SIGNED_URL_TTL_SECONDS);
+      const list = evidenceBySubmission[row.submissionId] ?? [];
+      list.push({ ...row, signedUrl: signed?.signedUrl ?? null });
+      evidenceBySubmission[row.submissionId] = list;
+    }
+  }
+
+  return { ...detail, evidenceBySubmission };
 }

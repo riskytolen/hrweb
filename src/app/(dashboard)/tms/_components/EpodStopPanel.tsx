@@ -7,6 +7,7 @@ import {
   Camera,
   Check,
   ChevronRight,
+  FileDown,
   Loader2,
   MapPin,
   Package,
@@ -687,6 +688,8 @@ export default function EpodStopPanel({
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [galleryKey, setGalleryKey] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const detailCardRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
@@ -745,6 +748,22 @@ export default function EpodStopPanel({
     setSelectedStopId((prev) => (prev === stopId ? null : stopId));
   }, []);
 
+  /** Buat laporan PDF e-POD (hanya saat seluruh e-POD selesai). */
+  const exportPdf = useCallback(async () => {
+    const taskId = detail?.assignment.taskId;
+    if (!taskId) return;
+    setExportingPdf(true);
+    setPdfError(null);
+    try {
+      const { exportEpodPdf } = await import("@/lib/tms-epod-pdf");
+      await exportEpodPdf(taskId);
+    } catch (caught) {
+      setPdfError(caught instanceof Error ? caught.message : "Gagal membuat laporan PDF e-POD.");
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [detail?.assignment.taskId]);
+
   /** Di layar kecil kolom kanan menumpuk di bawah, jadi gulirkan ke kartu detail. */
   useEffect(() => {
     if (!selectedStopId) return;
@@ -798,11 +817,29 @@ export default function EpodStopPanel({
             <span className="font-semibold text-foreground">Snapshot</span>
             <span className="tabular-nums">{formatDateTime(assignment.snapshotAt)}</span>
           </span>
+          {assignment.status === "COMPLETED" && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={exportingPdf ? Loader2 : FileDown}
+              disabled={exportingPdf}
+              onClick={() => void exportPdf()}
+            >
+              {exportingPdf ? "Menyiapkan PDF…" : "Export PDF"}
+            </Button>
+          )}
           <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={refreshAll}>
             Muat ulang
           </Button>
         </div>
       </div>
+
+      {pdfError && (
+        <p className="flex items-start gap-1.5 text-[11px] text-danger">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{pdfError}</span>
+        </p>
+      )}
 
       {/* Hero */}
       <div className="flex items-center gap-4 rounded-2xl border border-border bg-card p-5">

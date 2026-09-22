@@ -15,20 +15,31 @@ vi.mock("@/lib/tms-epod-data", () => ({
   listAssignments: vi.fn(),
   countAssignmentsByStatus: vi.fn(),
   getStopDetail: vi.fn(),
+  getAssignmentByTask: vi.fn(),
+  getAssignmentExportData: vi.fn(),
 }));
 
 import { createClient } from "@/lib/supabase-server";
 import { createAdminClient } from "@/lib/supabase-admin";
-import { countAssignmentsByStatus, getStopDetail, listAssignments } from "@/lib/tms-epod-data";
+import {
+  countAssignmentsByStatus,
+  getAssignmentByTask,
+  getAssignmentExportData,
+  getStopDetail,
+  listAssignments,
+} from "@/lib/tms-epod-data";
 import { GET as listEpod } from "@/app/api/tms/epod/route";
 import { POST as createUpload } from "@/app/api/tms/epod/uploads/route";
 import { POST as submitStop } from "@/app/api/tms/epod/stops/[stopId]/submissions/route";
+import { GET as exportEpod } from "@/app/api/tms/epod/by-task/[taskId]/export/route";
 
 const createClientMock = vi.mocked(createClient);
 const createAdminMock = vi.mocked(createAdminClient);
 const listAssignmentsMock = vi.mocked(listAssignments);
 const countMock = vi.mocked(countAssignmentsByStatus);
 const getStopDetailMock = vi.mocked(getStopDetail);
+const getAssignmentByTaskMock = vi.mocked(getAssignmentByTask);
+const getAssignmentExportDataMock = vi.mocked(getAssignmentExportData);
 
 function mockProfile(permissions: string[], accountType = "internal") {
   createClientMock.mockResolvedValue({
@@ -292,5 +303,59 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
         ],
       }),
     );
+  });
+});
+
+describe("GET /api/tms/epod/by-task/[taskId]/export", () => {
+  const context = { params: Promise.resolve({ taskId: "t1" }) };
+
+  it("menolak akun tanpa akses e-POD", async () => {
+    mockProfile(["dashboard"]);
+    const response = await exportEpod(new NextRequest("http://localhost/api/tms/epod/by-task/t1/export"), context);
+    expect(response.status).toBe(403);
+    expect(getAssignmentByTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("mengembalikan 404 bila FO tidak punya e-POD", async () => {
+    mockProfile(["tms.epod.view"]);
+    getAssignmentByTaskMock.mockResolvedValue(null);
+    const response = await exportEpod(new NextRequest("http://localhost/api/tms/epod/by-task/t1/export"), context);
+    expect(response.status).toBe(404);
+  });
+
+  it("mengembalikan 409 bila e-POD belum selesai", async () => {
+    mockProfile(["tms.epod.view"]);
+    getAssignmentByTaskMock.mockResolvedValue({
+      assignment: { id: "a1", status: "IN_PROGRESS" },
+      stops: [],
+      currentByStop: {},
+    } as never);
+    const response = await exportEpod(new NextRequest("http://localhost/api/tms/epod/by-task/t1/export"), context);
+    expect(response.status).toBe(409);
+    expect(getAssignmentExportDataMock).not.toHaveBeenCalled();
+  });
+
+  it("mengembalikan data ekspor tanpa cache saat e-POD selesai", async () => {
+    mockProfile(["tms.epod.view"]);
+    getAssignmentByTaskMock.mockResolvedValue({
+      assignment: { id: "a1", status: "COMPLETED" },
+      stops: [],
+      currentByStop: {},
+    } as never);
+    getAssignmentExportDataMock.mockResolvedValue({
+      assignment: { id: "a1", status: "COMPLETED" },
+      driverName: "Andi",
+      helperName: null,
+      stops: [],
+      currentByStop: {},
+      evidenceBySubmission: {},
+    } as never);
+
+    const response = await exportEpod(new NextRequest("http://localhost/api/tms/epod/by-task/t1/export"), context);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(getAssignmentExportDataMock).toHaveBeenCalledWith("a1");
+    const payload = (await response.json()) as { data: { driverName: string | null } };
+    expect(payload.data.driverName).toBe("Andi");
   });
 });
