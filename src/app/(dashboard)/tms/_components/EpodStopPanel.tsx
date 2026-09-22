@@ -44,6 +44,7 @@ import {
   EpodAssignmentBadge,
   EpodLoadingBadge,
   EpodResultBadge,
+  EpodSentBadge,
   EpodStopTypeBadge,
 } from "./EpodStatusBadge";
 import EpodEvidenceGallery from "./EpodEvidenceGallery";
@@ -855,7 +856,7 @@ export default function EpodStopPanel({
               Urutan pengiriman sesuai rute yang telah ditentukan
             </p>
 
-            <ol className="mt-4 space-y-2">
+            <ol className="mt-4 space-y-2.5">
               {stops.map((stop) => {
                 const current = currentByStop[stop.id];
                 const expanded = expandedStopId === stop.id;
@@ -864,25 +865,15 @@ export default function EpodStopPanel({
                 return (
                   <li
                     key={stop.id}
-                    className={cn(
-                      "overflow-hidden rounded-xl border border-border border-l-4",
-                      isLoading ? "border-l-orange-400" : "border-l-sky-400",
-                    )}
+                    className="overflow-hidden rounded-2xl border border-border bg-card"
                   >
                     <button
                       type="button"
                       onClick={() => setExpandedStopId(expanded ? null : stop.id)}
                       aria-expanded={expanded}
-                      className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-muted/40"
+                      className="flex w-full items-center gap-3.5 p-4 text-left transition-colors hover:bg-muted/40"
                     >
-                      <span
-                        className={cn(
-                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold",
-                          isLoading
-                            ? "bg-orange-500/15 text-orange-600"
-                            : "bg-sky-500/15 text-sky-600",
-                        )}
-                      >
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-600">
                         {stop.sequence}
                       </span>
                       <span className="min-w-0 flex-1">
@@ -892,31 +883,28 @@ export default function EpodStopPanel({
                           </span>
                           <EpodStopTypeBadge stopType={stop.stopType} />
                           {current?.result && <EpodResultBadge result={current.result} />}
-                          {isLoading && current && (
-                            <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600">
-                              Bukti terkirim
-                            </span>
-                          )}
+                          {isLoading && current && <EpodSentBadge />}
                         </span>
                         {stop.address && (
-                          <span className="mt-0.5 flex items-start gap-1 text-[11px] text-muted-foreground">
-                            <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
-                            <span className="line-clamp-2">{stop.address}</span>
+                          <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <MapPin className="h-3 w-3 shrink-0" />
+                            <span className="truncate" title={stop.address}>
+                              {stop.address}
+                            </span>
                           </span>
                         )}
                         {isLoading && (
-                          <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                             <Package className="h-3 w-3 shrink-0" />
                             Titik awal · Proses loading barang dari gudang
                           </span>
                         )}
                       </span>
-                      <ChevronRight
-                        className={cn(
-                          "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                          expanded && "rotate-90",
-                        )}
-                      />
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                        <ChevronRight
+                          className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")}
+                        />
+                      </span>
                     </button>
 
                     {expanded && (

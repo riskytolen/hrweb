@@ -2,6 +2,14 @@
 
 import { cn } from "@/lib/utils";
 import {
+  AlertTriangle,
+  CircleCheckBig,
+  Package,
+  Truck,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import {
   EPOD_ASSIGNMENT_STATUS_LABEL,
   EPOD_RESULT_LABEL,
   type EpodAssignmentStatus,
@@ -43,6 +51,12 @@ const RESULT_TONE: Record<EpodDeliveryResult, string> = {
   REJECTED: "bg-rose-500/10 text-rose-600",
 };
 
+const RESULT_ICON: Record<EpodDeliveryResult, LucideIcon> = {
+  DELIVERED: CircleCheckBig,
+  PARTIAL: AlertTriangle,
+  REJECTED: X,
+};
+
 export function EpodResultBadge({
   result,
   className,
@@ -50,15 +64,32 @@ export function EpodResultBadge({
   result: EpodDeliveryResult;
   className?: string;
 }) {
+  const Icon = RESULT_ICON[result];
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap",
+        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap",
         RESULT_TONE[result],
         className,
       )}
     >
+      <Icon className="h-3 w-3 shrink-0" />
       {EPOD_RESULT_LABEL[result]}
+    </span>
+  );
+}
+
+/** Badge hijau untuk bukti yang sudah dikirim (khusus titik loading). */
+export function EpodSentBadge({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap text-emerald-600",
+        className,
+      )}
+    >
+      <CircleCheckBig className="h-3 w-3 shrink-0" />
+      Bukti terkirim
     </span>
   );
 }
@@ -87,6 +118,11 @@ const STOP_TYPE_TONE: Record<EpodStopType, string> = {
   DELIVERY: "bg-sky-500/10 text-sky-600",
 };
 
+const STOP_TYPE_ICON: Record<EpodStopType, LucideIcon> = {
+  LOADING: Package,
+  DELIVERY: Truck,
+};
+
 export function EpodStopTypeBadge({
   stopType,
   className,
@@ -94,14 +130,16 @@ export function EpodStopTypeBadge({
   stopType: EpodStopType;
   className?: string;
 }) {
+  const Icon = STOP_TYPE_ICON[stopType];
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap",
+        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap",
         STOP_TYPE_TONE[stopType],
         className,
       )}
     >
+      <Icon className="h-3 w-3 shrink-0" />
       {STOP_TYPE_LABEL[stopType]}
     </span>
   );
