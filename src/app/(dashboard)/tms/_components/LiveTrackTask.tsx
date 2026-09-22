@@ -17,7 +17,7 @@ export default function LiveTrackTask() {
           <div className="min-w-0 xl:col-span-2">
             <TaskInstantBoard selectedId={selectedTask?.id ?? null} onSelect={setSelectedTask} />
           </div>
-          <aside className="min-w-0 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pr-1">
+          <aside className="min-w-0 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:self-start xl:overflow-y-auto xl:pr-1">
             <TaskInstantSidePanel
               item={selectedTask}
               onBack={() => setSelectedTask(null)}

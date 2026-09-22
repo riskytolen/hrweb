@@ -826,7 +826,7 @@ export default function EpodStopPanel({
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-5">
+      <div className="grid items-start gap-5 lg:grid-cols-5">
         {/* Kolom kiri */}
         <div className="space-y-5 lg:col-span-3">
           {/* Tim Pengiriman */}
@@ -967,7 +967,7 @@ export default function EpodStopPanel({
         </div>
 
         {/* Kolom kanan: detail titik terpilih + informasi pengiriman */}
-        <div className="space-y-5 lg:col-span-2 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
+        <div className="space-y-5 lg:col-span-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto lg:pr-1">
           {selectedStop && (
             <section ref={detailCardRef} className="rounded-2xl border border-border bg-card p-5">
               <div className="flex items-start justify-between gap-3">
