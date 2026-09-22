@@ -14,7 +14,8 @@ export const TMS_EPOD_MIN_PHOTOS = 1;
 export const TMS_EPOD_MAX_PHOTOS = 5;
 export const TMS_EPOD_MAX_ITEMS = 20;
 export const TMS_EPOD_MAX_PHOTO_BYTES = 5 * 1024 * 1024;
-export const TMS_EPOD_COMPRESS_KB = 1024;
+/** Target ukuran foto bukti e-POD setelah dikompres (KB). */
+export const TMS_EPOD_COMPRESS_KB = 500;
 export const TMS_EPOD_GEOFENCE_METERS = 500;
 /** Retensi bukti e-POD dalam bulan. */
 export const TMS_EPOD_RETENTION_MONTHS = 3;
