@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
+  RefreshCw,
   Search,
   Store,
   Thermometer,
@@ -19,44 +22,64 @@ import PageHeader from "@/components/ui/PageHeader";
 /* ─── Tipe data ─── */
 
 type TempStatus = "NORMAL" | "WASPADA" | "TINGGI";
+type VisitStateFilter = "ALL" | "ONGOING" | "COMPLETED" | "INCOMPLETE" | "PENDING";
 
-interface TripLog {
+interface TripLogRow {
   id: string;
-  unit: string;
-  unitType: string;
-  store: string;
-  city: string;
-  driver: string;
-  enteredAt: string;
+  taskId: string;
+  taskNumber: string | null;
+  taskStatus: string | null;
+  unit: string | null;
+  driver: string | null;
+  routeSequence: number;
+  pointType: string | null;
+  store: string | null;
+  address: string | null;
+  enteredAt: string | null;
   exitedAt: string | null;
-  temperatureC: number;
+  temperatureC: number | null;
 }
 
-/* ─── Data dummy (sementara, menunggu integrasi GPS/suhu) ─── */
+interface VisitCounts {
+  completed: number;
+  ongoing: number;
+  incomplete: number;
+  pending: number;
+}
 
-const DUMMY_LOGS: TripLog[] = [
-  { id: "TL-001", unit: "B 9123 UZX", unitType: "Box Freezer", store: "Toko Berkah Jaya", city: "Bekasi", driver: "Sutrisno", enteredAt: "2026-09-22T06:12:00", exitedAt: "2026-09-22T06:58:00", temperatureC: -18.4 },
-  { id: "TL-002", unit: "B 8741 FKS", unitType: "Box Freezer", store: "Toko Sumber Rejeki", city: "Depok", driver: "Hendra Gunawan", enteredAt: "2026-09-22T07:05:00", exitedAt: "2026-09-22T07:41:00", temperatureC: -16.1 },
-  { id: "TL-003", unit: "B 9052 ABC", unitType: "Wingbox", store: "Toko Makmur Abadi", city: "Bogor", driver: "Dedi Kurniawan", enteredAt: "2026-09-22T07:48:00", exitedAt: "2026-09-22T09:02:00", temperatureC: -9.6 },
-  { id: "TL-004", unit: "B 9123 UZX", unitType: "Box Freezer", store: "Toko Sinar Pagi", city: "Bekasi", driver: "Sutrisno", enteredAt: "2026-09-22T08:20:00", exitedAt: "2026-09-22T08:55:00", temperatureC: -17.8 },
-  { id: "TL-005", unit: "B 7330 QWE", unitType: "Box Chiller", store: "Toko Anugerah", city: "Jakarta Timur", driver: "Agus Santoso", enteredAt: "2026-09-22T09:10:00", exitedAt: "2026-09-22T09:47:00", temperatureC: 3.2 },
-  { id: "TL-006", unit: "B 8741 FKS", unitType: "Box Freezer", store: "Toko Lancar Jaya", city: "Depok", driver: "Hendra Gunawan", enteredAt: "2026-09-22T10:02:00", exitedAt: null, temperatureC: -4.2 },
-  { id: "TL-007", unit: "B 6554 ZXC", unitType: "Wingbox", store: "Toko Mitra Sejahtera", city: "Tangerang", driver: "Rudi Hartono", enteredAt: "2026-09-22T10:26:00", exitedAt: "2026-09-22T11:31:00", temperatureC: -19.0 },
-  { id: "TL-008", unit: "B 7330 QWE", unitType: "Box Chiller", store: "Toko Barokah", city: "Jakarta Timur", driver: "Agus Santoso", enteredAt: "2026-09-22T11:05:00", exitedAt: "2026-09-22T11:38:00", temperatureC: 4.1 },
-  { id: "TL-009", unit: "B 9052 ABC", unitType: "Wingbox", store: "Toko Cahaya Baru", city: "Bogor", driver: "Dedi Kurniawan", enteredAt: "2026-09-22T12:14:00", exitedAt: "2026-09-22T12:59:00", temperatureC: -11.3 },
-  { id: "TL-010", unit: "B 6554 ZXC", unitType: "Wingbox", store: "Toko Harapan Kita", city: "Tangerang", driver: "Rudi Hartono", enteredAt: "2026-09-22T13:22:00", exitedAt: null, temperatureC: -15.7 },
-];
+interface ListResponse {
+  data?: TripLogRow[];
+  error?: string;
+  meta?: {
+    total?: number;
+    page?: number;
+    limit?: number;
+    counts?: VisitCounts | null;
+    lastSyncedAt?: string | null;
+  };
+}
 
-type TempFilter = "ALL" | TempStatus;
-
-const TEMP_FILTERS: { key: TempFilter; label: string }[] = [
+const VISIT_FILTERS: { key: VisitStateFilter; label: string }[] = [
   { key: "ALL", label: "Semua" },
-  { key: "NORMAL", label: "Normal" },
-  { key: "WASPADA", label: "Waspada" },
-  { key: "TINGGI", label: "Tinggi" },
+  { key: "ONGOING", label: "Di lokasi" },
+  { key: "COMPLETED", label: "Selesai" },
+  { key: "INCOMPLETE", label: "Waktu tak lengkap" },
+  { key: "PENDING", label: "Belum dikunjungi" },
 ];
+
+const PAGE_SIZE = 15;
 
 /* ─── Helper ─── */
+
+function jakartaDate(offsetDays = 0): string {
+  const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(target);
+}
 
 function getTempStatus(tempC: number): TempStatus {
   if (tempC > -5) return "TINGGI";
@@ -71,28 +94,48 @@ function formatTime(value: string | null): string {
   return new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(new Date(parsed));
 }
 
-function formatDate(value: string): string {
+function formatDate(value: string | null): string {
+  if (!value) return "–";
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) return "–";
   return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short" }).format(new Date(parsed));
 }
 
-function getDurationMinutes(log: TripLog): number | null {
-  if (!log.exitedAt) return null;
-  const diff = Date.parse(log.exitedAt) - Date.parse(log.enteredAt);
-  if (Number.isNaN(diff) || diff < 0) return null;
-  return Math.round(diff / 60000);
+function formatDateTimeShort(value: string | null): string {
+  if (!value) return "–";
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return "–";
+  return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(
+    new Date(parsed),
+  );
 }
 
-function formatDuration(minutes: number | null): string {
-  if (minutes === null) return "Berlangsung";
+function durationSeconds(enteredAt: string | null, exitedAt: string | null): number | null {
+  if (!enteredAt || !exitedAt) return null;
+  const diff = Date.parse(exitedAt) - Date.parse(enteredAt);
+  if (Number.isNaN(diff) || diff < 0) return null;
+  return Math.round(diff / 1000);
+}
+
+function ongoingSeconds(enteredAt: string | null, nowMs: number): number | null {
+  if (!enteredAt) return null;
+  const start = Date.parse(enteredAt);
+  if (Number.isNaN(start) || nowMs < start) return null;
+  return Math.floor((nowMs - start) / 1000);
+}
+
+function formatDuration(totalSeconds: number | null): string {
+  if (totalSeconds === null) return "–";
+  if (totalSeconds < 60) return `${totalSeconds} dtk`;
+  const minutes = Math.floor(totalSeconds / 60);
   if (minutes < 60) return `${minutes} mnt`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest === 0 ? `${hours} jam` : `${hours} jam ${rest} mnt`;
 }
 
-function formatTemp(tempC: number): string {
+function formatTemp(tempC: number | null): string {
+  if (tempC === null) return "–";
   return `${tempC.toFixed(1).replace(".", ",")}°C`;
 }
 
@@ -123,75 +166,116 @@ function KpiCard({
   );
 }
 
-function TempBadge({ tempC }: { tempC: number }) {
+function TempBadge({ tempC }: { tempC: number | null }) {
+  if (tempC === null) return <span className="text-xs text-muted-foreground">–</span>;
   const status = getTempStatus(tempC);
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <Badge variant={status === "NORMAL" ? "success" : status === "WASPADA" ? "warning" : "danger"}>
-        <Thermometer className="h-3 w-3" />
-        {formatTemp(tempC)}
-      </Badge>
-    </span>
+    <Badge variant={status === "NORMAL" ? "success" : status === "WASPADA" ? "warning" : "danger"}>
+      <Thermometer className="h-3 w-3" />
+      {formatTemp(tempC)}
+    </Badge>
   );
+}
+
+function VisitStateBadge({ row }: { row: TripLogRow }) {
+  if (row.enteredAt && row.exitedAt) {
+    return durationSeconds(row.enteredAt, row.exitedAt) === null ? (
+      <Badge variant="warning">Waktu tak lengkap</Badge>
+    ) : (
+      <Badge variant="success">Selesai</Badge>
+    );
+  }
+  if (row.enteredAt) return <Badge variant="info">Di lokasi</Badge>;
+  if (row.exitedAt) return <Badge variant="warning">Waktu tak lengkap</Badge>;
+  return <Badge variant="muted">Belum dikunjungi</Badge>;
 }
 
 /* ─── Halaman ─── */
 
 export default function TripLoggerPage() {
+  const [rows, setRows] = useState<TripLogRow[]>([]);
+  const [counts, setCounts] = useState<VisitCounts | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [tempFilter, setTempFilter] = useState<TempFilter>("ALL");
+  const [visitState, setVisitState] = useState<VisitStateFilter>("ALL");
+  const [dateFrom, setDateFrom] = useState(() => jakartaDate(-6));
+  const [dateTo, setDateTo] = useState(() => jakartaDate(0));
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const filtered = useMemo(() => {
-    const keyword = appliedSearch.trim().toLowerCase();
-    return DUMMY_LOGS.filter((log) => {
-      if (tempFilter !== "ALL" && getTempStatus(log.temperatureC) !== tempFilter) return false;
-      if (!keyword) return true;
-      return [log.unit, log.store, log.city, log.driver]
-        .join(" ")
-        .toLowerCase()
-        .includes(keyword);
-    });
-  }, [appliedSearch, tempFilter]);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(PAGE_SIZE),
+        dateFrom,
+        dateTo,
+      });
+      if (visitState !== "ALL") params.set("visitState", visitState);
+      if (appliedSearch) params.set("search", appliedSearch);
 
-  const stats = useMemo(() => {
-    const done = DUMMY_LOGS.filter((log) => log.exitedAt);
-    const durations = done
-      .map((log) => getDurationMinutes(log))
-      .filter((d): d is number => d !== null);
-    const avgDuration = durations.length
-      ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
-      : 0;
-    const avgTemp = DUMMY_LOGS.length
-      ? DUMMY_LOGS.reduce((a, b) => a + b.temperatureC, 0) / DUMMY_LOGS.length
-      : 0;
-    const alerts = DUMMY_LOGS.filter((log) => getTempStatus(log.temperatureC) !== "NORMAL").length;
-    return {
-      total: DUMMY_LOGS.length,
-      avgDuration,
-      avgTemp,
-      alerts,
-      onSite: DUMMY_LOGS.length - done.length,
-    };
+      const response = await fetch(`/api/tms/logger-trips?${params.toString()}`, { cache: "no-store" });
+      const payload = (await response.json()) as ListResponse;
+      if (!response.ok || payload.error) {
+        setError(payload.error ?? "Gagal memuat Logger Trips.");
+        setRows([]);
+        return;
+      }
+      setRows(Array.isArray(payload.data) ? payload.data : []);
+      setCounts(payload.meta?.counts ?? null);
+      setTotal(payload.meta?.total ?? 0);
+      setLastSyncedAt(payload.meta?.lastSyncedAt ?? null);
+    } catch {
+      setError("Gagal memuat Logger Trips.");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [appliedSearch, dateFrom, dateTo, page, visitState]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
+
+  // Perbarui durasi berjalan tiap 30 detik.
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(timer);
   }, []);
 
-  const handleSearch = () => setAppliedSearch(search.trim());
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
+
+  const handleSearch = useCallback(() => {
+    setPage(1);
+    setAppliedSearch(search.trim());
+  }, [search]);
 
   return (
     <RouteGuard permission="tms">
       <div className="space-y-5">
         <PageHeader
           title="Logger Trips"
-          description="Catatan waktu kunjungan unit ke toko beserta suhu kargo saat bongkar"
+          description="Waktu masuk dan keluar unit di setiap titik kunjungan beserta suhu kargo"
           icon={Clock3}
-          actions={<Badge variant="muted">Data Dummy</Badge>}
+          actions={
+            <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={() => void load()}>
+              Muat ulang
+            </Button>
+          }
         />
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard icon={Store} tileClass="bg-sky-500" label="Total kunjungan" value={String(stats.total)} sub={`${stats.onSite} unit masih di lokasi`} />
-          <KpiCard icon={Clock3} tileClass="bg-violet-500" label="Rata-rata durasi di toko" value={formatDuration(stats.avgDuration)} sub="per kunjungan selesai" />
-          <KpiCard icon={Thermometer} tileClass="bg-cyan-600" label="Suhu rata-rata" value={formatTemp(stats.avgTemp)} sub="seluruh kunjungan" />
-          <KpiCard icon={AlertTriangle} tileClass={stats.alerts > 0 ? "bg-rose-500" : "bg-emerald-500"} label="Peringatan suhu" value={String(stats.alerts)} sub="waspada & tinggi" />
+          <KpiCard icon={Store} tileClass="bg-sky-500" label="Total kunjungan" value={String(total)} sub={lastSyncedAt ? `Sinkron ${formatDateTimeShort(lastSyncedAt)}` : "Sinkronisasi McEasy"} />
+          <KpiCard icon={Truck} tileClass="bg-violet-500" label="Sedang di lokasi" value={String(counts?.ongoing ?? 0)} sub="sudah masuk, belum keluar" />
+          <KpiCard icon={CheckCircle2} tileClass="bg-emerald-500" label="Kunjungan selesai" value={String(counts?.completed ?? 0)} sub="masuk & keluar tercatat" />
+          <KpiCard icon={AlertTriangle} tileClass={(counts?.incomplete ?? 0) > 0 ? "bg-amber-500" : "bg-slate-400"} label="Waktu tak lengkap" value={String(counts?.incomplete ?? 0)} sub="perlu validasi data" />
         </div>
 
         <div className="rounded-2xl border border-border bg-card">
@@ -201,7 +285,7 @@ export default function TripLoggerPage() {
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input
                   className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-3 text-xs"
-                  placeholder="Cari unit, toko, kota, atau driver"
+                  placeholder="Cari unit, toko, driver, atau nomor FO"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   onKeyDown={(event) => {
@@ -213,17 +297,46 @@ export default function TripLoggerPage() {
                 Cari
               </Button>
             </div>
+            <div className="flex items-center gap-2 text-xs">
+              <input
+                type="date"
+                aria-label="Tanggal mulai"
+                className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                value={dateFrom}
+                max={dateTo}
+                onChange={(event) => {
+                  setDateFrom(event.target.value);
+                  setPage(1);
+                }}
+              />
+              <span className="text-muted-foreground">s.d.</span>
+              <input
+                type="date"
+                aria-label="Tanggal akhir"
+                className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                value={dateTo}
+                min={dateFrom}
+                max={jakartaDate(0)}
+                onChange={(event) => {
+                  setDateTo(event.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-1.5 border-b border-border px-4 py-2.5">
-            {TEMP_FILTERS.map((filter) => (
+            {VISIT_FILTERS.map((filter) => (
               <button
                 key={filter.key}
                 type="button"
-                onClick={() => setTempFilter(filter.key)}
+                onClick={() => {
+                  setVisitState(filter.key);
+                  setPage(1);
+                }}
                 className={cn(
                   "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors",
-                  tempFilter === filter.key ? "bg-primary text-white" : "bg-muted text-muted-foreground hover:bg-muted/70",
+                  visitState === filter.key ? "bg-primary text-white" : "bg-muted text-muted-foreground hover:bg-muted/70",
                 )}
               >
                 {filter.label}
@@ -231,15 +344,23 @@ export default function TripLoggerPage() {
             ))}
           </div>
 
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div key={index} className="h-12 animate-pulse rounded-xl bg-muted" />
+              ))}
+            </div>
+          ) : error ? (
+            <p className="px-4 py-10 text-center text-sm text-danger">{error}</p>
+          ) : rows.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-              Tidak ada catatan perjalanan yang cocok dengan pencarian.
+              Belum ada catatan kunjungan pada rentang ini. Sinkronisasi McEasy berjalan setiap 2 menit.
             </p>
           ) : (
             <>
               {/* Tabel desktop */}
               <div className="hidden overflow-x-auto lg:block">
-                <table className="w-full min-w-[960px] border-collapse text-left text-sm">
+                <table className="w-full min-w-[980px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground">
                       <th className="px-4 py-3 font-semibold">Unit</th>
@@ -248,50 +369,54 @@ export default function TripLoggerPage() {
                       <th className="px-4 py-3 font-semibold">Masuk Toko</th>
                       <th className="px-4 py-3 font-semibold">Keluar Toko</th>
                       <th className="px-4 py-3 font-semibold">Durasi di Toko</th>
+                      <th className="px-4 py-3 font-semibold">Status</th>
                       <th className="px-4 py-3 font-semibold">Suhu</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((log) => {
-                      const minutes = getDurationMinutes(log);
-                      const inProgress = log.exitedAt === null;
+                    {rows.map((row) => {
+                      const inProgress = !!row.enteredAt && !row.exitedAt;
+                      const secs = inProgress
+                        ? ongoingSeconds(row.enteredAt, nowMs)
+                        : durationSeconds(row.enteredAt, row.exitedAt);
                       return (
-                        <tr key={log.id} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
+                        <tr key={row.id} className="border-b border-border/60 last:border-0 hover:bg-muted/40">
                           <td className="px-4 py-3">
-                            <p className="font-mono text-xs font-bold tabular-nums text-foreground">{log.unit}</p>
-                            <p className="text-[11px] text-muted-foreground">{log.unitType}</p>
+                            <p className="font-mono text-xs font-bold tabular-nums text-foreground">{row.unit ?? "–"}</p>
+                            <p className="text-[11px] text-muted-foreground">{row.taskNumber ?? "–"}</p>
                           </td>
                           <td className="px-4 py-3">
-                            <p className="text-xs font-semibold text-foreground">{log.store}</p>
-                            <p className="text-[11px] text-muted-foreground">{log.city}</p>
+                            <p className="text-xs font-semibold text-foreground">{row.store ?? `Titik ${row.routeSequence}`}</p>
+                            <p className="max-w-56 truncate text-[11px] text-muted-foreground" title={row.address ?? undefined}>
+                              {row.address ?? "–"}
+                            </p>
                           </td>
-                          <td className="px-4 py-3 text-xs text-foreground">{log.driver}</td>
+                          <td className="px-4 py-3 text-xs text-foreground">{row.driver ?? "–"}</td>
                           <td className="px-4 py-3">
-                            <p className="text-xs font-semibold tabular-nums text-foreground">{formatTime(log.enteredAt)}</p>
-                            <p className="text-[11px] text-muted-foreground">{formatDate(log.enteredAt)}</p>
+                            <p className="text-sm font-extrabold tabular-nums text-foreground">{formatTime(row.enteredAt)}</p>
+                            <p className="text-[11px] text-muted-foreground">{formatDate(row.enteredAt)}</p>
                           </td>
                           <td className="px-4 py-3">
-                            {inProgress ? (
-                              <Badge variant="info">Di lokasi</Badge>
-                            ) : (
+                            {row.exitedAt ? (
                               <>
-                                <p className="text-xs font-semibold tabular-nums text-foreground">{formatTime(log.exitedAt)}</p>
-                                <p className="text-[11px] text-muted-foreground">{log.exitedAt ? formatDate(log.exitedAt) : "–"}</p>
+                                <p className="text-sm font-extrabold tabular-nums text-foreground">{formatTime(row.exitedAt)}</p>
+                                <p className="text-[11px] text-muted-foreground">{formatDate(row.exitedAt)}</p>
                               </>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            {inProgress ? (
+                            ) : (
                               <span className="inline-flex items-center gap-1 text-xs font-semibold text-sky-600">
                                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
-                                Berlangsung
+                                Di lokasi
                               </span>
-                            ) : (
-                              <span className="text-xs font-semibold tabular-nums text-foreground">{formatDuration(minutes)}</span>
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <TempBadge tempC={log.temperatureC} />
+                            <span className="text-xs font-semibold tabular-nums text-foreground">{formatDuration(secs)}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <VisitStateBadge row={row} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <TempBadge tempC={row.temperatureC} />
                           </td>
                         </tr>
                       );
@@ -302,51 +427,71 @@ export default function TripLoggerPage() {
 
               {/* Kartu mobile */}
               <div className="space-y-2.5 p-4 lg:hidden">
-                {filtered.map((log) => {
-                  const minutes = getDurationMinutes(log);
-                  const inProgress = log.exitedAt === null;
+                {rows.map((row) => {
+                  const inProgress = !!row.enteredAt && !row.exitedAt;
+                  const secs = inProgress
+                    ? ongoingSeconds(row.enteredAt, nowMs)
+                    : durationSeconds(row.enteredAt, row.exitedAt);
                   return (
-                    <article key={log.id} className="rounded-xl border border-border bg-background p-3.5 shadow-sm">
+                    <article key={row.id} className="rounded-xl border border-border bg-background p-3.5 shadow-sm">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-bold text-foreground">{log.store}</p>
-                          <p className="text-[11px] text-muted-foreground">{log.city}</p>
+                          <p className="truncate text-sm font-bold text-foreground">{row.store ?? `Titik ${row.routeSequence}`}</p>
+                          <p className="truncate text-[11px] text-muted-foreground">{row.address ?? row.taskNumber ?? "–"}</p>
                         </div>
-                        <TempBadge tempC={log.temperatureC} />
+                        <VisitStateBadge row={row} />
                       </div>
                       <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <Truck className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate font-mono font-semibold tabular-nums text-foreground">{log.unit}</span>
+                          <span className="truncate font-mono font-semibold tabular-nums text-foreground">{row.unit ?? "–"}</span>
                         </div>
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate text-foreground">{log.driver}</span>
+                          <span className="truncate text-foreground">{row.driver ?? "–"}</span>
                         </div>
                         <div className="col-span-2 flex items-center justify-between rounded-lg bg-muted/60 px-2.5 py-2">
                           <span className="tabular-nums text-foreground">
-                            Masuk <strong>{formatTime(log.enteredAt)}</strong>
+                            Masuk <strong className="text-sm">{formatTime(row.enteredAt)}</strong>
                           </span>
                           <span className="text-muted-foreground">→</span>
                           <span className="tabular-nums text-foreground">
-                            {inProgress ? <strong className="text-sky-600">Di lokasi</strong> : <>Keluar <strong>{formatTime(log.exitedAt)}</strong></>}
+                            {row.exitedAt ? <>Keluar <strong className="text-sm">{formatTime(row.exitedAt)}</strong></> : <strong className="text-sky-600">Di lokasi</strong>}
                           </span>
                         </div>
-                        <div className="col-span-2 flex items-center justify-between">
-                          <span className="text-muted-foreground">Durasi di toko</span>
-                          <span className="font-semibold tabular-nums text-foreground">{formatDuration(minutes)}</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Durasi</span>
+                          <span className="font-semibold tabular-nums text-foreground">{formatDuration(secs)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Suhu</span>
+                          <TempBadge tempC={row.temperatureC} />
                         </div>
                       </div>
                     </article>
                   );
                 })}
               </div>
+
+              <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
+                <span className="tabular-nums">
+                  Halaman {page} dari {totalPages} · {total} kunjungan
+                </span>
+                <span className="flex items-center gap-1">
+                  <Button size="sm" variant="outline" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={page >= totalPages || loading} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </span>
+              </div>
             </>
           )}
         </div>
 
         <p className="text-[11px] text-muted-foreground">
-          Status suhu: Normal (≤ −12°C) · Waspada (−12°C s.d. −5°C) · Tinggi (&gt; −5°C). Data di atas masih contoh dan akan diganti hasil logger perangkat.
+          Waktu masuk/keluar berasal dari timeline Fleet Task McEasy. Suhu hanya tampil bila ada hasil capture perangkat; jika kosong berarti belum ada snapshot suhu untuk titik tersebut.
         </p>
       </div>
     </RouteGuard>
