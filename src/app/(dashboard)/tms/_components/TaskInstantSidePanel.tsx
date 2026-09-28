@@ -300,6 +300,32 @@ function extractTripTrail(payloadData: unknown): LatLng[] {
 }
 
 /**
+ * Bangun titik rute sintetis dari titik e-POD lokal. Dipakai bila timeline
+ * vendor/snapshot kosong (umum pada FO yang sudah lama selesai): nama,
+ * koordinat, waktu aktual, dan bukti e-POD tetap tampil lengkap.
+ */
+function epodStopsToTimeline(stops: EpodStop[]): FleetTaskTimelinePoint[] {
+  return [...stops]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((stop) => ({
+      sequence: stop.sequence,
+      pointType: stop.stopType,
+      pointId: stop.vendorPointId,
+      addressId: stop.vendorAddressId,
+      name: stop.pointName,
+      address: stop.address,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+      visitStatusRaw: stop.visitStatusRaw,
+      visitStatusName: null,
+      arrivalTarget: null,
+      arrivalActual: stop.arrivalActual,
+      departureTarget: null,
+      departureActual: stop.departureActual,
+    }));
+}
+
+/**
  * Daftar rute perjalanan (titik kunjungan) dari `timeline_route`.
  * Titik pertama yang belum dikunjungi ditandai sebagai posisi saat ini.
  */
@@ -639,6 +665,13 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     }
 
     void loadEpod();
+    // Task terminal hanya dimuat sekali; data e-POD-nya sudah final.
+    if (isTerminalTask) {
+      return () => {
+        disposed = true;
+        controller.abort();
+      };
+    }
     const timer = window.setInterval(() => {
       if (document.hidden) return;
       void loadEpod();
@@ -648,7 +681,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [item?.id, canViewEpod]);
+  }, [item?.id, canViewEpod, isTerminalTask]);
 
   const shown = detail ?? item;
 
@@ -695,9 +728,26 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     return map;
   }, [epodSummary]);
 
+  /**
+   * Timeline sintetis dari titik e-POD lokal (nama + koordinat + waktu
+   * aktual per titik). sequence sama dengan stop e-POD sehingga badge dan
+   * galeri bukti tetap terpetakan.
+   */
+  const epodTimeline = useMemo(() => {
+    if (!epodSummary || epodSummary.stops.length === 0) return [];
+    return epodStopsToTimeline(epodSummary.stops);
+  }, [epodSummary]);
+
+  /**
+   * Timeline yang ditampilkan: vendor/snapshot dulu; bila kosong (umum pada
+   * FO terminal yang datanya sudah tidak dikirim vendor), pakai titik e-POD
+   * agar riwayat lokasi + bukti tetap lengkap.
+   */
+  const displayTimeline = effectiveTimeline.length > 0 ? effectiveTimeline : epodTimeline;
+
   /** True bila semua titik rute sudah dikunjungi. */
   const allRoutePointsVisited =
-    effectiveTimeline.length > 0 && effectiveTimeline.every((point) => isPointVisited(point));
+    displayTimeline.length > 0 && displayTimeline.every((point) => isPointVisited(point));
 
   /**
    * Waktu selesai kunjungan terakhir (ms). Dipakai sebagai batas akhir
@@ -705,7 +755,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
    */
   const routeCompletedAtMs = useMemo(() => {
     let latest: number | null = null;
-    for (const point of effectiveTimeline) {
+    for (const point of displayTimeline) {
       for (const at of [point.arrivalActual, point.departureActual]) {
         if (!at) continue;
         const parsed = Date.parse(at);
@@ -714,14 +764,14 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       }
     }
     return latest;
-  }, [effectiveTimeline]);
+  }, [displayTimeline]);
 
   /**
    * Posisi akhir task terminal: koordinat titik terakhir yang memiliki waktu
    * aktual, fallback ke koordinat titik terakhir. Dipakai sebagai marker
    * "Posisi akhir" pengganti marker kendaraan realtime.
    */
-  const finalPosition: LatLng | null = computeFinalPosition(effectiveTimeline, isTerminalTask);
+  const finalPosition: LatLng | null = computeFinalPosition(displayTimeline, isTerminalTask);
 
   // Polling posisi kendaraan realtime tiap 30 detik selama task dipilih.
   // Task terminal TIDAK memuat posisi kendaraan saat ini: marker tersebut
@@ -803,7 +853,8 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     if (!startRaw) return;
     const startMs = Date.parse(startRaw);
     if (Number.isNaN(startMs)) return;
-    const endMsRaw = item.actualArrivalOn ? Date.parse(item.actualArrivalOn) : NaN;
+    const endRaw = item.actualArrivalOn ?? item.terminalAt ?? null;
+    const endMsRaw = endRaw ? Date.parse(endRaw) : NaN;
     // Bila semua titik sudah dikunjungi, hentikan riwayat trip pada waktu
     // kunjungan terakhir agar garis tidak lanjut setelah toko terakhir.
     // Task terminal TIDAK PERNAH memakai waktu sekarang: tanpa cutoff yang
@@ -940,25 +991,29 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
   if (shown && (shown.totalPoint ?? 0) > 0) {
     doneCount = shown.statusRaw === "ENDED" ? (shown.totalPoint ?? 0) : (shown.currentPoint ?? 0);
     totalCount = shown.totalPoint ?? 0;
-  } else if (effectiveTimeline.length > 0) {
-    totalCount = effectiveTimeline.length;
-    doneCount = effectiveTimeline.filter((p) => isPointVisited(p)).length;
+  } else if (displayTimeline.length > 0) {
+    totalCount = displayTimeline.length;
+    doneCount = displayTimeline.filter((p) => isPointVisited(p)).length;
   }
   const percent = totalCount > 0 ? Math.min(100, Math.round((doneCount / totalCount) * 100)) : 0;
 
   // Koordinat titik rute — dipakai sebagai sumber peta bila polyline
   // planned_trip/actual_trip tidak tersedia (umum pada task terjadwal).
   const timelineCoords: LatLng[] = [];
-  for (const point of effectiveTimeline) {
+  for (const point of displayTimeline) {
     if (point.latitude !== null && point.longitude !== null) {
       timelineCoords.push({ latitude: point.latitude, longitude: point.longitude });
     }
   }
-  const hasPolylines = !!detail && (detail.plannedRoutes.length > 0 || detail.actualRoutes.length > 0);
-  // Hanya gambar polyline asli dari API. Titik kunjungan tidak dihubungkan
-  // dengan garis agar peta menampilkan lokasi tanpa rute semu.
-  const mapPlanned = detail?.plannedRoutes ?? [];
-  const mapActual = detail?.actualRoutes ?? [];
+  // Polyline asli: prioritaskan detail vendor, fallback ke rute beku snapshot
+  // (penting untuk task terminal yang datanya sudah tidak dikirim vendor).
+  // Titik kunjungan tidak dihubungkan dengan garis agar peta menampilkan
+  // lokasi tanpa rute semu.
+  const mapPlanned =
+    detail && detail.plannedRoutes.length > 0 ? detail.plannedRoutes : (item?.plannedRoutes ?? []);
+  const mapActual =
+    detail && detail.actualRoutes.length > 0 ? detail.actualRoutes : (item?.actualRoutes ?? []);
+  const hasPolylines = mapPlanned.length > 0 || mapActual.length > 0;
   const hasPlannedRoute = mapPlanned.length > 0;
   const hasActualRoute = mapActual.length > 0;
 
@@ -978,8 +1033,8 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
 
   const hasMapData = hasPolylines || timelineCoords.length > 0 || trail.length > 0;
 
-  const routeNames = effectiveTimeline.length > 0
-    ? effectiveTimeline
+  const routeNames = displayTimeline.length > 0
+    ? displayTimeline
         .map((p) => p.name)
         .filter((n): n is string => !!n)
     : [];
@@ -1022,7 +1077,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                 planned={mapPlanned}
                 actual={mapActual}
                 trail={trail}
-                timeline={effectiveTimeline}
+                timeline={displayTimeline}
                 vehicle={isTerminalTask ? null : vehicleStatus}
                 finalPosition={finalPosition}
                 scrollWheel={false}
@@ -1062,7 +1117,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                   Posisi akhir
                 </span>
               )}
-              {effectiveTimeline.length > 0 && (
+              {displayTimeline.length > 0 && (
                 <>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="inline-block h-2.5 w-2.5 rounded-full bg-[#16a34a]" />
@@ -1209,7 +1264,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                 )}
                 <RoutePointList
                   key={item?.id ?? "none"}
-                  points={effectiveTimeline}
+                  points={displayTimeline}
                   pointTemperatures={pointTemperatureBySequence}
                   epodBySequence={epodBySequence}
                 />
@@ -1265,7 +1320,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                 planned={mapPlanned}
                 actual={mapActual}
                 trail={trail}
-                timeline={effectiveTimeline}
+                timeline={displayTimeline}
                 vehicle={isTerminalTask ? null : vehicleStatus}
                 finalPosition={finalPosition}
               />

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractTrackIdFromInput, normalizeFleetTaskTrack } from "@/lib/fleet-task-track";
+import {
+  extractTrackIdFromInput,
+  normalizeFleetTaskInstantItem,
+  normalizeFleetTaskTrack,
+  normalizeRouteList,
+} from "@/lib/fleet-task-track";
 
 describe("extractTrackIdFromInput", () => {
   it("returns bare ids unchanged", () => {
@@ -61,5 +66,43 @@ describe("normalizeFleetTaskTrack", () => {
     expect(normalizeFleetTaskTrack(null, "fallback").id).toBe("fallback");
     expect(normalizeFleetTaskTrack("rusak", "fallback").points).toEqual([]);
     expect(normalizeFleetTaskTrack({}, "fallback").history).toEqual([]);
+  });
+});
+
+describe("normalizeRouteList", () => {
+  it("keeps stored coordinate arrays and drops invalid entries", () => {
+    expect(
+      normalizeRouteList([
+        [
+          { latitude: -6.2, longitude: 106.8 },
+          { latitude: -6.3, longitude: 106.9 },
+        ],
+        [{ latitude: 0, longitude: 0 }],
+        "bukan-rute",
+      ]),
+    ).toEqual([[
+      { latitude: -6.2, longitude: 106.8 },
+      { latitude: -6.3, longitude: 106.9 },
+    ]]);
+    expect(normalizeRouteList(null)).toEqual([]);
+    expect(normalizeRouteList("rusak")).toEqual([]);
+  });
+});
+
+describe("normalizeFleetTaskInstantItem", () => {
+  it("carries frozen snapshot routes and terminal time when present", () => {
+    const item = normalizeFleetTaskInstantItem({
+      id: "task-1",
+      number: "FO-9445",
+      plannedRoutes: [[{ latitude: -6.2, longitude: 106.8 }]],
+      actual_routes: [[{ latitude: -6.3, longitude: 106.9 }]],
+      terminal_at: "2026-09-28T08:58:58.000Z",
+    });
+    expect(item).toMatchObject({
+      id: "task-1",
+      terminalAt: "2026-09-28T08:58:58.000Z",
+    });
+    expect(item?.plannedRoutes).toEqual([[{ latitude: -6.2, longitude: 106.8 }]]);
+    expect(item?.actualRoutes).toEqual([[{ latitude: -6.3, longitude: 106.9 }]]);
   });
 });

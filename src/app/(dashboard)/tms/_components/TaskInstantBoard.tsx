@@ -19,7 +19,9 @@ import { cn } from "@/lib/utils";
 import type {
   FleetTaskInstantItem,
   FleetTaskTimelinePoint,
+  LatLng,
 } from "@/lib/fleet-task-track";
+import { normalizeRouteList } from "@/lib/fleet-task-track";
 import TaskStatusBadge from "./TaskStatusBadge";
 
 type StatusFilter = "ALL" | "SCHEDULED" | "STARTED" | "ENDED" | "CANCELED";
@@ -51,6 +53,9 @@ interface BoardTask {
   actualStartedOn: string | null;
   actualArrivalOn: string | null;
   timeline: FleetTaskTimelinePoint[];
+  plannedRoutes: LatLng[][];
+  actualRoutes: LatLng[][];
+  terminalAt: string | null;
   trackId: string | null;
   frozen: boolean;
   windowStartedAt: string;
@@ -82,6 +87,9 @@ interface BoardApiResponse {
       actualStartedOn: string | null;
       actualArrivalOn: string | null;
       timeline: unknown;
+      plannedRoutes: unknown;
+      actualRoutes: unknown;
+      terminalAt: string | null;
       trackId: string | null;
       frozen: boolean;
       windowStartedAt: string;
@@ -133,6 +141,9 @@ function toFleetTaskItem(task: BoardTask): FleetTaskInstantItem {
     trackId: task.trackId,
     createdOn: null,
     timeline: task.timeline,
+    plannedRoutes: task.plannedRoutes,
+    actualRoutes: task.actualRoutes,
+    terminalAt: task.terminalAt,
   };
 }
 
@@ -225,6 +236,9 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
           actualStartedOn: task.actualStartedOn,
           actualArrivalOn: task.actualArrivalOn,
           timeline: normalizeTimeline(task.timeline),
+          plannedRoutes: normalizeRouteList(task.plannedRoutes),
+          actualRoutes: normalizeRouteList(task.actualRoutes),
+          terminalAt: task.terminalAt,
           trackId: task.trackId,
           frozen: task.frozen,
           windowStartedAt: task.windowStartedAt,

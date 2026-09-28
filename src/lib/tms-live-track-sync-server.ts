@@ -268,6 +268,11 @@ export async function syncLiveTrack(now = Date.now(), options: SyncOptions = {})
     const terminalAt = terminal
       ? (task.actualArrivalOn ?? new Date(now).toISOString())
       : null;
+    // Jangan timpa timeline berisi dengan array kosong dari detail vendor.
+    const timeline =
+      detail && Array.isArray(detail.timeline) && detail.timeline.length > 0
+        ? detail.timeline
+        : task.timeline;
     snapshotRows.push({
       task_id: task.id,
       task_number: task.number,
@@ -280,7 +285,7 @@ export async function syncLiveTrack(now = Date.now(), options: SyncOptions = {})
       actual_started_on: task.actualStartedOn,
       actual_arrival_on: task.actualArrivalOn,
       terminal_at: terminalAt,
-      timeline: detail ? detail.timeline : task.timeline,
+      timeline,
       planned_routes: detail ? detail.plannedRoutes : [],
       actual_routes: detail ? detail.actualRoutes : [],
       track_id: task.trackId,
@@ -300,6 +305,7 @@ export async function syncLiveTrack(now = Date.now(), options: SyncOptions = {})
   };
 
   // 3. Task SCHEDULED + STARTED dari vendor.
+  const pendingTasks: { task: FleetTaskInstantItem; relations: ActiveRelation[] }[] = [];
   for (const status of ACTIVE_TASK_STATUSES) {
     for (let page = 1; page <= maxTaskPages; page += 1) {
       let items: unknown[] = [];
@@ -337,11 +343,38 @@ export async function syncLiveTrack(now = Date.now(), options: SyncOptions = {})
         }
         seenTaskIds.add(task.id);
         summary.tasksChecked += 1;
-        queueTask(task, relations, null);
+        pendingTasks.push({ task, relations });
       }
       if (items.length < TASK_PAGE_LIMIT) break;
       if (page === maxTaskPages) summary.truncated = true;
     }
+  }
+
+  // Perkaya sebagian task dengan detail vendor (rute planned/actual +
+  // timeline penuh) selama kuota detail masih ada, agar snapshot yang kelak
+  // dibekukan sudah lengkap. Snapshot beku dilindungi RPC dari penimpaan.
+  for (const pending of pendingTasks) {
+    let detail: { timeline: unknown; plannedRoutes: unknown; actualRoutes: unknown } | null = null;
+    if (detailFetches < maxDetailFetches) {
+      detailFetches += 1;
+      try {
+        const normalized = normalizeFleetTaskInstantDetail(
+          await fetchFleetTaskInstantDetail(pending.task.id),
+        );
+        if (normalized) {
+          detail = {
+            timeline: normalized.timeline.length > 0 ? normalized.timeline : pending.task.timeline,
+            plannedRoutes: normalized.plannedRoutes,
+            actualRoutes: normalized.actualRoutes,
+          };
+        }
+      } catch (error) {
+        summary.failures.push(
+          `Detail task ${pending.task.number ?? pending.task.id}: ${errorMessage(error)}`,
+        );
+      }
+    }
+    queueTask(pending.task, pending.relations, detail);
   }
 
   const flushSnapshots = async (rows: Record<string, unknown>[]) => {
@@ -407,6 +440,8 @@ export async function syncLiveTrack(now = Date.now(), options: SyncOptions = {})
           const rawDetail = await fetchFleetTaskInstantDetail(match.id);
           const detail = normalizeFleetTaskInstantDetail(rawDetail);
           const relations = matchRelations(match);
+          const frozenTimeline =
+            detail && detail.timeline.length > 0 ? detail.timeline : match.timeline;
           await flushSnapshots([
             {
               task_id: match.id,
@@ -420,7 +455,7 @@ export async function syncLiveTrack(now = Date.now(), options: SyncOptions = {})
               actual_started_on: match.actualStartedOn,
               actual_arrival_on: match.actualArrivalOn,
               terminal_at: match.actualArrivalOn ?? new Date(now).toISOString(),
-              timeline: detail?.timeline ?? match.timeline,
+              timeline: frozenTimeline,
               planned_routes: detail?.plannedRoutes ?? [],
               actual_routes: detail?.actualRoutes ?? [],
               track_id: match.trackId,

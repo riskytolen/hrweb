@@ -438,6 +438,15 @@ export interface FleetTaskInstantItem {
    * fallback saat membuka detail task terjadwal.
    */
   timeline: FleetTaskTimelinePoint[];
+  /**
+   * Rute beku dari snapshot Live Track (sudah berupa daftar koordinat,
+   * bukan encoded polyline). Hanya diisi oleh board Live Track agar task
+   * terminal tetap menampilkan rute walau vendor tak lagi mengirimnya.
+   */
+  plannedRoutes?: LatLng[][];
+  actualRoutes?: LatLng[][];
+  /** Waktu task menjadi terminal (ENDED/CANCELED) menurut snapshot. */
+  terminalAt?: string | null;
 }
 
 function toStatusColor(value: unknown): string | null {
@@ -512,6 +521,13 @@ export function normalizeFleetTaskInstantItem(raw: unknown): FleetTaskInstantIte
     timeline: normalizeTimelineList(
       pickFirst(source, ["timeline_route", "timelineRoute", "timeline", "route_points", "routePoints"]),
     ),
+    plannedRoutes: normalizeRouteList(
+      pickFirst(source, ["planned_routes", "plannedRoutes"]),
+    ),
+    actualRoutes: normalizeRouteList(
+      pickFirst(source, ["actual_routes", "actualRoutes"]),
+    ),
+    terminalAt: toDateString(pickFirst(source, ["terminal_at", "terminalAt"])),
   };
 }
 
@@ -600,6 +616,31 @@ function normalizeTimelineList(value: unknown): FleetTaskTimelinePoint[] {
     (a, b) => (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER),
   );
   return timeline;
+}
+
+/**
+ * Normalisasi rute tersimpan (array dari array titik `{ latitude, longitude }`),
+ * mis. dari snapshot Live Track. Berbeda dengan `decodeRouteList` yang
+ * menerima encoded polyline. Tidak pernah melempar — entri rusak dibuang.
+ */
+export function normalizeRouteList(value: unknown): LatLng[][] {
+  if (!Array.isArray(value)) return [];
+  const routes: LatLng[][] = [];
+  for (const entry of value) {
+    if (!Array.isArray(entry)) continue;
+    const points: LatLng[] = [];
+    for (const item of entry) {
+      if (!item || typeof item !== "object") continue;
+      const point = item as Record<string, unknown>;
+      const latitude = toFiniteNumber(point.latitude);
+      const longitude = toFiniteNumber(point.longitude);
+      if (latitude === null || longitude === null) continue;
+      if (!isValidCoordinate(latitude, longitude)) continue;
+      points.push({ latitude, longitude });
+    }
+    if (points.length > 0) routes.push(points);
+  }
+  return routes;
 }
 
 function decodeRouteList(value: unknown): LatLng[][] {
