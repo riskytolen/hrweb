@@ -5,14 +5,12 @@ import {
   ChevronDown,
   ChevronRight,
   CircleCheckBig,
-  ClipboardList,
   Loader2,
   RefreshCw,
   Route as RouteIcon,
   Search,
   TriangleAlert,
   Truck,
-  X,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
@@ -24,23 +22,7 @@ import type {
 import { normalizeRouteList } from "@/lib/fleet-task-track";
 import TaskStatusBadge from "./TaskStatusBadge";
 
-type StatusFilter = "ALL" | "SCHEDULED" | "STARTED" | "ENDED" | "CANCELED";
-
 type BoardMode = "active" | "history";
-
-const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
-  { key: "ALL", label: "Semua" },
-  { key: "SCHEDULED", label: "Dijadwalkan" },
-  { key: "STARTED", label: "Berjalan" },
-  { key: "ENDED", label: "Selesai" },
-  { key: "CANCELED", label: "Batal" },
-];
-
-const HISTORY_STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
-  { key: "ALL", label: "Semua" },
-  { key: "ENDED", label: "Selesai" },
-  { key: "CANCELED", label: "Batal" },
-];
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   SCHEDULED: { label: "Dijadwalkan", color: "#64748b" },
@@ -224,7 +206,6 @@ interface TaskInstantBoardProps {
 export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBoardProps) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [mode, setMode] = useState<BoardMode>("active");
   const [from, setFrom] = useState(() => wibToday(-6));
   const [to, setTo] = useState(() => wibToday(0));
@@ -352,27 +333,14 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
     if (next === mode) return;
     setMode(next);
     setPage(1);
-    setStatusFilter("ALL");
   };
 
   const visibleGroups = useMemo(
-    () =>
-      groups
-        .map((group) => ({
-          ...group,
-          tasks:
-            statusFilter === "ALL" ? group.tasks : group.tasks.filter((t) => t.statusRaw === statusFilter),
-        }))
-        .filter((group) => group.tasks.length > 0),
-    [groups, statusFilter],
+    () => groups.filter((group) => group.tasks.length > 0),
+    [groups],
   );
 
   const allTasks = useMemo(() => groups.flatMap((g) => g.tasks), [groups]);
-  const countFor = useCallback(
-    (status: StatusFilter): number =>
-      status === "ALL" ? allTasks.length : allTasks.filter((t) => t.statusRaw === status).length,
-    [allTasks],
-  );
 
   const toggleCollapse = useCallback((groupId: string) => {
     setCollapsed((prev) => {
@@ -405,8 +373,8 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
               {mode === "active"
-                ? "FO per kelompok customer sesuai jam operasional kontrak."
-                : "Riwayat FO selesai dan dibatalkan, tetap tersedia di luar jam operasional."}
+                ? "FO yang sedang berjalan per kelompok customer."
+                : "Riwayat FO selesai, tetap tersedia di luar jam operasional."}
               {lastSyncedAt && (
                 <span className="tabular-nums"> · sinkron {formatClock(lastSyncedAt)}</span>
               )}
@@ -457,30 +425,6 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
           <Button variant="outline" size="sm" className="h-10" icon={RefreshCw} onClick={handleRefresh} disabled={loading}>
             Refresh
           </Button>
-        </div>
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter status task">
-          {(mode === "history" ? HISTORY_STATUS_FILTERS : STATUS_FILTERS).map((filter) => {
-            const active = statusFilter === filter.key;
-            return (
-              <button
-                key={filter.key}
-                type="button"
-                onClick={() => setStatusFilter(filter.key)}
-                aria-pressed={active}
-                className={cn(
-                  "rounded-full px-3 py-1.5 text-xs font-bold tabular-nums transition-colors",
-                  active
-                    ? "bg-foreground text-background"
-                    : "bg-card text-muted-foreground ring-1 ring-border hover:text-foreground",
-                )}
-              >
-                {filter.label}
-                <span className={cn("ml-1.5", active ? "opacity-70" : "opacity-60")}>
-                  {countFor(filter.key).toLocaleString("id-ID")}
-                </span>
-              </button>
-            );
-          })}
         </div>
         {mode === "history" && (
           <div className="flex flex-wrap items-center gap-2">
@@ -540,17 +484,12 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
 
       {/* KPI cards */}
       {mode === "active" ? (
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <KpiCard icon={ClipboardList} tileClass="bg-[#2563eb]" label="Total FO" value={allTasks.length.toLocaleString("id-ID")} caption="dalam window aktif" />
-          <KpiCard icon={Truck} tileClass="bg-[#16a34a]" label="Berjalan" value={countFor("STARTED").toLocaleString("id-ID")} caption="task started" />
-          <KpiCard icon={CircleCheckBig} tileClass="bg-[#0284c7]" label="Selesai" value={countFor("ENDED").toLocaleString("id-ID")} caption="sampai window berakhir" />
-          <KpiCard icon={X} tileClass="bg-[#ea580c]" label="Dibatalkan" value={countFor("CANCELED").toLocaleString("id-ID")} caption="task dibatalkan" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <KpiCard icon={Truck} tileClass="bg-[#16a34a]" label="FO Berjalan" value={allTasks.length.toLocaleString("id-ID")} caption="sedang berjalan dalam window aktif" />
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
-          <KpiCard icon={ClipboardList} tileClass="bg-[#2563eb]" label="Total Riwayat" value={total.toLocaleString("id-ID")} caption="rentang tanggal dipilih" />
-          <KpiCard icon={CircleCheckBig} tileClass="bg-[#0284c7]" label="Selesai" value={countFor("ENDED").toLocaleString("id-ID")} caption="halaman ini" />
-          <KpiCard icon={X} tileClass="bg-[#ea580c]" label="Dibatalkan" value={countFor("CANCELED").toLocaleString("id-ID")} caption="halaman ini" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <KpiCard icon={CircleCheckBig} tileClass="bg-[#0284c7]" label="FO Selesai" value={total.toLocaleString("id-ID")} caption="rentang tanggal dipilih" />
         </div>
       )}
 
@@ -571,8 +510,8 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
       ) : visibleGroups.length === 0 ? (
         <p className="rounded-2xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
           {mode === "active"
-            ? "Tidak ada FO dalam window aktif. Periksa konfigurasi kelompok dan jam operasional di Pengaturan Live Track."
-            : "Belum ada riwayat FO selesai atau dibatalkan pada rentang tanggal ini."}
+            ? "Tidak ada FO yang sedang berjalan dalam window aktif."
+            : "Belum ada riwayat FO selesai pada rentang tanggal ini."}
         </p>
       ) : (
         <div className="space-y-3">

@@ -17,13 +17,13 @@ const createClientMock = vi.mocked(createClient);
 const createAdminMock = vi.mocked(createAdminClient);
 
 function chainable(result: unknown) {
-  const chain: Record<string, unknown> = {};
-  for (const name of ["or", "lte", "gt", "in", "order", "limit", "range"]) {
+  const chain: Record<string, ReturnType<typeof vi.fn>> = {};
+  for (const name of ["eq", "or", "lte", "gt", "in", "order", "limit", "range", "select"]) {
     chain[name] = vi.fn(() => chain);
   }
-  chain.select = vi.fn(() => chain);
-  chain.then = (resolve: (value: unknown) => void) => resolve(result);
-  return chain;
+  return Object.assign(chain, {
+    then: (resolve: (value: unknown) => void) => resolve(result),
+  });
 }
 
 function mockAuth(profile: unknown) {
@@ -138,6 +138,18 @@ describe("GET /api/tms/live-track-board", () => {
     expect(payload.data[0].tasks[0]).toMatchObject({ id: "task-1", number: "FO-9445" });
   });
 
+  it("filters the active board to running tasks only", async () => {
+    mockAuth(activeProfile(["tms.view"]));
+    const chain = chainable({ data: [], error: null });
+    createAdminMock.mockReturnValue({
+      from: vi.fn(() => chain),
+    } as never);
+
+    const response = await GET(request());
+    expect(response.status).toBe(200);
+    expect(chain.eq).toHaveBeenCalledWith("snapshot.status_raw", "STARTED");
+  });
+
   it("returns terminal tasks outside the window in history mode, including inactive groups", async () => {
     mockAuth(activeProfile(["tms.view"]));
     const snapshots = [
@@ -209,6 +221,7 @@ describe("GET /api/tms/live-track-board", () => {
     expect(payload.data[0]).toMatchObject({ id: "group-9", name: "Lama", status: "Tidak Aktif" });
     expect(payload.data[0].tasks).toHaveLength(1);
     expect(payload.data[0].tasks[0]).toMatchObject({ id: "task-9" });
+    expect(snapChain.in).toHaveBeenCalledWith("status_raw", ["ENDED"]);
   });
 
   it("rejects invalid history date ranges with 400", async () => {

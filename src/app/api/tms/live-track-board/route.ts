@@ -8,7 +8,7 @@ const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
 const MAX_ROWS = 500;
 
 /** Status yang dianggap riwayat: tetap tampil di luar jam operasional. */
-const TERMINAL_STATUSES = ["ENDED", "CANCELED"];
+const TERMINAL_STATUSES = ["ENDED"];
 const HISTORY_DEFAULT_DAYS = 7;
 const HISTORY_DEFAULT_PAGE_SIZE = 50;
 const HISTORY_MAX_PAGE_SIZE = 100;
@@ -138,9 +138,11 @@ const OCCURRENCE_SELECT =
   "planned_routes, actual_routes, track_id, frozen_at, last_synced_at)";
 
 /**
- * Board Live Track berkelompok: hanya occurrence dengan window aktif
- * (window_started_at <= now < visible_until). Unit tanpa kelompok tidak
- * masuk response. FO selesai tetap tampil sampai window berakhir.
+ * Board Live Track berkelompok.
+ * - mode=active (default): hanya FO STARTED dengan window aktif
+ *   (window_started_at <= now < visible_until). Unit tanpa kelompok tidak
+ *   masuk response.
+ * - mode=history: hanya FO ENDED tanpa filter window (lihat getHistoryBoard).
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -191,6 +193,8 @@ export async function GET(request: NextRequest) {
   let query = admin
     .from("tms_live_track_task_occurrences")
     .select(OCCURRENCE_SELECT)
+    // Tab Aktif hanya untuk FO yang sedang berjalan.
+    .eq("snapshot.status_raw", "STARTED")
     .lte("window_started_at", nowIso)
     .gt("visible_until", nowIso)
     .order("window_started_at", { ascending: false })
@@ -229,6 +233,7 @@ export async function GET(request: NextRequest) {
 
   for (const row of rows) {
     if (!row.group || row.group.status !== "Aktif" || !row.snapshot) continue;
+    if ((row.snapshot.status_raw ?? "").toUpperCase() !== "STARTED") continue;
     const entry = groups.get(row.group.id) ?? {
       id: row.group.id,
       name: row.group.name,
@@ -272,10 +277,10 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Board Riwayat: FO ENDED/CANCELED tanpa filter window operasional sehingga
- * tetap tampil di luar jam. Kelompok nonaktif tetap disertakan agar riwayat
- * tidak hilang saat konfigurasi berubah. Diurutkan dan difilter berdasarkan
- * waktu terminal (fallback waktu tiba aktual) dalam tanggal WIB.
+ * Board Riwayat: FO ENDED tanpa filter window operasional sehingga tetap
+ * tampil di luar jam. Kelompok nonaktif tetap disertakan agar riwayat tidak
+ * hilang saat konfigurasi berubah. Diurutkan dan difilter berdasarkan waktu
+ * terminal (fallback waktu tiba aktual) dalam tanggal WIB.
  */
 async function getHistoryBoard(
   admin: ReturnType<typeof createAdminClient>,
@@ -365,6 +370,7 @@ async function getHistoryBoard(
   const occByTask = new Map<string, OccurrenceRow[]>();
   for (const row of occRows) {
     if (!row.group || !row.snapshot) continue;
+    if ((row.snapshot.status_raw ?? "").toUpperCase() !== "ENDED") continue;
     const list = occByTask.get(row.task_id) ?? [];
     list.push(row);
     occByTask.set(row.task_id, list);
