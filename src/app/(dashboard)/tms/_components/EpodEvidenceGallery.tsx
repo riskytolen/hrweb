@@ -100,6 +100,8 @@ export default function EpodEvidenceGallery({
     <div className="space-y-3">
       {submissions.map((submission) => {
         const evidence = detail?.evidenceBySubmission?.[submission.id] ?? [];
+        const photos = evidence.filter((item) => (item.evidenceType ?? "PHOTO") === "PHOTO");
+        const signature = evidence.find((item) => item.evidenceType === "RECIPIENT_SIGNATURE") ?? null;
         return (
           <div
             key={submission.id}
@@ -180,9 +182,9 @@ export default function EpodEvidenceGallery({
               </div>
             )}
 
-            {evidence.length > 0 ? (
+            {photos.length > 0 ? (
               <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                {evidence.map((item) => (
+                {photos.map((item) => (
                   <a
                     key={item.id}
                     href={item.signedUrl ?? undefined}
@@ -212,6 +214,25 @@ export default function EpodEvidenceGallery({
                 {submission.evidencePurgedAt ? "Foto sudah dibersihkan (masa retensi)." : "Foto tidak tersedia."}
               </p>
             )}
+
+            <div className="mt-2 rounded-xl border border-border bg-muted/30 p-2">
+              <p className="text-[11px] font-semibold text-muted-foreground">Tanda tangan penerima</p>
+              {signature?.signedUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={signature.signedUrl}
+                  alt="Tanda tangan penerima"
+                  className="mt-1 h-20 w-full rounded-lg border border-border bg-white object-contain"
+                  loading="lazy"
+                />
+              ) : (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {submission.evidencePurgedAt
+                    ? "Tanda tangan sudah dibersihkan (masa retensi)."
+                    : "Tanda tangan belum tersedia untuk versi ini."}
+                </p>
+              )}
+            </div>
           </div>
         );
       })}

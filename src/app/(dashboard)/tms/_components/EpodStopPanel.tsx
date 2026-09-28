@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   CalendarDays,
@@ -89,7 +89,149 @@ interface UploadedEvidence {
   sizeBytes: number;
   originalFilename: string | null;
   sortOrder: number;
+  evidenceType: "PHOTO" | "RECIPIENT_SIGNATURE";
 }
+
+interface SignaturePadHandle {
+  clear: () => void;
+  isEmpty: () => boolean;
+  toPngBlob: () => Promise<Blob | null>;
+}
+
+/** Kanvas tanda tangan penerima: mouse, sentuhan, dan stylus. */
+const SignaturePad = ({
+  ref,
+  onStroke,
+}: {
+  ref: React.Ref<SignaturePadHandle>;
+  onStroke: () => void;
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawingRef = useRef(false);
+  const hasInkRef = useRef(false);
+  const lastRef = useRef<{ x: number; y: number } | null>(null);
+
+  const getPos = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+  }, []);
+
+  const setupCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    const width = parent ? parent.clientWidth : 320;
+    const ratio = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    canvas.width = Math.max(1, Math.round(width * ratio));
+    canvas.height = Math.round(160 * ratio);
+    canvas.style.height = "160px";
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(ratio, ratio);
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#0f172a";
+  }, []);
+
+  useEffect(() => {
+    setupCanvas();
+    const onResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas || hasInkRef.current) return;
+      setupCanvas();
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [setupCanvas]);
+
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      clear() {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        hasInkRef.current = false;
+        lastRef.current = null;
+      },
+      isEmpty() {
+        return !hasInkRef.current;
+      },
+      toPngBlob() {
+        const canvas = canvasRef.current;
+        if (!canvas || !hasInkRef.current) return Promise.resolve(null);
+        return new Promise<Blob | null>((resolve) => {
+          canvas.toBlob((blob) => resolve(blob), "image/png");
+        });
+      },
+    }),
+    [],
+  );
+
+  const drawTo = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      const pos = getPos(event);
+      if (!canvas || !ctx || !pos) return;
+      const last = lastRef.current;
+      if (last) {
+        ctx.beginPath();
+        ctx.moveTo(last.x / (window.devicePixelRatio || 1), last.y / (window.devicePixelRatio || 1));
+        // Koordinat sudah diskala via getPos; bagi kembali agar garis pas dengan skala ctx.
+        ctx.lineTo(pos.x / (window.devicePixelRatio || 1), pos.y / (window.devicePixelRatio || 1));
+        ctx.stroke();
+      }
+      lastRef.current = pos;
+      if (!hasInkRef.current) {
+        hasInkRef.current = true;
+        onStroke();
+      }
+    },
+    [getPos, onStroke],
+  );
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-full cursor-crosshair touch-none rounded-lg border border-border bg-white"
+      onPointerDown={(event) => {
+        (event.target as HTMLCanvasElement).setPointerCapture(event.pointerId);
+        drawingRef.current = true;
+        lastRef.current = getPos(event);
+      }}
+      onPointerMove={(event) => {
+        if (!drawingRef.current) return;
+        event.preventDefault();
+        drawTo(event);
+      }}
+      onPointerUp={() => {
+        drawingRef.current = false;
+        lastRef.current = null;
+      }}
+      onPointerCancel={() => {
+        drawingRef.current = false;
+        lastRef.current = null;
+      }}
+      onPointerLeave={() => {
+        if (drawingRef.current) {
+          drawingRef.current = false;
+          lastRef.current = null;
+        }
+      }}
+    />
+  );
+};
 
 interface GeoPoint {
   latitude: number;
@@ -419,6 +561,8 @@ function StopSubmissionForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const signatureRef = useRef<SignaturePadHandle | null>(null);
+  const [signatureDrawn, setSignatureDrawn] = useState(false);
 
   const isDelivery = stop.stopType === "DELIVERY";
   const distance = useMemo(() => {
@@ -489,6 +633,7 @@ function StopSubmissionForm({
             sizeBytes: prepared.size,
             originalFilename: prepared.name,
             sortOrder: evidence.length + uploaded.length,
+            evidenceType: "PHOTO",
           });
         }
         if (uploaded.length > 0) setEvidence((prev) => [...prev, ...uploaded].slice(0, TMS_EPOD_MAX_PHOTOS));
@@ -502,12 +647,15 @@ function StopSubmissionForm({
 
   const submit = useCallback(async () => {
     setError(null);
+    const photoCount = evidence.filter((item) => item.evidenceType === "PHOTO").length;
+    const hasSignature = isDelivery ? signatureDrawn && !signatureRef.current?.isEmpty() : false;
     const validationError = validateEpodSubmission({
       stopType: stop.stopType,
       result: isDelivery ? result : null,
       recipientName,
       note,
-      photoCount: evidence.length,
+      photoCount,
+      signatureCount: isDelivery ? (hasSignature ? 1 : 0) : 0,
       latitude: geo?.latitude ?? null,
       longitude: geo?.longitude ?? null,
       distanceMeters: distance,
@@ -521,6 +669,55 @@ function StopSubmissionForm({
 
     setSubmitting(true);
     try {
+      let payloadEvidence = evidence;
+      if (isDelivery) {
+        const blob = await signatureRef.current?.toPngBlob();
+        if (!blob) {
+          setError("Tanda tangan penerima wajib diisi.");
+          return;
+        }
+        const file = new File([blob], "tanda-tangan-penerima.png", { type: "image/png" });
+        const permissionResponse = await fetch("/api/tms/epod/uploads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stopId: stop.id,
+            mimeType: file.type,
+            sizeBytes: file.size,
+            filename: file.name,
+            evidenceType: "RECIPIENT_SIGNATURE",
+          }),
+        });
+        const permission = (await permissionResponse.json()) as {
+          data?: { bucket: string; path: string; token: string };
+          error?: string;
+        };
+        if (!permissionResponse.ok || !permission.data) {
+          setError(permission.error ?? "Gagal menyiapkan unggahan tanda tangan.");
+          return;
+        }
+        const supabase = createClient();
+        const { error: uploadError } = await supabase.storage
+          .from(permission.data.bucket)
+          .uploadToSignedUrl(permission.data.path, permission.data.token, file, {
+            contentType: file.type,
+          });
+        if (uploadError) {
+          setError(`Gagal mengunggah tanda tangan: ${uploadError.message}`);
+          return;
+        }
+        payloadEvidence = [
+          ...evidence,
+          {
+            path: permission.data.path,
+            mimeType: file.type,
+            sizeBytes: file.size,
+            originalFilename: file.name,
+            sortOrder: evidence.length,
+            evidenceType: "RECIPIENT_SIGNATURE" as const,
+          },
+        ];
+      }
       const response = await fetch(`/api/tms/epod/stops/${stop.id}/submissions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -534,7 +731,7 @@ function StopSubmissionForm({
           accuracyMeters: geo?.accuracy ?? null,
           capturedAtDevice: new Date().toISOString(),
           outOfRadiusReason,
-          evidence,
+          evidence: payloadEvidence,
         }),
       });
       const payload = (await response.json()) as { error?: string };
@@ -547,6 +744,8 @@ function StopSubmissionForm({
       setNote("");
       setItems([{ name: "", quantity: "", unit: "" }]);
       setOutOfRadiusReason("");
+      signatureRef.current?.clear();
+      setSignatureDrawn(false);
       onSubmitted();
     } catch {
       setError("Gagal mengirim bukti e-POD.");
@@ -562,6 +761,7 @@ function StopSubmissionForm({
     note,
     onSubmitted,
     outOfRadiusReason,
+    signatureDrawn,
     recipientName,
     result,
     stop.stopType,
@@ -744,6 +944,30 @@ function StopSubmissionForm({
         )}
       </div>
 
+      {isDelivery && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <p className="text-[11px] font-semibold text-muted-foreground">
+              Tanda tangan penerima <span className="font-normal">· wajib</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                signatureRef.current?.clear();
+                setSignatureDrawn(false);
+              }}
+              className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted"
+            >
+              <Undo2 className="h-3.5 w-3.5" /> Hapus/Ulangi
+            </button>
+          </div>
+          <SignaturePad ref={signatureRef} onStroke={() => setSignatureDrawn(true)} />
+          <p className="text-[11px] text-muted-foreground">
+            {signatureDrawn ? "Tanda tangan terisi." : "Minta penerima menandatangani di area putih."}
+          </p>
+        </div>
+      )}
+
       {error && (
         <p className="flex items-center gap-1.5 text-[11px] text-danger">
           <TriangleAlert className="h-3.5 w-3.5" /> {error}
@@ -753,7 +977,7 @@ function StopSubmissionForm({
       <Button
         type="button"
         size="sm"
-        disabled={submitting || uploading || evidence.length === 0}
+        disabled={submitting || uploading || evidence.length === 0 || (isDelivery && !signatureDrawn)}
         onClick={() => void submit()}
       >
         {submitting ? "Mengirim…" : stop.stopType === "LOADING" ? "Kirim bukti loading" : "Kirim e-POD"}

@@ -84,6 +84,7 @@ function validInput(overrides: Partial<EpodSubmissionInput> = {}): EpodSubmissio
     recipientName: "Budi",
     note: "",
     photoCount: 1,
+    signatureCount: 1,
     latitude: -6.2,
     longitude: 106.8,
     distanceMeters: 10,
@@ -110,8 +111,28 @@ describe("validateEpodSubmission", () => {
 
   it("menerima titik loading tanpa hasil", () => {
     expect(
-      validateEpodSubmission(validInput({ stopType: "LOADING", result: null, recipientName: "" })),
+      validateEpodSubmission(validInput({ stopType: "LOADING", result: null, recipientName: "", signatureCount: 0 })),
     ).toBeNull();
+  });
+
+  it("mewajibkan tanda tangan untuk semua hasil pengiriman", () => {
+    expect(validateEpodSubmission(validInput({ signatureCount: 0 }))).toContain("Tanda tangan");
+    expect(
+      validateEpodSubmission(validInput({ result: "PARTIAL", note: "kurang", signatureCount: 0 })),
+    ).toContain("Tanda tangan");
+    expect(
+      validateEpodSubmission(
+        validInput({ result: "REJECTED", recipientName: "", note: "toko tutup", signatureCount: 0 }),
+      ),
+    ).toContain("Tanda tangan");
+  });
+
+  it("menolak tanda tangan pada titik loading", () => {
+    expect(
+      validateEpodSubmission(
+        validInput({ stopType: "LOADING", result: null, recipientName: "", signatureCount: 1 }),
+      ),
+    ).toContain("tanda tangan");
   });
 
   it("menolak hasil kosong pada pengiriman", () => {
@@ -136,6 +157,11 @@ describe("validateEpodSubmission", () => {
     expect(
       validateEpodSubmission(validInput({ result: "REJECTED", recipientName: "", note: "toko tutup" })),
     ).toBeNull();
+  });
+
+  it("tanda tangan tidak dihitung sebagai foto", () => {
+    expect(validateEpodSubmission(validInput({ photoCount: 1, signatureCount: 1 }))).toBeNull();
+    expect(validateEpodSubmission(validInput({ photoCount: 0, signatureCount: 1 }))).toContain("Jumlah foto");
   });
 
   it("mewajibkan alasan bila di luar radius", () => {
@@ -163,7 +189,7 @@ describe("validateEpodSubmission", () => {
   it("tidak mewajibkan barang pada titik loading", () => {
     expect(
       validateEpodSubmission(
-        validInput({ stopType: "LOADING", result: null, recipientName: "", items: [] }),
+        validInput({ stopType: "LOADING", result: null, recipientName: "", items: [], signatureCount: 0 }),
       ),
     ).toBeNull();
   });

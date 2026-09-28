@@ -303,14 +303,14 @@ export async function listEpodPetugas(): Promise<EpodPetugasOption[]> {
     };
     const jabatan = Array.isArray(record.jabatan) ? record.jabatan[0] : record.jabatan;
     const role =
-      record.jabatan_id !== null ? (roleByJabatan.get(Number(record.jabatan_id)) ?? null) : null;
+      record.jabatan_id !== null ? (roleByJabatan.get(Number(record.jabatan_id)) ?? "OTHER") : "OTHER";
     return {
       id: String(record.id),
       nama: String(record.nama),
       jabatanId: record.jabatan_id,
       jabatanNama: jabatan ? String(jabatan.nama) : null,
       role,
-      mobileAllowed: role !== null,
+      mobileAllowed: true,
     };
   });
 }

@@ -32,13 +32,26 @@ export async function POST(request: Request) {
   const mimeType = typeof source.mimeType === "string" ? source.mimeType.trim().toLowerCase() : "";
   const sizeBytes = typeof source.sizeBytes === "number" ? source.sizeBytes : Number(source.sizeBytes);
   const filename = typeof source.filename === "string" ? source.filename.slice(0, 200) : null;
+  const evidenceTypeRaw = typeof source.evidenceType === "string" ? source.evidenceType.trim().toUpperCase() : "PHOTO";
+  const evidenceType = evidenceTypeRaw === "RECIPIENT_SIGNATURE" ? "RECIPIENT_SIGNATURE" : "PHOTO";
 
   if (!stopId) return epodError("ID titik tidak valid.", 400);
   if (!TMS_EPOD_ALLOWED_MIME.includes(mimeType as (typeof TMS_EPOD_ALLOWED_MIME)[number])) {
-    return epodError("Format foto harus JPEG, PNG, atau WebP.", 400);
+    return epodError(
+      evidenceType === "RECIPIENT_SIGNATURE"
+        ? "Format tanda tangan harus PNG."
+        : "Format foto harus JPEG, PNG, atau WebP.",
+      400,
+    );
+  }
+  if (evidenceType === "RECIPIENT_SIGNATURE" && mimeType !== "image/png") {
+    return epodError("Format tanda tangan harus PNG.", 400);
   }
   if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > TMS_EPOD_MAX_PHOTO_BYTES) {
-    return epodError("Ukuran foto melebihi 5 MB.", 400);
+    return epodError(
+      evidenceType === "RECIPIENT_SIGNATURE" ? "Ukuran tanda tangan melebihi 5 MB." : "Ukuran foto melebihi 5 MB.",
+      400,
+    );
   }
 
   try {
@@ -67,6 +80,7 @@ export async function POST(request: Request) {
         mimeType,
         sizeBytes,
         filename,
+        evidenceType,
       },
     });
   } catch (error) {

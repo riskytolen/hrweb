@@ -404,7 +404,7 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
   };
 
   const photos = async (evidence: EpodExportEvidence[]) => {
-    const usable = evidence.filter((item) => item.signedUrl);
+    const usable = evidence.filter((item) => item.signedUrl && (item.evidenceType ?? "PHOTO") === "PHOTO");
     if (usable.length === 0) return;
     const gap = 5;
     const boxW = (contentWidth - gap) / PHOTOS_PER_ROW;
@@ -604,14 +604,54 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
       itemsTable(submission.items);
     }
 
-    if (evidence.length > 0) {
+    const photoItems = evidence.filter((item) => (item.evidenceType ?? "PHOTO") === "PHOTO");
+    const signatureItem = evidence.find((item) => item.evidenceType === "RECIPIENT_SIGNATURE") ?? null;
+    if (photoItems.length > 0) {
       ensure(10);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(8.5);
       doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
-      doc.text(`Foto Bukti (${evidence.length})`, margin, y);
+      doc.text(`Foto Bukti (${photoItems.length})`, margin, y);
       y += 5;
-      await photos(evidence);
+      await photos(photoItems);
+    }
+    if (isDelivery) {
+      ensure(28);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
+      doc.text("Tanda Tangan Penerima", margin, y);
+      y += 5;
+      const boxW = 72;
+      const boxH = 20;
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(BORDER[0], BORDER[1], BORDER[2]);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(margin, y, boxW, boxH, 1.5, 1.5, "FD");
+      if (signatureItem?.signedUrl) {
+        const image = await toJpegImage(signatureItem.signedUrl);
+        if (image) {
+          try {
+            doc.addImage(image.dataUrl, "JPEG", margin + 2, y + 2, boxW - 4, boxH - 4);
+          } catch {
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7);
+            doc.setTextColor(MUTED[0], MUTED[1], MUTED[2]);
+            doc.text("Tanda tangan tidak tersedia", margin + 4, y + 11);
+          }
+        } else {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7);
+          doc.setTextColor(MUTED[0], MUTED[1], MUTED[2]);
+          doc.text("Tanda tangan tidak tersedia", margin + 4, y + 11);
+        }
+      } else {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(MUTED[0], MUTED[1], MUTED[2]);
+        doc.text("Tanda tangan belum tersedia untuk versi ini", margin + 4, y + 11);
+      }
+      y += boxH + 4;
     }
     y += 4;
   }

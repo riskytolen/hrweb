@@ -17,6 +17,7 @@ interface EvidenceInput {
   sizeBytes: number | null;
   originalFilename: string | null;
   sortOrder: number;
+  evidenceType: "PHOTO" | "RECIPIENT_SIGNATURE";
 }
 
 function parseEvidence(value: unknown): EvidenceInput[] {
@@ -28,12 +29,19 @@ function parseEvidence(value: unknown): EvidenceInput[] {
     const path = typeof source.path === "string" ? source.path.trim() : "";
     if (!path) continue;
     const sizeBytes = Number(source.sizeBytes);
+    const rawType =
+      typeof source.evidenceType === "string"
+        ? source.evidenceType.trim().toUpperCase()
+        : typeof source.evidence_type === "string"
+          ? source.evidence_type.trim().toUpperCase()
+          : "PHOTO";
     result.push({
       path,
       mimeType: typeof source.mimeType === "string" ? source.mimeType : null,
       sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : null,
       originalFilename: typeof source.originalFilename === "string" ? source.originalFilename.slice(0, 200) : null,
       sortOrder: Number.isFinite(Number(source.sortOrder)) ? Math.trunc(Number(source.sortOrder)) : result.length,
+      evidenceType: rawType === "RECIPIENT_SIGNATURE" ? "RECIPIENT_SIGNATURE" : "PHOTO",
     });
   }
   return result;
@@ -107,12 +115,15 @@ export async function POST(
         ? haversineMeters(latitude, longitude, detail.stop.latitude, detail.stop.longitude)
         : null;
 
+    const photoCount = evidence.filter((item) => item.evidenceType === "PHOTO").length;
+    const signatureCount = evidence.filter((item) => item.evidenceType === "RECIPIENT_SIGNATURE").length;
     const validationError = validateEpodSubmission({
       stopType: detail.stop.stopType,
       result,
       recipientName,
       note,
-      photoCount: evidence.length,
+      photoCount,
+      signatureCount,
       latitude,
       longitude,
       distanceMeters,
@@ -138,6 +149,7 @@ export async function POST(
         size_bytes: item.sizeBytes,
         original_filename: item.originalFilename,
         sort_order: item.sortOrder,
+        evidence_type: item.evidenceType,
       })),
       p_items: toEpodItemPayload(items),
       p_actor_user: auth.context.userId,

@@ -292,7 +292,10 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
         recipientName: "Budi",
         latitude: -6.2,
         longitude: 106.8,
-        evidence: [{ path: "a/b.jpg" }],
+        evidence: [
+          { path: "a/b.jpg", evidenceType: "PHOTO" },
+          { path: "a/sign.png", evidenceType: "RECIPIENT_SIGNATURE" },
+        ],
         items: [],
       }),
       context,
@@ -301,6 +304,27 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
     expect(response.status).toBe(400);
     const payload = (await response.json()) as { error: string };
     expect(payload.error).toContain("Minimal satu barang");
+  });
+
+  it("menolak pengantaran tanpa tanda tangan", async () => {
+    mockProfile(["tms.epod.manage"]);
+    getStopDetailMock.mockResolvedValue(deliveryStop as never);
+
+    const response = await submitStop(
+      submitRequest({
+        result: "DELIVERED",
+        recipientName: "Budi",
+        latitude: -6.2,
+        longitude: 106.8,
+        evidence: [{ path: "a/b.jpg", evidenceType: "PHOTO" }],
+        items: [{ name: "Kopi", quantity: "1", unit: "" }],
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(400);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain("Tanda tangan");
   });
 
   it("meneruskan daftar barang ke RPC sebagai p_items", async () => {
@@ -315,7 +339,10 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
         recipientName: "Budi",
         latitude: -6.2,
         longitude: 106.8,
-        evidence: [{ path: "a/b.jpg" }],
+        evidence: [
+          { path: "a/b.jpg", evidenceType: "PHOTO" },
+          { path: "a/sign.png", evidenceType: "RECIPIENT_SIGNATURE" },
+        ],
         items: [
           { name: "Kopi", quantity: "2", unit: "karton" },
           { name: "Gula", quantity: "1.5", unit: "" },
@@ -332,6 +359,10 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
           { name: "Kopi", quantity: 2, unit: "karton" },
           { name: "Gula", quantity: 1.5, unit: null },
         ],
+        p_evidence: expect.arrayContaining([
+          expect.objectContaining({ path: "a/b.jpg", evidence_type: "PHOTO" }),
+          expect.objectContaining({ path: "a/sign.png", evidence_type: "RECIPIENT_SIGNATURE" }),
+        ]),
       }),
     );
   });

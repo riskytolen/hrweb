@@ -28,6 +28,7 @@ export type EpodDeliveryResult = "DELIVERED" | "PARTIAL" | "REJECTED";
 export type EpodActorType = "WEB_ADMIN" | "DRIVER" | "HELPER" | "COORDINATOR" | "DEPUTY_COORDINATOR" | "OTHER";
 export type EpodSource = "WEB" | "MOBILE";
 export type EpodPetugasRole = "DRIVER" | "HELPER" | "COORDINATOR" | "DEPUTY_COORDINATOR" | "OTHER";
+export type EpodEvidenceType = "PHOTO" | "RECIPIENT_SIGNATURE";
 
 /** Label tampil role petugas e-POD (untuk OTHER, UI memakai nama jabatan). */
 export const EPOD_PETUGAS_ROLE_LABELS: Record<EpodPetugasRole, string> = {
@@ -117,6 +118,7 @@ export interface EpodEvidence {
   sizeBytes: number | null;
   originalFilename: string | null;
   sortOrder: number;
+  evidenceType: EpodEvidenceType;
 }
 
 // ─── Normalizer baris database ───
@@ -317,6 +319,15 @@ export function normalizeEpodSubmission(raw: unknown): EpodSubmission | null {
   };
 }
 
+const EVIDENCE_TYPES: readonly EpodEvidenceType[] = ["PHOTO", "RECIPIENT_SIGNATURE"];
+
+function toEvidenceType(value: unknown): EpodEvidenceType {
+  if (typeof value === "string" && (EVIDENCE_TYPES as readonly string[]).includes(value.trim().toUpperCase())) {
+    return value.trim().toUpperCase() as EpodEvidenceType;
+  }
+  return "PHOTO";
+}
+
 export function normalizeEpodEvidence(raw: unknown): EpodEvidence | null {
   const source = asRecord(raw);
   const id = toStr(pick(source, "id"), 60);
@@ -332,6 +343,7 @@ export function normalizeEpodEvidence(raw: unknown): EpodEvidence | null {
     sizeBytes: toNum(pick(source, "size_bytes", "sizeBytes")),
     originalFilename: toStr(pick(source, "original_filename", "originalFilename"), 200),
     sortOrder: toInt(pick(source, "sort_order", "sortOrder")),
+    evidenceType: toEvidenceType(pick(source, "evidence_type", "evidenceType")),
   };
 }
 
@@ -406,6 +418,7 @@ export interface EpodSubmissionInput {
   recipientName: string;
   note: string;
   photoCount: number;
+  signatureCount: number;
   latitude: number | null;
   longitude: number | null;
   distanceMeters: number | null;
@@ -451,6 +464,12 @@ export function validateEpodItems(items: EpodItemInput[]): string | null {
 export function validateEpodSubmission(input: EpodSubmissionInput): string | null {
   if (input.photoCount < TMS_EPOD_MIN_PHOTOS || input.photoCount > TMS_EPOD_MAX_PHOTOS) {
     return `Jumlah foto harus ${TMS_EPOD_MIN_PHOTOS} sampai ${TMS_EPOD_MAX_PHOTOS}.`;
+  }
+  if (input.stopType === "LOADING" && input.signatureCount > 0) {
+    return "Titik loading tidak memakai tanda tangan.";
+  }
+  if (input.stopType === "DELIVERY" && input.signatureCount !== 1) {
+    return "Tanda tangan penerima wajib diisi.";
   }
   if (input.latitude === null || input.longitude === null) {
     return "Lokasi GPS wajib diisi. Aktifkan izin lokasi pada browser.";
