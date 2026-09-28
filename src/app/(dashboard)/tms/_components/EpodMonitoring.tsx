@@ -360,6 +360,7 @@ export default function EpodMonitoring() {
           <h1 className="text-lg font-bold text-foreground">Monitoring e-POD</h1>
           <p className="text-xs text-muted-foreground">
             Bukti pengiriman per titik toko. Titik pertama adalah loading barang.
+            Menampilkan FO McEasy: Dijadwalkan, Berjalan, dan Selesai.
           </p>
         </div>
         {!canManage && (

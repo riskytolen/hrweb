@@ -25,6 +25,12 @@ const SUBMISSIONS = "tms_epod_submissions";
 const EVIDENCE = "tms_epod_evidence";
 const POINT_TEMPERATURES = "tms_route_point_temperatures";
 
+/**
+ * Status FO McEasy yang ditampilkan di Monitoring e-POD: dijadwalkan,
+ * berjalan, dan selesai. FO DRAFT/CANCELED tidak masuk pool monitoring.
+ */
+const VISIBLE_TASK_STATUSES = ["SCHEDULED", "STARTED", "ENDED"];
+
 /** Masa berlaku signed URL foto pada laporan PDF. */
 const EXPORT_SIGNED_URL_TTL_SECONDS = 600;
 
@@ -98,7 +104,11 @@ export async function listAssignments(
   filters: EpodAssignmentFilters,
 ): Promise<{ items: EpodAssignmentListItem[]; total: number }> {
   const admin = createAdminClient();
-  let query = admin.from(ASSIGNMENTS).select("*", { count: "exact" });
+  let query = admin
+    .from(ASSIGNMENTS)
+    .select("*", { count: "exact" })
+    // Monitoring hanya menampilkan FO Dijadwalkan/Berjalan/Selesai.
+    .in("task_status_raw", VISIBLE_TASK_STATUSES);
 
   if (filters.status) query = query.eq("status", filters.status);
   if (filters.dateFrom) query = query.gte("snapshot_at", filters.dateFrom);
@@ -327,7 +337,11 @@ export async function countAssignmentsByStatus(): Promise<EpodStatusCounts> {
   const statuses = ["OPEN", "CLAIMED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] as const;
   const results = await Promise.all(
     statuses.map((status) =>
-      admin.from(ASSIGNMENTS).select("id", { count: "exact", head: true }).eq("status", status),
+      admin
+        .from(ASSIGNMENTS)
+        .select("id", { count: "exact", head: true })
+        .eq("status", status)
+        .in("task_status_raw", VISIBLE_TASK_STATUSES),
     ),
   );
 
