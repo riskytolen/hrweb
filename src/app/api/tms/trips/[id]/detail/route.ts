@@ -83,6 +83,29 @@ export async function GET(
     );
   }
 
+  // Batasi query vendor: tanggal harus valid, berurutan, dan rentang
+  // maksimal 31 hari agar satu request tidak membebani layanan tracking.
+  const startMs = Date.parse(startDate);
+  const endMs = Date.parse(endDate);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+    return NextResponse.json(
+      { error: "Format startDate atau endDate tidak valid." },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+  if (endMs < startMs) {
+    return NextResponse.json(
+      { error: "endDate tidak boleh sebelum startDate." },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+  if (endMs - startMs > 31 * 24 * 60 * 60 * 1000) {
+    return NextResponse.json(
+      { error: "Rentang trip maksimal 31 hari." },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
+  }
+
   const speedLimitRaw = request.nextUrl.searchParams.get("speedLimit");
   const speedLimitParsed = speedLimitRaw === null ? null : Number(speedLimitRaw);
   const speedLimit =

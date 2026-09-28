@@ -17,6 +17,9 @@ export const TMS_INPUT_PERMISSION = "tms.input";
 export const TMS_EPOD_PERMISSION = "tms.epod";
 export const TMS_EPOD_VIEW_PERMISSION = "tms.epod.view";
 export const TMS_EPOD_MANAGE_PERMISSION = "tms.epod.manage";
+export const TMS_LIVE_TRACK_CONFIG_PERMISSION = "tms.live-track-config";
+export const TMS_LIVE_TRACK_CONFIG_VIEW_PERMISSION = "tms.live-track-config.view";
+export const TMS_LIVE_TRACK_CONFIG_MANAGE_PERMISSION = "tms.live-track-config.manage";
 
 export type AccountType = "internal" | "external";
 
@@ -122,6 +125,48 @@ export function canViewTmsEpod(
       TMS_EPOD_VIEW_PERMISSION,
       TMS_EPOD_MANAGE_PERMISSION,
     ].includes(p),
+  );
+}
+
+/**
+ * Hak lihat Pengaturan Live Track.
+ *
+ * Pemegang `tms`/`tms.view`/`tms.input` boleh melihat konfigurasi agar
+ * operasional memahami cakupan Live Track. Mengubah konfigurasi butuh
+ * permission manage eksplisit.
+ */
+export function canViewLiveTrackConfig(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return permissions.some((p) =>
+    [
+      "all",
+      TMS_PERMISSION,
+      TMS_VIEW_PERMISSION,
+      TMS_INPUT_PERMISSION,
+      TMS_LIVE_TRACK_CONFIG_PERMISSION,
+      TMS_LIVE_TRACK_CONFIG_VIEW_PERMISSION,
+      TMS_LIVE_TRACK_CONFIG_MANAGE_PERMISSION,
+    ].includes(p),
+  );
+}
+
+/**
+ * Hak kelola Pengaturan Live Track (grup, unit, jadwal).
+ *
+ * Sengaja TIDAK mengimplikasi dari `tms`/`tms.input` agar perubahan
+ * konfigurasi kontrak customer hanya dilakukan role yang diberi wewenang
+ * eksplisit (`tms.live-track-config.manage`).
+ */
+export function canManageLiveTrackConfig(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return permissions.some((p) =>
+    ["all", TMS_LIVE_TRACK_CONFIG_PERMISSION, TMS_LIVE_TRACK_CONFIG_MANAGE_PERMISSION].includes(p),
   );
 }
 

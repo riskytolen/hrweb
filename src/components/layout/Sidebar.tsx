@@ -48,6 +48,7 @@ import {
   Route,
   PackageCheck,
   ScrollText,
+  Settings2,
   type LucideIcon,
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
@@ -172,6 +173,7 @@ const allSections: MenuSection[] = [
         items: [
           { name: "Live View", href: "/tms/live-view", icon: Satellite, permission: "tms" },
           { name: "Live Track Task", href: "/tms/live-track-task", icon: Route, permission: "tms" },
+          { name: "Pengaturan Live Track", href: "/tms/live-track-settings", icon: Settings2, permission: "tms.live-track-config" },
           { name: "Monitoring e-POD", href: "/tms/epod", icon: PackageCheck, permission: "tms.epod" },
           { name: "Logger Trips", href: "/tms/logger-trips", icon: ScrollText, permission: "tms" },
           { name: "Dashboard Kendaraan", href: "/operasional-kendaraan/dashboard", icon: Gauge, permission: "vehicle-odometer" },

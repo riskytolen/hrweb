@@ -152,6 +152,17 @@ function epodPermissionLabel(key: string): string | null {
   return EPOD_PERMISSION_LABELS[key] ?? null;
 }
 
+/** Label khusus Pengaturan Live Track yang punya mode sendiri (Lihat/Kelola). */
+const LIVE_TRACK_CONFIG_PERMISSION_LABELS: Record<string, string> = {
+  "tms.live-track-config": "Pengaturan Live Track (Kelola)",
+  "tms.live-track-config.view": "Pengaturan Live Track (Lihat)",
+  "tms.live-track-config.manage": "Pengaturan Live Track (Kelola)",
+};
+
+function liveTrackConfigPermissionLabel(key: string): string | null {
+  return LIVE_TRACK_CONFIG_PERMISSION_LABELS[key] ?? null;
+}
+
 export default function AccountsPage() {
   // Fix #4: Supabase instance dibuat sekali via useState
   const [supabase] = useState(() => createClient());
@@ -617,6 +628,26 @@ export default function AccountsPage() {
     });
   };
 
+  // Permission Pengaturan Live Track: tidak tampil / lihat / kelola.
+  // Kelola bersifat eksplisit: permission `tms` biasa tidak ikut mengelola.
+  const getLiveTrackConfigState = (): "none" | "view" | "manage" => {
+    if (roleForm.permissions.includes("tms.live-track-config.manage")) return "manage";
+    if (roleForm.permissions.includes("tms.live-track-config.view")) return "view";
+    if (roleForm.permissions.includes("tms.live-track-config")) return "manage";
+    return "none";
+  };
+
+  const setLiveTrackConfigState = (state: "none" | "view" | "manage") => {
+    setRoleForm((prev) => {
+      const cleaned = prev.permissions.filter(
+        (p) => p !== "tms.live-track-config" && p !== "tms.live-track-config.view" && p !== "tms.live-track-config.manage",
+      );
+      if (state === "view") return { ...prev, permissions: [...cleaned, "tms.live-track-config.view"] };
+      if (state === "manage") return { ...prev, permissions: [...cleaned, "tms.live-track-config.manage"] };
+      return { ...prev, permissions: cleaned };
+    });
+  };
+
   // Baris satu modul dengan mode Tidak Tampil / Lihat / Input / Edit.
   const renderModuleRow = (opt: PermissionOption) => {
     const state = getPermissionState(opt.key);
@@ -699,6 +730,54 @@ export default function AccountsPage() {
               className={cn(
                 "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
                 epodState === s.value
+                  ? s.value === "manage"
+                    ? "bg-primary text-white shadow-sm"
+                    : s.value === "view"
+                      ? "bg-amber-500 text-white shadow-sm"
+                      : "bg-card text-muted-foreground shadow-sm"
+                  : "text-muted-foreground/60 hover:text-muted-foreground"
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Baris khusus Pengaturan Live Track: mode Tidak Tampil / Lihat / Kelola.
+  const renderLiveTrackConfigRow = () => {
+    const configState = getLiveTrackConfigState();
+    return (
+      <div
+        key="tms.live-track-config"
+        className={cn(
+          "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+          configState === "manage"
+            ? "border-primary/30 bg-primary/5"
+            : configState === "view"
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-border"
+        )}
+      >
+        <div>
+          <span className="text-xs font-medium text-foreground">Pengaturan Live Track</span>
+          <p className="text-[10px] text-muted-foreground">Kelompok customer, unit & jam tampil</p>
+        </div>
+        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+          {([
+            { value: "none" as const, label: "Tidak Tampil" },
+            { value: "view" as const, label: "Lihat" },
+            { value: "manage" as const, label: "Kelola" },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => setLiveTrackConfigState(s.value)}
+              className={cn(
+                "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                configState === s.value
                   ? s.value === "manage"
                     ? "bg-primary text-white shadow-sm"
                     : s.value === "view"
@@ -1126,8 +1205,8 @@ export default function AccountsPage() {
                       </span>
                     ) : r.permissions.length > 0 ? (
                       r.permissions.map((p) => {
-                        const epodLabel = epodPermissionLabel(p);
-                        const isEpodView = p === "tms.epod.view";
+                        const epodLabel = epodPermissionLabel(p) || liveTrackConfigPermissionLabel(p);
+                        const isEpodView = p === "tms.epod.view" || p === "tms.live-track-config.view";
                         const isView = !epodLabel && p.endsWith(".view");
                         const isInput = !epodLabel && p.endsWith(".input");
                         const baseKey = isView ? p.replace(".view", "") : isInput ? p.replace(".input", "") : p;
@@ -1701,6 +1780,8 @@ export default function AccountsPage() {
                           {section.options.map((opt) => renderModuleRow(opt))}
                           {/* TMS e-POD memakai mode khusus Lihat / Kelola. */}
                           {section.title === "TMS" && renderEpodRow()}
+                          {/* Pengaturan Live Track memakai mode khusus Lihat / Kelola. */}
+                          {section.title === "TMS" && renderLiveTrackConfigRow()}
                         </div>
                       ))}
                     </div>

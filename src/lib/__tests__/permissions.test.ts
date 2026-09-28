@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   canAccessTmsLive,
+  canManageLiveTrackConfig,
   canManageTmsEpod,
+  canViewLiveTrackConfig,
   canViewTmsEpod,
   parsePermissions,
   permissionGranted,
@@ -124,6 +126,45 @@ describe("canManageTmsEpod", () => {
   it("selalu menolak akun eksternal", () => {
     expect(canManageTmsEpod(["all"], "external")).toBe(false);
     expect(canManageTmsEpod(["tms.input"], "external")).toBe(false);
+  });
+});
+
+describe("canViewLiveTrackConfig", () => {
+  it("memberi lihat untuk all/tms/tms.view/tms.input", () => {
+    expect(canViewLiveTrackConfig(["all"])).toBe(true);
+    expect(canViewLiveTrackConfig(["tms"])).toBe(true);
+    expect(canViewLiveTrackConfig(["tms.view"])).toBe(true);
+    expect(canViewLiveTrackConfig(["tms.input"])).toBe(true);
+  });
+
+  it("memberi lihat untuk permission konfigurasi", () => {
+    expect(canViewLiveTrackConfig(["tms.live-track-config"])).toBe(true);
+    expect(canViewLiveTrackConfig(["tms.live-track-config.view"])).toBe(true);
+    expect(canViewLiveTrackConfig(["tms.live-track-config.manage"])).toBe(true);
+  });
+
+  it("selalu menolak akun eksternal", () => {
+    expect(canViewLiveTrackConfig(["all"], "external")).toBe(false);
+    expect(canViewLiveTrackConfig(["tms.live-track-config.manage"], "external")).toBe(false);
+  });
+});
+
+describe("canManageLiveTrackConfig", () => {
+  it("memberi kelola untuk all dan permission konfigurasi", () => {
+    expect(canManageLiveTrackConfig(["all"])).toBe(true);
+    expect(canManageLiveTrackConfig(["tms.live-track-config"])).toBe(true);
+    expect(canManageLiveTrackConfig(["tms.live-track-config.manage"])).toBe(true);
+  });
+
+  it("tidak memberi kelola untuk tms/tms.input/tms.view", () => {
+    expect(canManageLiveTrackConfig(["tms"])).toBe(false);
+    expect(canManageLiveTrackConfig(["tms.input"])).toBe(false);
+    expect(canManageLiveTrackConfig(["tms.view"])).toBe(false);
+    expect(canManageLiveTrackConfig(["tms.live-track-config.view"])).toBe(false);
+  });
+
+  it("selalu menolak akun eksternal", () => {
+    expect(canManageLiveTrackConfig(["all"], "external")).toBe(false);
   });
 });
 

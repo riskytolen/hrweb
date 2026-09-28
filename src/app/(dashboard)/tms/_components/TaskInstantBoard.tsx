@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronLeft,
+  ChevronDown,
   ChevronRight,
   CircleCheckBig,
   ClipboardList,
@@ -13,69 +13,134 @@ import {
   TriangleAlert,
   Truck,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
-import {
-  normalizeFleetTaskInstantItem,
-  type FleetTaskInstantItem,
+import type {
+  FleetTaskInstantItem,
+  FleetTaskTimelinePoint,
 } from "@/lib/fleet-task-track";
-import { formatRelativeTime } from "@/lib/tms-status";
 import TaskStatusBadge from "./TaskStatusBadge";
 
-type StatusFilter = "ALL" | "DRAFT" | "SCHEDULED" | "STARTED" | "ENDED" | "CANCELED";
+type StatusFilter = "ALL" | "SCHEDULED" | "STARTED" | "ENDED" | "CANCELED";
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "ALL", label: "Semua" },
-  { key: "DRAFT", label: "Draf" },
   { key: "SCHEDULED", label: "Dijadwalkan" },
   { key: "STARTED", label: "Berjalan" },
   { key: "ENDED", label: "Selesai" },
   { key: "CANCELED", label: "Batal" },
 ];
 
-interface TaskListCounts {
-  draft: number | null;
-  scheduled: number | null;
-  started: number | null;
-  ended: number | null;
-  canceled: number | null;
+const STATUS_META: Record<string, { label: string; color: string }> = {
+  SCHEDULED: { label: "Dijadwalkan", color: "#64748b" },
+  STARTED: { label: "Berjalan", color: "#0284c7" },
+  ENDED: { label: "Selesai", color: "#16a34a" },
+  CANCELED: { label: "Dibatalkan", color: "#ea580c" },
+  DRAFT: { label: "Draf", color: "#94a3b8" },
+};
+
+interface BoardTask {
+  id: string;
+  number: string | null;
+  statusRaw: string;
+  vehicleId: number | null;
+  licensePlate: string | null;
+  driverName: string | null;
+  expectedStartedOn: string | null;
+  actualStartedOn: string | null;
+  actualArrivalOn: string | null;
+  timeline: FleetTaskTimelinePoint[];
+  trackId: string | null;
+  frozen: boolean;
+  windowStartedAt: string;
+  visibleUntil: string;
 }
 
-interface TaskListApiResponse {
-  data?: unknown;
+interface BoardGroup {
+  id: string;
+  name: string;
+  color: string;
+  windowLabel: string;
+  tasks: BoardTask[];
+}
+
+interface BoardApiResponse {
+  data?: {
+    id: string;
+    name: string;
+    color: string;
+    windowLabel: string;
+    tasks: {
+      id: string;
+      number: string | null;
+      statusRaw: string | null;
+      vehicleId: number | null;
+      licensePlate: string | null;
+      driverName: string | null;
+      expectedStartedOn: string | null;
+      actualStartedOn: string | null;
+      actualArrivalOn: string | null;
+      timeline: unknown;
+      trackId: string | null;
+      frozen: boolean;
+      windowStartedAt: string;
+      visibleUntil: string;
+    }[];
+  }[];
   error?: string;
-  meta?: {
-    total?: number | null;
-    page?: number | null;
-    counts?: TaskListCounts | null;
+  meta?: { lastSyncedAt?: string | null };
+}
+
+/** Interval auto-refresh board (ms). */
+const BOARD_POLL_MS = 30_000;
+
+function normalizeTimeline(value: unknown): FleetTaskTimelinePoint[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is FleetTaskTimelinePoint => !!item && typeof item === "object",
+  );
+}
+
+function visitedCount(timeline: FleetTaskTimelinePoint[]): number {
+  return timeline.filter((p) => !!p.arrivalActual || !!p.departureActual).length;
+}
+
+function toFleetTaskItem(task: BoardTask): FleetTaskInstantItem {
+  const meta = STATUS_META[task.statusRaw] ?? { label: task.statusRaw, color: "#64748b" };
+  const total = task.timeline.length;
+  // ENDED selalu 100% agar konsisten dengan panel detail.
+  const done = task.statusRaw === "ENDED" ? total : visitedCount(task.timeline);
+  return {
+    id: task.id,
+    number: task.number,
+    statusRaw: task.statusRaw,
+    statusName: meta.label,
+    statusColor: meta.color,
+    vehicleId: task.vehicleId,
+    licensePlate: task.licensePlate,
+    driverName: task.driverName,
+    expectedStartedOn: task.expectedStartedOn,
+    expectedArrivalOn: null,
+    estimatedArrivalOn: null,
+    actualStartedOn: task.actualStartedOn,
+    actualArrivalOn: task.actualArrivalOn,
+    totalPoint: total,
+    currentPoint: done,
+    currentPointName: null,
+    currentPointStatus: null,
+    trackLink: null,
+    trackId: task.trackId,
+    createdOn: null,
+    timeline: task.timeline,
   };
 }
 
-const PAGE_SIZE = 10;
-
-function countFor(counts: TaskListCounts | null, key: StatusFilter): number | null {
-  if (!counts) return null;
-  switch (key) {
-    case "DRAFT":
-      return counts.draft;
-    case "SCHEDULED":
-      return counts.scheduled;
-    case "STARTED":
-      return counts.started;
-    case "ENDED":
-      return counts.ended;
-    case "CANCELED":
-      return counts.canceled;
-    default:
-      return null;
-  }
-}
-
-function formatCount(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "–";
-  return value.toLocaleString("id-ID");
+function formatClock(iso: string | null): string {
+  if (!iso) return "–";
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return "–";
+  return new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(new Date(parsed));
 }
 
 function KpiCard({
@@ -85,7 +150,7 @@ function KpiCard({
   value,
   caption,
 }: {
-  icon: LucideIcon;
+  icon: typeof Truck;
   tileClass: string;
   label: string;
   value: string;
@@ -105,22 +170,6 @@ function KpiCard({
   );
 }
 
-function pageWindow(current: number, totalPages: number): (number | "…")[] {
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, i) => i + 1);
-  }
-  const pages = new Set<number>([1, 2, current - 1, current, current + 1, totalPages - 1, totalPages]);
-  const sorted = [...pages].filter((p) => p >= 1 && p <= totalPages).sort((a, b) => a - b);
-  const result: (number | "…")[] = [];
-  let prev = 0;
-  for (const p of sorted) {
-    if (p - prev > 1) result.push("…");
-    result.push(p);
-    prev = p;
-  }
-  return result;
-}
-
 interface TaskInstantBoardProps {
   selectedId: string | null;
   onSelect: (item: FleetTaskInstantItem) => void;
@@ -130,94 +179,132 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [items, setItems] = useState<FleetTaskInstantItem[]>([]);
-  const [counts, setCounts] = useState<TaskListCounts | null>(null);
-  const [total, setTotal] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
+  const [groups, setGroups] = useState<BoardGroup[]>([]);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [stale, setStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const requestRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
-  const fetchPage = useCallback(async (targetPage: number, term: string, status: StatusFilter) => {
+  const fetchBoard = useCallback(async (term: string, background: boolean) => {
+    const requestId = requestRef.current + 1;
+    requestRef.current = requestId;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    setLoading(true);
-    setError(null);
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const params = new URLSearchParams();
-      params.set("limit", String(PAGE_SIZE));
-      params.set("page", String(targetPage));
-      params.set("sort", "created_on desc");
       if (term.trim()) params.set("search", term.trim());
-      if (status !== "ALL") params.set("status", status);
-      const response = await fetch(`/api/tms/fleet-task-instant?${params.toString()}`, {
+      const suffix = params.toString();
+      const response = await fetch(`/api/tms/live-track-board${suffix ? `?${suffix}` : ""}`, {
         headers: { Accept: "application/json" },
         signal: controller.signal,
       });
-      const payload = (await response.json()) as TaskListApiResponse;
-      if (!response.ok) throw new Error(payload.error ?? "Gagal memuat daftar task.");
-      const batch: FleetTaskInstantItem[] = [];
-      if (Array.isArray(payload.data)) {
-        for (const raw of payload.data) {
-          const item = normalizeFleetTaskInstantItem(raw);
-          if (item) batch.push(item);
-        }
-      }
-      setItems(batch);
-      setCounts(payload.meta?.counts ?? null);
-      setTotal(payload.meta?.total ?? null);
-      setPage(targetPage);
+      const payload = (await response.json()) as BoardApiResponse;
+      if (requestRef.current !== requestId) return;
+      if (!response.ok) throw new Error(payload.error ?? "Gagal memuat board Live Track.");
+      const next: BoardGroup[] = (Array.isArray(payload.data) ? payload.data : []).map((group) => ({
+        id: group.id,
+        name: group.name,
+        color: group.color,
+        windowLabel: group.windowLabel,
+        tasks: group.tasks.map((task) => ({
+          id: task.id,
+          number: task.number,
+          statusRaw: (task.statusRaw ?? "SCHEDULED").toUpperCase(),
+          vehicleId: task.vehicleId,
+          licensePlate: task.licensePlate,
+          driverName: task.driverName,
+          expectedStartedOn: task.expectedStartedOn,
+          actualStartedOn: task.actualStartedOn,
+          actualArrivalOn: task.actualArrivalOn,
+          timeline: normalizeTimeline(task.timeline),
+          trackId: task.trackId,
+          frozen: task.frozen,
+          windowStartedAt: task.windowStartedAt,
+          visibleUntil: task.visibleUntil,
+        })),
+      }));
+      setGroups(next);
+      setLastSyncedAt(payload.meta?.lastSyncedAt ?? null);
+      setStale(false);
+      setError(null);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      setError(err instanceof Error && err.message ? err.message : "Gagal memuat daftar task.");
-      setItems([]);
+      if (requestRef.current !== requestId) return;
+      // Background gagal: pertahankan data lama + tandai stale.
+      if (background && groups.length > 0) {
+        setStale(true);
+        return;
+      }
+      setError(err instanceof Error && err.message ? err.message : "Gagal memuat board Live Track.");
     } finally {
-      setLoading(false);
+      if (requestRef.current === requestId && !background) setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Muat ulang setiap halaman/search/filter status berubah.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchPage(page, search, statusFilter);
-    return () => abortRef.current?.abort();
+    void fetchBoard(search, false);
+    const timer = setInterval(() => void fetchBoard(search, true), BOARD_POLL_MS);
+    return () => {
+      clearInterval(timer);
+      abortRef.current?.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search, statusFilter]);
+  }, [search]);
 
   const handleSearchSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    setPage(1);
     setSearch(searchInput);
   };
 
-  const handleStatusFilter = (filter: StatusFilter) => {
-    if (filter === statusFilter) return;
-    setStatusFilter(filter);
-    setPage(1);
-  };
-
   const handleRefresh = () => {
-    if (!loading) void fetchPage(page, search, statusFilter);
+    if (!loading) void fetchBoard(search, false);
   };
 
-  // Kirim snapshot terbaru ke panel detail saat daftar diperbarui, agar
-  // progres/status task terpilih tidak tertinggal snapshot lama.
+  const visibleGroups = useMemo(
+    () =>
+      groups
+        .map((group) => ({
+          ...group,
+          tasks:
+            statusFilter === "ALL" ? group.tasks : group.tasks.filter((t) => t.statusRaw === statusFilter),
+        }))
+        .filter((group) => group.tasks.length > 0),
+    [groups, statusFilter],
+  );
+
+  const allTasks = useMemo(() => groups.flatMap((g) => g.tasks), [groups]);
+  const countFor = useCallback(
+    (status: StatusFilter): number =>
+      status === "ALL" ? allTasks.length : allTasks.filter((t) => t.statusRaw === status).length,
+    [allTasks],
+  );
+
+  const toggleCollapse = useCallback((groupId: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
+
+  // Kirim snapshot terbaru ke panel detail saat board diperbarui.
   useEffect(() => {
     if (!selectedId) return;
-    const updated = items.find((entry) => entry.id === selectedId);
-    if (updated) onSelect(updated);
-  }, [items, selectedId, onSelect]);
-
-  // Filter status sudah diterapkan di server (filtered pagination),
-  // jadi tampilkan semua item dari halaman aktif apa adanya.
-  const visibleItems = items;
-
-  const totalPages = total !== null ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : 1;
-  const rangeStart = total !== null && total > 0 ? (page - 1) * PAGE_SIZE + 1 : 0;
-  const rangeEnd = total !== null ? Math.min(page * PAGE_SIZE, total) : 0;
-
-  const activeTasks = (counts?.scheduled ?? 0) + (counts?.started ?? 0);
+    const updated = allTasks.find((entry) => entry.id === selectedId);
+    if (updated) onSelect(toFleetTaskItem(updated));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, selectedId]);
 
   return (
     <div className="space-y-4">
@@ -229,21 +316,25 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
           </span>
           <div className="min-w-0">
             <h2 className="text-xl font-extrabold tracking-tight text-foreground">
-              Fleet Task Instant Point List
+              Live Track Task
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Monitor task, titik kunjungan, dan progres pengiriman secara real time.
+              FO per kelompok customer sesuai jam operasional kontrak.
+              {lastSyncedAt && (
+                <span className="tabular-nums"> · sinkron {formatClock(lastSyncedAt)}</span>
+              )}
+              {stale && <span className="font-semibold text-amber-600"> · data mungkin basi</span>}
             </p>
           </div>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <form onSubmit={handleSearchSubmit} className="relative flex-1">
-            <span className="sr-only">Cari task, kendaraan, driver, atau lokasi</span>
+            <span className="sr-only">Cari FO, kendaraan, atau driver</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Search tasks, vehicles, drivers or locations…"
+              placeholder="Cari FO, nopol, atau driver…"
               autoComplete="off"
               spellCheck={false}
               className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
@@ -256,12 +347,11 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter status task">
           {STATUS_FILTERS.map((filter) => {
             const active = statusFilter === filter.key;
-            const count = filter.key === "ALL" ? total : countFor(counts, filter.key);
             return (
               <button
                 key={filter.key}
                 type="button"
-                onClick={() => handleStatusFilter(filter.key)}
+                onClick={() => setStatusFilter(filter.key)}
                 aria-pressed={active}
                 className={cn(
                   "rounded-full px-3 py-1.5 text-xs font-bold tabular-nums transition-colors",
@@ -271,11 +361,9 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
                 )}
               >
                 {filter.label}
-                {count !== null && count !== undefined && (
-                  <span className={cn("ml-1.5", active ? "opacity-70" : "opacity-60")}>
-                    {count.toLocaleString("id-ID")}
-                  </span>
-                )}
+                <span className={cn("ml-1.5", active ? "opacity-70" : "opacity-60")}>
+                  {countFor(filter.key).toLocaleString("id-ID")}
+                </span>
               </button>
             );
           })}
@@ -284,203 +372,111 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <KpiCard icon={ClipboardList} tileClass="bg-[#2563eb]" label="Total Tasks" value={formatCount(total)} caption="seluruh task instant" />
-        <KpiCard icon={Truck} tileClass="bg-[#16a34a]" label="Active Tasks" value={formatCount(counts ? activeTasks : null)} caption="dijadwalkan + berjalan" />
-        <KpiCard icon={CircleCheckBig} tileClass="bg-[#0284c7]" label="Completed" value={formatCount(counts?.ended)} caption="task selesai" />
-        <KpiCard icon={X} tileClass="bg-[#ea580c]" label="Canceled" value={formatCount(counts?.canceled)} caption="task dibatalkan" />
+        <KpiCard icon={ClipboardList} tileClass="bg-[#2563eb]" label="Total FO" value={allTasks.length.toLocaleString("id-ID")} caption="dalam window aktif" />
+        <KpiCard icon={Truck} tileClass="bg-[#16a34a]" label="Berjalan" value={countFor("STARTED").toLocaleString("id-ID")} caption="task started" />
+        <KpiCard icon={CircleCheckBig} tileClass="bg-[#0284c7]" label="Selesai" value={countFor("ENDED").toLocaleString("id-ID")} caption="sampai window berakhir" />
+        <KpiCard icon={X} tileClass="bg-[#ea580c]" label="Dibatalkan" value={countFor("CANCELED").toLocaleString("id-ID")} caption="task dibatalkan" />
       </div>
 
-      {/* Tabel task */}
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <h3 className="text-sm font-bold text-foreground">Task List</h3>
-          {total !== null && (
-            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-              Showing {rangeStart.toLocaleString("id-ID")}–{rangeEnd.toLocaleString("id-ID")} of{" "}
-              {total.toLocaleString("id-ID")} tasks
-            </span>
-          )}
+      {/* Board per kelompok */}
+      {error && (
+        <div className="flex items-start gap-2.5 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-danger">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>{error}</p>
         </div>
+      )}
 
-        {error && (
-          <div className="flex items-start gap-2.5 px-4 py-3 text-sm text-danger">
-            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>{error}</p>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="space-y-2 px-4 py-3">
-            {[0, 1, 2, 3].map((key) => (
-              <div key={key} className="h-14 animate-pulse rounded-xl bg-muted" />
-            ))}
-          </div>
-        ) : visibleItems.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-            Tidak ada task ditemukan. Ubah filter status atau kata kunci pencarian.
-          </p>
-        ) : (
-          <>
-            {/* Desktop: tabel */}
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="w-full min-w-[860px] border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground">
-                    <th className="px-4 py-2.5 font-semibold">Task ID</th>
-                    <th className="px-4 py-2.5 font-semibold">Vehicle</th>
-                    <th className="px-4 py-2.5 font-semibold">Driver</th>
-                    <th className="px-4 py-2.5 font-semibold">Location</th>
-                    <th className="px-4 py-2.5 font-semibold">Instant Point</th>
-                    <th className="px-4 py-2.5 font-semibold">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {visibleItems.map((item) => {
-                    const active = selectedId === item.id;
-                    const done = item.currentPoint ?? 0;
-                    const totalPoints = item.totalPoint ?? 0;
-                    const percent =
-                      totalPoints > 0 ? Math.min(100, Math.round((done / totalPoints) * 100)) : 0;
-                    return (
-                      <tr
-                        key={item.id}
-                        onClick={() => onSelect(item)}
-                        aria-selected={active}
-                        className={cn(
-                          "cursor-pointer transition-colors hover:bg-muted/60",
-                          active && "bg-primary-light/40",
-                        )}
-                      >
-                        <td className="whitespace-nowrap px-4 py-3 font-bold text-foreground">
-                          {item.number ?? item.id.slice(0, 8)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-semibold tabular-nums text-foreground">
-                          {item.licensePlate ?? "–"}
-                        </td>
-                        <td className="max-w-40 truncate px-4 py-3 text-muted-foreground">
-                          {item.driverName ?? "–"}
-                        </td>
-                        <td className="max-w-52 truncate px-4 py-3 text-muted-foreground" title={item.currentPointName ?? undefined}>
-                          {item.currentPointName ?? "–"}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          {totalPoints > 0 ? (
-                            <span className="inline-flex items-center gap-2">
-                              <span className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
-                                <span className="block h-full rounded-full bg-[#16a34a]" style={{ width: `${percent}%` }} />
-                              </span>
-                              <span className="text-xs font-bold tabular-nums text-foreground">
-                                {done}/{totalPoints}
-                              </span>
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">–</span>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <TaskStatusBadge color={item.statusColor} label={item.statusName ?? "–"} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile: kartu */}
-            <ol className="divide-y divide-border lg:hidden">
-              {visibleItems.map((item) => {
-                const active = selectedId === item.id;
-                const done = item.currentPoint ?? 0;
-                const totalPoints = item.totalPoint ?? 0;
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      onClick={() => onSelect(item)}
-                      className={cn(
-                        "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60",
-                        active && "bg-primary-light/40",
-                      )}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-bold text-foreground">
-                            {item.number ?? item.id.slice(0, 8)}
-                          </span>
-                          <TaskStatusBadge color={item.statusColor} label={item.statusName ?? "–"} />
-                        </div>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
-                          {[item.licensePlate, item.driverName, item.currentPointName].filter(Boolean).join(" • ") || "–"}
-                        </p>
-                        <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
-                          {totalPoints > 0 ? `Titik ${done}/${totalPoints}` : "Titik –"}
-                          {item.estimatedArrivalOn && (
-                            <span>
-                              {" • ETA "}
-                              {formatRelativeTime(item.estimatedArrivalOn)}
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </>
-        )}
-
-        {/* Pagination bernomor */}
-        {!loading && total !== null && totalPages > 1 && (
-          <div className="flex items-center justify-end gap-1 border-t border-border px-4 py-3">
-            <Button
-              size="sm"
-              variant="outline"
-              icon={ChevronLeft}
-              aria-label="Halaman sebelumnya"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              <span className="sr-only">Sebelumnya</span>
-            </Button>
-            {pageWindow(page, totalPages).map((p, index) =>
-              p === "…" ? (
-                <span key={`gap-${index}`} className="px-1 text-xs text-muted-foreground">
-                  …
-                </span>
-              ) : (
+      {loading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((key) => (
+            <div key={key} className="h-24 animate-pulse rounded-2xl bg-muted" />
+          ))}
+        </div>
+      ) : visibleGroups.length === 0 ? (
+        <p className="rounded-2xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
+          Tidak ada FO dalam window aktif. Periksa konfigurasi kelompok dan jam operasional di Pengaturan Live Track.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {visibleGroups.map((group) => {
+            const isCollapsed = collapsed.has(group.id);
+            return (
+              <section key={group.id} className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
                 <button
-                  key={p}
                   type="button"
-                  onClick={() => setPage(p)}
-                  aria-current={p === page ? "page" : undefined}
-                  className={cn(
-                    "h-8 min-w-8 rounded-lg px-2 text-xs font-bold tabular-nums transition-colors",
-                    p === page
-                      ? "bg-primary text-white"
-                      : "text-muted-foreground ring-1 ring-border hover:text-foreground",
-                  )}
+                  onClick={() => toggleCollapse(group.id)}
+                  className="flex w-full items-center gap-2.5 px-4 py-3 text-left hover:bg-muted/40"
+                  aria-expanded={!isCollapsed}
                 >
-                  {p}
+                  <span
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white"
+                    style={{ backgroundColor: group.color }}
+                  >
+                    <Truck className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-foreground">{group.name}</span>
+                    <span className="block text-[11px] tabular-nums text-muted-foreground">
+                      {group.windowLabel} · {group.tasks.length} FO
+                    </span>
+                  </span>
+                  {isCollapsed ? (
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  )}
                 </button>
-              ),
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              icon={ChevronRight}
-              aria-label="Halaman berikutnya"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              <span className="sr-only">Berikutnya</span>
-            </Button>
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-          </div>
-        )}
-      </div>
+                {!isCollapsed && (
+                  <ol className="divide-y divide-border border-t border-border">
+                    {group.tasks.map((task) => {
+                      const active = selectedId === task.id;
+                      const meta = STATUS_META[task.statusRaw] ?? { label: task.statusRaw, color: "#64748b" };
+                      const totalPoints = task.timeline.length;
+                      const done = task.statusRaw === "ENDED" ? totalPoints : visitedCount(task.timeline);
+                      const percent = totalPoints > 0 ? Math.min(100, Math.round((done / totalPoints) * 100)) : 0;
+                      return (
+                        <li key={task.id}>
+                          <button
+                            type="button"
+                            onClick={() => onSelect(toFleetTaskItem(task))}
+                            className={cn(
+                              "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60",
+                              active && "bg-primary-light/40",
+                            )}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-bold text-foreground">
+                                  {task.number ?? task.id.slice(0, 8)}
+                                </span>
+                                <TaskStatusBadge color={meta.color} label={meta.label} />
+                                {task.frozen && (
+                                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                                    Beku s.d. {formatClock(task.visibleUntil)}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 truncate text-xs text-muted-foreground">
+                                {[task.licensePlate, task.driverName].filter(Boolean).join(" • ") || "–"}
+                              </p>
+                              <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
+                                {totalPoints > 0 ? `Titik ${done}/${totalPoints} (${percent}%)` : "Titik –"}
+                              </p>
+                            </div>
+                            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
+
+      {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
     </div>
   );
 }

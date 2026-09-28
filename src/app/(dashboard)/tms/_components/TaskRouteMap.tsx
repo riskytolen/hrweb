@@ -45,6 +45,8 @@ interface TaskRouteMapProps {
   timeline: FleetTaskTimelinePoint[];
   /** Posisi kendaraan realtime untuk task terpilih. */
   vehicle?: TmsVehicleStatus | null;
+  /** Posisi akhir task terminal (pengganti marker kendaraan realtime). */
+  finalPosition?: LatLng | null;
   /** Matikan zoom via scroll agar nyaman dipakai sebagai mini-map. */
   scrollWheel?: boolean;
 }
@@ -85,12 +87,14 @@ export default function TaskRouteMap({
   trail = [],
   timeline,
   vehicle = null,
+  finalPosition = null,
   scrollWheel = true,
 }: TaskRouteMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const leafletRef = useRef<LeafletRefs | null>(null);
   const fittedRef = useRef(false);
-  const dataRef = useRef({ planned, actual, trail, timeline, vehicle });
+  const dataRef = useRef({ planned, actual, trail, timeline, vehicle, finalPosition });
+  const shapeRef = useRef("");
 
   const draw = useCallback(() => {
     const refs = leafletRef.current;
@@ -147,6 +151,27 @@ export default function TaskRouteMap({
         })
         .addTo(layer);
     });
+
+    // Marker posisi akhir untuk task terminal (tanpa data realtime).
+    const final = current.finalPosition;
+    if (final) {
+      bounds.push([final.latitude, final.longitude]);
+      const marker = L.marker([final.latitude, final.longitude], {
+        icon: L.divIcon({
+          className: "task-final-marker",
+          html: `<div style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9999px;background:#475569;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);color:#fff;font-size:15px;font-weight:800;">✓</div>`,
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
+        }),
+        title: "Posisi akhir",
+        zIndexOffset: 1000,
+      });
+      marker.bindTooltip("<strong>Posisi akhir</strong><br/>Task selesai/dibatalkan", {
+        direction: "top",
+        offset: [0, -16],
+      });
+      marker.addTo(layer);
+    }
 
     // Icon kendaraan realtime di atas semua layer.
     const v = current.vehicle;
@@ -208,19 +233,43 @@ export default function TaskRouteMap({
   }, [draw, scrollWheel]);
 
   // Redraw layer saat data rute, jejak, atau posisi kendaraan berubah.
+  // Refit viewport hanya bila ISI rute berubah (bukan referensi array baru
+  // dari polling), agar zoom/pan pengguna tidak direset tiap 30 detik.
+  function shapeSignature(): string {
+    const round = (value: number): string => value.toFixed(5);
+    const routeSig = (routes: LatLng[][]): string =>
+      routes.map((route) => {
+        if (route.length === 0) return "0";
+        const first = route[0];
+        const last = route[route.length - 1];
+        return `${route.length}:${round(first.latitude)},${round(first.longitude)}:${round(last.latitude)},${round(last.longitude)}`;
+      }).join("|");
+    const timelineSig = timeline
+      .map((p) =>
+        p.latitude === null || p.longitude === null
+          ? "x"
+          : `${p.sequence ?? 0}:${round(p.latitude)},${round(p.longitude)}`,
+      )
+      .join("|");
+    return `${routeSig(planned)}#${routeSig(actual)}#${timelineSig}`;
+  }
+
   useEffect(() => {
     const prev = dataRef.current;
-    const routeChanged =
-      prev.planned !== planned || prev.actual !== actual || prev.timeline !== timeline;
+    const shape = shapeSignature();
+    const routeChanged = shapeRef.current !== "" && shapeRef.current !== shape;
+    if (shapeRef.current === "") shapeRef.current = shape;
     // Jejak historis datang async: refit sekali saat pertama kali muncul agar
     // lintasan langsung terlihat. Polling live berikutnya tidak refit.
     const trailAppeared = prev.trail.length <= 1 && trail.length > 1;
     if (routeChanged || trailAppeared) {
+      shapeRef.current = shape;
       fittedRef.current = false;
     }
-    dataRef.current = { planned, actual, trail, timeline, vehicle };
+    dataRef.current = { planned, actual, trail, timeline, vehicle, finalPosition };
     draw();
-  }, [planned, actual, trail, timeline, vehicle, draw]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planned, actual, trail, timeline, vehicle, finalPosition, draw]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

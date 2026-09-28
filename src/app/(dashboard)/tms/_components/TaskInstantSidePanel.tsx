@@ -303,6 +303,23 @@ function extractTripTrail(payloadData: unknown): LatLng[] {
  * Daftar rute perjalanan (titik kunjungan) dari `timeline_route`.
  * Titik pertama yang belum dikunjungi ditandai sebagai posisi saat ini.
  */
+function computeFinalPosition(
+  timeline: FleetTaskTimelinePoint[],
+  isTerminal: boolean,
+): LatLng | null {
+  if (!isTerminal) return null;
+  let fallback: LatLng | null = null;
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const point = timeline[index];
+    if (point.latitude === null || point.longitude === null) continue;
+    if (!fallback) fallback = { latitude: point.latitude, longitude: point.longitude };
+    if (point.arrivalActual || point.departureActual) {
+      return { latitude: point.latitude, longitude: point.longitude };
+    }
+  }
+  return fallback;
+}
+
 function RoutePointList({
   points,
   pointTemperatures,
@@ -484,6 +501,12 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     selected: null,
   });
 
+  /** Task terminal (ENDED/CANCELED): data dibekukan, tidak ada polling live. */
+  const isTerminalTask = useMemo(() => {
+    const raw = (item?.statusRaw ?? "").toUpperCase();
+    return raw === "ENDED" || raw === "CANCELED";
+  }, [item?.statusRaw]);
+
   useEffect(() => {
     // Reset tampilan saat task yang dipilih berganti, lalu muat detail baru.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -532,6 +555,13 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       }
     }
     void load(true);
+    // Task terminal hanya dimuat sekali; tidak ada polling detail.
+    if (isTerminalTask) {
+      return () => {
+        disposed = true;
+        controller.abort();
+      };
+    }
     const timer = window.setInterval(() => {
       if (document.hidden) return;
       void load(false);
@@ -541,7 +571,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [item]);
+  }, [item, isTerminalTask]);
 
   useEffect(() => {
     const taskId = item?.id;
@@ -566,6 +596,13 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     }
 
     void loadPointTemperatures();
+    // Suhu task terminal hanya dimuat sekali.
+    if (isTerminalTask) {
+      return () => {
+        disposed = true;
+        controller.abort();
+      };
+    }
     const timer = window.setInterval(() => {
       if (document.hidden) return;
       void loadPointTemperatures();
@@ -575,7 +612,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [item?.id]);
+  }, [item?.id, isTerminalTask]);
 
   // Ringkasan e-POD per titik (badge loading/pengantaran) tiap 30 detik.
   useEffect(() => {
@@ -679,8 +716,19 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     return latest;
   }, [effectiveTimeline]);
 
+  /**
+   * Posisi akhir task terminal: koordinat titik terakhir yang memiliki waktu
+   * aktual, fallback ke koordinat titik terakhir. Dipakai sebagai marker
+   * "Posisi akhir" pengganti marker kendaraan realtime.
+   */
+  const finalPosition: LatLng | null = computeFinalPosition(effectiveTimeline, isTerminalTask);
+
   // Polling posisi kendaraan realtime tiap 30 detik selama task dipilih.
+  // Task terminal TIDAK memuat posisi kendaraan saat ini: marker tersebut
+  // bisa berasal dari perjalanan lain dan menyesatkan. Peta memakai posisi
+  // akhir dari timeline beku.
   useEffect(() => {
+    if (isTerminalTask) return;
     const vehicleId = item?.vehicleId ?? null;
     if (vehicleId === null) return;
     let disposed = false;
@@ -739,7 +787,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [item, allRoutePointsVisited]);
+  }, [item, allRoutePointsVisited, isTerminalTask]);
 
   // Jejak historis: sumber utama Detail Trip History (/trips/:id/detail).
   // Coba license plate dulu (paling andal lintas endpoint), lalu vehicleId,
@@ -758,13 +806,16 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     const endMsRaw = item.actualArrivalOn ? Date.parse(item.actualArrivalOn) : NaN;
     // Bila semua titik sudah dikunjungi, hentikan riwayat trip pada waktu
     // kunjungan terakhir agar garis tidak lanjut setelah toko terakhir.
-    // Tanpa waktu cutoff yang akurat, pakai waktu sekarang seperti semula.
-    const endMs =
-      !Number.isNaN(endMsRaw)
-        ? endMsRaw
-        : allRoutePointsVisited && routeCompletedAtMs !== null
-          ? routeCompletedAtMs
+    // Task terminal TIDAK PERNAH memakai waktu sekarang: tanpa cutoff yang
+    // akurat, riwayat tidak diambil agar perjalanan lain tidak tercampur.
+    const endMs = !Number.isNaN(endMsRaw)
+      ? endMsRaw
+      : allRoutePointsVisited && routeCompletedAtMs !== null
+        ? routeCompletedAtMs
+        : isTerminalTask
+          ? null
           : Date.now();
+    if (endMs === null) return;
 
     // Window dari sempit ke lebar (WIB-aware) agar trip yang tercatat di luar
     // jam task tetap tertangkap.
@@ -871,7 +922,9 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
       }
-      await loadFallbackTrack();
+      // Fallback track endpoint hanya untuk task aktif; pada task terminal
+      // jejak tersebut bisa berasal dari perjalanan lain.
+      if (!isTerminalTask) await loadFallbackTrack();
     }
 
     void loadHistory();
@@ -879,7 +932,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       disposed = true;
       controller.abort();
     };
-  }, [item, allRoutePointsVisited, routeCompletedAtMs]);
+  }, [item, allRoutePointsVisited, routeCompletedAtMs, isTerminalTask]);
 
   // Progress: pakai current/total bila ada, fallback ke timeline visited.
   let doneCount = 0;
@@ -970,7 +1023,8 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                 actual={mapActual}
                 trail={trail}
                 timeline={effectiveTimeline}
-                vehicle={vehicleStatus}
+                vehicle={isTerminalTask ? null : vehicleStatus}
+                finalPosition={finalPosition}
                 scrollWheel={false}
               />
             </div>
@@ -1002,6 +1056,12 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                   Jejak Mobil
                 </span>
               )}
+              {isTerminalTask && finalPosition && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[#475569] text-[8px] font-bold text-white">✓</span>
+                  Posisi akhir
+                </span>
+              )}
               {effectiveTimeline.length > 0 && (
                 <>
                   <span className="inline-flex items-center gap-1.5">
@@ -1025,7 +1085,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
               Jejak lintasan trip belum tersedia dari layanan tracking.
             </p>
           )}
-          {!loading && !hasTrail && tripTrailDebug.attempts.length > 0 && (
+          {process.env.NODE_ENV !== "production" && !loading && !hasTrail && tripTrailDebug.attempts.length > 0 && (
             <div className="mt-2 rounded-lg border border-dashed border-border bg-muted/40 p-2 text-[11px] text-muted-foreground">
               <p className="font-bold text-foreground">Diagnostik jejak trip</p>
               <div className="mt-1 space-y-1">
@@ -1074,6 +1134,11 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                 label={shown.statusName ?? "–"}
                 className="ml-auto"
               />
+              {isTerminalTask && (
+                <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-[11px] font-bold text-muted-foreground">
+                  Data beku · tidak update lagi
+                </span>
+              )}
             </div>
             {routeSummary && (
               <p className="truncate text-xs text-muted-foreground" title={routeSummary}>
@@ -1201,7 +1266,8 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
                 actual={mapActual}
                 trail={trail}
                 timeline={effectiveTimeline}
-                vehicle={vehicleStatus}
+                vehicle={isTerminalTask ? null : vehicleStatus}
+                finalPosition={finalPosition}
               />
             </div>
           </div>

@@ -76,6 +76,35 @@ describe("GET /api/tms/trips/[id]/detail", () => {
     expect(fetchTripDetailMock).not.toHaveBeenCalled();
   });
 
+  it("rejects unparseable dates with 400", async () => {
+    mockProfile(["tms.view"]);
+    const response = await GET(request("11418", "?startDate=bukan-tanggal&endDate=2026-09-09T12:00:00.000Z"), {
+      params: Promise.resolve({ id: "11418" }),
+    });
+    expect(response.status).toBe(400);
+    expect(fetchTripDetailMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects reversed ranges with 400", async () => {
+    mockProfile(["tms.view"]);
+    const response = await GET(
+      request("11418", "?startDate=2026-09-10T00:00:00.000Z&endDate=2026-09-09T12:00:00.000Z"),
+      { params: Promise.resolve({ id: "11418" }) },
+    );
+    expect(response.status).toBe(400);
+    expect(fetchTripDetailMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects ranges longer than 31 days with 400", async () => {
+    mockProfile(["tms.view"]);
+    const response = await GET(
+      request("11418", "?startDate=2026-08-01T00:00:00.000Z&endDate=2026-09-09T12:00:00.000Z"),
+      { params: Promise.resolve({ id: "11418" }) },
+    );
+    expect(response.status).toBe(400);
+    expect(fetchTripDetailMock).not.toHaveBeenCalled();
+  });
+
   it("returns a normalized trail with no-store headers", async () => {
     mockProfile(["tms.view"]);
     fetchTripDetailMock.mockResolvedValue({
