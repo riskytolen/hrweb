@@ -158,6 +158,27 @@ describe("GET /api/tms/epod", () => {
     expect(response.status).toBe(200);
     expect(listAssignmentsMock).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }));
   });
+
+  it("meneruskan rentang tanggal ke daftar dan hitungan status", async () => {
+    mockProfile(["tms.epod.view"]);
+    listAssignmentsMock.mockResolvedValue({ items: [], total: 0 });
+    const response = await listEpod(
+      new NextRequest(
+        "http://localhost/api/tms/epod?dateFrom=2026-09-27T00:00:00%2B07:00&dateTo=2026-09-28T23:59:59.999%2B07:00",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(listAssignmentsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-09-26T17:00:00.000Z",
+        dateTo: "2026-09-28T16:59:59.999Z",
+      }),
+    );
+    expect(countMock).toHaveBeenCalledWith({
+      dateFrom: "2026-09-26T17:00:00.000Z",
+      dateTo: "2026-09-28T16:59:59.999Z",
+    });
+  });
 });
 
 describe("POST /api/tms/epod/uploads", () => {

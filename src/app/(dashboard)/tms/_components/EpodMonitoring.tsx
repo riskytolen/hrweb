@@ -91,11 +91,21 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
   const [status, setStatus] = useState<StatusFilter>("ALL");
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  const hasDateFilter = dateFrom !== "" || dateTo !== "";
+
   const load = useCallback(async () => {
+    if (dateFrom && dateTo && dateTo < dateFrom) {
+      setLoading(false);
+      setItems([]);
+      setError("Tanggal mulai tidak boleh setelah tanggal selesai.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -105,6 +115,9 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
       });
       if (status !== "ALL") params.set("status", status);
       if (appliedSearch) params.set("search", appliedSearch);
+      // Batas hari WIB agar konsisten dengan zona operasional.
+      if (dateFrom) params.set("dateFrom", `${dateFrom}T00:00:00+07:00`);
+      if (dateTo) params.set("dateTo", `${dateTo}T23:59:59.999+07:00`);
 
       const response = await fetch(`/api/tms/epod?${params.toString()}`, { cache: "no-store" });
       const payload = (await response.json()) as ListResponse;
@@ -121,7 +134,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [appliedSearch, page, status]);
+  }, [appliedSearch, dateFrom, dateTo, page, status]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -181,6 +194,48 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
           </Button>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+          <label className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+            Dari
+            <input
+              type="date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(event) => {
+                setDateFrom(event.target.value);
+                setPage(1);
+              }}
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:border-primary"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+            Sampai
+            <input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(event) => {
+                setDateTo(event.target.value);
+                setPage(1);
+              }}
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:border-primary"
+            />
+          </label>
+          {hasDateFilter && (
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+                setPage(1);
+              }}
+              className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              Reset tanggal
+            </button>
+          )}
+        </div>
+
         <div className="flex flex-wrap gap-1.5 border-b border-border px-4 py-2.5">
           {STATUS_FILTERS.map((filter) => (
             <button
@@ -210,7 +265,9 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
           <p className="px-4 py-10 text-center text-sm text-danger">{error}</p>
         ) : items.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-            Belum ada FO di pool e-POD. Sinkronisasi berjalan setiap 2 menit.
+            {hasDateFilter
+              ? "Belum ada FO e-POD pada rentang tanggal ini."
+              : "Belum ada FO di pool e-POD. Sinkronisasi berjalan setiap 2 menit."}
           </p>
         ) : (
           <>

@@ -23,18 +23,20 @@ export async function GET(request: Request) {
   const page = Math.max(1, Math.trunc(Number(url.searchParams.get("page") ?? "1")) || 1);
   const limitRaw = Math.trunc(Number(url.searchParams.get("limit") ?? "20")) || 20;
   const limit = Math.min(Math.max(limitRaw, 1), 100);
+  const dateFrom = parseDate(url.searchParams.get("dateFrom"));
+  const dateTo = parseDate(url.searchParams.get("dateTo"));
 
   try {
     const [result, counts] = await Promise.all([
       listAssignments({
         search: url.searchParams.get("search")?.trim() || undefined,
         status,
-        dateFrom: parseDate(url.searchParams.get("dateFrom")),
-        dateTo: parseDate(url.searchParams.get("dateTo")),
+        dateFrom,
+        dateTo,
         page,
         limit,
       }),
-      countAssignmentsByStatus(),
+      countAssignmentsByStatus({ dateFrom, dateTo }),
     ]);
 
     return epodJson({

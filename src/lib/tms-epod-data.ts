@@ -332,17 +332,22 @@ export interface EpodStatusCounts {
 }
 
 /** Hitung jumlah assignment per status untuk kartu ringkasan. */
-export async function countAssignmentsByStatus(): Promise<EpodStatusCounts> {
+export async function countAssignmentsByStatus(
+  filters: { dateFrom?: string; dateTo?: string } = {},
+): Promise<EpodStatusCounts> {
   const admin = createAdminClient();
   const statuses = ["OPEN", "CLAIMED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] as const;
   const results = await Promise.all(
-    statuses.map((status) =>
-      admin
+    statuses.map((status) => {
+      let query = admin
         .from(ASSIGNMENTS)
         .select("id", { count: "exact", head: true })
         .eq("status", status)
-        .in("task_status_raw", VISIBLE_TASK_STATUSES),
-    ),
+        .in("task_status_raw", VISIBLE_TASK_STATUSES);
+      if (filters.dateFrom) query = query.gte("snapshot_at", filters.dateFrom);
+      if (filters.dateTo) query = query.lte("snapshot_at", filters.dateTo);
+      return query;
+    }),
   );
 
   const counts: Record<string, number> = {};
