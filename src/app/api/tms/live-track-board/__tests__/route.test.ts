@@ -18,7 +18,7 @@ const createAdminMock = vi.mocked(createAdminClient);
 
 function chainable(result: unknown) {
   const chain: Record<string, unknown> = {};
-  for (const name of ["or", "lte", "gt", "order", "limit"]) {
+  for (const name of ["or", "lte", "gt", "in", "order", "limit", "range"]) {
     chain[name] = vi.fn(() => chain);
   }
   chain.select = vi.fn(() => chain);
@@ -136,5 +136,85 @@ describe("GET /api/tms/live-track-board", () => {
     expect(payload.data[0]).toMatchObject({ id: "group-1", name: "CP Suka" });
     expect(payload.data[0].tasks).toHaveLength(1);
     expect(payload.data[0].tasks[0]).toMatchObject({ id: "task-1", number: "FO-9445" });
+  });
+
+  it("returns terminal tasks outside the window in history mode, including inactive groups", async () => {
+    mockAuth(activeProfile(["tms.view"]));
+    const snapshots = [
+      {
+        task_id: "task-9",
+        terminal_at: "2026-09-27T10:00:00.000Z",
+        actual_arrival_on: "2026-09-27T10:00:00.000Z",
+      },
+    ];
+    const occRows = [
+      {
+        task_id: "task-9",
+        group_id: "group-9",
+        group_vehicle_id: "rel-9",
+        window_started_at: "2026-09-26T23:00:00.000Z",
+        visible_until: "2026-09-27T11:00:00.000Z",
+        terminal_at: "2026-09-27T10:00:00.000Z",
+        first_visible_at: "2026-09-26T23:05:00.000Z",
+        group: {
+          id: "group-9",
+          name: "Lama",
+          color: "#64748b",
+          status: "Tidak Aktif",
+          default_window_start: "06:00:00",
+          default_window_end: "18:00:00",
+        },
+        snapshot: {
+          task_id: "task-9",
+          task_number: "FO-9000",
+          vehicle_id: 1,
+          license_plate: "B 1 X",
+          driver_name: "A",
+          status_raw: "ENDED",
+          expected_started_on: null,
+          actual_started_on: "2026-09-27T01:00:00.000Z",
+          actual_arrival_on: "2026-09-27T10:00:00.000Z",
+          terminal_at: "2026-09-27T10:00:00.000Z",
+          timeline: [],
+          planned_routes: [],
+          actual_routes: [],
+          track_id: null,
+          frozen_at: "2026-09-27T10:05:00.000Z",
+          last_synced_at: "2026-09-27T10:05:00.000Z",
+        },
+      },
+    ];
+    const snapChain = chainable({ data: snapshots, error: null, count: 1 });
+    const occChain = chainable({ data: occRows, error: null });
+    createAdminMock.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "tms_live_track_task_snapshots" ? snapChain : occChain,
+      ),
+    } as never);
+
+    const response = await GET(request("?mode=history&from=2026-09-27&to=2026-09-27"));
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      data: { id: string; name: string; status: string; tasks: { id: string }[] }[];
+      meta: { mode: string; total: number; page: number; from: string; to: string };
+    };
+    expect(payload.meta).toMatchObject({
+      mode: "history",
+      total: 1,
+      page: 1,
+      from: "2026-09-27",
+      to: "2026-09-27",
+    });
+    expect(payload.data).toHaveLength(1);
+    expect(payload.data[0]).toMatchObject({ id: "group-9", name: "Lama", status: "Tidak Aktif" });
+    expect(payload.data[0].tasks).toHaveLength(1);
+    expect(payload.data[0].tasks[0]).toMatchObject({ id: "task-9" });
+  });
+
+  it("rejects invalid history date ranges with 400", async () => {
+    mockAuth(activeProfile(["tms.view"]));
+    createAdminMock.mockReturnValue({ from: vi.fn() } as never);
+    const response = await GET(request("?mode=history&from=2026-09-28&to=2026-09-27"));
+    expect(response.status).toBe(400);
   });
 });

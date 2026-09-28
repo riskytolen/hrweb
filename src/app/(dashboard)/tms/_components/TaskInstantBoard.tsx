@@ -26,10 +26,18 @@ import TaskStatusBadge from "./TaskStatusBadge";
 
 type StatusFilter = "ALL" | "SCHEDULED" | "STARTED" | "ENDED" | "CANCELED";
 
+type BoardMode = "active" | "history";
+
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "ALL", label: "Semua" },
   { key: "SCHEDULED", label: "Dijadwalkan" },
   { key: "STARTED", label: "Berjalan" },
+  { key: "ENDED", label: "Selesai" },
+  { key: "CANCELED", label: "Batal" },
+];
+
+const HISTORY_STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
+  { key: "ALL", label: "Semua" },
   { key: "ENDED", label: "Selesai" },
   { key: "CANCELED", label: "Batal" },
 ];
@@ -66,6 +74,7 @@ interface BoardGroup {
   id: string;
   name: string;
   color: string;
+  status: string;
   windowLabel: string;
   tasks: BoardTask[];
 }
@@ -75,6 +84,7 @@ interface BoardApiResponse {
     id: string;
     name: string;
     color: string;
+    status: string;
     windowLabel: string;
     tasks: {
       id: string;
@@ -97,11 +107,24 @@ interface BoardApiResponse {
     }[];
   }[];
   error?: string;
-  meta?: { lastSyncedAt?: string | null };
+  meta?: { lastSyncedAt?: string | null; total?: number; page?: number; pageSize?: number };
 }
 
-/** Interval auto-refresh board (ms). */
+/** Interval auto-refresh board aktif (ms). Riwayat tidak di-polling. */
 const BOARD_POLL_MS = 30_000;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HISTORY_PAGE_SIZE = 50;
+
+/** Tanggal kalender WIB (YYYY-MM-DD). */
+function wibToday(offsetDays = 0): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(Date.now() + offsetDays * DAY_MS));
+}
 
 function normalizeTimeline(value: unknown): FleetTaskTimelinePoint[] {
   if (!Array.isArray(value)) return [];
@@ -154,6 +177,18 @@ function formatClock(iso: string | null): string {
   return new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(new Date(parsed));
 }
 
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "–";
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return "–";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(parsed));
+}
+
 function KpiCard({
   icon: Icon,
   tileClass,
@@ -190,6 +225,11 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [mode, setMode] = useState<BoardMode>("active");
+  const [from, setFrom] = useState(() => wibToday(-6));
+  const [to, setTo] = useState(() => wibToday(0));
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [groups, setGroups] = useState<BoardGroup[]>([]);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,89 +239,120 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
   const requestRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
-  const fetchBoard = useCallback(async (term: string, background: boolean) => {
-    const requestId = requestRef.current + 1;
-    requestRef.current = requestId;
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    if (!background) {
-      setLoading(true);
-      setError(null);
-    }
-    try {
-      const params = new URLSearchParams();
-      if (term.trim()) params.set("search", term.trim());
-      const suffix = params.toString();
-      const response = await fetch(`/api/tms/live-track-board${suffix ? `?${suffix}` : ""}`, {
-        headers: { Accept: "application/json" },
-        signal: controller.signal,
-      });
-      const payload = (await response.json()) as BoardApiResponse;
-      if (requestRef.current !== requestId) return;
-      if (!response.ok) throw new Error(payload.error ?? "Gagal memuat board Live Track.");
-      const next: BoardGroup[] = (Array.isArray(payload.data) ? payload.data : []).map((group) => ({
-        id: group.id,
-        name: group.name,
-        color: group.color,
-        windowLabel: group.windowLabel,
-        tasks: group.tasks.map((task) => ({
-          id: task.id,
-          number: task.number,
-          statusRaw: (task.statusRaw ?? "SCHEDULED").toUpperCase(),
-          vehicleId: task.vehicleId,
-          licensePlate: task.licensePlate,
-          driverName: task.driverName,
-          expectedStartedOn: task.expectedStartedOn,
-          actualStartedOn: task.actualStartedOn,
-          actualArrivalOn: task.actualArrivalOn,
-          timeline: normalizeTimeline(task.timeline),
-          plannedRoutes: normalizeRouteList(task.plannedRoutes),
-          actualRoutes: normalizeRouteList(task.actualRoutes),
-          terminalAt: task.terminalAt,
-          trackId: task.trackId,
-          frozen: task.frozen,
-          windowStartedAt: task.windowStartedAt,
-          visibleUntil: task.visibleUntil,
-        })),
-      }));
-      setGroups(next);
-      setLastSyncedAt(payload.meta?.lastSyncedAt ?? null);
-      setStale(false);
-      setError(null);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      if (requestRef.current !== requestId) return;
-      // Background gagal: pertahankan data lama + tandai stale.
-      if (background && groups.length > 0) {
-        setStale(true);
-        return;
+  const fetchBoard = useCallback(
+    async (
+      term: string,
+      background: boolean,
+      opts: { mode: BoardMode; from: string; to: string; page: number },
+    ) => {
+      const requestId = requestRef.current + 1;
+      requestRef.current = requestId;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      if (!background) {
+        setLoading(true);
+        setError(null);
       }
-      setError(err instanceof Error && err.message ? err.message : "Gagal memuat board Live Track.");
-    } finally {
-      if (requestRef.current === requestId && !background) setLoading(false);
-    }
+      try {
+        const params = new URLSearchParams();
+        if (term.trim()) params.set("search", term.trim());
+        if (opts.mode === "history") {
+          params.set("mode", "history");
+          params.set("from", opts.from);
+          params.set("to", opts.to);
+          params.set("page", String(opts.page));
+          params.set("limit", String(HISTORY_PAGE_SIZE));
+        }
+        const suffix = params.toString();
+        const response = await fetch(`/api/tms/live-track-board${suffix ? `?${suffix}` : ""}`, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as BoardApiResponse;
+        if (requestRef.current !== requestId) return;
+        if (!response.ok) throw new Error(payload.error ?? "Gagal memuat board Live Track.");
+        const next: BoardGroup[] = (Array.isArray(payload.data) ? payload.data : []).map((group) => ({
+          id: group.id,
+          name: group.name,
+          color: group.color,
+          status: group.status ?? "Aktif",
+          windowLabel: group.windowLabel,
+          tasks: group.tasks.map((task) => ({
+            id: task.id,
+            number: task.number,
+            statusRaw: (task.statusRaw ?? "SCHEDULED").toUpperCase(),
+            vehicleId: task.vehicleId,
+            licensePlate: task.licensePlate,
+            driverName: task.driverName,
+            expectedStartedOn: task.expectedStartedOn,
+            actualStartedOn: task.actualStartedOn,
+            actualArrivalOn: task.actualArrivalOn,
+            timeline: normalizeTimeline(task.timeline),
+            plannedRoutes: normalizeRouteList(task.plannedRoutes),
+            actualRoutes: normalizeRouteList(task.actualRoutes),
+            terminalAt: task.terminalAt,
+            trackId: task.trackId,
+            frozen: task.frozen,
+            windowStartedAt: task.windowStartedAt,
+            visibleUntil: task.visibleUntil,
+          })),
+        }));
+        setGroups(next);
+        setLastSyncedAt(payload.meta?.lastSyncedAt ?? null);
+        setTotal(typeof payload.meta?.total === "number" ? payload.meta.total : next.flatMap((g) => g.tasks).length);
+        setStale(false);
+        setError(null);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (requestRef.current !== requestId) return;
+        // Background gagal: pertahankan data lama + tandai stale.
+        if (background && groups.length > 0) {
+          setStale(true);
+          return;
+        }
+        setError(err instanceof Error && err.message ? err.message : "Gagal memuat board Live Track.");
+      } finally {
+        if (requestRef.current === requestId && !background) setLoading(false);
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    [],
+  );
 
   useEffect(() => {
+    const opts = { mode, from, to, page };
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void fetchBoard(search, false);
-    const timer = setInterval(() => void fetchBoard(search, true), BOARD_POLL_MS);
+    void fetchBoard(search, false, opts);
+    // Riwayat bersifat statis: tidak di-polling agar pagination stabil.
+    if (mode !== "active") {
+      return () => {
+        abortRef.current?.abort();
+      };
+    }
+    const timer = setInterval(() => void fetchBoard(search, true, opts), BOARD_POLL_MS);
     return () => {
       clearInterval(timer);
       abortRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, mode, from, to, page]);
 
   const handleSearchSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    setPage(1);
     setSearch(searchInput);
   };
 
   const handleRefresh = () => {
-    if (!loading) void fetchBoard(search, false);
+    if (!loading) void fetchBoard(search, false, { mode, from, to, page });
+  };
+
+  const handleModeChange = (next: BoardMode) => {
+    if (next === mode) return;
+    setMode(next);
+    setPage(1);
+    setStatusFilter("ALL");
   };
 
   const visibleGroups = useMemo(
@@ -333,13 +404,42 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
               Live Track Task
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              FO per kelompok customer sesuai jam operasional kontrak.
+              {mode === "active"
+                ? "FO per kelompok customer sesuai jam operasional kontrak."
+                : "Riwayat FO selesai dan dibatalkan, tetap tersedia di luar jam operasional."}
               {lastSyncedAt && (
                 <span className="tabular-nums"> · sinkron {formatClock(lastSyncedAt)}</span>
               )}
               {stale && <span className="font-semibold text-amber-600"> · data mungkin basi</span>}
             </p>
           </div>
+        </div>
+        <div className="flex gap-1.5" role="tablist" aria-label="Mode board live track">
+          {(
+            [
+              { key: "active", label: "Aktif" },
+              { key: "history", label: "Riwayat" },
+            ] as { key: BoardMode; label: string }[]
+          ).map((tab) => {
+            const selected = mode === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => handleModeChange(tab.key)}
+                className={cn(
+                  "rounded-full px-4 py-1.5 text-xs font-bold transition-colors",
+                  selected
+                    ? "bg-foreground text-background"
+                    : "bg-card text-muted-foreground ring-1 ring-border hover:text-foreground",
+                )}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <form onSubmit={handleSearchSubmit} className="relative flex-1">
@@ -359,7 +459,7 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
           </Button>
         </div>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter status task">
-          {STATUS_FILTERS.map((filter) => {
+          {(mode === "history" ? HISTORY_STATUS_FILTERS : STATUS_FILTERS).map((filter) => {
             const active = statusFilter === filter.key;
             return (
               <button
@@ -382,15 +482,77 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
             );
           })}
         </div>
+        {mode === "history" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              Dari
+              <input
+                type="date"
+                value={from}
+                max={to}
+                onChange={(event) => {
+                  setFrom(event.target.value);
+                  setPage(1);
+                }}
+                className="h-9 rounded-xl border border-border bg-card px-2 text-xs text-foreground shadow-sm outline-none focus:border-primary"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              Sampai
+              <input
+                type="date"
+                value={to}
+                min={from}
+                onChange={(event) => {
+                  setTo(event.target.value);
+                  setPage(1);
+                }}
+                className="h-9 rounded-xl border border-border bg-card px-2 text-xs text-foreground shadow-sm outline-none focus:border-primary"
+              />
+            </label>
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {total.toLocaleString("id-ID")} FO riwayat
+            </span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || loading}
+                className="rounded-xl px-3 py-1.5 text-xs font-bold text-muted-foreground ring-1 ring-border hover:text-foreground disabled:opacity-40"
+              >
+                ‹ Sebelumnya
+              </button>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                Halaman {page} dari {Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE))}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={loading || page >= Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE))}
+                className="rounded-xl px-3 py-1.5 text-xs font-bold text-muted-foreground ring-1 ring-border hover:text-foreground disabled:opacity-40"
+              >
+                Berikutnya ›
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <KpiCard icon={ClipboardList} tileClass="bg-[#2563eb]" label="Total FO" value={allTasks.length.toLocaleString("id-ID")} caption="dalam window aktif" />
-        <KpiCard icon={Truck} tileClass="bg-[#16a34a]" label="Berjalan" value={countFor("STARTED").toLocaleString("id-ID")} caption="task started" />
-        <KpiCard icon={CircleCheckBig} tileClass="bg-[#0284c7]" label="Selesai" value={countFor("ENDED").toLocaleString("id-ID")} caption="sampai window berakhir" />
-        <KpiCard icon={X} tileClass="bg-[#ea580c]" label="Dibatalkan" value={countFor("CANCELED").toLocaleString("id-ID")} caption="task dibatalkan" />
-      </div>
+      {mode === "active" ? (
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <KpiCard icon={ClipboardList} tileClass="bg-[#2563eb]" label="Total FO" value={allTasks.length.toLocaleString("id-ID")} caption="dalam window aktif" />
+          <KpiCard icon={Truck} tileClass="bg-[#16a34a]" label="Berjalan" value={countFor("STARTED").toLocaleString("id-ID")} caption="task started" />
+          <KpiCard icon={CircleCheckBig} tileClass="bg-[#0284c7]" label="Selesai" value={countFor("ENDED").toLocaleString("id-ID")} caption="sampai window berakhir" />
+          <KpiCard icon={X} tileClass="bg-[#ea580c]" label="Dibatalkan" value={countFor("CANCELED").toLocaleString("id-ID")} caption="task dibatalkan" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+          <KpiCard icon={ClipboardList} tileClass="bg-[#2563eb]" label="Total Riwayat" value={total.toLocaleString("id-ID")} caption="rentang tanggal dipilih" />
+          <KpiCard icon={CircleCheckBig} tileClass="bg-[#0284c7]" label="Selesai" value={countFor("ENDED").toLocaleString("id-ID")} caption="halaman ini" />
+          <KpiCard icon={X} tileClass="bg-[#ea580c]" label="Dibatalkan" value={countFor("CANCELED").toLocaleString("id-ID")} caption="halaman ini" />
+        </div>
+      )}
 
       {/* Board per kelompok */}
       {error && (
@@ -408,7 +570,9 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
         </div>
       ) : visibleGroups.length === 0 ? (
         <p className="rounded-2xl border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
-          Tidak ada FO dalam window aktif. Periksa konfigurasi kelompok dan jam operasional di Pengaturan Live Track.
+          {mode === "active"
+            ? "Tidak ada FO dalam window aktif. Periksa konfigurasi kelompok dan jam operasional di Pengaturan Live Track."
+            : "Belum ada riwayat FO selesai atau dibatalkan pada rentang tanggal ini."}
         </p>
       ) : (
         <div className="space-y-3">
@@ -432,6 +596,7 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
                     <span className="block truncate text-sm font-bold text-foreground">{group.name}</span>
                     <span className="block text-[11px] tabular-nums text-muted-foreground">
                       {group.windowLabel} · {group.tasks.length} FO
+                      {group.status !== "Aktif" ? " · Nonaktif" : ""}
                     </span>
                   </span>
                   {isCollapsed ? (
@@ -464,9 +629,10 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
                                   {task.number ?? task.id.slice(0, 8)}
                                 </span>
                                 <TaskStatusBadge color={meta.color} label={meta.label} />
-                                {task.frozen && (
-                                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                                    Beku s.d. {formatClock(task.visibleUntil)}
+                                {(task.statusRaw === "ENDED" || task.statusRaw === "CANCELED") && (
+                                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
+                                    {task.statusRaw === "ENDED" ? "Selesai" : "Dibatalkan"} ·{" "}
+                                    {formatDateTime(task.terminalAt ?? task.actualArrivalOn)}
                                   </span>
                                 )}
                               </div>
