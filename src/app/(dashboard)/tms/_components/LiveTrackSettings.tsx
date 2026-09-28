@@ -113,7 +113,7 @@ function countActiveMembers(group: LiveTrackGroup, nowMs: number): number {
 export default function LiveTrackSettings() {
   const [groups, setGroups] = useState<LiveTrackGroup[]>([]);
   const [vehicles, setVehicles] = useState<LiveTrackVehicleOption[]>([]);
-  const [canManage, setCanManage] = useState(false);
+  const [canManage, setCanManage] = useState<boolean | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +130,7 @@ export default function LiveTrackSettings() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setCanManage(null);
     try {
       const [groupsRes, vehiclesRes] = await Promise.all([
         fetch("/api/tms/live-track-config/groups", { cache: "no-store" }),
@@ -404,7 +405,7 @@ export default function LiveTrackSettings() {
               <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={() => void load()}>
                 Muat ulang
               </Button>
-              {canManage && (
+              {canManage === true && (
                 <Button size="sm" icon={Plus} onClick={openCreate}>
                   Kelompok Baru
                 </Button>
@@ -413,7 +414,7 @@ export default function LiveTrackSettings() {
           }
         />
 
-        {!canManage && (
+        {!loading && canManage === false && (
           <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs text-amber-700">
             Anda hanya dapat melihat konfigurasi. Perubahan membutuhkan permission Kelola Pengaturan Live Track.
           </p>
@@ -475,7 +476,7 @@ export default function LiveTrackSettings() {
                       <Badge variant={group.status === "Aktif" ? "success" : "muted"}>
                         {group.status === "Aktif" ? `${activeCount} aktif` : "Nonaktif"}
                       </Badge>
-                      {canManage && (
+                      {canManage === true && (
                         <>
                           <button
                             type="button"
