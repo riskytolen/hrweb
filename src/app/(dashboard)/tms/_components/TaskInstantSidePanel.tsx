@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Expand,
@@ -533,8 +533,22 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     return raw === "ENDED" || raw === "CANCELED";
   }, [item?.statusRaw]);
 
+  /**
+   * ID task terpilih. Board mengirim objek `item` baru tiap auto-refresh,
+   * sehingga efek tidak boleh bergantung pada identitas objek tersebut.
+   * Reset (termasuk `mapOpen`) hanya saat ID benar-benar berganti agar
+   * fullscreen map tidak tertutup tiap 30 detik.
+   */
+  const taskId = item?.id ?? null;
+
+  /** Timeline terbaru dari board untuk fallback saat detail vendor kosong. */
+  const boardTimelineRef = useRef<FleetTaskTimelinePoint[]>(item?.timeline ?? []);
   useEffect(() => {
-    // Reset tampilan saat task yang dipilih berganti, lalu muat detail baru.
+    if (item) boardTimelineRef.current = item.timeline;
+  }, [item]);
+
+  // Reset tampilan hanya saat task yang dipilih berganti (atau dikosongkan).
+  useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDetail(null);
     setError(null);
@@ -544,15 +558,17 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     setHistoryTrail([]);
     setLiveTrail([]);
     setTripTrailDebug({ attempts: [], selected: null });
-    if (!item) return;
-    const taskId = item.id;
-    const listTimeline = item.timeline;
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!taskId) return;
+    const activeTaskId: string = taskId;
     let disposed = false;
     const controller = new AbortController();
     async function load(isInitial: boolean) {
       if (isInitial) setLoading(true);
       try {
-        const response = await fetch(`/api/tms/fleet-task-instant/${encodeURIComponent(taskId)}`, {
+        const response = await fetch(`/api/tms/fleet-task-instant/${encodeURIComponent(activeTaskId)}`, {
           headers: { Accept: "application/json" },
           signal: controller.signal,
         });
@@ -562,10 +578,10 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
         if (!normalized) throw new Error("Detail task tidak dikenali. Coba lagi.");
         if (disposed) return;
         // Endpoint Show tidak mengirim timeline_route, jadi pakai titik
-        // rute dari data Index bila detail tidak memilikinya.
+        // rute terbaru dari board bila detail tidak memilikinya.
         setDetail({
           ...normalized,
-          timeline: normalized.timeline.length > 0 ? normalized.timeline : listTimeline,
+          timeline: normalized.timeline.length > 0 ? normalized.timeline : boardTimelineRef.current,
         });
         setError(null);
       } catch (err) {
@@ -597,7 +613,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [item, isTerminalTask]);
+  }, [taskId, isTerminalTask]);
 
   useEffect(() => {
     const taskId = item?.id;
@@ -777,9 +793,11 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
   // Task terminal TIDAK memuat posisi kendaraan saat ini: marker tersebut
   // bisa berasal dari perjalanan lain dan menyesatkan. Peta memakai posisi
   // akhir dari timeline beku.
+  // Deps memakai primitif agar interval tidak di-restart tiap board refresh.
+  const vehicleIdForPoll = item?.vehicleId ?? null;
   useEffect(() => {
     if (isTerminalTask) return;
-    const vehicleId = item?.vehicleId ?? null;
+    const vehicleId = vehicleIdForPoll;
     if (vehicleId === null) return;
     let disposed = false;
     const controller = new AbortController();
@@ -837,23 +855,31 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [item, allRoutePointsVisited, isTerminalTask]);
+  }, [taskId, vehicleIdForPoll, allRoutePointsVisited, isTerminalTask]);
 
   // Jejak historis: sumber utama Detail Trip History (/trips/:id/detail).
   // Coba license plate dulu (paling andal lintas endpoint), lalu vehicleId,
   // dengan rentang waktu task dan fallback rentang harian. Bila tetap kosong,
   // fallback ke track endpoint.
+  // Deps memakai primitif agar fetch tidak diulang tiap board refresh.
+  const licensePlateForTrail = item?.licensePlate ?? null;
+  const vehicleIdStringForTrail = item?.vehicleId !== null && item?.vehicleId !== undefined
+    ? String(item.vehicleId)
+    : null;
+  const trackIdForTrail = item?.trackId ?? null;
+  const trailStartRaw = item?.actualStartedOn ?? item?.expectedStartedOn ?? item?.createdOn ?? null;
+  const trailEndRaw = item?.actualArrivalOn ?? item?.terminalAt ?? null;
   useEffect(() => {
-    if (!item) return;
-    const identifiers = [item.licensePlate, item.vehicleId !== null ? String(item.vehicleId) : null].filter(
+    if (!taskId) return;
+    const identifiers = [licensePlateForTrail, vehicleIdStringForTrail].filter(
       (value): value is string => !!value,
     );
     if (identifiers.length === 0) return;
-    const startRaw = item.actualStartedOn ?? item.expectedStartedOn ?? item.createdOn;
+    const startRaw = trailStartRaw;
     if (!startRaw) return;
     const startMs = Date.parse(startRaw);
     if (Number.isNaN(startMs)) return;
-    const endRaw = item.actualArrivalOn ?? item.terminalAt ?? null;
+    const endRaw = trailEndRaw;
     const endMsRaw = endRaw ? Date.parse(endRaw) : NaN;
     // Bila semua titik sudah dikunjungi, hentikan riwayat trip pada waktu
     // kunjungan terakhir agar garis tidak lanjut setelah toko terakhir.
@@ -876,7 +902,7 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
     const controller = new AbortController();
 
     async function loadFallbackTrack() {
-      const trackId = item?.trackId;
+      const trackId = trackIdForTrail;
       if (!trackId) return;
       try {
         const response = await fetch(
@@ -983,7 +1009,17 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       disposed = true;
       controller.abort();
     };
-  }, [item, allRoutePointsVisited, routeCompletedAtMs, isTerminalTask]);
+  }, [
+    taskId,
+    licensePlateForTrail,
+    vehicleIdStringForTrail,
+    trackIdForTrail,
+    trailStartRaw,
+    trailEndRaw,
+    allRoutePointsVisited,
+    routeCompletedAtMs,
+    isTerminalTask,
+  ]);
 
   // Progress: pakai current/total bila ada, fallback ke timeline visited.
   let doneCount = 0;
