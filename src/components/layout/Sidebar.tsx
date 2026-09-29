@@ -43,7 +43,6 @@ import {
   FileText,
   FileSpreadsheet,
   TrendingUp,
-  Banknote,
   Satellite,
   Route,
   PackageCheck,
@@ -52,7 +51,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
-import { canViewTmsEpod } from "@/lib/permissions";
+import { canViewLiveTrackConfig, canViewTmsEpod } from "@/lib/permissions";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -230,6 +229,9 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
             if (item.href === "/settings/storage-usage") return isSuperAdmin;
             if (item.href === "/tms/epod") {
               return canViewTmsEpod(profile.roles?.permissions ?? [], profile.account_type);
+            }
+            if (item.href === "/tms/live-track-settings") {
+              return canViewLiveTrackConfig(profile.roles?.permissions ?? [], profile.account_type);
             }
             if (!item.permission) return true;
             return hasPermission(item.permission) || hasPermission(item.permission + ".view") || hasPermission(item.permission + ".input");

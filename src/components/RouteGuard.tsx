@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Shield } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
+import { canViewLiveTrackConfig, canViewTmsEpod } from "@/lib/permissions";
 
 interface RouteGuardProps {
   /** Permission key modul, misal "employees", "payroll" */
@@ -46,7 +47,7 @@ function LoadingSkeleton() {
  * Jika tidak punya keduanya → tampilkan "Akses Ditolak".
  */
 export default function RouteGuard({ permission, children }: RouteGuardProps) {
-  const { hasPermission, isLoading, user } = useAuth();
+  const { hasPermission, isLoading, profile, user } = useAuth();
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -66,7 +67,11 @@ export default function RouteGuard({ permission, children }: RouteGuardProps) {
 
   // Cek: punya permission penuh ATAU input-only ATAU view-only?
   const hasAccess =
-    hasPermission(permission) || hasPermission(permission + ".input") || hasPermission(permission + ".view");
+    permission === "tms.epod"
+      ? canViewTmsEpod(profile?.roles?.permissions ?? [], profile?.account_type)
+      : permission === "tms.live-track-config"
+        ? canViewLiveTrackConfig(profile?.roles?.permissions ?? [], profile?.account_type)
+        : hasPermission(permission) || hasPermission(permission + ".input") || hasPermission(permission + ".view");
 
   if (!hasAccess) {
     return (

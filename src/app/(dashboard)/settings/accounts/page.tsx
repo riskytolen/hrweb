@@ -597,6 +597,8 @@ export default function AccountsPage() {
     return "none";
   };
 
+  const getTmsBaseState = () => getPermissionState("tms");
+
   const setPermissionState = (key: string, state: "none" | "view" | "input" | "edit") => {
     setRoleForm((prev) => {
       // Hapus semua varian key ini dulu
@@ -614,6 +616,9 @@ export default function AccountsPage() {
     if (roleForm.permissions.includes("tms.epod.manage")) return "manage";
     if (roleForm.permissions.includes("tms.epod.view")) return "view";
     if (roleForm.permissions.includes("tms.epod")) return "manage";
+    const tmsState = getTmsBaseState();
+    if (tmsState === "edit" || tmsState === "input") return "manage";
+    if (tmsState === "view") return "view";
     return "none";
   };
 
@@ -634,6 +639,7 @@ export default function AccountsPage() {
     if (roleForm.permissions.includes("tms.live-track-config.manage")) return "manage";
     if (roleForm.permissions.includes("tms.live-track-config.view")) return "view";
     if (roleForm.permissions.includes("tms.live-track-config")) return "manage";
+    if (getTmsBaseState() !== "none") return "view";
     return "none";
   };
 
