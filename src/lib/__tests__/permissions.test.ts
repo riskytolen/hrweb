@@ -314,6 +314,9 @@ describe("canViewOdometerDashboard", () => {
   it("tetap melayani akun eksternal pemegang operasional kendaraan", () => {
     expect(canViewOdometerDashboard(["vehicle-odometer"], "external")).toBe(true);
     expect(canViewOdometerDashboard(["vehicle-odometer.dashboard"], "external")).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer.dashboard.view"], "external")).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer.dashboard.input"], "external")).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer.report.view"], "external")).toBe(false);
     expect(canViewOdometerDashboard(["tms"], "external")).toBe(false);
   });
 });
@@ -331,6 +334,11 @@ describe("canViewOdometerReport", () => {
 
   it("tetap melayani akun eksternal pemegang operasional kendaraan", () => {
     expect(canViewOdometerReport(["vehicle-odometer"], "external")).toBe(true);
+    expect(canViewOdometerReport(["vehicle-odometer.report"], "external")).toBe(true);
+    expect(canViewOdometerReport(["vehicle-odometer.report.view"], "external")).toBe(true);
+    expect(canViewOdometerReport(["vehicle-odometer.report.input"], "external")).toBe(true);
+    expect(canViewOdometerReport(["vehicle-odometer.dashboard.view"], "external")).toBe(false);
+    expect(canViewOdometerReport(["tms"], "external")).toBe(false);
   });
 });
 
@@ -343,6 +351,9 @@ describe("permissionMatches", () => {
 
   it("membatasi akun eksternal ke operasional kendaraan + TMS view-only", () => {
     expect(permissionMatches(["all"], "vehicle-odometer", "external")).toBe(true);
+    expect(permissionMatches(["vehicle-odometer.dashboard.view"], "vehicle-odometer.dashboard", "external")).toBe(true);
+    expect(permissionMatches(["vehicle-odometer.report.view"], "vehicle-odometer.report", "external")).toBe(true);
+    expect(permissionMatches(["vehicle-odometer.report.view"], "vehicle-odometer.dashboard", "external")).toBe(false);
     expect(permissionMatches(["tms.live-view"], "tms.live-view", "external")).toBe(true);
     expect(permissionMatches(["tms.view"], "tms.epod", "external")).toBe(true);
     expect(permissionMatches(["tms.live-view"], "tms.epod", "external")).toBe(false);

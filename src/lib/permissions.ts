@@ -126,25 +126,35 @@ export function externalCanViewTms(permissions: string[], permission: string): b
 }
 
 export function externalCanViewVehicleOdometer(permissions: string[], permission: string): boolean {
-  const normalized =
-    permission === VEHICLE_ODOMETER_DASHBOARD_PERMISSION ||
-    permission === VEHICLE_ODOMETER_DASHBOARD_VIEW_PERMISSION ||
-    permission === VEHICLE_ODOMETER_DASHBOARD_INPUT_PERMISSION ||
-    permission === VEHICLE_ODOMETER_REPORT_PERMISSION ||
-    permission === VEHICLE_ODOMETER_REPORT_VIEW_PERMISSION ||
-    permission === VEHICLE_ODOMETER_REPORT_INPUT_PERMISSION
-      ? VEHICLE_ODOMETER_VIEW_PERMISSION
-      : permission;
-  if (normalized !== VEHICLE_ODOMETER_PERMISSION && normalized !== VEHICLE_ODOMETER_VIEW_PERMISSION) return false;
-  return permissions.some(
-    (p) =>
-      p === "all" ||
-      p === VEHICLE_ODOMETER_PERMISSION ||
-      p === VEHICLE_ODOMETER_VIEW_PERMISSION ||
-      p === VEHICLE_ODOMETER_INPUT_PERMISSION ||
-      p === VEHICLE_ODOMETER_MANAGE_PERMISSION ||
-      p === permission,
-  );
+  const dashboardKeys = [
+    VEHICLE_ODOMETER_DASHBOARD_PERMISSION,
+    VEHICLE_ODOMETER_DASHBOARD_VIEW_PERMISSION,
+    VEHICLE_ODOMETER_DASHBOARD_INPUT_PERMISSION,
+  ];
+  const reportKeys = [
+    VEHICLE_ODOMETER_REPORT_PERMISSION,
+    VEHICLE_ODOMETER_REPORT_VIEW_PERMISSION,
+    VEHICLE_ODOMETER_REPORT_INPUT_PERMISSION,
+  ];
+  // Key induk lama tetap memberi akses ke kedua submenu.
+  const sharedKeys = [
+    "all",
+    VEHICLE_ODOMETER_PERMISSION,
+    VEHICLE_ODOMETER_VIEW_PERMISSION,
+    VEHICLE_ODOMETER_INPUT_PERMISSION,
+    VEHICLE_ODOMETER_MANAGE_PERMISSION,
+  ];
+  const hasAny = (keys: string[]): boolean =>
+    permissions.some((p) => sharedKeys.includes(p) || keys.includes(p));
+
+  // Samakan dengan internal: turunan memberi akses ke induknya, jadi base
+  // lolos bila memegang key induk lama maupun salah satu submenu granular.
+  if (permission === VEHICLE_ODOMETER_PERMISSION || permission === VEHICLE_ODOMETER_VIEW_PERMISSION) {
+    return hasAny([...dashboardKeys, ...reportKeys]);
+  }
+  if (dashboardKeys.includes(permission)) return hasAny(dashboardKeys);
+  if (reportKeys.includes(permission)) return hasAny(reportKeys);
+  return false;
 }
 
 /** Pencocokan permission untuk penentuan route default. */
