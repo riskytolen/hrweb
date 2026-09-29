@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
 import {
+  canManageOdometerClientUnits,
   canViewLiveTrackConfig,
   canViewOdometerDashboard,
   canViewOdometerReport,
@@ -196,6 +197,7 @@ const allSections: MenuSection[] = [
           { name: "Dashboard Kendaraan", href: "/operasional-kendaraan/dashboard", icon: Gauge, permission: "vehicle-odometer.dashboard" },
           { name: "Input Odometer", href: "/operasional-kendaraan/input", icon: ClipboardList, permission: "vehicle-odometer.manage" },
           { name: "Laporan Kendaraan", href: "/operasional-kendaraan/laporan", icon: FileSpreadsheet, permission: "vehicle-odometer.report" },
+          { name: "Pengaturan Unit Client", href: "/operasional-kendaraan/pengaturan-unit-client", icon: Settings2, permission: "vehicle-odometer.client-unit-config" },
         ],
       },
     ],
@@ -265,6 +267,12 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
             }
             if (item.href === "/operasional-kendaraan/laporan") {
               return canViewOdometerReport(profile.roles?.permissions ?? [], profile.account_type);
+            }
+            if (item.href === "/operasional-kendaraan/pengaturan-unit-client") {
+              return (
+                isSuperAdmin ||
+                canManageOdometerClientUnits(profile.roles?.permissions ?? [], profile.account_type)
+              );
             }
             if (!item.permission) return true;
             return hasPermission(item.permission) || hasPermission(item.permission + ".view") || hasPermission(item.permission + ".input");

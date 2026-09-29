@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from "react";
 import { Shield } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import {
+  canManageOdometerClientUnits,
   canViewLiveTrackConfig,
   canViewOdometerDashboard,
   canViewOdometerReport,
@@ -84,6 +85,10 @@ export default function RouteGuard({ permission, children }: RouteGuardProps) {
     "tms.logger-trips": canViewTmsLoggerTrips(profile?.roles?.permissions ?? [], profile?.account_type),
     "vehicle-odometer.dashboard": canViewOdometerDashboard(profile?.roles?.permissions ?? [], profile?.account_type),
     "vehicle-odometer.report": canViewOdometerReport(profile?.roles?.permissions ?? [], profile?.account_type),
+    "vehicle-odometer.client-unit-config": canManageOdometerClientUnits(
+      profile?.roles?.permissions ?? [],
+      profile?.account_type,
+    ),
   };
   const hasAccess =
     permission in submenuAccess

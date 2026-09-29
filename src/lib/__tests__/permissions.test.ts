@@ -3,6 +3,7 @@ import {
   canAccessTmsData,
   canAccessTmsLive,
   canManageLiveTrackConfig,
+  canManageOdometerClientUnits,
   canManageTmsEpod,
   canViewLiveTrackConfig,
   canViewOdometerDashboard,
@@ -339,6 +340,26 @@ describe("canViewOdometerReport", () => {
     expect(canViewOdometerReport(["vehicle-odometer.report.input"], "external")).toBe(true);
     expect(canViewOdometerReport(["vehicle-odometer.dashboard.view"], "external")).toBe(false);
     expect(canViewOdometerReport(["tms"], "external")).toBe(false);
+  });
+});
+
+describe("canManageOdometerClientUnits", () => {
+  it("memberi akses untuk permission eksplisit dan all", () => {
+    expect(canManageOdometerClientUnits(["vehicle-odometer.client-unit-config.manage"])).toBe(true);
+    expect(canManageOdometerClientUnits(["vehicle-odometer.client-unit-config"])).toBe(true);
+    expect(canManageOdometerClientUnits(["all"])).toBe(true);
+  });
+
+  it("menolak permission induk odometer tanpa wewenang eksplisit", () => {
+    expect(canManageOdometerClientUnits(["vehicle-odometer"])).toBe(false);
+    expect(canManageOdometerClientUnits(["vehicle-odometer.manage"])).toBe(false);
+    expect(canManageOdometerClientUnits(["vehicle-odometer.dashboard"])).toBe(false);
+    expect(canManageOdometerClientUnits([])).toBe(false);
+  });
+
+  it("selalu menolak akun external", () => {
+    expect(canManageOdometerClientUnits(["all"], "external")).toBe(false);
+    expect(canManageOdometerClientUnits(["vehicle-odometer.client-unit-config.manage"], "external")).toBe(false);
   });
 });
 

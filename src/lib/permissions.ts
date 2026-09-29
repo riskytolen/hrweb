@@ -41,6 +41,10 @@ export const VEHICLE_ODOMETER_DASHBOARD_INPUT_PERMISSION = "vehicle-odometer.das
 export const VEHICLE_ODOMETER_REPORT_PERMISSION = "vehicle-odometer.report";
 export const VEHICLE_ODOMETER_REPORT_VIEW_PERMISSION = "vehicle-odometer.report.view";
 export const VEHICLE_ODOMETER_REPORT_INPUT_PERMISSION = "vehicle-odometer.report.input";
+/** Kelola mapping unit operasional yang terlihat oleh masing-masing client. */
+export const VEHICLE_ODOMETER_CLIENT_UNIT_CONFIG_PERMISSION = "vehicle-odometer.client-unit-config";
+export const VEHICLE_ODOMETER_CLIENT_UNIT_CONFIG_MANAGE_PERMISSION =
+  "vehicle-odometer.client-unit-config.manage";
 
 export type AccountType = "internal" | "external";
 
@@ -352,6 +356,27 @@ export function canManageLiveTrackConfig(
   if (accountType === "external") return false;
   return permissions.some((p) =>
     ["all", TMS_LIVE_TRACK_CONFIG_PERMISSION, TMS_LIVE_TRACK_CONFIG_MANAGE_PERMISSION].includes(p),
+  );
+}
+
+/**
+ * Hak kelola Pengaturan Unit Client (mapping unit operasional -> client).
+ *
+ * Sengaja TIDAK mengimplikasi dari `vehicle-odometer`/`vehicle-odometer.manage`
+ * agar konfigurasi cakupan data client hanya dilakukan role yang diberi
+ * wewenang eksplisit. Akun external selalu ditolak.
+ */
+export function canManageOdometerClientUnits(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return permissions.some((p) =>
+    [
+      "all",
+      VEHICLE_ODOMETER_CLIENT_UNIT_CONFIG_PERMISSION,
+      VEHICLE_ODOMETER_CLIENT_UNIT_CONFIG_MANAGE_PERMISSION,
+    ].includes(p),
   );
 }
 

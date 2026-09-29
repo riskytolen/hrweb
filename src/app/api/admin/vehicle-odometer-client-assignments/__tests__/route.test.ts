@@ -58,6 +58,26 @@ function mockNonAdmin() {
   } as never);
 }
 
+function mockProfile(accountType: string, permissions: string[], level = 10) {
+  createClientMock.mockResolvedValue({
+    auth: { getUser: async () => ({ data: { user: { id: "user-2" } }, error: null }) },
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          single: async () => ({
+            data: {
+              status: "Aktif",
+              account_type: accountType,
+              roles: { id: 3, nama: "Khusus", level, permissions, status: "Aktif" },
+            },
+            error: null,
+          }),
+        }),
+      }),
+    }),
+  } as never);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -71,10 +91,66 @@ describe("GET /api/admin/vehicle-odometer-client-assignments", () => {
     expect(response.status).toBe(403);
   });
 
-  it("menolak tanpa clientId dengan 400", async () => {
+  it("mengembalikan daftar client aktif tanpa clientId", async () => {
     mockSuperAdmin();
+    createAdminMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "tms_clients") {
+          return {
+            select: () => ({
+              eq: () => ({
+                order: async () => ({
+                  data: [{ id: "c1", code: "TUKU", slug: "tuku", name: "Tuku", timezone: "Asia/Jakarta", status: "Aktif" }],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: () => ({
+            eq: async () => ({ data: [{ client_id: "c1" }], error: null }),
+          }),
+        };
+      },
+    } as never);
     const response = await GET(new NextRequest("http://localhost/api/admin/vehicle-odometer-client-assignments"));
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { data: { clients: { id: string; odometerVehicleCount: number }[] } };
+    expect(payload.data.clients).toHaveLength(1);
+    expect(payload.data.clients[0]?.odometerVehicleCount).toBe(1);
+  });
+
+  it("mengizinkan internal dengan permission khusus", async () => {
+    mockProfile("internal", ["vehicle-odometer.client-unit-config.manage"]);
+    createAdminMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "tms_clients") {
+          return {
+            select: () => ({
+              eq: () => ({
+                order: async () => ({ data: [], error: null }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: () => ({
+            eq: async () => ({ data: [], error: null }),
+          }),
+        };
+      },
+    } as never);
+    const response = await GET(new NextRequest("http://localhost/api/admin/vehicle-odometer-client-assignments"));
+    expect(response.status).toBe(200);
+  });
+
+  it("menolak external walau punya permission khusus", async () => {
+    mockProfile("external", ["vehicle-odometer.client-unit-config.manage"]);
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/vehicle-odometer-client-assignments?clientId=c1"),
+    );
+    expect(response.status).toBe(403);
   });
 
   it("mengembalikan daftar kendaraan + pilihan client", async () => {

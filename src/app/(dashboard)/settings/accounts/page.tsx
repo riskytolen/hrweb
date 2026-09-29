@@ -19,7 +19,6 @@ import {
   KeyRound,
   RefreshCw,
   Building2,
-  Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -179,6 +178,16 @@ function liveTrackConfigPermissionLabel(key: string): string | null {
   return LIVE_TRACK_CONFIG_PERMISSION_LABELS[key] ?? null;
 }
 
+/** Label khusus Pengaturan Unit Client yang punya mode sendiri (Tidak Tampil/Kelola). */
+const ODOMETER_UNIT_CONFIG_PERMISSION_LABELS: Record<string, string> = {
+  "vehicle-odometer.client-unit-config": "Pengaturan Unit Client (Kelola)",
+  "vehicle-odometer.client-unit-config.manage": "Pengaturan Unit Client (Kelola)",
+};
+
+function odometerUnitConfigPermissionLabel(key: string): string | null {
+  return ODOMETER_UNIT_CONFIG_PERMISSION_LABELS[key] ?? null;
+}
+
 /** Label khusus Input Odometer (mode Tidak Tampil / Kelola). */
 const ODOMETER_INPUT_PERMISSION_LABELS: Record<string, string> = {
   "vehicle-odometer.manage": "Input Odometer",
@@ -244,13 +253,6 @@ export default function AccountsPage() {
     logoUrl: string | null;
     timezone: string;
     status: "Aktif" | "Tidak Aktif";
-    odometerVehicleCount?: number;
-  }
-  interface OdometerVehicleOption {
-    id: number;
-    unit: string;
-    jenis: string;
-    status: string;
   }
   const [adminClients, setAdminClients] = useState<TmsClientManaged[]>([]);
   const [adminClientsLoading, setAdminClientsLoading] = useState(false);
@@ -266,13 +268,7 @@ export default function AccountsPage() {
   });
   const [savingClient, setSavingClient] = useState(false);
 
-  // Mapping unit Operasional Kendaraan per client (via API admin).
-  const [odometerModalClient, setOdometerModalClient] = useState<TmsClientManaged | null>(null);
-  const [odometerVehicles, setOdometerVehicles] = useState<OdometerVehicleOption[]>([]);
-  const [odometerSelected, setOdometerSelected] = useState<number[]>([]);
-  const [odometerSearch, setOdometerSearch] = useState("");
-  const [odometerLoading, setOdometerLoading] = useState(false);
-  const [odometerSaving, setOdometerSaving] = useState(false);
+
 
   const fetchTmsClients = useCallback(async () => {
     setClientsLoading(true);
@@ -520,62 +516,6 @@ export default function AccountsPage() {
     setTab(next);
     if (next === "clients") void fetchAdminClients();
   };
-
-  const openOdometerModal = async (client: TmsClientManaged) => {
-    setOdometerModalClient(client);
-    setOdometerSearch("");
-    setOdometerSelected([]);
-    setOdometerVehicles([]);
-    setOdometerLoading(true);
-    try {
-      const res = await fetch(
-        `/api/admin/vehicle-odometer-client-assignments?clientId=${encodeURIComponent(client.id)}`,
-        { cache: "no-store" },
-      );
-      const payload = (await res.json()) as {
-        data?: { vehicles?: OdometerVehicleOption[]; vehicleIds?: number[] };
-        error?: string;
-      };
-      if (!res.ok) throw new Error(payload.error || "Gagal memuat unit operasional.");
-      setOdometerVehicles(Array.isArray(payload.data?.vehicles) ? payload.data.vehicles : []);
-      setOdometerSelected(
-        (Array.isArray(payload.data?.vehicleIds) ? payload.data.vehicleIds : []).filter(
-          (v): v is number => typeof v === "number",
-        ),
-      );
-    } catch (err) {
-      addToast("error", err instanceof Error ? err.message : "Gagal memuat unit operasional.");
-    } finally {
-      setOdometerLoading(false);
-    }
-  };
-
-  const saveOdometerAssignments = async () => {
-    if (!odometerModalClient) return;
-    setOdometerSaving(true);
-    try {
-      const res = await fetch("/api/admin/vehicle-odometer-client-assignments", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: odometerModalClient.id, vehicleIds: odometerSelected }),
-      });
-      const payload = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(payload.error || "Gagal menyimpan unit operasional.");
-      addToast("success", `Unit operasional ${odometerModalClient.name} berhasil diperbarui.`);
-      setOdometerModalClient(null);
-      await fetchAdminClients();
-    } catch (err) {
-      addToast("error", err instanceof Error ? err.message : "Gagal menyimpan unit operasional.");
-    } finally {
-      setOdometerSaving(false);
-    }
-  };
-
-  const filteredOdometerVehicles = odometerVehicles.filter((v) => {
-    const q = odometerSearch.trim().toLowerCase();
-    if (!q) return true;
-    return v.unit.toLowerCase().includes(q) || v.jenis.toLowerCase().includes(q);
-  });
 
   // ─── Pegawai yang belum punya akun ───
   const availableEmployees = useMemo(() => {
@@ -1219,6 +1159,68 @@ export default function AccountsPage() {
     );
   };
 
+  // Permission Pengaturan Unit Client: tidak tampil / kelola (eksplisit).
+  const getOdometerUnitConfigState = (): "none" | "manage" => {
+    if (
+      roleForm.permissions.includes("vehicle-odometer.client-unit-config.manage") ||
+      roleForm.permissions.includes("vehicle-odometer.client-unit-config")
+    ) {
+      return "manage";
+    }
+    return "none";
+  };
+
+  const setOdometerUnitConfigState = (state: "none" | "manage") => {
+    setRoleForm((prev) => {
+      const cleaned = prev.permissions.filter(
+        (p) => p !== "vehicle-odometer.client-unit-config" && p !== "vehicle-odometer.client-unit-config.manage",
+      );
+      if (state === "manage") return { ...prev, permissions: [...cleaned, "vehicle-odometer.client-unit-config.manage"] };
+      return { ...prev, permissions: cleaned };
+    });
+  };
+
+  // Baris khusus Pengaturan Unit Client: mode Tidak Tampil / Kelola.
+  const renderOdometerUnitConfigRow = () => {
+    const unitConfigState = getOdometerUnitConfigState();
+    return (
+      <div
+        key="vehicle-odometer.client-unit-config"
+        className={cn(
+          "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+          unitConfigState === "manage" ? "border-primary/30 bg-primary/5" : "border-border",
+        )}
+      >
+        <div>
+          <span className="text-xs font-medium text-foreground">Pengaturan Unit Client</span>
+          <p className="text-[10px] text-muted-foreground">Unit operasional yang tampil per client</p>
+        </div>
+        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+          {([
+            { value: "none" as const, label: "Tidak Tampil" },
+            { value: "manage" as const, label: "Kelola" },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => setOdometerUnitConfigState(s.value)}
+              className={cn(
+                "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                unitConfigState === s.value
+                  ? s.value === "manage"
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-card text-muted-foreground shadow-sm"
+                  : "text-muted-foreground/60 hover:text-muted-foreground",
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   // ─── Filter (memoized) ───
   const filteredUsers = useMemo(
     () =>
@@ -1634,7 +1636,8 @@ export default function AccountsPage() {
                         const epodLabel =
                           epodPermissionLabel(p) ||
                           liveTrackConfigPermissionLabel(p) ||
-                          odometerInputPermissionLabel(p);
+                          odometerInputPermissionLabel(p) ||
+                          odometerUnitConfigPermissionLabel(p);
                         const isEpodView = p === "tms.epod.view" || p === "tms.live-track-config.view";
                         const isView = !epodLabel && p.endsWith(".view");
                         const isInput = !epodLabel && p.endsWith(".input");
@@ -1744,7 +1747,6 @@ export default function AccountsPage() {
                   <tr className="border-b border-border bg-muted/30 text-left">
                     <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Client</th>
                     <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Kode / Slug</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Unit Operasional</th>
                     <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timezone</th>
                     <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
                     <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Aksi</th>
@@ -1766,16 +1768,6 @@ export default function AccountsPage() {
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         <div className="font-semibold text-foreground">{c.code}</div>
                         <div>{c.slug}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => { void openOdometerModal(c); }}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20"
-                          title="Pilih unit operasional yang dapat dilihat client ini"
-                        >
-                          <Truck className="w-3 h-3" />
-                          {c.odometerVehicleCount ?? 0} unit
-                        </button>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{c.timezone}</td>
                       <td className="px-4 py-3">
@@ -1812,6 +1804,7 @@ export default function AccountsPage() {
           )}
           <p className="px-4 py-3 text-[11px] text-muted-foreground border-t border-border">
             Client baru langsung muncul di checkbox Client TMS pada akun dan dropdown client di Pengaturan Live Track.
+            Unit operasional per client diatur di menu Operasional Kendaraan → Pengaturan Unit Client.
             Nonaktifkan client yang tidak dipakai lagi agar tidak bisa dipilih; data historis tetap aman.
           </p>
         </div>
@@ -2432,6 +2425,7 @@ export default function AccountsPage() {
                               {renderChildRow({ key: "vehicle-odometer.dashboard", label: "Dashboard Kendaraan" }, "vehicle-odometer", "Operasional Kendaraan")}
                               {renderInputOdometerRow()}
                               {renderChildRow({ key: "vehicle-odometer.report", label: "Laporan Kendaraan" }, "vehicle-odometer", "Operasional Kendaraan")}
+                              {renderOdometerUnitConfigRow()}
                             </>
                           ) : (
                             section.options.map((opt) => renderModuleRow(opt))
@@ -2601,134 +2595,6 @@ export default function AccountsPage() {
           </div>
         </Portal>
       )}
-
-      {/* ═══════════════════════════════════════════════════════ */}
-      {/* MODAL: UNIT OPERASIONAL PER CLIENT                         */}
-      {/* ═══════════════════════════════════════════════════════ */}
-      {odometerModalClient && (
-        <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-              onClick={() => !odometerSaving && !odometerLoading && setOdometerModalClient(null)}
-            />
-            <div
-              className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden flex flex-col"
-              style={{ maxHeight: "calc(100vh - 2rem)" }}
-            >
-              {/* Header */}
-              <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent flex-shrink-0">
-                <button
-                  onClick={() => !odometerSaving && !odometerLoading && setOdometerModalClient(null)}
-                  className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/20">
-                    <Truck className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-bold text-foreground">Unit Operasional</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Kendaraan {odometerModalClient.name} yang tampil di Dashboard & Laporan
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Body */}
-              <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto">
-                <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2">
-                  <Search className="w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    placeholder="Cari nomor polisi atau jenis..."
-                    value={odometerSearch}
-                    onChange={(e) => setOdometerSearch(e.target.value)}
-                    className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground/60"
-                  />
-                </div>
-
-                {odometerLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                  </div>
-                ) : filteredOdometerVehicles.length === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center py-8">
-                    {odometerVehicles.length === 0
-                      ? "Belum ada kendaraan operasional."
-                      : "Kendaraan tidak ditemukan."}
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-[11px] text-muted-foreground">
-                      {odometerSelected.length} dari {odometerVehicles.length} unit dipilih.
-                      Satu unit boleh dipilih untuk beberapa client.
-                    </p>
-                    <div className="space-y-1.5">
-                      {filteredOdometerVehicles.map((v) => {
-                        const checked = odometerSelected.includes(v.id);
-                        return (
-                          <label
-                            key={v.id}
-                            className={cn(
-                              "flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition-all",
-                              checked ? "border-primary/30 bg-primary/5" : "border-border hover:bg-muted/30",
-                              v.status !== "Aktif" && "opacity-60",
-                            )}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setOdometerSelected((prev) =>
-                                  prev.includes(v.id) ? prev.filter((id) => id !== v.id) : [...prev, v.id],
-                                );
-                              }}
-                              className="w-4 h-4 rounded accent-primary"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-semibold text-foreground">{v.unit}</p>
-                              <p className="text-[10px] text-muted-foreground truncate">{v.jenis}</p>
-                            </div>
-                            {v.status !== "Aktif" && (
-                              <span className="px-2 py-0.5 rounded-full bg-danger-light text-danger text-[10px] font-semibold">
-                                {v.status}
-                              </span>
-                            )}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setOdometerModalClient(null)}
-                  disabled={odometerSaving || odometerLoading}
-                >
-                  Batal
-                </Button>
-                <Button
-                  size="sm"
-                  icon={CheckCircle}
-                  onClick={() => { void saveOdometerAssignments(); }}
-                  disabled={odometerSaving || odometerLoading}
-                >
-                  {odometerSaving ? "Menyimpan..." : "Simpan Unit"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Portal>
-      )}
-
       {/* ═══════════════════════════════════════════════════════ */}
       {/* MODAL: DELETE CONFIRM                                    */}
       {/* ═══════════════════════════════════════════════════════ */}

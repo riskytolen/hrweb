@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { createAdminClient } from "@/lib/supabase-admin";
+import { canManageOdometerClientUnits, parsePermissions } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,11 @@ interface GaVehicleRow {
   status: string;
 }
 
-async function requireSuperAdmin() {
+/**
+ * Guard: Super Admin internal ATAU internal dengan permission kelola
+ * unit client. Akun external selalu ditolak.
+ */
+async function requireUnitConfigAccess() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -34,17 +39,20 @@ async function requireSuperAdmin() {
     .single();
   const roleRelation = profile?.roles;
   const role = Array.isArray(roleRelation) ? roleRelation[0] : roleRelation;
-  const permissions = Array.isArray(role?.permissions) ? role.permissions : [];
-  const isSuperAdmin =
-    profile?.status === "Aktif" &&
+  const permissions = parsePermissions(role?.permissions);
+  const accountType = profile?.account_type === "external" ? "external" : "internal";
+  const allowed =
     profile?.account_type === "internal" &&
+    profile?.status === "Aktif" &&
     role?.status !== "Tidak Aktif" &&
-    (Number(role?.level ?? 0) >= 100 || permissions.includes("all"));
-  if (!isSuperAdmin) {
+    (Number(role?.level ?? 0) >= 100 ||
+      permissions.includes("all") ||
+      canManageOdometerClientUnits(permissions, accountType));
+  if (!allowed) {
     return {
       ok: false as const,
       response: NextResponse.json(
-        { error: "Hanya Super Admin yang dapat mengelola unit operasional client." },
+        { error: "Anda tidak memiliki akses Pengaturan Unit Client." },
         { status: 403, headers: NO_STORE_HEADERS },
       ),
     };
@@ -53,16 +61,58 @@ async function requireSuperAdmin() {
 }
 
 /**
+ * GET tanpa clientId -> daftar client aktif + jumlah unit operasional.
  * GET ?clientId=... -> daftar ga_vehicles + vehicleIds yang dipilih client.
- * Dipakai modal "Atur Unit Operasional" di tab Client TMS.
+ * Dipakai halaman Pengaturan Unit Client di Operasional Kendaraan.
  */
 export async function GET(request: NextRequest) {
-  const gate = await requireSuperAdmin();
+  const gate = await requireUnitConfigAccess();
   if (!gate.ok) return gate.response;
 
   const clientId = request.nextUrl.searchParams.get("clientId")?.trim() ?? "";
   if (!clientId) {
-    return NextResponse.json({ error: "Parameter clientId wajib diisi." }, { status: 400, headers: NO_STORE_HEADERS });
+    const admin = createAdminClient();
+    const [{ data: clients, error: clientsError }, { data: assignments }] = await Promise.all([
+      admin
+        .from("tms_clients")
+        .select("id, code, slug, name, timezone, status")
+        .eq("status", "Aktif")
+        .order("name", { ascending: true }),
+      admin.from("client_vehicle_odometer_assignments").select("client_id").eq("status", "Aktif"),
+    ]);
+    if (clientsError) {
+      return NextResponse.json({ error: "Gagal memuat daftar client." }, { status: 502, headers: NO_STORE_HEADERS });
+    }
+    const counts = new Map<string, number>();
+    for (const row of (Array.isArray(assignments) ? assignments : []) as { client_id: string }[]) {
+      const key = String(row.client_id);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const list = (Array.isArray(clients) ? clients : []) as {
+      id: string;
+      code: string;
+      slug: string;
+      name: string;
+      timezone: string;
+      status: string;
+    }[];
+    return NextResponse.json(
+      {
+        data: {
+          clients: list.map((c) => ({
+            id: c.id,
+            code: c.code,
+            slug: c.slug,
+            name: c.name,
+            timezone: c.timezone,
+            status: c.status,
+            odometerVehicleCount: counts.get(c.id) ?? 0,
+          })),
+        },
+        meta: { total: list.length, fetchedAt: new Date().toISOString() },
+      },
+      { headers: NO_STORE_HEADERS },
+    );
   }
 
   const admin = createAdminClient();
@@ -105,7 +155,7 @@ export async function GET(request: NextRequest) {
  * Satu unit boleh dipilih untuk beberapa client.
  */
 export async function PATCH(request: NextRequest) {
-  const gate = await requireSuperAdmin();
+  const gate = await requireUnitConfigAccess();
   if (!gate.ok) return gate.response;
 
   let body: unknown;
