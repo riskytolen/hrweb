@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "./supabase-admin";
+import { stampUnmappedTmsRows } from "./tms-tenant-sync-server";
 import {
   fetchFleetTaskInstantList,
   type FleetTaskInstantStatus,
@@ -179,6 +180,7 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
         if (page === maxPages) summary.truncated = true;
       }
     }
+    await stampUnmappedTmsRows(admin);
     return summary;
   }
 
@@ -237,6 +239,9 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
   } catch (error) {
     summary.failures.push(errorMessage(error));
   }
+
+  // Visit log baru hasil sync langsung dicap client.
+  await stampUnmappedTmsRows(admin);
 
   return summary;
 }

@@ -3,6 +3,19 @@ import { NextRequest } from "next/server";
 
 vi.mock("server-only", () => ({}));
 
+vi.mock("@/lib/tms-tenant-auth", () => ({
+  authorizeTmsScope: vi.fn(async () => ({
+    ok: true,
+    scope: { allowedClientIds: "all", isSuperAdmin: false, canAccessAllClients: true },
+    selectedClientId: null,
+  })),
+  applyClientScope: (query: unknown) => query,
+  isRecordInScope: () => true,
+  fetchScopedVehicleMap: vi.fn(async () => "all"),
+  isVehicleInScopedMap: () => true,
+  normalizeTenantPlateKey: (value: string | null | undefined) => (value ?? "").toUpperCase(),
+}));
+
 vi.mock("@/lib/supabase-server", () => ({
   createClient: vi.fn(),
 }));

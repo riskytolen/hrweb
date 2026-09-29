@@ -14,6 +14,8 @@
 export const TMS_PERMISSION = "tms";
 export const TMS_VIEW_PERMISSION = "tms.view";
 export const TMS_INPUT_PERMISSION = "tms.input";
+/** Cakupan data: role internal dengan permission ini melihat semua client. Diabaikan untuk external. */
+export const TMS_CLIENTS_ALL_PERMISSION = "tms.clients.all";
 export const TMS_LIVE_VIEW_PERMISSION = "tms.live-view";
 export const TMS_LIVE_VIEW_VIEW_PERMISSION = "tms.live-view.view";
 export const TMS_LIVE_VIEW_INPUT_PERMISSION = "tms.live-view.input";

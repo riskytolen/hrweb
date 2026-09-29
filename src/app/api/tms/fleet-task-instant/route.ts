@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { authorizeTmsScope, fetchScopedVehicleMap } from "@/lib/tms-tenant-auth";
 import { canAccessTmsData } from "@/lib/permissions";
 import {
   fetchFleetTaskInstantList,
@@ -63,6 +64,14 @@ export async function GET(request: Request) {
   const limit = Number(url.searchParams.get("limit") ?? "20");
   const page = Number(url.searchParams.get("page") ?? "1");
 
+  const scope = await authorizeTmsScope({
+    userId: user.id,
+    accountType: "internal",
+    permissions,
+    roleLevel: typeof role?.level === "number" ? role.level : 0,
+  });
+  if (!scope.ok) return scope.response;
+
   try {
     const result = await fetchFleetTaskInstantList({
       limit: Number.isFinite(limit) ? limit : 20,
@@ -71,11 +80,21 @@ export async function GET(request: Request) {
       sort: url.searchParams.get("sort") ?? undefined,
       status: normalizeFleetTaskInstantStatus(url.searchParams.get("status")) ?? undefined,
     });
+    // Data vendor live tidak punya client_id: saring berdasarkan mapping
+    // unit aktif dalam scope. Meta upstream mencerminkan pool vendor.
+    const vehicleMap = await fetchScopedVehicleMap(scope.scope.allowedClientIds);
+    const items =
+      vehicleMap === "all"
+        ? result.items
+        : result.items.filter((item) => {
+            const vehicleId = (item as { vehicleId?: unknown }).vehicleId;
+            return typeof vehicleId === "number" && vehicleMap.byMceasyId.has(vehicleId);
+          });
     return NextResponse.json(
       {
-        data: result.items,
+        data: items,
         meta: {
-          total: result.total,
+          total: vehicleMap === "all" ? result.total : items.length,
           page: result.page,
           counts: result.counts,
           fetchedAt: new Date().toISOString(),

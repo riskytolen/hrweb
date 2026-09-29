@@ -63,7 +63,7 @@ export async function GET() {
   if (!auth.ok) return auth.response;
 
   const admin = createAdminClient();
-  const { data: groups, error: groupsError } = await admin
+  let groupsQuery = admin
     .from("tms_live_track_groups")
     .select(
       "id, name, description, color, sort_order, status, default_window_start, " +
@@ -71,6 +71,10 @@ export async function GET() {
     )
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
+  if (auth.context.allowedClientIds !== "all") {
+    groupsQuery = groupsQuery.in("client_id", auth.context.allowedClientIds);
+  }
+  const { data: groups, error: groupsError } = await groupsQuery;
   if (groupsError) {
     return liveTrackConfigError("Gagal memuat kelompok Live Track.", 502);
   }
@@ -156,6 +160,23 @@ export async function POST(request: Request) {
     return liveTrackConfigError("Nama kelompok dan daftar unit wajib diisi.", 400);
   }
 
+  // Tentukan client sebelum menyimpan: single-scope otomatis, all-scope
+  // lewat body (opsional), multi-scope wajib memilih salah satu miliknya.
+  const requestedClientId =
+    typeof (input as { clientId?: unknown }).clientId === "string"
+      ? ((input as { clientId?: unknown }).clientId as string)
+      : null;
+  let clientToStamp: string | null = null;
+  if (auth.context.allowedClientIds === "all") {
+    clientToStamp = requestedClientId;
+  } else if (auth.context.allowedClientIds.length === 1) {
+    clientToStamp = auth.context.allowedClientIds[0] ?? null;
+  } else if (requestedClientId && auth.context.allowedClientIds.includes(requestedClientId)) {
+    clientToStamp = requestedClientId;
+  } else {
+    return liveTrackConfigError("Pilih client untuk kelompok baru.", 400);
+  }
+
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("tms_live_track_config_save_group", {
     p_group: {
@@ -177,5 +198,51 @@ export async function POST(request: Request) {
   if (error) {
     return liveTrackConfigError(error.message || "Gagal menyimpan kelompok.", 400);
   }
+
+  const savedGroupId =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? ((data as { group_id?: unknown }).group_id ?? null)
+      : null;
+  if (typeof savedGroupId === "string" && savedGroupId && clientToStamp) {
+    const stampError = await stampGroupClient(admin, savedGroupId, clientToStamp, input.members);
+    if (stampError) {
+      return liveTrackConfigError(stampError, 502);
+    }
+  }
   return liveTrackConfigJson({ data }, 201);
+}
+
+/**
+ * Cap client_id pada grup + unit anggotanya (hanya yang masih null agar
+ * tidak menimpa mapping client lain).
+ */
+async function stampGroupClient(
+  admin: ReturnType<typeof createAdminClient>,
+  groupId: string,
+  clientId: string,
+  members: LiveTrackGroupMember[],
+): Promise<string | null> {
+  const { error: groupError } = await admin
+    .from("tms_live_track_groups")
+    .update({ client_id: clientId, updated_at: new Date().toISOString() })
+    .eq("id", groupId);
+  if (groupError) return `Gagal menandai client kelompok: ${groupError.message}`;
+
+  const mceasyIds = [...new Set(members.map((m) => m.mceasyVehicleId).filter((v) => Number.isFinite(v)))];
+  if (mceasyIds.length > 0) {
+    const { error: vehicleError } = await admin
+      .from("tms_live_track_vehicles")
+      .update({ client_id: clientId, updated_at: new Date().toISOString() })
+      .is("client_id", null)
+      .in("mceasy_vehicle_id", mceasyIds);
+    if (vehicleError) return `Gagal menandai client unit: ${vehicleError.message}`;
+
+    const { error: memberError } = await admin
+      .from("tms_live_track_group_vehicles")
+      .update({ client_id: clientId })
+      .eq("group_id", groupId)
+      .is("client_id", null);
+    if (memberError) return `Gagal menandai client anggota: ${memberError.message}`;
+  }
+  return null;
 }

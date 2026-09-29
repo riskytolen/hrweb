@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { canAccessTmsData } from "@/lib/permissions";
 import { fetchMcEasyVehicleStatus, McEasyError } from "@/lib/mceasy-server";
+import {
+  authorizeTmsScope,
+  fetchScopedVehicleMap,
+  isVehicleInScopedMap,
+} from "@/lib/tms-tenant-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +64,24 @@ export async function GET(
   }
 
   const { id } = await params;
+  const scope = await authorizeTmsScope({
+    userId: user.id,
+    accountType: "internal",
+    permissions,
+    roleLevel: typeof role?.level === "number" ? role.level : 0,
+  });
+  if (!scope.ok) return scope.response;
+  // ID milik client lain tidak boleh diambil langsung.
+  if (scope.scope.allowedClientIds !== "all") {
+    const vehicleMap = await fetchScopedVehicleMap(scope.scope.allowedClientIds);
+    const numericId = Number(id);
+    if (!isVehicleInScopedMap(vehicleMap, Number.isFinite(numericId) ? numericId : null, id)) {
+      return NextResponse.json(
+        { error: "Data kendaraan tidak ditemukan pada layanan tracking." },
+        { status: 404, headers: NO_STORE_HEADERS },
+      );
+    }
+  }
   try {
     const data = await fetchMcEasyVehicleStatus(id);
     if (!data) {

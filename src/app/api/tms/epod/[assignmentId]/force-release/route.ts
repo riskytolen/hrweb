@@ -98,7 +98,7 @@ export async function POST(
       }
     }
 
-    const detail = await getAssignmentDetail(assignmentId);
+    const detail = await getAssignmentDetail(assignmentId, auth.context.allowedClientIds);
     if (storageFailures.length > 0) {
       return epodJson({
         data: detail,

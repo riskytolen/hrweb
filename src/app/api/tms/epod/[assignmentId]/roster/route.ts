@@ -61,7 +61,7 @@ export async function PATCH(
       return epodError(mapped.message, mapped.status);
     }
 
-    const detail = await getAssignmentDetail(assignmentId);
+    const detail = await getAssignmentDetail(assignmentId, auth.context.allowedClientIds);
     return epodJson({ data: detail });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gagal menyimpan tim e-POD.";

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { createAdminClient } from "@/lib/supabase-admin";
+import { authorizeTmsScope, isRecordInScope } from "@/lib/tms-tenant-auth";
 import { canAccessTmsData } from "@/lib/permissions";
 import { fetchFleetTaskInstantDetail, McEasyError } from "@/lib/mceasy-server";
 
@@ -59,6 +61,29 @@ export async function GET(
   }
 
   const { id } = await params;
+  const scope = await authorizeTmsScope({
+    userId: user.id,
+    accountType: "internal",
+    permissions,
+    roleLevel: typeof role?.level === "number" ? role.level : 0,
+  });
+  if (!scope.ok) return scope.response;
+  // Verifikasi tenant via snapshot lokal sebelum memanggil vendor.
+  if (scope.scope.allowedClientIds !== "all") {
+    const admin = createAdminClient();
+    const { data: snap } = await admin
+      .from("tms_live_track_task_snapshots")
+      .select("client_id")
+      .eq("task_id", id)
+      .maybeSingle();
+    const clientId = (snap as { client_id?: string | null } | null)?.client_id ?? null;
+    if (!isRecordInScope(clientId, scope.scope.allowedClientIds)) {
+      return NextResponse.json(
+        { error: "Data Fleet Task tidak ditemukan pada layanan tracking." },
+        { status: 404, headers: NO_STORE_HEADERS },
+      );
+    }
+  }
   try {
     // Next sudah men-decode param route; teruskan apa adanya agar UUID
     // tidak rusak oleh decode ganda.

@@ -2,6 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { canAccessTmsData } from "@/lib/permissions";
 import { createAdminClient } from "@/lib/supabase-admin";
+import {
+  applyClientScope,
+  authorizeTmsScope,
+  type ClientScope,
+} from "@/lib/tms-tenant-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -186,8 +191,17 @@ export async function GET(request: NextRequest) {
   const nowIso = new Date().toISOString();
   const admin = createAdminClient();
 
+  const scope = await authorizeTmsScope({
+    userId: user.id,
+    accountType: "internal",
+    permissions: parsePermissions(role.permissions),
+    roleLevel: typeof role?.level === "number" ? role.level : 0,
+  });
+  if (!scope.ok) return scope.response;
+  const allowedClientIds = scope.scope.allowedClientIds;
+
   if (mode === "history") {
-    return getHistoryBoard(admin, params, search);
+    return getHistoryBoard(admin, params, search, allowedClientIds);
   }
 
   let query = admin
@@ -199,6 +213,7 @@ export async function GET(request: NextRequest) {
     .gt("visible_until", nowIso)
     .order("window_started_at", { ascending: false })
     .limit(MAX_ROWS);
+  query = applyClientScope(query, allowedClientIds, (q, ids) => q.in("client_id", ids));
 
   if (search) {
     const pattern = `%${search.replace(/[%_]/g, "")}%`;
@@ -286,6 +301,7 @@ async function getHistoryBoard(
   admin: ReturnType<typeof createAdminClient>,
   params: URLSearchParams,
   search: string,
+  allowedClientIds: ClientScope,
 ): Promise<NextResponse> {
   const nowMs = Date.now();
   const defaultTo = wibDateString(nowMs);
@@ -312,6 +328,7 @@ async function getHistoryBoard(
     )
     .order("terminal_at", { ascending: false, nullsFirst: false })
     .order("actual_arrival_on", { ascending: false, nullsFirst: false });
+  snapQuery = applyClientScope(snapQuery, allowedClientIds, (q, ids) => q.in("client_id", ids));
 
   if (search) {
     const pattern = `%${search.replace(/[%_,()]/g, "")}%`;

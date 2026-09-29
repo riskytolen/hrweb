@@ -33,9 +33,13 @@ export async function GET() {
   if (!auth.ok) return auth.response;
 
   const admin = createAdminClient();
-  const { data: catalog } = await admin
+  let catalogQuery = admin
     .from("tms_live_track_vehicles")
     .select("id, mceasy_vehicle_id, license_plate, vendor_groups, last_seen_at, last_synced_at, status");
+  if (auth.context.allowedClientIds !== "all") {
+    catalogQuery = catalogQuery.in("client_id", auth.context.allowedClientIds);
+  }
+  const { data: catalog } = await catalogQuery;
   const catalogRows = (Array.isArray(catalog) ? catalog : []) as unknown as CatalogRow[];
 
   const { data: memberships } = await admin

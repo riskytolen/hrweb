@@ -26,6 +26,18 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const admin = createAdminClient();
+  if (auth.context.allowedClientIds !== "all") {
+    const { data: existing } = await admin
+      .from("tms_live_track_groups")
+      .select("client_id")
+      .eq("id", id)
+      .maybeSingle();
+    const existingClientId =
+      (existing as { client_id?: string | null } | null)?.client_id ?? null;
+    if (!existingClientId || !auth.context.allowedClientIds.includes(existingClientId)) {
+      return liveTrackConfigError("Kelompok tidak ditemukan.", 404);
+    }
+  }
   const { data, error } = await admin.rpc("tms_live_track_config_set_group_status", {
     p_group_id: id,
     p_status: status,

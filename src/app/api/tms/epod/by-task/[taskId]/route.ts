@@ -14,7 +14,7 @@ export async function GET(
   if (!taskId) return epodError("ID task tidak valid.", 400);
 
   try {
-    const summary = await getAssignmentByTask(taskId);
+    const summary = await getAssignmentByTask(taskId, auth.context.allowedClientIds);
     return epodJson({ data: summary });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gagal memuat ringkasan e-POD.";

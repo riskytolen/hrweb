@@ -3,6 +3,19 @@ import { NextRequest } from "next/server";
 
 vi.mock("server-only", () => ({}));
 
+vi.mock("@/lib/tms-tenant-auth", () => ({
+  authorizeTmsScope: vi.fn(async () => ({
+    ok: true,
+    scope: { allowedClientIds: "all", isSuperAdmin: false, canAccessAllClients: true },
+    selectedClientId: null,
+  })),
+  applyClientScope: (query: unknown) => query,
+  isRecordInScope: () => true,
+  fetchScopedVehicleMap: vi.fn(async () => "all"),
+  isVehicleInScopedMap: () => true,
+  normalizeTenantPlateKey: (value: string | null | undefined) => (value ?? "").toUpperCase(),
+}));
+
 vi.mock("@/lib/supabase-server", () => ({
   createClient: vi.fn(),
 }));
@@ -132,6 +145,7 @@ describe("GET /api/tms/epod", () => {
           snapshotAt: "2026-09-22T00:00:00Z",
           frozenAt: null,
           lastSyncedAt: null,
+          clientId: null,
           assignedName: null,
           assignedRoleLabel: null,
         },
@@ -144,6 +158,7 @@ describe("GET /api/tms/epod", () => {
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(listAssignmentsMock).toHaveBeenCalledWith(
       expect.objectContaining({ page: 1, limit: 15, status: undefined }),
+      "all",
     );
     const payload = (await response.json()) as { data: unknown[]; meta: { total: number; counts: { completed: number } } };
     expect(payload.data).toHaveLength(1);
@@ -156,7 +171,7 @@ describe("GET /api/tms/epod", () => {
     listAssignmentsMock.mockResolvedValue({ items: [], total: 0 });
     const response = await listEpod(new NextRequest("http://localhost/api/tms/epod?status=ngawur"));
     expect(response.status).toBe(200);
-    expect(listAssignmentsMock).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }));
+    expect(listAssignmentsMock).toHaveBeenCalledWith(expect.objectContaining({ status: undefined }), "all");
   });
 
   it("meneruskan rentang tanggal ke daftar dan hitungan status", async () => {
@@ -173,11 +188,15 @@ describe("GET /api/tms/epod", () => {
         dateFrom: "2026-09-26T17:00:00.000Z",
         dateTo: "2026-09-28T16:59:59.999Z",
       }),
+      "all",
     );
-    expect(countMock).toHaveBeenCalledWith({
-      dateFrom: "2026-09-26T17:00:00.000Z",
-      dateTo: "2026-09-28T16:59:59.999Z",
-    });
+    expect(countMock).toHaveBeenCalledWith(
+      {
+        dateFrom: "2026-09-26T17:00:00.000Z",
+        dateTo: "2026-09-28T16:59:59.999Z",
+      },
+      "all",
+    );
   });
 });
 
@@ -665,7 +684,7 @@ describe("GET /api/tms/epod/by-task/[taskId]/export", () => {
     const response = await exportEpod(new NextRequest("http://localhost/api/tms/epod/by-task/t1/export"), context);
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(getAssignmentExportDataMock).toHaveBeenCalledWith("a1");
+    expect(getAssignmentExportDataMock).toHaveBeenCalledWith("a1", "all");
     const payload = (await response.json()) as {
       data: { assignedName: string | null; pointTemperatures: unknown[] };
     };

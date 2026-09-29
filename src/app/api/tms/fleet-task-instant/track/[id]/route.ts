@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { createAdminClient } from "@/lib/supabase-admin";
+import { authorizeTmsScope, isRecordInScope } from "@/lib/tms-tenant-auth";
 import { canAccessTmsData } from "@/lib/permissions";
 import { fetchFleetTaskInstantTrack, McEasyError } from "@/lib/mceasy-server";
 
@@ -59,6 +61,30 @@ export async function GET(
   }
 
   const { id } = await params;
+  const scope = await authorizeTmsScope({
+    userId: user.id,
+    accountType: "internal",
+    permissions,
+    roleLevel: typeof role?.level === "number" ? role.level : 0,
+  });
+  if (!scope.ok) return scope.response;
+  // Jejak track diverifikasi lewat snapshot lokal agar ID milik client
+  // lain tidak bisa diambil langsung.
+  if (scope.scope.allowedClientIds !== "all") {
+    const admin = createAdminClient();
+    const { data: snap } = await admin
+      .from("tms_live_track_task_snapshots")
+      .select("client_id")
+      .eq("track_id", id)
+      .maybeSingle();
+    const clientId = (snap as { client_id?: string | null } | null)?.client_id ?? null;
+    if (!isRecordInScope(clientId, scope.scope.allowedClientIds)) {
+      return NextResponse.json(
+        { error: "Data Live Track Task tidak ditemukan. Pastikan ID tracking masih berlaku." },
+        { status: 404, headers: NO_STORE_HEADERS },
+      );
+    }
+  }
   try {
     // Next sudah men-decode param route; teruskan apa adanya agar ID
     // yang mengandung karakter khusus tidak rusak oleh decode ganda.

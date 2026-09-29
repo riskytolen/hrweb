@@ -28,15 +28,18 @@ export async function GET(request: Request) {
 
   try {
     const [result, counts] = await Promise.all([
-      listAssignments({
-        search: url.searchParams.get("search")?.trim() || undefined,
-        status,
-        dateFrom,
-        dateTo,
-        page,
-        limit,
-      }),
-      countAssignmentsByStatus({ dateFrom, dateTo }),
+      listAssignments(
+        {
+          search: url.searchParams.get("search")?.trim() || undefined,
+          status,
+          dateFrom,
+          dateTo,
+          page,
+          limit,
+        },
+        auth.context.allowedClientIds,
+      ),
+      countAssignmentsByStatus({ dateFrom, dateTo }, auth.context.allowedClientIds),
     ]);
 
     return epodJson({

@@ -23,7 +23,7 @@ export async function GET(
   if (!stopId) return epodError("ID titik tidak valid.", 400);
 
   try {
-    const detail = await getStopDetail(stopId);
+    const detail = await getStopDetail(stopId, auth.context.allowedClientIds);
     if (!detail) return epodError("Titik e-POD tidak ditemukan.", 404);
 
     const admin = createAdminClient();

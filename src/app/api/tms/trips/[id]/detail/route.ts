@@ -3,6 +3,11 @@ import { createClient } from "@/lib/supabase-server";
 import { canAccessTmsData } from "@/lib/permissions";
 import { fetchMcEasyTripDetail, McEasyError } from "@/lib/mceasy-server";
 import { normalizeTripDetailTrail } from "@/lib/fleet-task-track";
+import {
+  authorizeTmsScope,
+  fetchScopedVehicleMap,
+  isVehicleInScopedMap,
+} from "@/lib/tms-tenant-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +30,16 @@ function canAccessTms(permissions: string[]): boolean {
   return canAccessTmsData(permissions);
 }
 
-async function verifyTmsAccess(): Promise<{ ok: true } | { ok: false; status: 401 | 403 }> {
+interface TmsAccessContext {
+  userId: string;
+  permissions: string[];
+  roleLevel: number;
+}
+
+async function verifyTmsAccess(): Promise<
+  | { ok: true; context: TmsAccessContext }
+  | { ok: false; status: 401 | 403 }
+> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -53,7 +67,14 @@ async function verifyTmsAccess(): Promise<{ ok: true } | { ok: false; status: 40
     return { ok: false, status: 403 };
   }
 
-  return { ok: true };
+  return {
+    ok: true,
+    context: {
+      userId: user.id,
+      permissions: parsePermissions(role.permissions),
+      roleLevel: typeof role?.level === "number" ? role.level : 0,
+    },
+  };
 }
 
 export async function GET(
@@ -74,6 +95,24 @@ export async function GET(
   }
 
   const { id } = await params;
+  // ID di endpoint ini adalah identifier unit (plat atau ID McEasy).
+  const scope = await authorizeTmsScope({
+    userId: access.context.userId,
+    accountType: "internal",
+    permissions: access.context.permissions,
+    roleLevel: access.context.roleLevel,
+  });
+  if (!scope.ok) return scope.response;
+  if (scope.scope.allowedClientIds !== "all") {
+    const vehicleMap = await fetchScopedVehicleMap(scope.scope.allowedClientIds);
+    const numericId = Number(id);
+    if (!isVehicleInScopedMap(vehicleMap, Number.isFinite(numericId) ? numericId : null, id)) {
+      return NextResponse.json(
+        { error: "Data trip tidak ditemukan." },
+        { status: 404, headers: NO_STORE_HEADERS },
+      );
+    }
+  }
   const startDate = request.nextUrl.searchParams.get("startDate")?.trim() ?? "";
   const endDate = request.nextUrl.searchParams.get("endDate")?.trim() ?? "";
   if (!startDate || !endDate) {

@@ -14,7 +14,7 @@ export async function GET(
   if (!assignmentId) return epodError("ID assignment tidak valid.", 400);
 
   try {
-    const detail = await getAssignmentDetail(assignmentId);
+    const detail = await getAssignmentDetail(assignmentId, auth.context.allowedClientIds);
     if (!detail) return epodError("Assignment e-POD tidak ditemukan.", 404);
     return epodJson({ data: detail });
   } catch (error) {

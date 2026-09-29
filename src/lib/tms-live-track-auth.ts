@@ -8,6 +8,7 @@ import {
   parsePermissions,
   type AccountType,
 } from "./permissions";
+import { authorizeTmsScope, type ClientScope } from "./tms-tenant-auth";
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
 
@@ -15,6 +16,8 @@ export interface LiveTrackConfigAuthContext {
   userId: string;
   permissions: string[];
   canManage: boolean;
+  accountType: AccountType;
+  allowedClientIds: ClientScope;
 }
 
 export type LiveTrackConfigAuthResult =
@@ -81,12 +84,22 @@ export async function authorizeLiveTrackConfig(
     };
   }
 
+  const scope = await authorizeTmsScope({
+    userId: user.id,
+    accountType,
+    permissions,
+    roleLevel: typeof role?.level === "number" ? role.level : 0,
+  });
+  if (!scope.ok) return scope;
+
   return {
     ok: true,
     context: {
       userId: user.id,
       permissions,
       canManage: canManageLiveTrackConfig(permissions, accountType),
+      accountType,
+      allowedClientIds: scope.scope.allowedClientIds,
     },
   };
 }

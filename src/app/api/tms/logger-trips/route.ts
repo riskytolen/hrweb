@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { canAccessTmsData } from "@/lib/permissions";
+import { authorizeTmsScope } from "@/lib/tms-tenant-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -187,14 +188,32 @@ export async function GET(request: NextRequest) {
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
+  const scope = await authorizeTmsScope({
+    userId: user.id,
+    accountType: "internal",
+    permissions: parsePermissions(role.permissions),
+    roleLevel: typeof role?.level === "number" ? role.level : 0,
+  });
+  if (!scope.ok) return scope.response;
+  const scopeIds = scope.scope.allowedClientIds;
+
   const dataQuery = applyFilters(
-    supabase
-      .from("tms_trip_visit_logs")
-      .select(
-        "id, task_id, task_number, task_status, license_plate, driver_name, route_sequence, " +
-          "point_type, location_name, location_address, arrival_actual, departure_actual, last_synced_at",
-        { count: "exact" },
-      ),
+    scopeIds === "all"
+      ? supabase
+          .from("tms_trip_visit_logs")
+          .select(
+            "id, task_id, task_number, task_status, license_plate, driver_name, route_sequence, " +
+              "point_type, location_name, location_address, arrival_actual, departure_actual, last_synced_at",
+            { count: "exact" },
+          )
+      : supabase
+          .from("tms_trip_visit_logs")
+          .select(
+            "id, task_id, task_number, task_status, license_plate, driver_name, route_sequence, " +
+              "point_type, location_name, location_address, arrival_actual, departure_actual, last_synced_at",
+            { count: "exact" },
+          )
+          .in("client_id", scopeIds),
   )
     .order("arrival_actual", { ascending: false, nullsFirst: false })
     .order("route_sequence", { ascending: true })
@@ -226,7 +245,12 @@ export async function GET(request: NextRequest) {
 
   // KPI dihitung dari rentang tanggal yang sama (tanpa paging).
   const countsQuery = applyFilters(
-    supabase.from("tms_trip_visit_logs").select("arrival_actual, departure_actual", { count: "exact" }),
+    scopeIds === "all"
+      ? supabase.from("tms_trip_visit_logs").select("arrival_actual, departure_actual", { count: "exact" })
+      : supabase
+          .from("tms_trip_visit_logs")
+          .select("arrival_actual, departure_actual", { count: "exact" })
+          .in("client_id", scopeIds),
   );
   const { data: countRows, count: total } = await countsQuery;
   const counts = { completed: 0, ongoing: 0, incomplete: 0, pending: 0 };

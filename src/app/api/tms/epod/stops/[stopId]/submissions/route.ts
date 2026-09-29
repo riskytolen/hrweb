@@ -101,7 +101,7 @@ export async function POST(
   const items = parseItems(source.items);
 
   try {
-    const detail = await getStopDetail(stopId);
+    const detail = await getStopDetail(stopId, auth.context.allowedClientIds);
     if (!detail) return epodError("Titik e-POD tidak ditemukan.", 404);
     if (detail.assignment.status === "CANCELLED") {
       return epodError("Assignment e-POD sudah dibatalkan.", 400);

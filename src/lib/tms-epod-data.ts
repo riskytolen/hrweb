@@ -18,6 +18,7 @@ import {
   normalizePointTemperatureList,
   type TmsRoutePointTemperature,
 } from "./tms-point-temperature";
+import { isRecordInScope, type ClientScope } from "./tms-tenant-auth";
 
 const ASSIGNMENTS = "tms_epod_assignments";
 const STOPS = "tms_epod_stops";
@@ -102,7 +103,11 @@ export function resolvePetugasRoleLabel(
 
 export async function listAssignments(
   filters: EpodAssignmentFilters,
+  clientScope: ClientScope = "all",
 ): Promise<{ items: EpodAssignmentListItem[]; total: number }> {
+  if (clientScope !== "all" && clientScope.length === 0) {
+    return { items: [], total: 0 };
+  }
   const admin = createAdminClient();
   let query = admin
     .from(ASSIGNMENTS)
@@ -110,6 +115,7 @@ export async function listAssignments(
     // Monitoring hanya menampilkan FO Dijadwalkan/Berjalan/Selesai.
     .in("task_status_raw", VISIBLE_TASK_STATUSES);
 
+  if (clientScope !== "all") query = query.in("client_id", clientScope);
   if (filters.status) query = query.eq("status", filters.status);
   if (filters.dateFrom) query = query.gte("snapshot_at", filters.dateFrom);
   if (filters.dateTo) query = query.lte("snapshot_at", filters.dateTo);
@@ -151,6 +157,7 @@ export async function listAssignments(
 
 export async function getAssignmentDetail(
   assignmentId: string,
+  clientScope: ClientScope = "all",
 ): Promise<EpodAssignmentDetail | null> {
   const admin = createAdminClient();
   const { data: assignmentRow, error } = await admin
@@ -161,6 +168,8 @@ export async function getAssignmentDetail(
   if (error) throw new Error(error.message);
   const assignment = normalizeEpodAssignment(assignmentRow);
   if (!assignment) return null;
+  // Endpoint detail lintas client dikembalikan sebagai tidak ada (404 di route).
+  if (!isRecordInScope(assignment.clientId, clientScope)) return null;
 
   const { data: stopRows, error: stopError } = await admin
     .from(STOPS)
@@ -203,7 +212,10 @@ export async function getAssignmentDetail(
   };
 }
 
-export async function getStopDetail(stopId: string): Promise<EpodStopDetail | null> {
+export async function getStopDetail(
+  stopId: string,
+  clientScope: ClientScope = "all",
+): Promise<EpodStopDetail | null> {
   const admin = createAdminClient();
   const { data: stopRow, error } = await admin.from(STOPS).select("*").eq("id", stopId).maybeSingle();
   if (error) throw new Error(error.message);
@@ -218,6 +230,7 @@ export async function getStopDetail(stopId: string): Promise<EpodStopDetail | nu
   if (assignmentError) throw new Error(assignmentError.message);
   const assignment = normalizeEpodAssignment(assignmentRow);
   if (!assignment) return null;
+  if (!isRecordInScope(assignment.clientId, clientScope)) return null;
 
   const { data: submissionRows, error: submissionError } = await admin
     .from(SUBMISSIONS)
@@ -241,7 +254,10 @@ export interface EpodTaskSummary {
   currentByStop: Record<string, EpodSubmission>;
 }
 
-export async function getAssignmentByTask(taskId: string): Promise<EpodTaskSummary | null> {
+export async function getAssignmentByTask(
+  taskId: string,
+  clientScope: ClientScope = "all",
+): Promise<EpodTaskSummary | null> {
   const admin = createAdminClient();
   const { data: assignmentRow, error } = await admin
     .from(ASSIGNMENTS)
@@ -251,8 +267,9 @@ export async function getAssignmentByTask(taskId: string): Promise<EpodTaskSumma
   if (error) throw new Error(error.message);
   const assignment = normalizeEpodAssignment(assignmentRow);
   if (!assignment) return null;
+  if (!isRecordInScope(assignment.clientId, clientScope)) return null;
 
-  const detail = await getAssignmentDetail(assignment.id);
+  const detail = await getAssignmentDetail(assignment.id, clientScope);
   if (!detail) return null;
   return { assignment: detail.assignment, stops: detail.stops, currentByStop: detail.currentByStop };
 }
@@ -315,11 +332,17 @@ export async function listEpodPetugas(): Promise<EpodPetugasOption[]> {
   });
 }
 
-export async function getAssignmentById(assignmentId: string): Promise<EpodAssignment | null> {
+export async function getAssignmentById(
+  assignmentId: string,
+  clientScope: ClientScope = "all",
+): Promise<EpodAssignment | null> {
   const admin = createAdminClient();
   const { data, error } = await admin.from(ASSIGNMENTS).select("*").eq("id", assignmentId).maybeSingle();
   if (error) throw new Error(error.message);
-  return normalizeEpodAssignment(data);
+  const assignment = normalizeEpodAssignment(data);
+  if (!assignment) return null;
+  if (!isRecordInScope(assignment.clientId, clientScope)) return null;
+  return assignment;
 }
 
 export interface EpodStatusCounts {
@@ -334,7 +357,17 @@ export interface EpodStatusCounts {
 /** Hitung jumlah assignment per status untuk kartu ringkasan. */
 export async function countAssignmentsByStatus(
   filters: { dateFrom?: string; dateTo?: string } = {},
+  clientScope: ClientScope = "all",
 ): Promise<EpodStatusCounts> {
+  const zero: EpodStatusCounts = {
+    open: 0,
+    claimed: 0,
+    inProgress: 0,
+    completed: 0,
+    cancelled: 0,
+    total: 0,
+  };
+  if (clientScope !== "all" && clientScope.length === 0) return zero;
   const admin = createAdminClient();
   const statuses = ["OPEN", "CLAIMED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] as const;
   const results = await Promise.all(
@@ -344,6 +377,7 @@ export async function countAssignmentsByStatus(
         .select("id", { count: "exact", head: true })
         .eq("status", status)
         .in("task_status_raw", VISIBLE_TASK_STATUSES);
+      if (clientScope !== "all") query = query.in("client_id", clientScope);
       if (filters.dateFrom) query = query.gte("snapshot_at", filters.dateFrom);
       if (filters.dateTo) query = query.lte("snapshot_at", filters.dateTo);
       return query;
@@ -386,8 +420,9 @@ export interface EpodAssignmentExport extends EpodAssignmentDetail {
  */
 export async function getAssignmentExportData(
   assignmentId: string,
+  clientScope: ClientScope = "all",
 ): Promise<EpodAssignmentExport | null> {
-  const detail = await getAssignmentDetail(assignmentId);
+  const detail = await getAssignmentDetail(assignmentId, clientScope);
   if (!detail) return null;
 
   const admin = createAdminClient();

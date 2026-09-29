@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { authorizeTmsScope, fetchScopedVehicleMap } from "@/lib/tms-tenant-auth";
 import { createClient } from "@/lib/supabase-server";
 import { canAccessTmsData } from "@/lib/permissions";
 import { fetchMcEasyVehicleStatuses, McEasyError } from "@/lib/mceasy-server";
@@ -25,7 +26,16 @@ function canAccessTms(permissions: string[]): boolean {
   return canAccessTmsData(permissions);
 }
 
-async function verifyTmsAccess(): Promise<{ ok: true } | { ok: false; status: 401 | 403 }> {
+interface TmsAccessContext {
+  userId: string;
+  permissions: string[];
+  roleLevel: number;
+}
+
+async function verifyTmsAccess(): Promise<
+  | { ok: true; context: TmsAccessContext }
+  | { ok: false; status: 401 | 403 }
+> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -56,7 +66,14 @@ async function verifyTmsAccess(): Promise<{ ok: true } | { ok: false; status: 40
     return { ok: false, status: 403 };
   }
 
-  return { ok: true };
+  return {
+    ok: true,
+    context: {
+      userId: user.id,
+      permissions: parsePermissions(role.permissions),
+      roleLevel: typeof role?.level === "number" ? role.level : 0,
+    },
+  };
 }
 
 function parseBooleanParam(value: string | null, fallback: boolean): boolean {
@@ -84,10 +101,23 @@ export async function GET(request: NextRequest) {
   const filteredParam = request.nextUrl.searchParams.get("withFilteredAddress");
   const withFilteredAddress = filteredParam === null ? undefined : parseBooleanParam(filteredParam, false);
 
+  const scope = await authorizeTmsScope({
+    userId: access.context.userId,
+    accountType: "internal",
+    permissions: access.context.permissions,
+    roleLevel: access.context.roleLevel,
+  });
+  if (!scope.ok) return scope.response;
+
   try {
     const data = await fetchMcEasyVehicleStatuses({ withAddress, withFilteredAddress });
+    const vehicleMap = await fetchScopedVehicleMap(scope.scope.allowedClientIds);
+    const filtered =
+      vehicleMap === "all"
+        ? data
+        : data.filter((vehicle) => vehicleMap.byMceasyId.has(vehicle.vehicleId));
     return NextResponse.json(
-      { data, meta: { total: data.length, fetchedAt: new Date().toISOString(), withAddress } },
+      { data: filtered, meta: { total: filtered.length, fetchedAt: new Date().toISOString(), withAddress } },
       { headers: NO_STORE_HEADERS },
     );
   } catch (error) {

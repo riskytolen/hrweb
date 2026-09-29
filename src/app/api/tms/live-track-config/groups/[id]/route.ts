@@ -39,6 +39,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const admin = createAdminClient();
+  // Kelompok milik client lain tidak boleh diubah.
+  if (auth.context.allowedClientIds !== "all") {
+    const { data: existing } = await admin
+      .from("tms_live_track_groups")
+      .select("client_id")
+      .eq("id", id)
+      .maybeSingle();
+    const existingClientId =
+      (existing as { client_id?: string | null } | null)?.client_id ?? null;
+    if (!existingClientId || !auth.context.allowedClientIds.includes(existingClientId)) {
+      return liveTrackConfigError("Kelompok tidak ditemukan.", 404);
+    }
+  }
   const { data, error } = await admin.rpc("tms_live_track_config_save_group", {
     p_group: {
       id,
@@ -59,6 +72,32 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
   if (error) {
     return liveTrackConfigError(error.message || "Gagal menyimpan kelompok.", 400);
+  }
+  // Cap client bila kelompok belum punya (grup lama pra-tenant).
+  const { data: saved } = await admin
+    .from("tms_live_track_groups")
+    .select("client_id")
+    .eq("id", id)
+    .maybeSingle();
+  if ((saved as { client_id?: string | null } | null)?.client_id == null) {
+    const requestedClientId =
+      typeof (input as { clientId?: unknown }).clientId === "string"
+        ? ((input as { clientId?: unknown }).clientId as string)
+        : null;
+    let clientToStamp: string | null = null;
+    if (auth.context.allowedClientIds === "all") {
+      clientToStamp = requestedClientId;
+    } else if (auth.context.allowedClientIds.length === 1) {
+      clientToStamp = auth.context.allowedClientIds[0] ?? null;
+    } else if (requestedClientId && auth.context.allowedClientIds.includes(requestedClientId)) {
+      clientToStamp = requestedClientId;
+    }
+    if (clientToStamp) {
+      await admin
+        .from("tms_live_track_groups")
+        .update({ client_id: clientToStamp, updated_at: new Date().toISOString() })
+        .eq("id", id);
+    }
   }
   return liveTrackConfigJson({ data });
 }

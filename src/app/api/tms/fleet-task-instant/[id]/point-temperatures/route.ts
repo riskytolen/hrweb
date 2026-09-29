@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 import { canAccessTmsData } from "@/lib/permissions";
+import { authorizeTmsScope } from "@/lib/tms-tenant-auth";
 import { normalizePointTemperatureList } from "@/lib/tms-point-temperature";
 
 export const dynamic = "force-dynamic";
@@ -69,13 +70,24 @@ export async function GET(
     return NextResponse.json({ error: "ID Fleet Task tidak valid." }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
-  const { data, error } = await supabase
+  const scope = await authorizeTmsScope({
+    userId: user.id,
+    accountType: "internal",
+    permissions: parsePermissions(role.permissions),
+    roleLevel: typeof role?.level === "number" ? role.level : 0,
+  });
+  if (!scope.ok) return scope.response;
+
+  let tempQuery = supabase
     .from(TABLE)
     .select(
       "task_id,task_number,vehicle_id,license_plate,route_sequence,point_name,temperatures,measured_at,arrival_actual,distance_meters,captured_at",
     )
-    .eq("task_id", taskId)
-    .order("route_sequence", { ascending: true });
+    .eq("task_id", taskId);
+  if (scope.scope.allowedClientIds !== "all") {
+    tempQuery = tempQuery.in("client_id", scope.scope.allowedClientIds);
+  }
+  const { data, error } = await tempQuery.order("route_sequence", { ascending: true });
 
   if (error) {
     return NextResponse.json(

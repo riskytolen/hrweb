@@ -61,6 +61,8 @@ export interface EpodAssignment {
   snapshotAt: string;
   frozenAt: string | null;
   lastSyncedAt: string | null;
+  /** Client pemilik assignment (null = belum dipetakan). */
+  clientId: string | null;
 }
 
 export interface EpodStop {
@@ -77,6 +79,8 @@ export interface EpodStop {
   arrivalActual: string | null;
   departureActual: string | null;
   visitStatusRaw: string | null;
+  /** Client pemilik stop (null = belum dipetakan). */
+  clientId: string | null;
 }
 
 /** Satu barang yang diantar pada sebuah titik pengantaran. */
@@ -263,6 +267,7 @@ export function normalizeEpodAssignment(raw: unknown): EpodAssignment | null {
     snapshotAt: toStr(pick(source, "snapshot_at", "snapshotAt"), 40) ?? new Date(0).toISOString(),
     frozenAt: toStr(pick(source, "frozen_at", "frozenAt"), 40),
     lastSyncedAt: toStr(pick(source, "last_synced_at", "lastSyncedAt"), 40),
+    clientId: toStr(pick(source, "client_id", "clientId"), 60),
   };
 }
 
@@ -285,6 +290,7 @@ export function normalizeEpodStop(raw: unknown): EpodStop | null {
     arrivalActual: toStr(pick(source, "arrival_actual", "arrivalActual"), 40),
     departureActual: toStr(pick(source, "departure_actual", "departureActual"), 40),
     visitStatusRaw: toStr(pick(source, "visit_status_raw", "visitStatusRaw"), 40),
+    clientId: toStr(pick(source, "client_id", "clientId"), 60),
   };
 }
 

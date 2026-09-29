@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "./supabase-admin";
+import { stampUnmappedTmsRows } from "./tms-tenant-sync-server";
 import { fetchFleetTaskInstantDetail, fetchFleetTaskInstantList } from "./mceasy-server";
 import { normalizeFleetTaskInstantItem, type FleetTaskInstantItem } from "./fleet-task-track";
 import { resolveRoutePointSequence } from "./tms-point-temperature";
@@ -304,6 +305,9 @@ export async function syncActiveEpodAssignments(
   }
 
   const evidencePurged = await purgeExpiredEvidence(admin, now, failures);
+
+  // Assignment/stop baru hasil sync langsung dicap client.
+  await stampUnmappedTmsRows(admin);
 
   return {
     requestedAt: nowIso,

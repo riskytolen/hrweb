@@ -20,7 +20,7 @@ export async function GET(
   if (!taskId) return epodError("ID task tidak valid.", 400);
 
   try {
-    const summary = await getAssignmentByTask(taskId);
+    const summary = await getAssignmentByTask(taskId, auth.context.allowedClientIds);
     if (!summary) {
       return epodError("Data e-POD belum tersedia untuk FO ini.", 404);
     }
@@ -28,7 +28,7 @@ export async function GET(
       return epodError("Laporan PDF hanya tersedia setelah seluruh e-POD selesai.", 409);
     }
 
-    const data = await getAssignmentExportData(summary.assignment.id);
+    const data = await getAssignmentExportData(summary.assignment.id, auth.context.allowedClientIds);
     if (!data) {
       return epodError("Data e-POD belum tersedia untuk FO ini.", 404);
     }

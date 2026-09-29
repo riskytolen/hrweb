@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "./supabase-admin";
+import { stampUnmappedTmsRows } from "./tms-tenant-sync-server";
 import {
   fetchFleetTaskInstantDetail,
   fetchFleetTaskInstantList,
@@ -485,6 +486,10 @@ export async function syncLiveTrack(now = Date.now(), options: SyncOptions = {})
   } catch (error) {
     summary.failures.push(errorMessage(error));
   }
+
+  // Baris baru hasil sync langsung dicap client agar tidak tampil sebagai
+  // UNASSIGNED bagi user scoped pada siklus berikutnya.
+  await stampUnmappedTmsRows(admin);
 
   return summary;
 }

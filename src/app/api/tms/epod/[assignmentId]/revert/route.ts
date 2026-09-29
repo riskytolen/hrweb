@@ -36,7 +36,7 @@ export async function POST(
       return epodError(error.message, 400);
     }
 
-    const detail = await getAssignmentDetail(assignmentId);
+    const detail = await getAssignmentDetail(assignmentId, auth.context.allowedClientIds);
     return epodJson({ data: detail });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gagal mengembalikan assignment e-POD.";

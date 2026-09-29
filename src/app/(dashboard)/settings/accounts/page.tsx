@@ -182,6 +182,7 @@ function odometerInputPermissionLabel(key: string): string | null {
 const TMS_BASE_PERMISSION_LABELS: Record<string, string> = {
   tms: "TMS (semua menu)",
   "vehicle-odometer": "Operasional Kendaraan (semua)",
+  "tms.clients.all": "TMS (semua klien)",
 };
 
 export default function AccountsPage() {
@@ -1928,6 +1929,34 @@ export default function AccountsPage() {
                     <div>
                       <p className="text-sm font-semibold text-foreground">Akses Penuh</p>
                       <p className="text-[10px] text-muted-foreground">Dapat mengakses semua modul</p>
+                    </div>
+                  </label>
+
+                  {/* Cakupan data client TMS */}
+                  <label className="flex items-center gap-3 p-3 rounded-xl border border-border hover:bg-muted/30 cursor-pointer mb-2">
+                    <input
+                      type="checkbox"
+                      checked={roleForm.permissions.includes("tms.clients.all")}
+                      onChange={() => {
+                        if (roleForm.permissions.includes("tms.clients.all")) {
+                          setRoleForm({
+                            ...roleForm,
+                            permissions: roleForm.permissions.filter((p) => p !== "tms.clients.all"),
+                          });
+                        } else {
+                          setRoleForm({
+                            ...roleForm,
+                            permissions: [...roleForm.permissions, "tms.clients.all"],
+                          });
+                        }
+                      }}
+                      className="w-4 h-4 rounded accent-primary"
+                    />
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Semua Klien TMS</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Cakupan data seluruh client (khusus internal; diabaikan untuk akun external)
+                      </p>
                     </div>
                   </label>
 
