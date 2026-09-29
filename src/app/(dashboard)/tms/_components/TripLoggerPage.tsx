@@ -237,7 +237,10 @@ export default function TripLoggerPage() {
       const payload = (await response.json()) as ListResponse;
       if (!response.ok || payload.error) {
         setError(payload.error ?? "Gagal memuat Logger Trips.");
+        // Reset agar tidak tampil error + sisa angka/list dari filter sebelumnya.
         setRows([]);
+        setTotal(0);
+        setCounts(null);
         return;
       }
       setRows(Array.isArray(payload.data) ? payload.data : []);
@@ -247,6 +250,8 @@ export default function TripLoggerPage() {
     } catch {
       setError("Gagal memuat Logger Trips.");
       setRows([]);
+      setTotal(0);
+      setCounts(null);
     } finally {
       setLoading(false);
     }

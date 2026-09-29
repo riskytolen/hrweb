@@ -252,6 +252,20 @@ describe("normalizer baris database", () => {
     expect(assignment?.deliveryTotalCount).toBe(6);
   });
 
+  it("membaca completed_at bila ada dan null bila belum selesai", () => {
+    expect(
+      normalizeEpodAssignment({
+        id: "a1",
+        task_id: "t1",
+        status: "COMPLETED",
+        completed_at: "2026-09-29T10:00:00Z",
+      })?.completedAt,
+    ).toBe("2026-09-29T10:00:00Z");
+    expect(
+      normalizeEpodAssignment({ id: "a1", task_id: "t1", status: "OPEN" })?.completedAt,
+    ).toBeNull();
+  });
+
   it("menolak assignment tanpa id atau task_id", () => {
     expect(normalizeEpodAssignment({ id: "a1" })).toBeNull();
     expect(normalizeEpodAssignment(null)).toBeNull();

@@ -92,6 +92,13 @@ function scopeError(message: string, status: number): NextResponse {
   return NextResponse.json({ error: message }, { status, headers: NO_STORE_HEADERS });
 }
 
+/** Referensi UUID valid — satu-satunya bentuk yang boleh dicari via kolom `id`. */
+const UUID_REF_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuidRef(value: string): boolean {
+  return UUID_REF_PATTERN.test(value);
+}
+
 /**
  * Totapkan scope client untuk request yang sudah lolos cek permission modul.
  * `requestedClientId` (mis. query `?client=`) tidak pernah dipercaya
@@ -133,12 +140,16 @@ export async function authorizeTmsScope(input: {
     if (!safeRef) {
       return { ok: false, response: scopeError("Data tidak ditemukan.", 404) };
     }
-    const { data: client } = await admin
-      .from("tms_clients")
-      .select("id")
-      .eq("status", "Aktif")
-      .or(`id.eq.${safeRef},code.ilike.${safeRef},slug.ilike.${safeRef}`)
-      .maybeSingle();
+    // Kolom `id` bertipe UUID: slug/code seperti "tuku" tidak boleh dicari
+    // via `id.eq.<slug>` karena membuat seluruh query resolusi gagal.
+    // UUID dicari persis by id; selain itu hanya by code/slug.
+    const clientQuery = admin.from("tms_clients").select("id").eq("status", "Aktif");
+    const { data: client, error: clientError } = isUuidRef(safeRef)
+      ? await clientQuery.eq("id", safeRef).maybeSingle()
+      : await clientQuery.or(`code.ilike.${safeRef},slug.ilike.${safeRef}`).maybeSingle();
+    if (clientError) {
+      return { ok: false, response: scopeError("Gagal memvalidasi client TMS.", 502) };
+    }
     const resolvedId = (client as { id?: string } | null)?.id ?? null;
     if (
       !resolvedId ||

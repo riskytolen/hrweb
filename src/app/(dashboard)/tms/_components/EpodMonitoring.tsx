@@ -157,6 +157,8 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
     if (dateFrom && dateTo && dateTo < dateFrom) {
       setLoading(false);
       setItems([]);
+      setTotal(0);
+      setCounts(null);
       setError("Tanggal mulai tidak boleh setelah tanggal selesai.");
       return;
     }
@@ -183,7 +185,10 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
       const payload = (await response.json()) as ListResponse;
       if (!response.ok || payload.error) {
         setError(payload.error ?? "Gagal memuat data e-POD.");
+        // Reset agar tidak tampil error + sisa angka/list dari filter sebelumnya.
         setItems([]);
+        setTotal(0);
+        setCounts(null);
         return;
       }
       setItems(normalizeEpodAssignmentList(payload.data));
@@ -191,6 +196,9 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
       setTotal(payload.meta?.total ?? 0);
     } catch {
       setError("Gagal memuat data e-POD.");
+      setItems([]);
+      setTotal(0);
+      setCounts(null);
     } finally {
       setLoading(false);
     }

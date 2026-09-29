@@ -89,7 +89,12 @@ export default function TmsClientSelector({ compact = false }: { compact?: boole
       if (value) params.set("client", value);
       else params.delete("client");
       const query = params.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      const url = query ? `${pathname}?${query}` : pathname;
+      // Sinkronkan URL secara sinkron dulu: listener membaca client dari
+      // window.location.search, sedangkan router.replace() bersifat async.
+      // Tanpa ini request pertama setelah ganti client bisa memakai client lama.
+      window.history.replaceState(null, "", url);
+      router.replace(url, { scroll: false });
       window.dispatchEvent(new Event(TMS_CLIENT_CHANGED_EVENT));
     },
     [pathname, router],

@@ -172,6 +172,147 @@ describe("authorizeTmsScope", () => {
     expect(result).toMatchObject({ ok: true, selectedClientId: "client-b" });
     if (result.ok) expect(result.scope.allowedClientIds).toEqual(["client-b"]);
   });
+
+  it("resolve slug/code tanpa menyentuh kolom id UUID", async () => {
+    const seen: string[] = [];
+    const clientQuery = () => {
+      const chain: Record<string, (...args: unknown[]) => unknown> = {};
+      chain.eq = (column: unknown, value: unknown) => {
+        seen.push(`eq:${String(column)}=${String(value)}`);
+        return chain;
+      };
+      chain.or = (filter: unknown) => {
+        seen.push(`or:${String(filter)}`);
+        return chain;
+      };
+      chain.maybeSingle = async () => ({ data: { id: "client-tuku" }, error: null });
+      return chain;
+    };
+    mockMemberships(["client-tuku"]);
+    createAdminMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "tms_clients") return { select: () => clientQuery() };
+        return {
+          select: () => ({
+            eq: () => ({ eq: async () => ({ data: [{ client_id: "client-tuku" }], error: null }) }),
+          }),
+        };
+      },
+    } as never);
+
+    const result = await authorizeTmsScope({
+      userId: "user-1",
+      accountType: "internal",
+      permissions: ["tms.live-view"],
+      roleLevel: 10,
+      requestedClientRef: "tuku",
+    });
+
+    expect(result).toMatchObject({ ok: true, selectedClientId: "client-tuku" });
+    // Slug tidak boleh dicari via id.eq.<slug> (kolom UUID).
+    expect(seen.some((entry) => entry.startsWith("eq:id="))).toBe(false);
+    expect(seen).toContain("or:code.ilike.tuku,slug.ilike.tuku");
+  });
+
+  it("resolve UUID langsung via kolom id", async () => {
+    const uuid = "11111111-2222-3333-4444-555555555555";
+    const seen: string[] = [];
+    const clientQuery = () => {
+      const chain: Record<string, (...args: unknown[]) => unknown> = {};
+      chain.eq = (column: unknown, value: unknown) => {
+        seen.push(`eq:${String(column)}=${String(value)}`);
+        return chain;
+      };
+      chain.or = (filter: unknown) => {
+        seen.push(`or:${String(filter)}`);
+        return chain;
+      };
+      chain.maybeSingle = async () => ({ data: { id: uuid }, error: null });
+      return chain;
+    };
+    mockMemberships([uuid]);
+    createAdminMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "tms_clients") return { select: () => clientQuery() };
+        return {
+          select: () => ({
+            eq: () => ({ eq: async () => ({ data: [{ client_id: uuid }], error: null }) }),
+          }),
+        };
+      },
+    } as never);
+
+    const result = await authorizeTmsScope({
+      userId: "user-1",
+      accountType: "internal",
+      permissions: ["tms.live-view"],
+      roleLevel: 10,
+      requestedClientRef: uuid,
+    });
+
+    expect(result).toMatchObject({ ok: true, selectedClientId: uuid });
+    expect(seen).toContain(`eq:id=${uuid}`);
+    expect(seen.some((entry) => entry.startsWith("or:"))).toBe(false);
+  });
+
+  it("client tak dikenal tetap 404 dan error resolve jadi 502", async () => {
+    mockMemberships(["client-a"]);
+    createAdminMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "tms_clients") {
+          return {
+            select: () => ({
+              eq: () => ({
+                or: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: () => ({
+            eq: () => ({ eq: async () => ({ data: [{ client_id: "client-a" }], error: null }) }),
+          }),
+        };
+      },
+    } as never);
+    const missing = await authorizeTmsScope({
+      userId: "user-1",
+      accountType: "internal",
+      permissions: ["tms.live-view"],
+      roleLevel: 10,
+      requestedClientRef: "ngawur",
+    });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.response.status).toBe(404);
+
+    createAdminMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "tms_clients") {
+          return {
+            select: () => ({
+              eq: () => ({
+                or: () => ({ maybeSingle: async () => ({ data: null, error: { message: "db down" } }) }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: () => ({
+            eq: () => ({ eq: async () => ({ data: [{ client_id: "client-a" }], error: null }) }),
+          }),
+        };
+      },
+    } as never);
+    const broken = await authorizeTmsScope({
+      userId: "user-1",
+      accountType: "internal",
+      permissions: ["tms.live-view"],
+      roleLevel: 10,
+      requestedClientRef: "tuku",
+    });
+    expect(broken.ok).toBe(false);
+    if (!broken.ok) expect(broken.response.status).toBe(502);
+  });
 });
 
 describe("isRecordInScope", () => {

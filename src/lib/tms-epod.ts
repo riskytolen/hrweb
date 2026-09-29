@@ -61,6 +61,8 @@ export interface EpodAssignment {
   snapshotAt: string;
   frozenAt: string | null;
   lastSyncedAt: string | null;
+  /** Waktu e-POD selesai; null bila status belum COMPLETED. */
+  completedAt: string | null;
   /** Client pemilik assignment (null = belum dipetakan). */
   clientId: string | null;
 }
@@ -265,6 +267,8 @@ export function normalizeEpodAssignment(raw: unknown): EpodAssignment | null {
     deliveryDoneCount: toInt(pick(source, "delivery_done_count", "deliveryDoneCount")),
     deliveryTotalCount: toInt(pick(source, "delivery_total_count", "deliveryTotalCount")),
     snapshotAt: toStr(pick(source, "snapshot_at", "snapshotAt"), 40) ?? new Date(0).toISOString(),
+    /** Waktu e-POD selesai (null bila belum COMPLETED). */
+    completedAt: toStr(pick(source, "completed_at", "completedAt"), 40),
     frozenAt: toStr(pick(source, "frozen_at", "frozenAt"), 40),
     lastSyncedAt: toStr(pick(source, "last_synced_at", "lastSyncedAt"), 40),
     clientId: toStr(pick(source, "client_id", "clientId"), 60),
