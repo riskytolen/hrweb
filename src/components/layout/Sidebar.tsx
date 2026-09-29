@@ -48,6 +48,7 @@ import {
   PackageCheck,
   ScrollText,
   Settings2,
+  Car,
   type LucideIcon,
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
@@ -183,6 +184,15 @@ const allSections: MenuSection[] = [
           { name: "Pengaturan Live Track", href: "/tms/live-track-settings", icon: Settings2, permission: "tms.live-track-config" },
           { name: "Monitoring e-POD", href: "/tms/epod", icon: PackageCheck, permission: "tms.epod" },
           { name: "Logger Trips", href: "/tms/logger-trips", icon: ScrollText, permission: "tms.logger-trips" },
+        ],
+      },
+      {
+        kind: "group",
+        key: "operasional-kendaraan",
+        label: "Operasional Kendaraan",
+        icon: Car,
+        basePath: "/operasional-kendaraan",
+        items: [
           { name: "Dashboard Kendaraan", href: "/operasional-kendaraan/dashboard", icon: Gauge, permission: "vehicle-odometer.dashboard" },
           { name: "Input Odometer", href: "/operasional-kendaraan/input", icon: ClipboardList, permission: "vehicle-odometer.manage" },
           { name: "Laporan Kendaraan", href: "/operasional-kendaraan/laporan", icon: FileSpreadsheet, permission: "vehicle-odometer.report" },

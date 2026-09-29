@@ -146,9 +146,23 @@ export async function GET() {
     return NextResponse.json({ error: "Gagal memuat client TMS." }, { status: 502, headers: NO_STORE_HEADERS });
   }
   const rows = (Array.isArray(data) ? data : []) as ClientRow[];
+  // Hitung unit operasional aktif per client (best effort; 0 bila gagal).
+  const counts = new Map<string, number>();
+  try {
+    const { data: assignments } = await admin
+      .from("client_vehicle_odometer_assignments")
+      .select("client_id")
+      .eq("status", "Aktif");
+    for (const row of (Array.isArray(assignments) ? assignments : []) as { client_id: string }[]) {
+      const key = String(row.client_id);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  } catch {
+    // Abaikan; count default 0.
+  }
   return NextResponse.json(
     {
-      data: rows.map(toResponse),
+      data: rows.map((row) => ({ ...toResponse(row), odometerVehicleCount: counts.get(row.id) ?? 0 })),
       meta: { total: rows.length, fetchedAt: new Date().toISOString() },
     },
     { headers: NO_STORE_HEADERS },
