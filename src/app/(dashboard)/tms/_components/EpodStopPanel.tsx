@@ -125,31 +125,45 @@ const SignaturePad = ({
 
   const setupCanvas = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return false;
     const parent = canvas.parentElement;
-    const width = parent ? parent.clientWidth : 320;
+    // Panel detail bisa belum punya lebar saat pertama mount (mis. animasi/scroll),
+    // jadi jangan kunci backing store ke 1px — biarkan fallback dan coba lagi nanti.
+    const width = parent && parent.clientWidth > 0 ? parent.clientWidth : 320;
     const ratio = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
     canvas.width = Math.max(1, Math.round(width * ratio));
     canvas.height = Math.round(160 * ratio);
     canvas.style.height = "160px";
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return false;
     ctx.scale(ratio, ratio);
     ctx.lineWidth = 2.2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = "#0f172a";
+    return true;
   }, []);
 
   useEffect(() => {
     setupCanvas();
-    const onResize = () => {
-      const canvas = canvasRef.current;
-      if (!canvas || hasInkRef.current) return;
+    const refresh = () => {
+      if (hasInkRef.current) return;
       setupCanvas();
     };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    window.addEventListener("resize", refresh);
+    const parent = canvasRef.current?.parentElement ?? null;
+    const observer =
+      typeof ResizeObserver !== "undefined" && parent
+        ? new ResizeObserver(refresh)
+        : null;
+    observer?.observe(parent as Element);
+    // Panel bisa terbuka dengan lebar 0 pada frame pertama; sinkronkan ulang.
+    const retry = window.setTimeout(refresh, 300);
+    return () => {
+      window.removeEventListener("resize", refresh);
+      window.clearTimeout(retry);
+      observer?.disconnect();
+    };
   }, [setupCanvas]);
 
   React.useImperativeHandle(
@@ -204,7 +218,10 @@ const SignaturePad = ({
   return (
     <canvas
       ref={canvasRef}
-      className="w-full cursor-crosshair touch-none rounded-lg border border-border bg-white"
+      height={160}
+      data-testid="epod-signature-pad"
+      style={{ minHeight: 160 }}
+      className="block w-full cursor-crosshair touch-none rounded-lg border border-border bg-white"
       onPointerDown={(event) => {
         (event.target as HTMLCanvasElement).setPointerCapture(event.pointerId);
         drawingRef.current = true;
@@ -562,6 +579,7 @@ function StopSubmissionForm({
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const signatureRef = useRef<SignaturePadHandle | null>(null);
+  const signatureSectionRef = useRef<HTMLDivElement | null>(null);
   const [signatureDrawn, setSignatureDrawn] = useState(false);
 
   const isDelivery = stop.stopType === "DELIVERY";
@@ -664,6 +682,11 @@ function StopSubmissionForm({
     });
     if (validationError) {
       setError(validationError);
+      if (validationError.includes("Tanda tangan")) {
+        requestAnimationFrame(() => {
+          signatureSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
       return;
     }
 
@@ -814,6 +837,41 @@ function StopSubmissionForm({
       </div>
 
       {isDelivery && (
+        <div
+          ref={signatureSectionRef}
+          data-testid="epod-signature-section"
+          className={cn(
+            "space-y-1.5 rounded-xl border-2 border-dashed p-2.5",
+            signatureDrawn
+              ? "border-emerald-500/60 bg-emerald-50/40"
+              : "border-amber-500/60 bg-amber-50/40",
+          )}
+        >
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-bold text-foreground">
+              Tanda tangan penerima <span className="font-semibold text-danger">· wajib</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                signatureRef.current?.clear();
+                setSignatureDrawn(false);
+              }}
+              className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted"
+            >
+              <Undo2 className="h-3.5 w-3.5" /> Hapus/Ulangi
+            </button>
+          </div>
+          <SignaturePad ref={signatureRef} onStroke={() => setSignatureDrawn(true)} />
+          <p className={cn("text-[11px]", signatureDrawn ? "font-semibold text-emerald-600" : "text-muted-foreground")}>
+            {signatureDrawn
+              ? "Tanda tangan terisi."
+              : "Minta penerima menandatangani di area putih di bawah ini."}
+          </p>
+        </div>
+      )}
+
+      {isDelivery && (
         <div className="space-y-2">
           <p className="text-[11px] font-semibold text-muted-foreground">
             Barang ({filledEpodItems(items).length}) <span className="font-normal">· wajib minimal 1</span>
@@ -943,30 +1001,6 @@ function StopSubmissionForm({
           </ul>
         )}
       </div>
-
-      {isDelivery && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <p className="text-[11px] font-semibold text-muted-foreground">
-              Tanda tangan penerima <span className="font-normal">· wajib</span>
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                signatureRef.current?.clear();
-                setSignatureDrawn(false);
-              }}
-              className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted"
-            >
-              <Undo2 className="h-3.5 w-3.5" /> Hapus/Ulangi
-            </button>
-          </div>
-          <SignaturePad ref={signatureRef} onStroke={() => setSignatureDrawn(true)} />
-          <p className="text-[11px] text-muted-foreground">
-            {signatureDrawn ? "Tanda tangan terisi." : "Minta penerima menandatangani di area putih."}
-          </p>
-        </div>
-      )}
 
       {error && (
         <p className="flex items-center gap-1.5 text-[11px] text-danger">
