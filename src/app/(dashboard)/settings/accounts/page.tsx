@@ -18,6 +18,7 @@ import {
   Users,
   KeyRound,
   RefreshCw,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -72,7 +73,7 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
-type Tab = "users" | "roles";
+type Tab = "users" | "roles" | "clients";
 
 // ─── Toast ───
 interface Toast {
@@ -229,6 +230,26 @@ export default function AccountsPage() {
   const [userClientIds, setUserClientIds] = useState<string[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
 
+  // Manajemen Client TMS (tab khusus Super Admin, via API admin).
+  interface TmsClientManaged extends TmsClientOption {
+    logoUrl: string | null;
+    timezone: string;
+    status: "Aktif" | "Tidak Aktif";
+  }
+  const [adminClients, setAdminClients] = useState<TmsClientManaged[]>([]);
+  const [adminClientsLoading, setAdminClientsLoading] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
+  const [showClientModal, setShowClientModal] = useState(false);
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
+  const [clientForm, setClientForm] = useState({
+    name: "",
+    code: "",
+    slug: "",
+    timezone: "Asia/Jakarta",
+    status: "Aktif" as "Aktif" | "Tidak Aktif",
+  });
+  const [savingClient, setSavingClient] = useState(false);
+
   const fetchTmsClients = useCallback(async () => {
     setClientsLoading(true);
     try {
@@ -258,6 +279,16 @@ export default function AccountsPage() {
     setUserClientIds([]);
   }, []);
 
+  function slugifyClientName(value: string): string {
+    return value
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60);
+  }
+
   // Reset password modal (Fix #6)
   const [showResetPwModal, setShowResetPwModal] = useState(false);
   const [resetPwUser, setResetPwUser] = useState<{ id: string; nama: string } | null>(null);
@@ -285,6 +316,96 @@ export default function AccountsPage() {
     const id = nextToastId++;
     setToasts((prev) => [...prev, { id, type, message }]);
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+  };
+
+  // ─── Manajemen Client TMS (via API admin, khusus Super Admin) ───
+  const fetchAdminClients = useCallback(async () => {
+    setAdminClientsLoading(true);
+    try {
+      const res = await fetch("/api/admin/tms-clients", { cache: "no-store" });
+      const payload = (await res.json()) as { data?: TmsClientManaged[]; error?: string };
+      if (!res.ok) {
+        addToast("error", payload.error || "Gagal memuat client TMS.");
+        return;
+      }
+      if (Array.isArray(payload.data)) setAdminClients(payload.data);
+    } catch {
+      addToast("error", "Gagal memuat client TMS.");
+    } finally {
+      setAdminClientsLoading(false);
+    }
+  }, []);
+
+  const openCreateClient = () => {
+    setEditingClientId(null);
+    setClientForm({ name: "", code: "", slug: "", timezone: "Asia/Jakarta", status: "Aktif" });
+    setShowClientModal(true);
+  };
+
+  const openEditClient = (client: TmsClientManaged) => {
+    setEditingClientId(client.id);
+    setClientForm({
+      name: client.name,
+      code: client.code,
+      slug: client.slug,
+      timezone: client.timezone || "Asia/Jakarta",
+      status: client.status,
+    });
+    setShowClientModal(true);
+  };
+
+  const saveClient = async () => {
+    if (!clientForm.name.trim() || !clientForm.code.trim() || !clientForm.slug.trim()) {
+      addToast("error", "Nama, kode, dan slug client wajib diisi.");
+      return;
+    }
+    setSavingClient(true);
+    try {
+      const res = await fetch("/api/admin/tms-clients", {
+        method: editingClientId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingClientId ? { id: editingClientId, ...clientForm } : { ...clientForm }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error || "Gagal menyimpan client TMS.");
+      addToast(
+        "success",
+        editingClientId ? `Client ${clientForm.name} berhasil diperbarui.` : `Client ${clientForm.name} berhasil dibuat.`,
+      );
+      setShowClientModal(false);
+      setEditingClientId(null);
+      await Promise.all([fetchAdminClients(), fetchTmsClients()]);
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Gagal menyimpan client TMS.");
+    } finally {
+      setSavingClient(false);
+    }
+  };
+
+  const toggleClientStatus = async (client: TmsClientManaged) => {
+    setSavingClient(true);
+    try {
+      const res = await fetch("/api/admin/tms-clients", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: client.id,
+          name: client.name,
+          code: client.code,
+          slug: client.slug,
+          timezone: client.timezone,
+          status: client.status === "Aktif" ? "Tidak Aktif" : "Aktif",
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error || "Gagal mengubah status client.");
+      addToast("success", `Client ${client.name} ${client.status === "Aktif" ? "dinonaktifkan" : "diaktifkan"}.`);
+      await Promise.all([fetchAdminClients(), fetchTmsClients()]);
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Gagal mengubah status client.");
+    } finally {
+      setSavingClient(false);
+    }
   };
 
   // ─── Fetch Data (Fix #5: no supabase in dependency) ───
@@ -371,11 +492,27 @@ export default function AccountsPage() {
     return () => window.clearTimeout(timer);
   }, [fetchUsers, fetchRoles, fetchEmployees]);
 
+  const handleTabChange = (next: Tab) => {
+    setTab(next);
+    if (next === "clients") void fetchAdminClients();
+  };
+
   // ─── Pegawai yang belum punya akun ───
   const availableEmployees = useMemo(() => {
     const linkedIds = users.map((u) => u.employee_id).filter(Boolean);
     return employees.filter((e) => !linkedIds.includes(e.id));
   }, [employees, users]);
+
+  const filteredAdminClients = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    if (!q) return adminClients;
+    return adminClients.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.code.toLowerCase().includes(q) ||
+        c.slug.toLowerCase().includes(q),
+    );
+  }, [adminClients, clientSearch]);
 
   // ─── User CRUD ───
   const openCreateUser = () => {
@@ -1145,10 +1282,11 @@ export default function AccountsPage() {
         {[
           { key: "users" as Tab, label: "Pengguna", icon: Users, count: users.length },
           { key: "roles" as Tab, label: "Role & Hak Akses", icon: KeyRound, count: roles.length },
+          { key: "clients" as Tab, label: "Client TMS", icon: Building2, count: adminClients.length },
         ].map((t) => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => handleTabChange(t.key)}
             className={cn(
               "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
               tab === t.key
@@ -1464,6 +1602,127 @@ export default function AccountsPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* TAB: CLIENT TMS                                          */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      {tab === "clients" && (
+        <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+          {/* Toolbar */}
+          <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 max-w-sm">
+              <Search className="w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Cari nama, kode, atau slug client..."
+                value={clientSearch}
+                onChange={(e) => setClientSearch(e.target.value)}
+                className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground/60"
+              />
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={() => { void fetchAdminClients(); }}
+                className="p-2 rounded-lg hover:bg-muted text-muted-foreground"
+                title="Refresh"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button
+                onClick={openCreateClient}
+                className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Tambah Client
+              </button>
+            </div>
+          </div>
+
+          {/* List */}
+          {adminClientsLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+            </div>
+          ) : filteredAdminClients.length === 0 ? (
+            <div className="text-center py-16 px-4">
+              <Building2 className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+              <p className="text-sm font-semibold text-foreground">
+                {adminClients.length === 0 ? "Belum ada client TMS." : "Client tidak ditemukan."}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {adminClients.length === 0
+                  ? "Tambahkan client pertama, misalnya Tuku atau Manginue."
+                  : "Coba kata kunci pencarian lain."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30 text-left">
+                    <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Client</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Kode / Slug</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timezone</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAdminClients.map((c) => (
+                    <tr key={c.id} className="border-b border-border/50 hover:bg-muted/20">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                            {c.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground">{c.name}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        <div className="font-semibold text-foreground">{c.code}</div>
+                        <div>{c.slug}</div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{c.timezone}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => { void toggleClientStatus(c); }}
+                          disabled={savingClient}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold",
+                            c.status === "Aktif" ? "bg-success-light text-success" : "bg-danger-light text-danger",
+                            "opacity-100",
+                          )}
+                          title={c.status === "Aktif" ? "Klik untuk menonaktifkan" : "Klik untuk mengaktifkan"}
+                        >
+                          <div className={cn("w-1.5 h-1.5 rounded-full", c.status === "Aktif" ? "bg-success" : "bg-danger")} />
+                          {c.status}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openEditClient(c)}
+                            className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="px-4 py-3 text-[11px] text-muted-foreground border-t border-border">
+            Client baru langsung muncul di checkbox Client TMS pada akun dan dropdown client di Pengaturan Live Track.
+            Nonaktifkan client yang tidak dipakai lagi agar tidak bisa dipilih; data historis tetap aman.
+          </p>
         </div>
       )}
 
@@ -2102,6 +2361,146 @@ export default function AccountsPage() {
                   disabled={saving || !roleForm.nama.trim()}
                 >
                   {saving ? "Menyimpan..." : editingRoleId ? "Simpan" : "Buat Role"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* MODAL: CREATE/EDIT CLIENT TMS                            */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      {showClientModal && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !savingClient && setShowClientModal(false)} />
+            <div
+              className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden flex flex-col"
+              style={{ maxHeight: "calc(100vh - 2rem)" }}
+            >
+              {/* Header */}
+              <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent flex-shrink-0">
+                <button
+                  onClick={() => !savingClient && setShowClientModal(false)}
+                  className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg shadow-primary/20">
+                    <Building2 className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">
+                      {editingClientId ? "Edit Client TMS" : "Tambah Client TMS"}
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">Client menentukan cakupan data kendaraan yang terlihat</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto">
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">
+                    Nama Client <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={clientForm.name}
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      setClientForm((prev) => ({
+                        ...prev,
+                        name,
+                        code: editingClientId ? prev.code : name.trim().toUpperCase().replace(/[^A-Z0-9 _-]+/g, "").slice(0, 30),
+                        slug: editingClientId ? prev.slug : slugifyClientName(name),
+                      }));
+                    }}
+                    placeholder="Contoh: Manginue"
+                    autoFocus
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">
+                      Kode <span className="text-danger">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={clientForm.code}
+                      onChange={(e) => setClientForm({ ...clientForm, code: e.target.value.toUpperCase().slice(0, 30) })}
+                      placeholder="MANGINUE"
+                      className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 uppercase"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">Huruf kapital, 2-30 karakter.</p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">
+                      Slug <span className="text-danger">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={clientForm.slug}
+                      onChange={(e) => setClientForm({ ...clientForm, slug: e.target.value.toLowerCase().slice(0, 60) })}
+                      placeholder="manginue"
+                      className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">Huruf kecil, 2-60 karakter.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Timezone</label>
+                    <input
+                      type="text"
+                      value={clientForm.timezone}
+                      onChange={(e) => setClientForm({ ...clientForm, timezone: e.target.value })}
+                      placeholder="Asia/Jakarta"
+                      className="w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Status</label>
+                    <div className="flex gap-1.5">
+                      {(["Aktif", "Tidak Aktif"] as const).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setClientForm({ ...clientForm, status: s })}
+                          className={cn(
+                            "flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all",
+                            clientForm.status === s
+                              ? s === "Aktif"
+                                ? "bg-success/10 border-success/30 text-success"
+                                : "bg-danger/10 border-danger/30 text-danger"
+                              : "border-border text-muted-foreground hover:bg-muted"
+                          )}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
+                <Button variant="outline" size="sm" onClick={() => setShowClientModal(false)} disabled={savingClient}>
+                  Batal
+                </Button>
+                <Button
+                  size="sm"
+                  icon={editingClientId ? CheckCircle : Plus}
+                  onClick={() => { void saveClient(); }}
+                  disabled={savingClient || !clientForm.name.trim() || !clientForm.code.trim() || !clientForm.slug.trim()}
+                >
+                  {savingClient ? "Menyimpan..." : editingClientId ? "Simpan" : "Buat Client"}
                 </Button>
               </div>
             </div>
