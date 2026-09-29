@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { canAccessTmsData } from "@/lib/permissions";
 import {
   fetchFleetTaskInstantList,
   McEasyError,
@@ -49,10 +50,7 @@ export async function GET(request: Request) {
     profile?.status === "Aktif" &&
     profile.account_type === "internal" &&
     role?.status !== "Tidak Aktif" &&
-    (permissions.includes("all") ||
-      permissions.includes("tms") ||
-      permissions.includes("tms.view") ||
-      permissions.includes("tms.input"));
+    canAccessTmsData(permissions);
 
   if (!allowed) {
     return NextResponse.json(

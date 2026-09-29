@@ -3,7 +3,15 @@
 import { useEffect, type ReactNode } from "react";
 import { Shield } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
-import { canViewLiveTrackConfig, canViewTmsEpod } from "@/lib/permissions";
+import {
+  canViewLiveTrackConfig,
+  canViewOdometerDashboard,
+  canViewOdometerReport,
+  canViewTmsEpod,
+  canViewTmsLiveTask,
+  canViewTmsLiveView,
+  canViewTmsLoggerTrips,
+} from "@/lib/permissions";
 
 interface RouteGuardProps {
   /** Permission key modul, misal "employees", "payroll" */
@@ -66,12 +74,21 @@ export default function RouteGuard({ permission, children }: RouteGuardProps) {
   }
 
   // Cek: punya permission penuh ATAU input-only ATAU view-only?
+  // Submenu TMS granular memakai helper warisan agar role lama (`tms`,
+  // `vehicle-odometer` dkk) tetap lolos tanpa migrasi data.
+  const submenuAccess: Record<string, boolean> = {
+    "tms.epod": canViewTmsEpod(profile?.roles?.permissions ?? [], profile?.account_type),
+    "tms.live-track-config": canViewLiveTrackConfig(profile?.roles?.permissions ?? [], profile?.account_type),
+    "tms.live-view": canViewTmsLiveView(profile?.roles?.permissions ?? [], profile?.account_type),
+    "tms.live-track-task": canViewTmsLiveTask(profile?.roles?.permissions ?? [], profile?.account_type),
+    "tms.logger-trips": canViewTmsLoggerTrips(profile?.roles?.permissions ?? [], profile?.account_type),
+    "vehicle-odometer.dashboard": canViewOdometerDashboard(profile?.roles?.permissions ?? [], profile?.account_type),
+    "vehicle-odometer.report": canViewOdometerReport(profile?.roles?.permissions ?? [], profile?.account_type),
+  };
   const hasAccess =
-    permission === "tms.epod"
-      ? canViewTmsEpod(profile?.roles?.permissions ?? [], profile?.account_type)
-      : permission === "tms.live-track-config"
-        ? canViewLiveTrackConfig(profile?.roles?.permissions ?? [], profile?.account_type)
-        : hasPermission(permission) || hasPermission(permission + ".input") || hasPermission(permission + ".view");
+    permission in submenuAccess
+      ? submenuAccess[permission]
+      : hasPermission(permission) || hasPermission(permission + ".input") || hasPermission(permission + ".view");
 
   if (!hasAccess) {
     return (

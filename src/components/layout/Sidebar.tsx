@@ -51,7 +51,15 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
-import { canViewLiveTrackConfig, canViewTmsEpod } from "@/lib/permissions";
+import {
+  canViewLiveTrackConfig,
+  canViewOdometerDashboard,
+  canViewOdometerReport,
+  canViewTmsEpod,
+  canViewTmsLiveTask,
+  canViewTmsLiveView,
+  canViewTmsLoggerTrips,
+} from "@/lib/permissions";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -170,14 +178,14 @@ const allSections: MenuSection[] = [
         icon: Truck,
         basePath: "/tms",
         items: [
-          { name: "Live View", href: "/tms/live-view", icon: Satellite, permission: "tms" },
-          { name: "Live Track Task", href: "/tms/live-track-task", icon: Route, permission: "tms" },
+          { name: "Live View", href: "/tms/live-view", icon: Satellite, permission: "tms.live-view" },
+          { name: "Live Track Task", href: "/tms/live-track-task", icon: Route, permission: "tms.live-track-task" },
           { name: "Pengaturan Live Track", href: "/tms/live-track-settings", icon: Settings2, permission: "tms.live-track-config" },
           { name: "Monitoring e-POD", href: "/tms/epod", icon: PackageCheck, permission: "tms.epod" },
-          { name: "Logger Trips", href: "/tms/logger-trips", icon: ScrollText, permission: "tms" },
-          { name: "Dashboard Kendaraan", href: "/operasional-kendaraan/dashboard", icon: Gauge, permission: "vehicle-odometer" },
+          { name: "Logger Trips", href: "/tms/logger-trips", icon: ScrollText, permission: "tms.logger-trips" },
+          { name: "Dashboard Kendaraan", href: "/operasional-kendaraan/dashboard", icon: Gauge, permission: "vehicle-odometer.dashboard" },
           { name: "Input Odometer", href: "/operasional-kendaraan/input", icon: ClipboardList, permission: "vehicle-odometer.manage" },
-          { name: "Laporan Kendaraan", href: "/operasional-kendaraan/laporan", icon: FileSpreadsheet, permission: "vehicle-odometer" },
+          { name: "Laporan Kendaraan", href: "/operasional-kendaraan/laporan", icon: FileSpreadsheet, permission: "vehicle-odometer.report" },
         ],
       },
     ],
@@ -232,6 +240,21 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
             }
             if (item.href === "/tms/live-track-settings") {
               return canViewLiveTrackConfig(profile.roles?.permissions ?? [], profile.account_type);
+            }
+            if (item.href === "/tms/live-view") {
+              return canViewTmsLiveView(profile.roles?.permissions ?? [], profile.account_type);
+            }
+            if (item.href === "/tms/live-track-task") {
+              return canViewTmsLiveTask(profile.roles?.permissions ?? [], profile.account_type);
+            }
+            if (item.href === "/tms/logger-trips") {
+              return canViewTmsLoggerTrips(profile.roles?.permissions ?? [], profile.account_type);
+            }
+            if (item.href === "/operasional-kendaraan/dashboard") {
+              return canViewOdometerDashboard(profile.roles?.permissions ?? [], profile.account_type);
+            }
+            if (item.href === "/operasional-kendaraan/laporan") {
+              return canViewOdometerReport(profile.roles?.permissions ?? [], profile.account_type);
             }
             if (!item.permission) return true;
             return hasPermission(item.permission) || hasPermission(item.permission + ".view") || hasPermission(item.permission + ".input");

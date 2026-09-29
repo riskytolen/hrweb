@@ -14,12 +14,31 @@
 export const TMS_PERMISSION = "tms";
 export const TMS_VIEW_PERMISSION = "tms.view";
 export const TMS_INPUT_PERMISSION = "tms.input";
+export const TMS_LIVE_VIEW_PERMISSION = "tms.live-view";
+export const TMS_LIVE_VIEW_VIEW_PERMISSION = "tms.live-view.view";
+export const TMS_LIVE_VIEW_INPUT_PERMISSION = "tms.live-view.input";
+export const TMS_LIVE_TRACK_TASK_PERMISSION = "tms.live-track-task";
+export const TMS_LIVE_TRACK_TASK_VIEW_PERMISSION = "tms.live-track-task.view";
+export const TMS_LIVE_TRACK_TASK_INPUT_PERMISSION = "tms.live-track-task.input";
+export const TMS_LOGGER_TRIPS_PERMISSION = "tms.logger-trips";
+export const TMS_LOGGER_TRIPS_VIEW_PERMISSION = "tms.logger-trips.view";
+export const TMS_LOGGER_TRIPS_INPUT_PERMISSION = "tms.logger-trips.input";
 export const TMS_EPOD_PERMISSION = "tms.epod";
 export const TMS_EPOD_VIEW_PERMISSION = "tms.epod.view";
 export const TMS_EPOD_MANAGE_PERMISSION = "tms.epod.manage";
 export const TMS_LIVE_TRACK_CONFIG_PERMISSION = "tms.live-track-config";
 export const TMS_LIVE_TRACK_CONFIG_VIEW_PERMISSION = "tms.live-track-config.view";
 export const TMS_LIVE_TRACK_CONFIG_MANAGE_PERMISSION = "tms.live-track-config.manage";
+export const VEHICLE_ODOMETER_PERMISSION = "vehicle-odometer";
+export const VEHICLE_ODOMETER_VIEW_PERMISSION = "vehicle-odometer.view";
+export const VEHICLE_ODOMETER_INPUT_PERMISSION = "vehicle-odometer.input";
+export const VEHICLE_ODOMETER_MANAGE_PERMISSION = "vehicle-odometer.manage";
+export const VEHICLE_ODOMETER_DASHBOARD_PERMISSION = "vehicle-odometer.dashboard";
+export const VEHICLE_ODOMETER_DASHBOARD_VIEW_PERMISSION = "vehicle-odometer.dashboard.view";
+export const VEHICLE_ODOMETER_DASHBOARD_INPUT_PERMISSION = "vehicle-odometer.dashboard.input";
+export const VEHICLE_ODOMETER_REPORT_PERMISSION = "vehicle-odometer.report";
+export const VEHICLE_ODOMETER_REPORT_VIEW_PERMISSION = "vehicle-odometer.report.view";
+export const VEHICLE_ODOMETER_REPORT_INPUT_PERMISSION = "vehicle-odometer.report.input";
 
 export type AccountType = "internal" | "external";
 
@@ -70,16 +89,30 @@ export function permissionGranted(permissions: string[], required: string): bool
   });
 }
 
-/** Akun eksternal hanya boleh mengakses Operasional Kendaraan. */
+/**
+ * Akun eksternal hanya boleh mengakses Operasional Kendaraan.
+ * Submenu Dashboard/Laporan diminta memakai key turunannya, jadi
+ * normalisasi dulu ke key induk agar role eksternal lama tetap jalan.
+ */
 export function externalCanViewVehicleOdometer(permissions: string[], permission: string): boolean {
-  if (permission !== "vehicle-odometer" && permission !== "vehicle-odometer.view") return false;
+  const normalized =
+    permission === VEHICLE_ODOMETER_DASHBOARD_PERMISSION ||
+    permission === VEHICLE_ODOMETER_DASHBOARD_VIEW_PERMISSION ||
+    permission === VEHICLE_ODOMETER_DASHBOARD_INPUT_PERMISSION ||
+    permission === VEHICLE_ODOMETER_REPORT_PERMISSION ||
+    permission === VEHICLE_ODOMETER_REPORT_VIEW_PERMISSION ||
+    permission === VEHICLE_ODOMETER_REPORT_INPUT_PERMISSION
+      ? VEHICLE_ODOMETER_VIEW_PERMISSION
+      : permission;
+  if (normalized !== VEHICLE_ODOMETER_PERMISSION && normalized !== VEHICLE_ODOMETER_VIEW_PERMISSION) return false;
   return permissions.some(
     (p) =>
       p === "all" ||
-      p === "vehicle-odometer" ||
-      p === "vehicle-odometer.view" ||
-      p === "vehicle-odometer.input" ||
-      p === "vehicle-odometer.manage",
+      p === VEHICLE_ODOMETER_PERMISSION ||
+      p === VEHICLE_ODOMETER_VIEW_PERMISSION ||
+      p === VEHICLE_ODOMETER_INPUT_PERMISSION ||
+      p === VEHICLE_ODOMETER_MANAGE_PERMISSION ||
+      p === permission,
   );
 }
 
@@ -93,14 +126,118 @@ export function permissionMatches(
   return permissionGranted(permissions, permission);
 }
 
-/** Akses Live View / Live Track Task. */
+/**
+ * Akses Live View / Live Track Task / Logger Trips.
+ * Mencakup permission induk lama (`tms`/`tms.view`/`tms.input`) dan
+ * permission submenu granular (`tms.live-view`, `tms.live-track-task`,
+ * `tms.logger-trips` beserta varian `.view`/`.input`-nya).
+ */
 export function canAccessTmsLive(
   permissions: string[],
   accountType: AccountType = "internal",
 ): boolean {
   if (accountType === "external") return false;
   return permissions.some((p) =>
-    ["all", TMS_PERMISSION, TMS_VIEW_PERMISSION, TMS_INPUT_PERMISSION].includes(p),
+    [
+      "all",
+      TMS_PERMISSION,
+      TMS_VIEW_PERMISSION,
+      TMS_INPUT_PERMISSION,
+      TMS_LIVE_VIEW_PERMISSION,
+      TMS_LIVE_VIEW_VIEW_PERMISSION,
+      TMS_LIVE_VIEW_INPUT_PERMISSION,
+      TMS_LIVE_TRACK_TASK_PERMISSION,
+      TMS_LIVE_TRACK_TASK_VIEW_PERMISSION,
+      TMS_LIVE_TRACK_TASK_INPUT_PERMISSION,
+      TMS_LOGGER_TRIPS_PERMISSION,
+      TMS_LOGGER_TRIPS_VIEW_PERMISSION,
+      TMS_LOGGER_TRIPS_INPUT_PERMISSION,
+    ].includes(p),
+  );
+}
+
+/**
+ * Akses data TMS untuk Route Handler (board, fleet-task-instant,
+ * vehicle-statuses, logger-trips, trip detail). Role lama (`tms` dkk)
+ * tetap lolos; role granular baru lolos via key submenu live-nya.
+ * Role e-POD saja atau konfigurasi saja sengaja TIDAK diberi akses data
+ * live agar batas antar submenu tetap terjaga.
+ */
+export function canAccessTmsData(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return canAccessTmsLive(permissions, accountType);
+}
+
+/** Akses submenu Live View (menu + halaman + data turunannya). */
+export function canViewTmsLiveView(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return (
+    permissionGranted(permissions, TMS_LIVE_VIEW_PERMISSION) ||
+    permissionGranted(permissions, TMS_PERMISSION)
+  );
+}
+
+/** Akses submenu Live Track Task (menu + halaman + data turunannya). */
+export function canViewTmsLiveTask(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return (
+    permissionGranted(permissions, TMS_LIVE_TRACK_TASK_PERMISSION) ||
+    permissionGranted(permissions, TMS_PERMISSION)
+  );
+}
+
+/** Akses submenu Logger Trips (menu + halaman + data turunannya). */
+export function canViewTmsLoggerTrips(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return (
+    permissionGranted(permissions, TMS_LOGGER_TRIPS_PERMISSION) ||
+    permissionGranted(permissions, TMS_PERMISSION)
+  );
+}
+
+/**
+ * Akses submenu Dashboard Kendaraan. Role lama (`vehicle-odometer` dan
+ * variannya) tetap lolos; role granular baru lolos via key dashboard.
+ */
+export function canViewOdometerDashboard(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") {
+    return externalCanViewVehicleOdometer(permissions, VEHICLE_ODOMETER_DASHBOARD_PERMISSION);
+  }
+  return (
+    permissionGranted(permissions, VEHICLE_ODOMETER_DASHBOARD_PERMISSION) ||
+    permissionGranted(permissions, VEHICLE_ODOMETER_PERMISSION)
+  );
+}
+
+/**
+ * Akses submenu Laporan Kendaraan. Role lama (`vehicle-odometer` dan
+ * variannya) tetap lolos; role granular baru lolos via key laporan.
+ */
+export function canViewOdometerReport(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") {
+    return externalCanViewVehicleOdometer(permissions, VEHICLE_ODOMETER_REPORT_PERMISSION);
+  }
+  return (
+    permissionGranted(permissions, VEHICLE_ODOMETER_REPORT_PERMISSION) ||
+    permissionGranted(permissions, VEHICLE_ODOMETER_PERMISSION)
   );
 }
 

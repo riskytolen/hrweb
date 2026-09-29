@@ -258,7 +258,7 @@ export default function TripLoggerPage() {
   }, [search]);
 
   return (
-    <RouteGuard permission="tms">
+    <RouteGuard permission="tms.logger-trips">
       <div className="space-y-5">
         <PageHeader
           title="Logger Trips"

@@ -26,6 +26,16 @@ describe("navigation permissions", () => {
     expect(getTmsDefaultRoute(["tms.input"], "internal")).toBe("/tms/live-view");
   });
 
+  it("routes granular tms submenu roles to their own pages", () => {
+    expect(getTmsDefaultRoute(["tms.live-view"], "internal")).toBe("/tms/live-view");
+    expect(getTmsDefaultRoute(["tms.live-track-task"], "internal")).toBe("/tms/live-track-task");
+    expect(getTmsDefaultRoute(["tms.logger-trips"], "internal")).toBe("/tms/logger-trips");
+    expect(getDefaultRouteForPermissions(["tms.live-track-task"], "internal")).toBe("/tms/live-track-task");
+    expect(getDefaultRouteForPermissions(["vehicle-odometer.dashboard"], "internal")).toBe(
+      "/operasional-kendaraan/dashboard",
+    );
+  });
+
   it("sends epod-only roles to the epod monitoring page", () => {
     expect(permissionMatches(["tms.epod.view"], "tms", "internal")).toBe(false);
     expect(permissionMatches(["tms.epod.view"], "tms.epod", "internal")).toBe(true);

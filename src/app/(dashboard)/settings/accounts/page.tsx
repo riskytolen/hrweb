@@ -120,10 +120,16 @@ const PERMISSION_SECTIONS: PermissionSection[] = [
     ],
   },
   {
+    // Urutan mengikuti submenu sidebar TMS. Baris induk lama (`tms`,
+    // `vehicle-odometer`) tidak lagi ditulis dari UI, tapi tetap terbaca
+    // sebagai warisan agar role lama tidak kehilangan akses.
     title: "TMS",
     options: [
-      { key: "tms", label: "TMS (Live View & Track)" },
-      { key: "vehicle-odometer", label: "Operasional Kendaraan" },
+      { key: "tms.live-view", label: "Live View" },
+      { key: "tms.live-track-task", label: "Live Track Task" },
+      { key: "tms.logger-trips", label: "Logger Trips" },
+      { key: "vehicle-odometer.dashboard", label: "Dashboard Kendaraan" },
+      { key: "vehicle-odometer.report", label: "Laporan Kendaraan" },
     ],
   },
   { title: "Finance", options: [{ key: "finance", label: "Finance" }] },
@@ -162,6 +168,21 @@ const LIVE_TRACK_CONFIG_PERMISSION_LABELS: Record<string, string> = {
 function liveTrackConfigPermissionLabel(key: string): string | null {
   return LIVE_TRACK_CONFIG_PERMISSION_LABELS[key] ?? null;
 }
+
+/** Label khusus Input Odometer (mode Tidak Tampil / Kelola). */
+const ODOMETER_INPUT_PERMISSION_LABELS: Record<string, string> = {
+  "vehicle-odometer.manage": "Input Odometer",
+};
+
+function odometerInputPermissionLabel(key: string): string | null {
+  return ODOMETER_INPUT_PERMISSION_LABELS[key] ?? null;
+}
+
+/** Label fallback permission induk lama agar badge role lama tetap terbaca. */
+const TMS_BASE_PERMISSION_LABELS: Record<string, string> = {
+  tms: "TMS (semua menu)",
+  "vehicle-odometer": "Operasional Kendaraan (semua)",
+};
 
 export default function AccountsPage() {
   // Fix #4: Supabase instance dibuat sekali via useState
@@ -704,7 +725,134 @@ export default function AccountsPage() {
     );
   };
 
-  // Baris khusus TMS e-POD: mode Tidak Tampil / Lihat / Kelola.
+  // Baris submenu TMS granular: state eksplisit bila ada, jika tidak
+  // memakai warisan dari permission induk agar role lama tetap terbaca.
+  // Efektif di backend bersifat gabungan (induk ATAU eksplisit).
+  const renderChildRow = (opt: PermissionOption, parentKey: string, parentLabel: string) => {
+    const explicit = getPermissionState(opt.key);
+    const inherited = explicit === "none" ? getPermissionState(parentKey) : "none";
+    const state = explicit !== "none" ? explicit : inherited;
+    const isInherited = explicit === "none" && inherited !== "none";
+    return (
+      <div
+        key={opt.key}
+        className={cn(
+          "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+          state === "edit"
+            ? "border-primary/30 bg-primary/5"
+            : state === "input"
+              ? "border-emerald-500/30 bg-emerald-500/5"
+              : state === "view"
+                ? "border-amber-500/30 bg-amber-500/5"
+                : "border-border"
+        )}
+      >
+        <div>
+          <span className="text-xs font-medium text-foreground">
+            {opt.label}
+            {isInherited && (
+              <span className="ml-1 text-[10px] font-semibold text-amber-600">(Warisan)</span>
+            )}
+          </span>
+          {isInherited && (
+            <p className="text-[10px] text-muted-foreground">Mengikuti {parentLabel}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+          {([
+            { value: "none" as const, label: "Tidak Tampil" },
+            { value: "view" as const, label: "Lihat" },
+            { value: "input" as const, label: "Input" },
+            { value: "edit" as const, label: "Edit" },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => setPermissionState(opt.key, s.value)}
+              className={cn(
+                "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                state === s.value
+                  ? s.value === "edit"
+                    ? "bg-primary text-white shadow-sm"
+                    : s.value === "input"
+                      ? "bg-emerald-500 text-white shadow-sm"
+                      : s.value === "view"
+                        ? "bg-amber-500 text-white shadow-sm"
+                        : "bg-card text-muted-foreground shadow-sm"
+                  : "text-muted-foreground/60 hover:text-muted-foreground"
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Baris khusus Input Odometer: mode Tidak Tampil / Kelola.
+  const setInputOdometerState = (state: "none" | "manage") => {
+    setRoleForm((prev) => {
+      const cleaned = prev.permissions.filter((p) => p !== "vehicle-odometer.manage");
+      if (state === "manage") return { ...prev, permissions: [...cleaned, "vehicle-odometer.manage"] };
+      return { ...prev, permissions: cleaned };
+    });
+  };
+
+  const renderInputOdometerRow = () => {
+    const explicit = roleForm.permissions.includes("vehicle-odometer.manage");
+    const inherited = !explicit && getPermissionState("vehicle-odometer") === "edit";
+    const odometerState: "none" | "manage" = explicit || inherited ? "manage" : "none";
+    return (
+      <div
+        key="vehicle-odometer.manage"
+        className={cn(
+          "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+          odometerState === "manage"
+            ? "border-primary/30 bg-primary/5"
+            : "border-border"
+        )}
+      >
+        <div>
+          <span className="text-xs font-medium text-foreground">
+            Input Odometer
+            {inherited && (
+              <span className="ml-1 text-[10px] font-semibold text-amber-600">(Warisan)</span>
+            )}
+          </span>
+          {inherited ? (
+            <p className="text-[10px] text-muted-foreground">Mengikuti Operasional Kendaraan</p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground">Input odometer awal & akhir</p>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+          {([
+            { value: "none" as const, label: "Tidak Tampil" },
+            { value: "manage" as const, label: "Kelola" },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => setInputOdometerState(s.value)}
+              className={cn(
+                "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                odometerState === s.value
+                  ? s.value === "manage"
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-card text-muted-foreground shadow-sm"
+                  : "text-muted-foreground/60 hover:text-muted-foreground"
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Baris khusus Monitoring e-POD: mode Tidak Tampil / Lihat / Kelola.
   const renderEpodRow = () => {
     const epodState = getEpodState();
     return (
@@ -720,7 +868,7 @@ export default function AccountsPage() {
         )}
       >
         <div>
-          <span className="text-xs font-medium text-foreground">TMS e-POD</span>
+          <span className="text-xs font-medium text-foreground">Monitoring e-POD</span>
           <p className="text-[10px] text-muted-foreground">Monitoring & kelola bukti pengiriman</p>
         </div>
         <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
@@ -1211,12 +1359,19 @@ export default function AccountsPage() {
                       </span>
                     ) : r.permissions.length > 0 ? (
                       r.permissions.map((p) => {
-                        const epodLabel = epodPermissionLabel(p) || liveTrackConfigPermissionLabel(p);
+                        const epodLabel =
+                          epodPermissionLabel(p) ||
+                          liveTrackConfigPermissionLabel(p) ||
+                          odometerInputPermissionLabel(p);
                         const isEpodView = p === "tms.epod.view" || p === "tms.live-track-config.view";
                         const isView = !epodLabel && p.endsWith(".view");
                         const isInput = !epodLabel && p.endsWith(".input");
                         const baseKey = isView ? p.replace(".view", "") : isInput ? p.replace(".input", "") : p;
-                        const label = epodLabel || PERMISSION_OPTIONS.find((o) => o.key === baseKey)?.label || p;
+                        const label =
+                          epodLabel ||
+                          PERMISSION_OPTIONS.find((o) => o.key === baseKey)?.label ||
+                          TMS_BASE_PERMISSION_LABELS[baseKey] ||
+                          p;
                         return (
                           <span
                             key={p}
@@ -1783,11 +1938,20 @@ export default function AccountsPage() {
                           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                             {section.title}
                           </p>
-                          {section.options.map((opt) => renderModuleRow(opt))}
-                          {/* TMS e-POD memakai mode khusus Lihat / Kelola. */}
-                          {section.title === "TMS" && renderEpodRow()}
-                          {/* Pengaturan Live Track memakai mode khusus Lihat / Kelola. */}
-                          {section.title === "TMS" && renderLiveTrackConfigRow()}
+                          {section.title === "TMS" ? (
+                            <>
+                              {renderChildRow({ key: "tms.live-view", label: "Live View" }, "tms", "TMS induk")}
+                              {renderChildRow({ key: "tms.live-track-task", label: "Live Track Task" }, "tms", "TMS induk")}
+                              {renderLiveTrackConfigRow()}
+                              {renderEpodRow()}
+                              {renderChildRow({ key: "tms.logger-trips", label: "Logger Trips" }, "tms", "TMS induk")}
+                              {renderChildRow({ key: "vehicle-odometer.dashboard", label: "Dashboard Kendaraan" }, "vehicle-odometer", "Operasional Kendaraan")}
+                              {renderInputOdometerRow()}
+                              {renderChildRow({ key: "vehicle-odometer.report", label: "Laporan Kendaraan" }, "vehicle-odometer", "Operasional Kendaraan")}
+                            </>
+                          ) : (
+                            section.options.map((opt) => renderModuleRow(opt))
+                          )}
                         </div>
                       ))}
                     </div>

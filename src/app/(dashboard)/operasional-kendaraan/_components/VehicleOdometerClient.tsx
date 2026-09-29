@@ -66,7 +66,7 @@ const modeConfig = {
     title: "Dashboard Kendaraan",
     description: "Ringkasan jarak tempuh dan odometer kendaraan operasional",
     icon: Gauge,
-    permission: "vehicle-odometer",
+    permission: "vehicle-odometer.dashboard",
   },
   input: {
     title: "Input Odometer",
@@ -78,7 +78,7 @@ const modeConfig = {
     title: "Laporan Odometer",
     description: "Laporan jarak tempuh berdasarkan kendaraan dan tanggal",
     icon: FileSpreadsheet,
-    permission: "vehicle-odometer",
+    permission: "vehicle-odometer.report",
   },
 } as const;
 
@@ -188,7 +188,14 @@ export default function VehicleOdometerClient({ mode }: VehicleOdometerClientPro
 
   const permissionLevel = getPermissionLevel("vehicle-odometer");
   const canManage = permissionLevel === "edit" || hasPermission("vehicle-odometer.manage");
-  const canView = canManage || permissionLevel === "view" || permissionLevel === "input";
+  const canViewBase = canManage || permissionLevel === "view" || permissionLevel === "input";
+  // Submenu granular dashboard/laporan bisa diberi akses terpisah dari induk.
+  const canView =
+    mode === "dashboard"
+      ? canViewBase || hasPermission("vehicle-odometer.dashboard")
+      : mode === "laporan"
+        ? canViewBase || hasPermission("vehicle-odometer.report")
+        : canManage;
 
   const showToast = useCallback((type: Toast["type"], title: string, message?: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);

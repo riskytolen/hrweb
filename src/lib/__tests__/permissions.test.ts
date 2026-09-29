@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  canAccessTmsData,
   canAccessTmsLive,
   canManageLiveTrackConfig,
   canManageTmsEpod,
   canViewLiveTrackConfig,
+  canViewOdometerDashboard,
+  canViewOdometerReport,
   canViewTmsEpod,
+  canViewTmsLiveTask,
+  canViewTmsLiveView,
+  canViewTmsLoggerTrips,
   parsePermissions,
   permissionGranted,
   permissionMatches,
@@ -165,6 +171,124 @@ describe("canManageLiveTrackConfig", () => {
 
   it("selalu menolak akun eksternal", () => {
     expect(canManageLiveTrackConfig(["all"], "external")).toBe(false);
+  });
+});
+
+describe("canViewTmsLiveView", () => {
+  it("memberi akses untuk permission induk lama dan submenu live-view", () => {
+    expect(canViewTmsLiveView(["all"])).toBe(true);
+    expect(canViewTmsLiveView(["tms"])).toBe(true);
+    expect(canViewTmsLiveView(["tms.view"])).toBe(true);
+    expect(canViewTmsLiveView(["tms.input"])).toBe(true);
+    expect(canViewTmsLiveView(["tms.live-view"])).toBe(true);
+    expect(canViewTmsLiveView(["tms.live-view.view"])).toBe(true);
+  });
+
+  it("tidak memberi akses untuk submenu TMS lain saja", () => {
+    expect(canViewTmsLiveView(["tms.epod.view"])).toBe(false);
+    expect(canViewTmsLiveView(["tms.live-track-task"])).toBe(false);
+    expect(canViewTmsLiveView(["tms.logger-trips"])).toBe(false);
+    expect(canViewTmsLiveView([])).toBe(false);
+  });
+
+  it("selalu menolak akun eksternal", () => {
+    expect(canViewTmsLiveView(["all"], "external")).toBe(false);
+    expect(canViewTmsLiveView(["tms.live-view"], "external")).toBe(false);
+  });
+});
+
+describe("canViewTmsLiveTask", () => {
+  it("memberi akses untuk permission induk lama dan submenu task", () => {
+    expect(canViewTmsLiveTask(["tms"])).toBe(true);
+    expect(canViewTmsLiveTask(["tms.view"])).toBe(true);
+    expect(canViewTmsLiveTask(["tms.live-track-task"])).toBe(true);
+    expect(canViewTmsLiveTask(["tms.live-track-task.view"])).toBe(true);
+  });
+
+  it("tidak memberi akses untuk submenu TMS lain saja", () => {
+    expect(canViewTmsLiveTask(["tms.live-view"])).toBe(false);
+    expect(canViewTmsLiveTask(["tms.epod.manage"])).toBe(false);
+  });
+
+  it("selalu menolak akun eksternal", () => {
+    expect(canViewTmsLiveTask(["all"], "external")).toBe(false);
+  });
+});
+
+describe("canViewTmsLoggerTrips", () => {
+  it("memberi akses untuk permission induk lama dan submenu logger", () => {
+    expect(canViewTmsLoggerTrips(["tms"])).toBe(true);
+    expect(canViewTmsLoggerTrips(["tms.input"])).toBe(true);
+    expect(canViewTmsLoggerTrips(["tms.logger-trips"])).toBe(true);
+  });
+
+  it("tidak memberi akses untuk submenu TMS lain saja", () => {
+    expect(canViewTmsLoggerTrips(["tms.live-view"])).toBe(false);
+    expect(canViewTmsLoggerTrips(["tms.live-track-config.view"])).toBe(false);
+  });
+
+  it("selalu menolak akun eksternal", () => {
+    expect(canViewTmsLoggerTrips(["all"], "external")).toBe(false);
+  });
+});
+
+describe("canAccessTmsData", () => {
+  it("memberi akses untuk permission induk lama dan submenu live", () => {
+    expect(canAccessTmsData(["all"])).toBe(true);
+    expect(canAccessTmsData(["tms"])).toBe(true);
+    expect(canAccessTmsData(["tms.view"])).toBe(true);
+    expect(canAccessTmsData(["tms.live-view"])).toBe(true);
+    expect(canAccessTmsData(["tms.live-track-task.view"])).toBe(true);
+    expect(canAccessTmsData(["tms.logger-trips.input"])).toBe(true);
+  });
+
+  it("tidak memberi akses untuk e-POD atau konfigurasi saja", () => {
+    expect(canAccessTmsData(["tms.epod.view"])).toBe(false);
+    expect(canAccessTmsData(["tms.epod.manage"])).toBe(false);
+    expect(canAccessTmsData(["tms.live-track-config.manage"])).toBe(false);
+    expect(canAccessTmsData([])).toBe(false);
+  });
+
+  it("selalu menolak akun eksternal", () => {
+    expect(canAccessTmsData(["all"], "external")).toBe(false);
+  });
+});
+
+describe("canViewOdometerDashboard", () => {
+  it("memberi akses untuk permission induk lama dan submenu dashboard", () => {
+    expect(canViewOdometerDashboard(["all"])).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer"])).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer.view"])).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer.manage"])).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer.dashboard"])).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer.dashboard.view"])).toBe(true);
+  });
+
+  it("tidak memberi akses untuk submenu laporan saja", () => {
+    expect(canViewOdometerDashboard(["vehicle-odometer.report"])).toBe(false);
+    expect(canViewOdometerDashboard([])).toBe(false);
+  });
+
+  it("tetap melayani akun eksternal pemegang operasional kendaraan", () => {
+    expect(canViewOdometerDashboard(["vehicle-odometer"], "external")).toBe(true);
+    expect(canViewOdometerDashboard(["vehicle-odometer.dashboard"], "external")).toBe(true);
+    expect(canViewOdometerDashboard(["tms"], "external")).toBe(false);
+  });
+});
+
+describe("canViewOdometerReport", () => {
+  it("memberi akses untuk permission induk lama dan submenu laporan", () => {
+    expect(canViewOdometerReport(["vehicle-odometer"])).toBe(true);
+    expect(canViewOdometerReport(["vehicle-odometer.view"])).toBe(true);
+    expect(canViewOdometerReport(["vehicle-odometer.report"])).toBe(true);
+  });
+
+  it("tidak memberi akses untuk submenu dashboard saja", () => {
+    expect(canViewOdometerReport(["vehicle-odometer.dashboard"])).toBe(false);
+  });
+
+  it("tetap melayani akun eksternal pemegang operasional kendaraan", () => {
+    expect(canViewOdometerReport(["vehicle-odometer"], "external")).toBe(true);
   });
 });
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { canAccessTmsData } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -25,8 +26,7 @@ function parsePermissions(permissions: unknown): string[] {
 }
 
 function canAccessTms(permissions: string[]): boolean {
-  if (permissions.includes("all")) return true;
-  return permissions.some((p) => p === "tms" || p === "tms.view" || p === "tms.input");
+  return canAccessTmsData(permissions);
 }
 
 function jakartaToday(): string {

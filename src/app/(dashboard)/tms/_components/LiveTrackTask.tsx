@@ -10,7 +10,7 @@ export default function LiveTrackTask() {
   const [selectedTask, setSelectedTask] = useState<FleetTaskInstantItem | null>(null);
 
   return (
-    <RouteGuard permission="tms">
+    <RouteGuard permission="tms.live-track-task">
       <div className="space-y-5">
         {/* Board + side panel ala FleetPro */}
         <div className="grid items-start gap-5 xl:grid-cols-3">

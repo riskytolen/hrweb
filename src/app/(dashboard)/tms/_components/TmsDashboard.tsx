@@ -234,7 +234,7 @@ export default function TmsDashboard() {
   );
 
   return (
-    <RouteGuard permission="tms">
+    <RouteGuard permission="tms.live-view">
       {/* ── Desktop / laptop: sidebar + peta full-area ─────────────────── */}
       <div className="hidden h-[calc(100dvh-120px)] min-h-[560px] gap-4 lg:flex lg:h-[calc(100dvh-160px)]">
         <div className="w-[340px] shrink-0">{sidebar}</div>

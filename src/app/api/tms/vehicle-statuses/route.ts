@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { canAccessTmsData } from "@/lib/permissions";
 import { fetchMcEasyVehicleStatuses, McEasyError } from "@/lib/mceasy-server";
 
 // Data live tidak boleh di-cache di edge maupun browser.
@@ -21,8 +22,7 @@ function parsePermissions(permissions: unknown): string[] {
 }
 
 function canAccessTms(permissions: string[]): boolean {
-  if (permissions.includes("all")) return true;
-  return permissions.some((p) => p === "tms" || p === "tms.view" || p === "tms.input");
+  return canAccessTmsData(permissions);
 }
 
 async function verifyTmsAccess(): Promise<{ ok: true } | { ok: false; status: 401 | 403 }> {
