@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Building2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ interface TmsClientSelection {
   allAllowed: boolean;
   /** slug/code client terpilih, atau null = semua (khusus allAllowed). */
   selected: string | null;
+  setSelected: Dispatch<SetStateAction<string | null>>;
   loading: boolean;
 }
 
@@ -72,14 +73,14 @@ export function useTmsClientSelection(): TmsClientSelection {
     };
   }, []);
 
-  return { clients, allAllowed, selected, loading };
+  return { clients, allAllowed, selected, setSelected, loading };
 }
 
 /** Header selector client untuk halaman TMS (dropdown admin / badge terkunci). */
 export default function TmsClientSelector({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { clients, allAllowed, selected, loading } = useTmsClientSelection();
+  const { clients, allAllowed, selected, setSelected, loading } = useTmsClientSelection();
 
   const applySelection = useCallback(
     (value: string | null) => {
@@ -94,20 +95,22 @@ export default function TmsClientSelector({ compact = false }: { compact?: boole
       // window.location.search, sedangkan router.replace() bersifat async.
       // Tanpa ini request pertama setelah ganti client bisa memakai client lama.
       window.history.replaceState(null, "", url);
+      setSelected(value);
       router.replace(url, { scroll: false });
       window.dispatchEvent(new Event(TMS_CLIENT_CHANGED_EVENT));
     },
-    [pathname, router],
+    [pathname, router, setSelected],
   );
 
   // Sinkron saat tombol back/forward browser dipakai.
   useEffect(() => {
     const onPopState = () => {
+      setSelected(readClientParam());
       window.dispatchEvent(new Event(TMS_CLIENT_CHANGED_EVENT));
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [setSelected]);
 
   if (loading) {
     return (
@@ -140,7 +143,7 @@ export default function TmsClientSelector({ compact = false }: { compact?: boole
   return (
     <label
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-2 py-1",
+        "inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-2 py-1 shadow-sm transition-colors focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30",
         compact ? "text-[11px]" : "text-xs",
       )}
     >
@@ -149,7 +152,7 @@ export default function TmsClientSelector({ compact = false }: { compact?: boole
       <select
         value={selectedClient ? selectedClient.slug : ""}
         onChange={(event) => applySelection(event.target.value || null)}
-        className="max-w-40 cursor-pointer truncate bg-transparent font-bold text-foreground outline-none"
+        className="max-w-44 cursor-pointer truncate bg-transparent font-bold text-foreground outline-none"
         aria-label="Pilih client TMS"
       >
         {allAllowed && <option value="">Semua Klien</option>}
