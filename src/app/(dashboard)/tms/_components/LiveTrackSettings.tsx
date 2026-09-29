@@ -65,6 +65,13 @@ interface GroupDraft {
   effectiveFrom: string;
   effectiveUntil: string;
   members: MemberDraft[];
+  clientId: string;
+}
+
+interface TmsClientOption {
+  id: string;
+  code: string;
+  name: string;
 }
 
 const EMPTY_DRAFT: GroupDraft = {
@@ -78,6 +85,7 @@ const EMPTY_DRAFT: GroupDraft = {
   effectiveFrom: "",
   effectiveUntil: "",
   members: [],
+  clientId: "",
 };
 
 const GROUP_COLORS = ["#0284c7", "#16a34a", "#ea580c", "#7c3aed", "#db2777", "#0891b2", "#ca8a04", "#475569"];
@@ -113,6 +121,7 @@ function countActiveMembers(group: LiveTrackGroup, nowMs: number): number {
 export default function LiveTrackSettings() {
   const [groups, setGroups] = useState<LiveTrackGroup[]>([]);
   const [vehicles, setVehicles] = useState<LiveTrackVehicleOption[]>([]);
+  const [tmsClients, setTmsClients] = useState<TmsClientOption[]>([]);
   const [canManage, setCanManage] = useState<boolean | null>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,12 +141,16 @@ export default function LiveTrackSettings() {
     setError(null);
     setCanManage(null);
     try {
-      const [groupsRes, vehiclesRes] = await Promise.all([
+      const [groupsRes, vehiclesRes, clientsRes] = await Promise.all([
         fetch("/api/tms/live-track-config/groups", { cache: "no-store" }),
         fetch("/api/tms/live-track-config/vehicles", { cache: "no-store" }),
+        fetch("/api/tms/clients", { cache: "no-store" }),
       ]);
       const groupsPayload = (await groupsRes.json()) as GroupsResponse;
       const vehiclesPayload = (await vehiclesRes.json()) as VehiclesResponse;
+      const clientsPayload = (await clientsRes.json().catch(() => ({}))) as {
+        data?: TmsClientOption[];
+      };
       if (!groupsRes.ok || groupsPayload.error) {
         setError(groupsPayload.error ?? "Gagal memuat kelompok Live Track.");
         return;
@@ -148,6 +161,7 @@ export default function LiveTrackSettings() {
       }
       setGroups(Array.isArray(groupsPayload.data) ? groupsPayload.data : []);
       setVehicles(Array.isArray(vehiclesPayload.data) ? vehiclesPayload.data : []);
+      setTmsClients(Array.isArray(clientsPayload.data) ? clientsPayload.data : []);
       setCanManage(
         Boolean(groupsPayload.meta?.canManage) || Boolean(vehiclesPayload.meta?.canManage),
       );
@@ -204,6 +218,7 @@ export default function LiveTrackSettings() {
       defaultWindowEnd: group.defaultWindowEnd,
       effectiveFrom: group.effectiveFrom ?? "",
       effectiveUntil: group.effectiveUntil ?? "",
+      clientId: "",
       members: group.members.map((m) => ({
         mceasyVehicleId: m.mceasyVehicleId,
         licensePlate: m.licensePlate,
@@ -298,6 +313,9 @@ export default function LiveTrackSettings() {
 
   const validateDraft = useCallback((): string | null => {
     if (!draft.name.trim()) return "Nama kelompok wajib diisi.";
+    if (!draft.id && tmsClients.length > 0 && !draft.clientId) {
+      return "Pilih client pemilik kelompok (mis. Tuku atau Manginue).";
+    }
     if (parseClockToMinutes(draft.defaultWindowStart) === parseClockToMinutes(draft.defaultWindowEnd)) {
       return "Jam mulai dan jam selesai kelompok tidak boleh sama.";
     }
@@ -315,7 +333,7 @@ export default function LiveTrackSettings() {
       }
     }
     return null;
-  }, [draft]);
+  }, [draft, tmsClients]);
 
   const saveDraft = useCallback(async () => {
     const validation = validateDraft();
@@ -335,6 +353,7 @@ export default function LiveTrackSettings() {
         defaultWindowEnd: draft.defaultWindowEnd,
         effectiveFrom: draft.effectiveFrom || undefined,
         effectiveUntil: draft.effectiveUntil || undefined,
+        clientId: !draft.id && draft.clientId ? draft.clientId : undefined,
         members: draft.members.map((m) => ({
           mceasyVehicleId: m.mceasyVehicleId,
           licensePlate: m.licensePlate,
@@ -606,6 +625,28 @@ export default function LiveTrackSettings() {
                         onChange={(event) => setDraft({ ...draft, description: event.target.value })}
                       />
                     </label>
+                    {!draft.id && (
+                      <label className="block sm:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold text-foreground">
+                          Client pemilik *
+                        </span>
+                        <select
+                          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                          value={draft.clientId}
+                          onChange={(event) => setDraft({ ...draft, clientId: event.target.value })}
+                        >
+                          <option value="">Pilih client…</option>
+                          {tmsClients.map((client) => (
+                            <option key={client.id} value={client.id}>
+                              {client.name} ({client.code})
+                            </option>
+                          ))}
+                        </select>
+                        <span className="mt-1 block text-[11px] text-muted-foreground">
+                          Kelompok baru wajib terikat ke satu client agar unit Tuku/Manginue tidak tercampur.
+                        </span>
+                      </label>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
                       <label className="block">
                         <span className="mb-1 block text-xs font-semibold text-foreground">Jam mulai tampil *</span>

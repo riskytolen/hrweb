@@ -92,10 +92,39 @@ export function permissionGranted(permissions: string[], required: string): bool
 }
 
 /**
- * Akun eksternal hanya boleh mengakses Operasional Kendaraan.
- * Submenu Dashboard/Laporan diminta memakai key turunannya, jadi
- * normalisasi dulu ke key induk agar role eksternal lama tetap jalan.
+ * Akun eksternal hanya boleh mengakses Operasional Kendaraan dan submenu TMS
+ * yang aman untuk client (view-only). Semua akses eksternal bersifat lihat;
+ * hak kelola tetap ditolak oleh helper manage dan Route Handler server-side.
+ *
+ * Untuk Operasional Kendaraan: submenu Dashboard/Laporan memakai key
+ * turunannya, jadi normalisasi dulu ke key induk agar role eksternal lama
+ * tetap jalan.
  */
+export function externalCanViewTms(permissions: string[], permission: string): boolean {
+  const liveViewKeys = [TMS_LIVE_VIEW_PERMISSION, TMS_LIVE_VIEW_VIEW_PERMISSION, TMS_LIVE_VIEW_INPUT_PERMISSION];
+  const liveTaskKeys = [
+    TMS_LIVE_TRACK_TASK_PERMISSION,
+    TMS_LIVE_TRACK_TASK_VIEW_PERMISSION,
+    TMS_LIVE_TRACK_TASK_INPUT_PERMISSION,
+  ];
+  const loggerKeys = [TMS_LOGGER_TRIPS_PERMISSION, TMS_LOGGER_TRIPS_VIEW_PERMISSION, TMS_LOGGER_TRIPS_INPUT_PERMISSION];
+  const epodKeys = [TMS_EPOD_PERMISSION, TMS_EPOD_VIEW_PERMISSION, TMS_EPOD_MANAGE_PERMISSION];
+  const sharedKeys = ["all", TMS_PERMISSION, TMS_VIEW_PERMISSION, TMS_INPUT_PERMISSION];
+  const hasAny = (keys: string[]): boolean =>
+    permissions.some((p) => sharedKeys.includes(p) || keys.includes(p));
+
+  if (permission === TMS_PERMISSION || permission === TMS_VIEW_PERMISSION) {
+    // Samakan dengan internal: anak tidak memberi akses ke induk.
+    // "tms" hanya lolos bila memegang shared key (all/tms/tms.view/tms.input).
+    return permissions.some((p) => sharedKeys.includes(p));
+  }
+  if (liveViewKeys.includes(permission)) return hasAny(liveViewKeys);
+  if (liveTaskKeys.includes(permission)) return hasAny(liveTaskKeys);
+  if (loggerKeys.includes(permission)) return hasAny(loggerKeys);
+  if (epodKeys.includes(permission)) return hasAny(epodKeys);
+  return false;
+}
+
 export function externalCanViewVehicleOdometer(permissions: string[], permission: string): boolean {
   const normalized =
     permission === VEHICLE_ODOMETER_DASHBOARD_PERMISSION ||
@@ -124,7 +153,9 @@ export function permissionMatches(
   permission: string,
   accountType: AccountType = "internal",
 ): boolean {
-  if (accountType === "external") return externalCanViewVehicleOdometer(permissions, permission);
+  if (accountType === "external") {
+    return externalCanViewTms(permissions, permission) || externalCanViewVehicleOdometer(permissions, permission);
+  }
   return permissionGranted(permissions, permission);
 }
 
@@ -138,7 +169,13 @@ export function canAccessTmsLive(
   permissions: string[],
   accountType: AccountType = "internal",
 ): boolean {
-  if (accountType === "external") return false;
+  if (accountType === "external") {
+    return (
+      externalCanViewTms(permissions, TMS_LIVE_VIEW_PERMISSION) ||
+      externalCanViewTms(permissions, TMS_LIVE_TRACK_TASK_PERMISSION) ||
+      externalCanViewTms(permissions, TMS_LOGGER_TRIPS_PERMISSION)
+    );
+  }
   return permissions.some((p) =>
     [
       "all",
@@ -169,7 +206,6 @@ export function canAccessTmsData(
   permissions: string[],
   accountType: AccountType = "internal",
 ): boolean {
-  if (accountType === "external") return false;
   return canAccessTmsLive(permissions, accountType);
 }
 
@@ -178,7 +214,7 @@ export function canViewTmsLiveView(
   permissions: string[],
   accountType: AccountType = "internal",
 ): boolean {
-  if (accountType === "external") return false;
+  if (accountType === "external") return externalCanViewTms(permissions, TMS_LIVE_VIEW_PERMISSION);
   return (
     permissionGranted(permissions, TMS_LIVE_VIEW_PERMISSION) ||
     permissionGranted(permissions, TMS_PERMISSION)
@@ -190,7 +226,7 @@ export function canViewTmsLiveTask(
   permissions: string[],
   accountType: AccountType = "internal",
 ): boolean {
-  if (accountType === "external") return false;
+  if (accountType === "external") return externalCanViewTms(permissions, TMS_LIVE_TRACK_TASK_PERMISSION);
   return (
     permissionGranted(permissions, TMS_LIVE_TRACK_TASK_PERMISSION) ||
     permissionGranted(permissions, TMS_PERMISSION)
@@ -202,7 +238,7 @@ export function canViewTmsLoggerTrips(
   permissions: string[],
   accountType: AccountType = "internal",
 ): boolean {
-  if (accountType === "external") return false;
+  if (accountType === "external") return externalCanViewTms(permissions, TMS_LOGGER_TRIPS_PERMISSION);
   return (
     permissionGranted(permissions, TMS_LOGGER_TRIPS_PERMISSION) ||
     permissionGranted(permissions, TMS_PERMISSION)
@@ -253,7 +289,7 @@ export function canViewTmsEpod(
   permissions: string[],
   accountType: AccountType = "internal",
 ): boolean {
-  if (accountType === "external") return false;
+  if (accountType === "external") return externalCanViewTms(permissions, TMS_EPOD_PERMISSION);
   return permissions.some((p) =>
     [
       "all",

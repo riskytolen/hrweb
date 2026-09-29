@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
-import { canAccessTmsData } from "@/lib/permissions";
+import { canAccessTmsData, type AccountType } from "@/lib/permissions";
 import { authorizeTmsScope } from "@/lib/tms-tenant-auth";
 import { normalizePointTemperatureList } from "@/lib/tms-point-temperature";
 
@@ -22,8 +22,8 @@ function parsePermissions(permissions: unknown): string[] {
   return [];
 }
 
-function canAccessTms(permissions: string[]): boolean {
-  return canAccessTmsData(permissions);
+function canAccessTms(permissions: string[], accountType: AccountType): boolean {
+  return canAccessTmsData(permissions, accountType);
 }
 
 export async function GET(
@@ -50,13 +50,14 @@ export async function GET(
 
   const roleRelation = profile?.roles;
   const role = Array.isArray(roleRelation) ? roleRelation[0] : roleRelation;
+  const accountType: AccountType = profile?.account_type === "external" ? "external" : "internal";
   if (
     !profile ||
     profile.status !== "Aktif" ||
-    profile.account_type !== "internal" ||
+    (profile.account_type !== "internal" && profile.account_type !== "external") ||
     !role ||
     role.status === "Tidak Aktif" ||
-    !canAccessTms(parsePermissions(role.permissions))
+    !canAccessTms(parsePermissions(role.permissions), accountType)
   ) {
     return NextResponse.json(
       { error: "Anda tidak memiliki akses ke menu TMS." },
@@ -72,7 +73,7 @@ export async function GET(
 
   const scope = await authorizeTmsScope({
     userId: user.id,
-    accountType: "internal",
+    accountType,
     permissions: parsePermissions(role.permissions),
     roleLevel: typeof role?.level === "number" ? role.level : 0,
   });

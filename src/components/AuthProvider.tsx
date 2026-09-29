@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import {
+  externalCanViewTms,
   externalCanViewVehicleOdometer,
   permissionGranted,
 } from "@/lib/permissions";
@@ -165,7 +166,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const perms = profile.roles.permissions;
 
       if (profile.account_type === "external") {
-        return externalCanViewVehicleOdometer(perms, permission);
+        return externalCanViewTms(perms, permission) || externalCanViewVehicleOdometer(perms, permission);
       }
 
       return permissionGranted(perms, permission);
@@ -183,8 +184,19 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       const perms = profile.roles.permissions;
 
       if (profile.account_type === "external") {
-        if (module !== "vehicle-odometer") return "none";
-        return externalCanViewVehicleOdometer(perms, "vehicle-odometer") ? "view" : "none";
+        if (module === "vehicle-odometer") {
+          return externalCanViewVehicleOdometer(perms, "vehicle-odometer") ? "view" : "none";
+        }
+        // Akun client TMS bersifat view-only. Modul TMS yang diizinkan
+        // mengembalikan "view", selain itu "none".
+        if (
+          externalCanViewTms(perms, module) ||
+          externalCanViewTms(perms, `${module}.view`) ||
+          externalCanViewTms(perms, module.split(".")[0] ?? "")
+        ) {
+          return "view";
+        }
+        return "none";
       }
 
       // "all" = akses penuh

@@ -11,6 +11,7 @@ import {
   canViewTmsLiveTask,
   canViewTmsLiveView,
   canViewTmsLoggerTrips,
+  externalCanViewTms,
   parsePermissions,
   permissionGranted,
   permissionMatches,
@@ -79,9 +80,17 @@ describe("canAccessTmsLive", () => {
     expect(canAccessTmsLive(["tms.epod.manage"])).toBe(false);
   });
 
-  it("selalu menolak akun eksternal", () => {
-    expect(canAccessTmsLive(["all"], "external")).toBe(false);
-    expect(canAccessTmsLive(["tms"], "external")).toBe(false);
+  it("memberi akses view-only untuk eksternal pemegang submenu live", () => {
+    expect(canAccessTmsLive(["tms.live-view"], "external")).toBe(true);
+    expect(canAccessTmsLive(["tms.live-track-task.view"], "external")).toBe(true);
+    expect(canAccessTmsLive(["tms.logger-trips"], "external")).toBe(true);
+    expect(canAccessTmsLive(["tms"], "external")).toBe(true);
+  });
+
+  it("tetap menolak eksternal tanpa permission live", () => {
+    expect(canAccessTmsLive(["tms.epod.view"], "external")).toBe(false);
+    expect(canAccessTmsLive(["dashboard"], "external")).toBe(false);
+    expect(canAccessTmsLive([], "external")).toBe(false);
   });
 });
 
@@ -103,9 +112,15 @@ describe("canViewTmsEpod", () => {
     expect(canViewTmsEpod([])).toBe(false);
   });
 
-  it("selalu menolak akun eksternal", () => {
-    expect(canViewTmsEpod(["all"], "external")).toBe(false);
-    expect(canViewTmsEpod(["tms.view"], "external")).toBe(false);
+  it("memberi akses view-only e-POD untuk eksternal", () => {
+    expect(canViewTmsEpod(["tms.epod.view"], "external")).toBe(true);
+    expect(canViewTmsEpod(["tms.view"], "external")).toBe(true);
+    expect(canViewTmsEpod(["all"], "external")).toBe(true);
+  });
+
+  it("tetap menolak eksternal tanpa permission e-POD", () => {
+    expect(canViewTmsEpod(["tms.live-view"], "external")).toBe(false);
+    expect(canViewTmsEpod(["dashboard"], "external")).toBe(false);
   });
 });
 
@@ -191,9 +206,15 @@ describe("canViewTmsLiveView", () => {
     expect(canViewTmsLiveView([])).toBe(false);
   });
 
-  it("selalu menolak akun eksternal", () => {
-    expect(canViewTmsLiveView(["all"], "external")).toBe(false);
-    expect(canViewTmsLiveView(["tms.live-view"], "external")).toBe(false);
+  it("memberi akses view-only live-view untuk eksternal", () => {
+    expect(canViewTmsLiveView(["all"], "external")).toBe(true);
+    expect(canViewTmsLiveView(["tms.live-view"], "external")).toBe(true);
+    expect(canViewTmsLiveView(["tms.view"], "external")).toBe(true);
+  });
+
+  it("tetap menolak eksternal lintas submenu", () => {
+    expect(canViewTmsLiveView(["tms.epod.view"], "external")).toBe(false);
+    expect(canViewTmsLiveView(["dashboard"], "external")).toBe(false);
   });
 });
 
@@ -210,8 +231,15 @@ describe("canViewTmsLiveTask", () => {
     expect(canViewTmsLiveTask(["tms.epod.manage"])).toBe(false);
   });
 
-  it("selalu menolak akun eksternal", () => {
-    expect(canViewTmsLiveTask(["all"], "external")).toBe(false);
+  it("memberi akses view-only task untuk eksternal", () => {
+    expect(canViewTmsLiveTask(["tms.live-track-task"], "external")).toBe(true);
+    expect(canViewTmsLiveTask(["tms.view"], "external")).toBe(true);
+    expect(canViewTmsLiveTask(["all"], "external")).toBe(true);
+  });
+
+  it("tetap menolak eksternal lintas submenu", () => {
+    expect(canViewTmsLiveTask(["tms.live-view"], "external")).toBe(false);
+    expect(canViewTmsLiveTask(["dashboard"], "external")).toBe(false);
   });
 });
 
@@ -227,8 +255,15 @@ describe("canViewTmsLoggerTrips", () => {
     expect(canViewTmsLoggerTrips(["tms.live-track-config.view"])).toBe(false);
   });
 
-  it("selalu menolak akun eksternal", () => {
-    expect(canViewTmsLoggerTrips(["all"], "external")).toBe(false);
+  it("memberi akses view-only logger untuk eksternal", () => {
+    expect(canViewTmsLoggerTrips(["tms.logger-trips"], "external")).toBe(true);
+    expect(canViewTmsLoggerTrips(["tms.view"], "external")).toBe(true);
+    expect(canViewTmsLoggerTrips(["all"], "external")).toBe(true);
+  });
+
+  it("tetap menolak eksternal lintas submenu", () => {
+    expect(canViewTmsLoggerTrips(["tms.live-view"], "external")).toBe(false);
+    expect(canViewTmsLoggerTrips(["dashboard"], "external")).toBe(false);
   });
 });
 
@@ -249,8 +284,15 @@ describe("canAccessTmsData", () => {
     expect(canAccessTmsData([])).toBe(false);
   });
 
-  it("selalu menolak akun eksternal", () => {
-    expect(canAccessTmsData(["all"], "external")).toBe(false);
+  it("memberi akses data live untuk eksternal view-only", () => {
+    expect(canAccessTmsData(["tms.live-view"], "external")).toBe(true);
+    expect(canAccessTmsData(["tms"], "external")).toBe(true);
+  });
+
+  it("tetap menolak eksternal untuk e-POD/konfigurasi saja", () => {
+    expect(canAccessTmsData(["tms.epod.view"], "external")).toBe(false);
+    expect(canAccessTmsData(["tms.live-track-config.manage"], "external")).toBe(false);
+    expect(canAccessTmsData([], "external")).toBe(false);
   });
 });
 
@@ -299,9 +341,19 @@ describe("permissionMatches", () => {
     expect(permissionMatches(["dashboard"], "tms")).toBe(false);
   });
 
-  it("membatasi akun eksternal ke operasional kendaraan", () => {
+  it("membatasi akun eksternal ke operasional kendaraan + TMS view-only", () => {
     expect(permissionMatches(["all"], "vehicle-odometer", "external")).toBe(true);
-    expect(permissionMatches(["all"], "tms.epod", "external")).toBe(false);
-    expect(permissionMatches(["tms.view"], "tms.epod", "external")).toBe(false);
+    expect(permissionMatches(["tms.live-view"], "tms.live-view", "external")).toBe(true);
+    expect(permissionMatches(["tms.view"], "tms.epod", "external")).toBe(true);
+    expect(permissionMatches(["tms.live-view"], "tms.epod", "external")).toBe(false);
+    expect(permissionMatches(["dashboard"], "tms.live-view", "external")).toBe(false);
+  });
+
+  it("externalCanViewTms tidak memberi akses silang submenu", () => {
+    expect(externalCanViewTms(["tms.live-view"], "tms.live-view")).toBe(true);
+    expect(externalCanViewTms(["tms.live-view"], "tms.epod")).toBe(false);
+    expect(externalCanViewTms(["tms.epod.view"], "tms.epod.view")).toBe(true);
+    expect(externalCanViewTms(["dashboard"], "tms.live-view")).toBe(false);
+    expect(externalCanViewTms(["tms.live-track-config.manage"], "tms.live-view")).toBe(false);
   });
 });

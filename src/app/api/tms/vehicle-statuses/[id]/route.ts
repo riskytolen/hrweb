@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
-import { canAccessTmsData } from "@/lib/permissions";
+import { canAccessTmsData, type AccountType } from "@/lib/permissions";
 import { fetchMcEasyVehicleStatus, McEasyError } from "@/lib/mceasy-server";
 import {
   authorizeTmsScope,
@@ -50,11 +50,12 @@ export async function GET(
   const roleRelation = profile?.roles;
   const role = Array.isArray(roleRelation) ? roleRelation[0] : roleRelation;
   const permissions = parsePermissions(role?.permissions);
+  const accountType: AccountType = profile?.account_type === "external" ? "external" : "internal";
   const allowed =
     profile?.status === "Aktif" &&
-    profile.account_type === "internal" &&
+    (profile.account_type === "internal" || profile.account_type === "external") &&
     role?.status !== "Tidak Aktif" &&
-    canAccessTmsData(permissions);
+    canAccessTmsData(permissions, accountType);
 
   if (!allowed) {
     return NextResponse.json(
@@ -66,7 +67,7 @@ export async function GET(
   const { id } = await params;
   const scope = await authorizeTmsScope({
     userId: user.id,
-    accountType: "internal",
+    accountType,
     permissions,
     roleLevel: typeof role?.level === "number" ? role.level : 0,
   });

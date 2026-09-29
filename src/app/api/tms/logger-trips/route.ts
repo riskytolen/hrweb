@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
-import { canAccessTmsData } from "@/lib/permissions";
+import { canAccessTmsData, type AccountType } from "@/lib/permissions";
 import { authorizeTmsScope } from "@/lib/tms-tenant-auth";
 
 export const dynamic = "force-dynamic";
@@ -26,8 +26,8 @@ function parsePermissions(permissions: unknown): string[] {
   return [];
 }
 
-function canAccessTms(permissions: string[]): boolean {
-  return canAccessTmsData(permissions);
+function canAccessTms(permissions: string[], accountType: AccountType): boolean {
+  return canAccessTmsData(permissions, accountType);
 }
 
 function jakartaToday(): string {
@@ -104,14 +104,15 @@ export async function GET(request: NextRequest) {
 
   const roleRelation = profile?.roles;
   const role = Array.isArray(roleRelation) ? roleRelation[0] : roleRelation;
+  const accountType: AccountType = profile?.account_type === "external" ? "external" : "internal";
 
   if (
     !profile ||
     profile.status !== "Aktif" ||
-    profile.account_type !== "internal" ||
+    (profile.account_type !== "internal" && profile.account_type !== "external") ||
     !role ||
     role.status === "Tidak Aktif" ||
-    !canAccessTms(parsePermissions(role.permissions))
+    !canAccessTms(parsePermissions(role.permissions), accountType)
   ) {
     return NextResponse.json(
       { error: "Anda tidak memiliki akses ke menu TMS." },
@@ -190,7 +191,7 @@ export async function GET(request: NextRequest) {
 
   const scope = await authorizeTmsScope({
     userId: user.id,
-    accountType: "internal",
+    accountType,
     permissions: parsePermissions(role.permissions),
     roleLevel: typeof role?.level === "number" ? role.level : 0,
     requestedClientRef: params.get("client"),

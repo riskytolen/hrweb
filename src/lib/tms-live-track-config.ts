@@ -57,6 +57,8 @@ export interface LiveTrackGroupInput {
   effectiveFrom?: string;
   effectiveUntil?: string;
   members: LiveTrackGroupMember[];
+  /** Client pemilik kelompok baru. Wajib untuk admin all-scope multi-client. */
+  clientId?: string;
 }
 
 /** Ringkas jam operasional untuk label UI ("06.00–18.00"). */

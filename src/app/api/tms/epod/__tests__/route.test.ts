@@ -106,8 +106,8 @@ describe("GET /api/tms/epod", () => {
     expect(listAssignmentsMock).not.toHaveBeenCalled();
   });
 
-  it("menolak akun eksternal dengan 403", async () => {
-    mockProfile(["tms.view"], "external");
+  it("menolak akun eksternal tanpa permission TMS dengan 403", async () => {
+    mockProfile(["dashboard"], "external");
     const response = await listEpod(new NextRequest("http://localhost/api/tms/epod"));
     expect(response.status).toBe(403);
     expect(listAssignmentsMock).not.toHaveBeenCalled();

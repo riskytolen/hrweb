@@ -45,8 +45,10 @@ describe("navigation permissions", () => {
     expect(getDefaultRouteForPermissions(["tms.epod.view"], "internal")).toBe("/tms/epod");
   });
 
-  it("does not let external accounts reach epod", () => {
-    expect(permissionMatches(["tms.view"], "tms.epod", "external")).toBe(false);
-    expect(getTmsDefaultRoute(["tms.view"], "external")).toBe("/dashboard");
+  it("lets external client accounts reach epod view-only", () => {
+    expect(permissionMatches(["tms.view"], "tms.epod", "external")).toBe(true);
+    expect(permissionMatches(["tms.live-view"], "tms.epod", "external")).toBe(false);
+    expect(getTmsDefaultRoute(["tms.view"], "external")).toBe("/tms/live-view");
+    expect(getTmsDefaultRoute(["tms.epod.view"], "external")).toBe("/tms/epod");
   });
 });

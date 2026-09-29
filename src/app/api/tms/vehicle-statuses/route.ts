@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { authorizeTmsScope, fetchScopedVehicleMap } from "@/lib/tms-tenant-auth";
 import { createClient } from "@/lib/supabase-server";
-import { canAccessTmsData } from "@/lib/permissions";
+import { canAccessTmsData, type AccountType } from "@/lib/permissions";
 import { fetchMcEasyVehicleStatuses, McEasyError } from "@/lib/mceasy-server";
 
 // Data live tidak boleh di-cache di edge maupun browser.
@@ -22,14 +22,15 @@ function parsePermissions(permissions: unknown): string[] {
   return [];
 }
 
-function canAccessTms(permissions: string[]): boolean {
-  return canAccessTmsData(permissions);
+function canAccessTms(permissions: string[], accountType: AccountType): boolean {
+  return canAccessTmsData(permissions, accountType);
 }
 
 interface TmsAccessContext {
   userId: string;
   permissions: string[];
   roleLevel: number;
+  accountType: AccountType;
 }
 
 async function verifyTmsAccess(): Promise<
@@ -52,17 +53,18 @@ async function verifyTmsAccess(): Promise<
   const roleRelation = profile?.roles;
   const role = Array.isArray(roleRelation) ? roleRelation[0] : roleRelation;
 
+  const accountType: AccountType = profile?.account_type === "external" ? "external" : "internal";
   if (
     !profile ||
     profile.status !== "Aktif" ||
-    profile.account_type !== "internal" ||
+    (profile.account_type !== "internal" && profile.account_type !== "external") ||
     !role ||
     role.status === "Tidak Aktif"
   ) {
     return { ok: false, status: 403 };
   }
 
-  if (!canAccessTms(parsePermissions(role.permissions))) {
+  if (!canAccessTms(parsePermissions(role.permissions), accountType)) {
     return { ok: false, status: 403 };
   }
 
@@ -72,6 +74,7 @@ async function verifyTmsAccess(): Promise<
       userId: user.id,
       permissions: parsePermissions(role.permissions),
       roleLevel: typeof role?.level === "number" ? role.level : 0,
+      accountType,
     },
   };
 }
@@ -103,7 +106,7 @@ export async function GET(request: NextRequest) {
 
   const scope = await authorizeTmsScope({
     userId: access.context.userId,
-    accountType: "internal",
+    accountType: access.context.accountType,
     permissions: access.context.permissions,
     roleLevel: access.context.roleLevel,
     requestedClientRef: request.nextUrl.searchParams.get("client"),
