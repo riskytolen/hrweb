@@ -115,11 +115,12 @@ const SignaturePad = ({
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    if (rect.width === 0 || rect.height === 0) return null;
+    // Koordinat CSS — context sudah di-scale via setupCanvas/clear,
+    // jadi tidak perlu konversi manual ke backing pixel.
     return {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
     };
   }, []);
 
@@ -174,9 +175,21 @@ const SignaturePad = ({
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
+        // Reset transform dulu: context membawa scale(devicePixelRatio) dari
+        // setupCanvas (bisa terakumulasi bila setup dipanggil berulang),
+        // sehingga clearRect tanpa reset tidak selalu mencakup seluruh kanvas.
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Kembalikan style gambar agar bisa langsung dipakai menggambar lagi.
+        const ratio = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "#0f172a";
         hasInkRef.current = false;
         lastRef.current = null;
+        drawingRef.current = false;
       },
       isEmpty() {
         return !hasInkRef.current;
@@ -201,9 +214,8 @@ const SignaturePad = ({
       const last = lastRef.current;
       if (last) {
         ctx.beginPath();
-        ctx.moveTo(last.x / (window.devicePixelRatio || 1), last.y / (window.devicePixelRatio || 1));
-        // Koordinat sudah diskala via getPos; bagi kembali agar garis pas dengan skala ctx.
-        ctx.lineTo(pos.x / (window.devicePixelRatio || 1), pos.y / (window.devicePixelRatio || 1));
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(pos.x, pos.y);
         ctx.stroke();
       }
       lastRef.current = pos;
@@ -856,6 +868,9 @@ function StopSubmissionForm({
               onClick={() => {
                 signatureRef.current?.clear();
                 setSignatureDrawn(false);
+                setError((prev) =>
+                  prev && prev.includes("Tanda tangan") ? null : prev,
+                );
               }}
               className="ml-auto inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted"
             >
