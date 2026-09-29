@@ -277,11 +277,13 @@ export async function syncActiveEpodAssignments(
 
   // Assignment yang sudah tidak muncul di Index (kemungkinan ENDED/CANCELED)
   // disinkronkan statusnya sekali agar tidak selamanya "STARTED".
+  // Assignment frozen ikut direkonsiliasi, tetapi HANYA kolom
+  // task_status_raw/last_synced_at yang diperbarui: stop, bukti, dan
+  // snapshot tetap dibekukan agar pekerjaan e-POD tidak berubah.
   const orphaned = [...existingByTask.values()]
     .filter(
       (assignment) =>
         !taskMap.has(assignment.taskId) &&
-        !assignment.frozenAt &&
         assignment.status !== "CANCELLED" &&
         assignment.taskStatusRaw !== "ENDED" &&
         assignment.taskStatusRaw !== "CANCELED",

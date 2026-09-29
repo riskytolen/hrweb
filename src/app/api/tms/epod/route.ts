@@ -1,10 +1,16 @@
 import { authorizeEpod, epodError, epodJson } from "@/lib/tms-epod-auth";
-import { countAssignmentsByStatus, listAssignments } from "@/lib/tms-epod-data";
-import { EPOD_ASSIGNMENT_STATUS_LABEL, type EpodAssignmentStatus } from "@/lib/tms-epod";
+import { countAssignmentsByLifecycle, listAssignments } from "@/lib/tms-epod-data";
+import {
+  EPOD_ASSIGNMENT_STATUS_LABEL,
+  EPOD_LIFECYCLE_BUCKET_LABEL,
+  type EpodAssignmentStatus,
+  type EpodLifecycleBucket,
+} from "@/lib/tms-epod";
 
 export const dynamic = "force-dynamic";
 
 const VALID_STATUSES = Object.keys(EPOD_ASSIGNMENT_STATUS_LABEL) as EpodAssignmentStatus[];
+const VALID_BUCKETS = Object.keys(EPOD_LIFECYCLE_BUCKET_LABEL) as EpodLifecycleBucket[];
 
 function parseDate(value: string | null): string | undefined {
   if (!value) return undefined;
@@ -18,6 +24,12 @@ export async function GET(request: Request) {
   if (!auth.ok) return auth.response;
   const statusParam = url.searchParams.get("status");
   const status = statusParam && VALID_STATUSES.includes(statusParam as EpodAssignmentStatus) ? statusParam : undefined;
+  const bucketParam = url.searchParams.get("bucket");
+  const bucket =
+    bucketParam && VALID_BUCKETS.includes(bucketParam as EpodLifecycleBucket)
+      ? (bucketParam as EpodLifecycleBucket)
+      : undefined;
+  const search = url.searchParams.get("search")?.trim() || undefined;
 
   const page = Math.max(1, Math.trunc(Number(url.searchParams.get("page") ?? "1")) || 1);
   const limitRaw = Math.trunc(Number(url.searchParams.get("limit") ?? "20")) || 20;
@@ -29,8 +41,9 @@ export async function GET(request: Request) {
     const [result, counts] = await Promise.all([
       listAssignments(
         {
-          search: url.searchParams.get("search")?.trim() || undefined,
+          search,
           status,
+          bucket,
           dateFrom,
           dateTo,
           page,
@@ -38,7 +51,7 @@ export async function GET(request: Request) {
         },
         auth.context.allowedClientIds,
       ),
-      countAssignmentsByStatus({ dateFrom, dateTo }, auth.context.allowedClientIds),
+      countAssignmentsByLifecycle({ search, dateFrom, dateTo }, auth.context.allowedClientIds),
     ]);
 
     return epodJson({

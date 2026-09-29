@@ -266,6 +266,39 @@ describe("syncActiveEpodAssignments", () => {
     expect(store.updates[store.updates.length - 1]).toMatchObject({ task_status_raw: "ENDED" });
   });
 
+  it("merekonsiliasi assignment frozen hanya pada task_status_raw tanpa menyentuh bukti", async () => {
+    const store = captured();
+    fetchDetailMock.mockResolvedValue({
+      id: "t1",
+      number: "FO-1",
+      status: { raw_type: "ENDED", name: "Selesai" },
+    });
+    installAdminMock({
+      captured: store,
+      reads: {
+        assignments: [
+          {
+            id: "assign-1",
+            task_id: "t1",
+            status: "IN_PROGRESS",
+            task_status_raw: "STARTED",
+            frozen_at: "2026-09-22T00:00:00Z",
+          },
+        ],
+      },
+    });
+    fetchListMock.mockResolvedValue({ items: [], total: 0, page: 1, counts: null });
+
+    const summary = await syncActiveEpodAssignments(Date.now());
+
+    expect(summary.assignmentsReconciled).toBe(1);
+    expect(store.upserts).toHaveLength(0);
+    expect(store.rpcs).toHaveLength(0);
+    const update = store.updates[store.updates.length - 1];
+    expect(Object.keys(update).sort()).toEqual(["last_synced_at", "task_status_raw"]);
+    expect(update).toMatchObject({ task_status_raw: "ENDED" });
+  });
+
   it("mencatat kegagalan satu sumber tanpa menghentikan eksekusi", async () => {
     const store = captured();
     installAdminMock({ captured: store });

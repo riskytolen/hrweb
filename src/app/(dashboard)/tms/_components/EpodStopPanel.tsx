@@ -1336,6 +1336,19 @@ export default function EpodStopPanel({
         </div>
       </div>
 
+      {assignment.taskStatusRaw === "ENDED" &&
+        assignment.status !== "COMPLETED" &&
+        assignment.status !== "CANCELLED" && (
+          <div className="flex items-start gap-2.5 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <p className="text-xs leading-relaxed text-foreground">
+              <span className="font-bold">Perjalanan telah selesai, tetapi e-POD belum lengkap.</span>{" "}
+              FO ini tidak lagi ditawarkan pada Claim FO aplikasi. Selesaikan bukti yang tertinggal atau tetapkan
+              petugas agar e-POD dapat dilengkapi.
+            </p>
+          </div>
+        )}
+
       <div className="grid items-start gap-5 lg:grid-cols-5">
         {/* Kolom kiri */}
         <div className="space-y-5 lg:col-span-3">

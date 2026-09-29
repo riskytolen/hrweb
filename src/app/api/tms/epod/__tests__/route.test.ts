@@ -26,7 +26,7 @@ vi.mock("@/lib/supabase-admin", () => ({
 
 vi.mock("@/lib/tms-epod-data", () => ({
   listAssignments: vi.fn(),
-  countAssignmentsByStatus: vi.fn(),
+  countAssignmentsByLifecycle: vi.fn(),
   getStopDetail: vi.fn(),
   getAssignmentByTask: vi.fn(),
   getAssignmentExportData: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock("@/lib/tms-epod-data", () => ({
 import { createClient } from "@/lib/supabase-server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import {
-  countAssignmentsByStatus,
+  countAssignmentsByLifecycle,
   getAssignmentByTask,
   getAssignmentDetail,
   getAssignmentExportData,
@@ -54,7 +54,7 @@ import { POST as forceRelease } from "@/app/api/tms/epod/[assignmentId]/force-re
 const createClientMock = vi.mocked(createClient);
 const createAdminMock = vi.mocked(createAdminClient);
 const listAssignmentsMock = vi.mocked(listAssignments);
-const countMock = vi.mocked(countAssignmentsByStatus);
+const countMock = vi.mocked(countAssignmentsByLifecycle);
 const getStopDetailMock = vi.mocked(getStopDetail);
 const getAssignmentDetailMock = vi.mocked(getAssignmentDetail);
 const getAssignmentByTaskMock = vi.mocked(getAssignmentByTask);
@@ -89,10 +89,9 @@ function mockUnauthenticated() {
 beforeEach(() => {
   vi.clearAllMocks();
   countMock.mockResolvedValue({
-    open: 1,
-    claimed: 0,
-    inProgress: 2,
-    completed: 3,
+    actionable: 2,
+    tripEndedPending: 1,
+    epodCompleted: 3,
     cancelled: 0,
     total: 6,
   });
@@ -160,13 +159,44 @@ describe("GET /api/tms/epod", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(listAssignmentsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ page: 1, limit: 15, status: undefined }),
+      expect.objectContaining({ page: 1, limit: 15, status: undefined, bucket: undefined }),
       "all",
     );
-    const payload = (await response.json()) as { data: unknown[]; meta: { total: number; counts: { completed: number } } };
+    const payload = (await response.json()) as { data: unknown[]; meta: { total: number; counts: { epodCompleted: number } } };
     expect(payload.data).toHaveLength(1);
     expect(payload.meta.total).toBe(1);
-    expect(payload.meta.counts.completed).toBe(3);
+    expect(payload.meta.counts.epodCompleted).toBe(3);
+  });
+
+  it("meneruskan bucket lifecycle ke daftar", async () => {
+    mockProfile(["tms.epod.view"]);
+    listAssignmentsMock.mockResolvedValue({ items: [], total: 0 });
+    const response = await listEpod(new NextRequest("http://localhost/api/tms/epod?bucket=TRIP_ENDED_PENDING"));
+    expect(response.status).toBe(200);
+    expect(listAssignmentsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bucket: "TRIP_ENDED_PENDING" }),
+      "all",
+    );
+  });
+
+  it("mengabaikan bucket yang tidak dikenal", async () => {
+    mockProfile(["tms.epod.view"]);
+    listAssignmentsMock.mockResolvedValue({ items: [], total: 0 });
+    const response = await listEpod(new NextRequest("http://localhost/api/tms/epod?bucket=ngawur"));
+    expect(response.status).toBe(200);
+    expect(listAssignmentsMock).toHaveBeenCalledWith(expect.objectContaining({ bucket: undefined }), "all");
+  });
+
+  it("meneruskan search ke daftar dan hitungan lifecycle", async () => {
+    mockProfile(["tms.epod.view"]);
+    listAssignmentsMock.mockResolvedValue({ items: [], total: 0 });
+    const response = await listEpod(new NextRequest("http://localhost/api/tms/epod?search=FO-1"));
+    expect(response.status).toBe(200);
+    expect(listAssignmentsMock).toHaveBeenCalledWith(expect.objectContaining({ search: "FO-1" }), "all");
+    expect(countMock).toHaveBeenCalledWith(
+      expect.objectContaining({ search: "FO-1" }),
+      "all",
+    );
   });
 
   it("mengabaikan status filter yang tidak dikenal", async () => {
@@ -195,6 +225,7 @@ describe("GET /api/tms/epod", () => {
     );
     expect(countMock).toHaveBeenCalledWith(
       {
+        search: undefined,
         dateFrom: "2026-09-26T17:00:00.000Z",
         dateTo: "2026-09-28T16:59:59.999Z",
       },

@@ -10,6 +10,7 @@ import {
   type EpodAssignment,
   type EpodAssignmentListItem,
   type EpodEvidence,
+  type EpodLifecycleBucket,
   type EpodPetugasRole,
   type EpodStop,
   type EpodSubmission,
@@ -53,11 +54,25 @@ export interface EpodStopDetail {
 
 export interface EpodAssignmentFilters {
   search?: string;
+  /** Subfilter status e-POD di dalam tab terbuka (OPEN/CLAIMED/IN_PROGRESS). */
   status?: string;
+  /** Tab lifecycle; tanpa bucket berarti seluruh pool monitoring. */
+  bucket?: EpodLifecycleBucket;
   dateFrom?: string;
   dateTo?: string;
   page: number;
   limit: number;
+}
+
+/** Status e-POD yang masih terbuka (belum COMPLETED/CANCELLED). */
+const OPEN_EPOD_STATUSES = ["OPEN", "CLAIMED", "IN_PROGRESS"];
+
+/** Trip McEasy yang masih berjalan dan boleh diklaim mandiri dari aplikasi. */
+const CLAIMABLE_TRIP_STATUSES = ["SCHEDULED", "STARTED"];
+
+function cleanSearchTerm(search?: string): string {
+  if (!search) return "";
+  return search.replace(/[%,]/g, " ").trim();
 }
 
 interface EpodPetugasInfo {
@@ -116,11 +131,24 @@ export async function listAssignments(
     .in("task_status_raw", VISIBLE_TASK_STATUSES);
 
   if (clientScope !== "all") query = query.in("client_id", clientScope);
+
+  // Tab lifecycle memisahkan status perjalanan dari status bukti e-POD.
+  // Bucket saling eksklusif agar satu FO tidak muncul di dua tab.
+  if (filters.bucket === "ACTIONABLE") {
+    query = query.in("status", OPEN_EPOD_STATUSES).in("task_status_raw", CLAIMABLE_TRIP_STATUSES);
+  } else if (filters.bucket === "TRIP_ENDED_PENDING") {
+    query = query.in("status", OPEN_EPOD_STATUSES).eq("task_status_raw", "ENDED");
+  } else if (filters.bucket === "EPOD_COMPLETED") {
+    query = query.eq("status", "COMPLETED");
+  } else if (filters.bucket === "CANCELLED") {
+    query = query.eq("status", "CANCELLED");
+  }
+
   if (filters.status) query = query.eq("status", filters.status);
   if (filters.dateFrom) query = query.gte("snapshot_at", filters.dateFrom);
   if (filters.dateTo) query = query.lte("snapshot_at", filters.dateTo);
   if (filters.search) {
-    const term = filters.search.replace(/[%,]/g, " ").trim();
+    const term = cleanSearchTerm(filters.search);
     if (term) query = query.or(`task_number.ilike.%${term}%,license_plate.ilike.%${term}%`);
   }
 
@@ -366,60 +394,82 @@ export async function getAssignmentById(
   return assignment;
 }
 
-export interface EpodStatusCounts {
-  open: number;
-  claimed: number;
-  inProgress: number;
-  completed: number;
+export interface EpodLifecycleCounts {
+  actionable: number;
+  tripEndedPending: number;
+  epodCompleted: number;
   cancelled: number;
   total: number;
 }
 
-/** Hitung jumlah assignment per status untuk kartu ringkasan. */
-export async function countAssignmentsByStatus(
-  filters: { dateFrom?: string; dateTo?: string } = {},
+export interface EpodCountFilters {
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+/**
+ * Hitung jumlah assignment per bucket lifecycle untuk kartu/tab ringkasan.
+ * Mengikuti filter global (search, client, tanggal) agar angka konsisten
+ * dengan daftar yang ditampilkan.
+ */
+export async function countAssignmentsByLifecycle(
+  filters: EpodCountFilters = {},
   clientScope: ClientScope = "all",
-): Promise<EpodStatusCounts> {
-  const zero: EpodStatusCounts = {
-    open: 0,
-    claimed: 0,
-    inProgress: 0,
-    completed: 0,
+): Promise<EpodLifecycleCounts> {
+  const zero: EpodLifecycleCounts = {
+    actionable: 0,
+    tripEndedPending: 0,
+    epodCompleted: 0,
     cancelled: 0,
     total: 0,
   };
   if (clientScope !== "all" && clientScope.length === 0) return zero;
   const admin = createAdminClient();
-  const statuses = ["OPEN", "CLAIMED", "IN_PROGRESS", "COMPLETED", "CANCELLED"] as const;
+  const term = cleanSearchTerm(filters.search);
+
+  function baseQuery() {
+    return admin
+      .from(ASSIGNMENTS)
+      .select("id", { count: "exact", head: true })
+      .in("task_status_raw", VISIBLE_TASK_STATUSES);
+  }
+  const bucketQueries: Record<EpodLifecycleBucket, () => ReturnType<typeof baseQuery>> = {
+    ACTIONABLE: () => baseQuery().in("status", OPEN_EPOD_STATUSES).in("task_status_raw", CLAIMABLE_TRIP_STATUSES),
+    TRIP_ENDED_PENDING: () => baseQuery().in("status", OPEN_EPOD_STATUSES).eq("task_status_raw", "ENDED"),
+    EPOD_COMPLETED: () => baseQuery().eq("status", "COMPLETED"),
+    CANCELLED: () => baseQuery().eq("status", "CANCELLED"),
+  };
+
   const results = await Promise.all(
-    statuses.map((status) => {
-      let query = admin
-        .from(ASSIGNMENTS)
-        .select("id", { count: "exact", head: true })
-        .eq("status", status)
-        .in("task_status_raw", VISIBLE_TASK_STATUSES);
+    (Object.keys(bucketQueries) as EpodLifecycleBucket[]).map((bucket) => {
+      let query = bucketQueries[bucket]();
       if (clientScope !== "all") query = query.in("client_id", clientScope);
       if (filters.dateFrom) query = query.gte("snapshot_at", filters.dateFrom);
       if (filters.dateTo) query = query.lte("snapshot_at", filters.dateTo);
+      if (term) query = query.or(`task_number.ilike.%${term}%,license_plate.ilike.%${term}%`);
       return query;
     }),
   );
 
-  const counts: Record<string, number> = {};
-  for (let index = 0; index < statuses.length; index += 1) {
+  const keys: EpodLifecycleBucket[] = ["ACTIONABLE", "TRIP_ENDED_PENDING", "EPOD_COMPLETED", "CANCELLED"];
+  const out: Record<string, number> = {};
+  for (let index = 0; index < keys.length; index += 1) {
     const result = results[index];
     if (result.error) throw new Error(result.error.message);
-    counts[statuses[index]] = result.count ?? 0;
+    out[keys[index]] = result.count ?? 0;
   }
 
-  const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+  const actionable = out.ACTIONABLE ?? 0;
+  const tripEndedPending = out.TRIP_ENDED_PENDING ?? 0;
+  const epodCompleted = out.EPOD_COMPLETED ?? 0;
+  const cancelled = out.CANCELLED ?? 0;
   return {
-    open: counts.OPEN ?? 0,
-    claimed: counts.CLAIMED ?? 0,
-    inProgress: counts.IN_PROGRESS ?? 0,
-    completed: counts.COMPLETED ?? 0,
-    cancelled: counts.CANCELLED ?? 0,
-    total,
+    actionable,
+    tripEndedPending,
+    epodCompleted,
+    cancelled,
+    total: actionable + tripEndedPending + epodCompleted + cancelled,
   };
 }
 

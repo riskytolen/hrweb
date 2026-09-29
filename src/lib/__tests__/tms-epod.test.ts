@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  epodTripStatusLabel,
   filledEpodItems,
   formatDistance,
   haversineMeters,
@@ -8,6 +9,7 @@ import {
   normalizeEpodEvidence,
   normalizeEpodStop,
   normalizeEpodSubmission,
+  resolveEpodLifecycleBucket,
   resolveLoadingStopSequence,
   toEpodItemPayload,
   validateEpodSubmission,
@@ -399,5 +401,37 @@ describe("formatDistance", () => {
     expect(formatDistance(250)).toBe("250 m");
     expect(formatDistance(1500)).toBe("1.5 km");
     expect(formatDistance(null)).toBe("–");
+  });
+});
+
+describe("resolveEpodLifecycleBucket", () => {
+  it("memisahkan perjalanan selesai dari bukti selesai", () => {
+    // Trip aktif + e-POD terbuka → perlu dikerjakan.
+    expect(resolveEpodLifecycleBucket("OPEN", "SCHEDULED")).toBe("ACTIONABLE");
+    expect(resolveEpodLifecycleBucket("OPEN", "STARTED")).toBe("ACTIONABLE");
+    expect(resolveEpodLifecycleBucket("CLAIMED", "STARTED")).toBe("ACTIONABLE");
+    expect(resolveEpodLifecycleBucket("IN_PROGRESS", "STARTED")).toBe("ACTIONABLE");
+    // Trip selesai + e-POD terbuka → antrean pengecualian.
+    expect(resolveEpodLifecycleBucket("OPEN", "ENDED")).toBe("TRIP_ENDED_PENDING");
+    expect(resolveEpodLifecycleBucket("CLAIMED", "ENDED")).toBe("TRIP_ENDED_PENDING");
+    expect(resolveEpodLifecycleBucket("IN_PROGRESS", "ENDED")).toBe("TRIP_ENDED_PENDING");
+    // e-POD selesai menang atas status trip apa pun.
+    expect(resolveEpodLifecycleBucket("COMPLETED", "ENDED")).toBe("EPOD_COMPLETED");
+    expect(resolveEpodLifecycleBucket("COMPLETED", "STARTED")).toBe("EPOD_COMPLETED");
+    expect(resolveEpodLifecycleBucket("COMPLETED", null)).toBe("EPOD_COMPLETED");
+    // Dibatalkan selalu milik tab dibatalkan.
+    expect(resolveEpodLifecycleBucket("CANCELLED", "ENDED")).toBe("CANCELLED");
+    expect(resolveEpodLifecycleBucket("CANCELLED", "STARTED")).toBe("CANCELLED");
+  });
+});
+
+describe("epodTripStatusLabel", () => {
+  it("melabeli status perjalanan McEasy", () => {
+    expect(epodTripStatusLabel("SCHEDULED")).toBe("Dijadwalkan");
+    expect(epodTripStatusLabel("STARTED")).toBe("Berjalan");
+    expect(epodTripStatusLabel("ENDED")).toBe("Selesai");
+    expect(epodTripStatusLabel("CANCELED")).toBe("Dibatalkan vendor");
+    expect(epodTripStatusLabel(null)).toBe("–");
+    expect(epodTripStatusLabel("ngawur")).toBe("–");
   });
 });

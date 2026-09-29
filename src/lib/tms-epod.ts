@@ -514,6 +514,56 @@ export function validateEpodSubmission(input: EpodSubmissionInput): string | nul
 
 // ─── Tampilan ───
 
+/**
+ * Bucket lifecycle Monitoring e-POD: memisahkan status perjalanan McEasy
+ * dari status bukti e-POD yang independen satu sama lain.
+ */
+export type EpodLifecycleBucket = "ACTIONABLE" | "TRIP_ENDED_PENDING" | "EPOD_COMPLETED" | "CANCELLED";
+
+export const EPOD_LIFECYCLE_BUCKET_LABEL: Record<EpodLifecycleBucket, string> = {
+  ACTIONABLE: "Perlu Dikerjakan",
+  TRIP_ENDED_PENDING: "Trip Selesai, e-POD Tertinggal",
+  EPOD_COMPLETED: "e-POD Selesai",
+  CANCELLED: "Dibatalkan",
+};
+
+/** Status subfilter e-POD di dalam tab Perlu Dikerjakan / Trip Selesai. */
+export type EpodOpenStatus = "OPEN" | "CLAIMED" | "IN_PROGRESS";
+
+/**
+ * Kelompokkan assignment ke bucket lifecycle.
+ *
+ * - `CANCELLED` selalu milik tab Dibatalkan.
+ * - `COMPLETED` selalu milik tab e-POD Selesai, apa pun status trip.
+ * - Trip `ENDED` dengan e-POD belum selesai masuk antrean pengecualian.
+ * - Sisanya (trip aktif + e-POD belum selesai) actionable.
+ */
+export function resolveEpodLifecycleBucket(
+  status: EpodAssignmentStatus,
+  taskStatusRaw: string | null,
+): EpodLifecycleBucket {
+  if (status === "CANCELLED") return "CANCELLED";
+  if (status === "COMPLETED") return "EPOD_COMPLETED";
+  if (taskStatusRaw === "ENDED") return "TRIP_ENDED_PENDING";
+  return "ACTIONABLE";
+}
+
+/** Label tampil status perjalanan McEasy. */
+export function epodTripStatusLabel(taskStatusRaw: string | null): string {
+  switch (taskStatusRaw) {
+    case "SCHEDULED":
+      return "Dijadwalkan";
+    case "STARTED":
+      return "Berjalan";
+    case "ENDED":
+      return "Selesai";
+    case "CANCELED":
+      return "Dibatalkan vendor";
+    default:
+      return "–";
+  }
+}
+
 export const EPOD_ASSIGNMENT_STATUS_LABEL: Record<EpodAssignmentStatus, string> = {
   OPEN: "Belum diklaim",
   CLAIMED: "Sudah diklaim",
