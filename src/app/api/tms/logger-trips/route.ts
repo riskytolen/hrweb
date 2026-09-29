@@ -193,6 +193,7 @@ export async function GET(request: NextRequest) {
     accountType: "internal",
     permissions: parsePermissions(role.permissions),
     roleLevel: typeof role?.level === "number" ? role.level : 0,
+    requestedClientRef: params.get("client"),
   });
   if (!scope.ok) return scope.response;
   const scopeIds = scope.scope.allowedClientIds;

@@ -29,6 +29,7 @@ import {
 import FleetSidebar, { type FleetPill } from "./FleetSidebar";
 import FleetMap from "./FleetMap";
 import VehicleDetailPanel from "./VehicleDetailPanel";
+import TmsClientSelector, { TMS_CLIENT_CHANGED_EVENT, readTmsClientParam } from "./TmsClientSelector";
 
 interface FleetApiResponse {
   data?: unknown;
@@ -82,7 +83,12 @@ export default function TmsDashboard() {
     else setRefreshing(true);
 
     try {
-      const response = await fetch("/api/tms/vehicle-statuses?withAddress=true", {
+      const clientParam = readTmsClientParam();
+      const url =
+        clientParam != null
+          ? `/api/tms/vehicle-statuses?withAddress=true&client=${encodeURIComponent(clientParam)}`
+          : "/api/tms/vehicle-statuses?withAddress=true";
+      const response = await fetch(url, {
         signal: controller.signal,
         headers: { Accept: "application/json" },
       });
@@ -155,6 +161,15 @@ export default function TmsDashboard() {
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [fetchFleet]);
+
+  // Muat ulang saat pilihan client berubah.
+  useEffect(() => {
+    const onClientChanged = () => {
+      fetchFleet(true);
+    };
+    window.addEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
+    return () => window.removeEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
   }, [fetchFleet]);
 
   // Lacak status fullscreen.
@@ -263,6 +278,7 @@ export default function TmsDashboard() {
               LIVE
             </span>
             {refreshing && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+            <TmsClientSelector compact />
           </div>
 
           {/* Kontrol peta */}

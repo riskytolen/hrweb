@@ -111,7 +111,7 @@ export async function listAssignments(
   const admin = createAdminClient();
   let query = admin
     .from(ASSIGNMENTS)
-    .select("*", { count: "exact" })
+    .select("*, client:tms_clients(code, slug, name)", { count: "exact" })
     // Monitoring hanya menampilkan FO Dijadwalkan/Berjalan/Selesai.
     .in("task_status_raw", VISIBLE_TASK_STATUSES);
 
@@ -131,23 +131,44 @@ export async function listAssignments(
 
   if (error) throw new Error(error.message);
 
-  const assignments = (data ?? [])
-    .map(normalizeEpodAssignment)
-    .filter((item): item is EpodAssignment => item !== null);
+  const rows = (data ?? []) as Record<string, unknown>[];
+  const assignments = rows
+    .map((row) => {
+      const item = normalizeEpodAssignment(row);
+      if (!item) return null;
+      const client =
+        row.client && typeof row.client === "object"
+          ? (row.client as { code?: unknown; slug?: unknown; name?: unknown })
+          : null;
+      const text = (value: unknown, max: number): string | null => {
+        const str = typeof value === "string" ? value.trim() : "";
+        return str ? str.slice(0, max) : null;
+      };
+      return {
+        item,
+        clientCode: text(client?.code, 40),
+        clientSlug: text(client?.slug, 60),
+        clientName: text(client?.name, 120),
+      };
+    })
+    .filter((entry): entry is { item: EpodAssignment; clientCode: string | null; clientSlug: string | null; clientName: string | null } => entry !== null);
 
   const info = await loadPetugasInfo(
     admin,
-    assignments.map((item) => item.assignedEmployeeId).filter((v): v is string => !!v),
+    assignments.map((entry) => entry.item.assignedEmployeeId).filter((v): v is string => !!v),
   );
 
   return {
-    items: assignments.map((item) => {
-      const petugas = item.assignedEmployeeId ? info.get(item.assignedEmployeeId) : undefined;
+    items: assignments.map((entry) => {
+      const petugas = entry.item.assignedEmployeeId ? info.get(entry.item.assignedEmployeeId) : undefined;
       return {
-        ...item,
+        ...entry.item,
+        clientCode: entry.clientCode,
+        clientSlug: entry.clientSlug,
+        clientName: entry.clientName,
         assignedName: petugas?.nama ?? null,
-        assignedRoleLabel: item.assignedEmployeeId
-          ? resolvePetugasRoleLabel(item.assignedRole, petugas?.jabatanNama ?? null)
+        assignedRoleLabel: entry.item.assignedEmployeeId
+          ? resolvePetugasRoleLabel(entry.item.assignedRole, petugas?.jabatanNama ?? null)
           : null,
       };
     }),

@@ -106,6 +106,7 @@ export async function GET(request: NextRequest) {
     accountType: "internal",
     permissions: access.context.permissions,
     roleLevel: access.context.roleLevel,
+    requestedClientRef: request.nextUrl.searchParams.get("client"),
   });
   if (!scope.ok) return scope.response;
 

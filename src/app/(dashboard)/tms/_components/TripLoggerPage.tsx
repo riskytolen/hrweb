@@ -18,6 +18,7 @@ import RouteGuard from "@/components/RouteGuard";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import PageHeader from "@/components/ui/PageHeader";
+import TmsClientSelector, { TMS_CLIENT_CHANGED_EVENT, readTmsClientParam } from "./TmsClientSelector";
 
 /* ─── Tipe data ─── */
 
@@ -206,6 +207,16 @@ export default function TripLoggerPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [clientTick, setClientTick] = useState(0);
+
+  useEffect(() => {
+    const onClientChanged = () => {
+      setPage(1);
+      setClientTick((tick) => tick + 1);
+    };
+    window.addEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
+    return () => window.removeEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -219,6 +230,8 @@ export default function TripLoggerPage() {
       });
       if (visitState !== "ALL") params.set("visitState", visitState);
       if (appliedSearch) params.set("search", appliedSearch);
+      const clientParam = readTmsClientParam();
+      if (clientParam) params.set("client", clientParam);
 
       const response = await fetch(`/api/tms/logger-trips?${params.toString()}`, { cache: "no-store" });
       const payload = (await response.json()) as ListResponse;
@@ -240,9 +253,10 @@ export default function TripLoggerPage() {
   }, [appliedSearch, dateFrom, dateTo, page, visitState]);
 
   useEffect(() => {
+    // clientTick memicu muat ulang saat pilihan client berubah.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-  }, [load]);
+  }, [load, clientTick]);
 
   // Perbarui durasi berjalan tiap 30 detik.
   useEffect(() => {
@@ -265,9 +279,12 @@ export default function TripLoggerPage() {
           description="Waktu masuk dan keluar unit di setiap titik kunjungan beserta suhu kargo"
           icon={Clock3}
           actions={
-            <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={() => void load()}>
-              Muat ulang
-            </Button>
+            <div className="flex items-center gap-2">
+              <TmsClientSelector compact />
+              <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={() => void load()}>
+                Muat ulang
+              </Button>
+            </div>
           }
         />
 

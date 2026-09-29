@@ -38,7 +38,10 @@ export function epodError(message: string, status: number): NextResponse {
  * Route Handler adalah satu-satunya batas keamanan: RouteGuard hanya UI.
  * `requireManage` membedakan endpoint baca dan endpoint tulis.
  */
-export async function authorizeEpod(requireManage: boolean): Promise<EpodAuthResult> {
+export async function authorizeEpod(
+  requireManage: boolean,
+  requestedClientRef?: string | null,
+): Promise<EpodAuthResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -79,6 +82,7 @@ export async function authorizeEpod(requireManage: boolean): Promise<EpodAuthRes
     accountType,
     permissions,
     roleLevel: typeof role?.level === "number" ? role.level : 0,
+    requestedClientRef: requestedClientRef ?? null,
   });
   if (!scope.ok) return scope;
 

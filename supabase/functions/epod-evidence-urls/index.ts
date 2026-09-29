@@ -54,9 +54,12 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    const requestedClientId =
+      typeof body.client_id === "string" ? body.client_id.trim() : "";
+
     const { data: assignment, error: assignmentError } = await supabase
       .from("tms_epod_assignments")
-      .select("id, assigned_employee_id")
+      .select("id, assigned_employee_id, client_id, client:tms_clients(code, slug, name)")
       .eq("id", assignmentId)
       .single();
 
@@ -66,6 +69,26 @@ Deno.serve(async (req: Request) => {
     if (assignment.assigned_employee_id !== employeeId) {
       return json(403, { error: "Anda tidak terpasang pada FO ini" });
     }
+    // Tenant check: bila pemanggil menyertakan client, harus cocok dengan
+    // client assignment. Response selalu membawa client agar aplikasi bisa
+    // menampilkan badge dan memvalidasi sisi client.
+    const assignmentClient = assignment as {
+      id: string;
+      assigned_employee_id: string | null;
+      client_id: string | null;
+      client: { code: string; slug: string; name: string } | null;
+    };
+    if (requestedClientId && assignmentClient.client_id !== requestedClientId) {
+      return json(403, { error: "FO ini milik client lain" });
+    }
+    const clientInfo = assignmentClient.client
+      ? {
+          id: assignmentClient.client_id,
+          code: assignmentClient.client.code,
+          slug: assignmentClient.client.slug,
+          name: assignmentClient.client.name,
+        }
+      : { id: assignmentClient.client_id, code: null, slug: null, name: null };
 
     const { data: stops, error: stopsError } = await supabase
       .from("tms_epod_stops")
@@ -76,7 +99,7 @@ Deno.serve(async (req: Request) => {
     }
     const stopIds = (stops ?? []).map((s: { id: string }) => s.id);
     if (stopIds.length === 0) {
-      return json(200, { evidence: {}, expires_in: URL_TTL_SECONDS });
+      return json(200, { evidence: {}, client: clientInfo, expires_in: URL_TTL_SECONDS });
     }
 
     const { data: submissions, error: submissionsError } = await supabase
@@ -89,20 +112,27 @@ Deno.serve(async (req: Request) => {
     }
     const submissionIds = (submissions ?? []).map((s: { id: string }) => s.id);
     if (submissionIds.length === 0) {
-      return json(200, { evidence: {}, expires_in: URL_TTL_SECONDS });
+      return json(200, { evidence: {}, client: clientInfo, expires_in: URL_TTL_SECONDS });
     }
 
     const { data: rows, error: evidenceError } = await supabase
       .from("tms_epod_evidence")
-      .select("submission_id, bucket_id, object_path, sort_order, evidence_type")
+      .select("submission_id, bucket_id, object_path, sort_order, evidence_type, client_id")
       .in("submission_id", submissionIds)
       .order("sort_order", { ascending: true });
     if (evidenceError) {
       return json(500, { error: "Gagal memuat foto", detail: evidenceError.message });
     }
+    // Bukti milik client lain (inkonsistensi data) tidak ikut ditandatangani.
+    const scopedRows = ((rows ?? []) as (EvidenceRow & { client_id: string | null })[]).filter(
+      (row) =>
+        assignmentClient.client_id == null ||
+        row.client_id == null ||
+        row.client_id === assignmentClient.client_id,
+    );
 
     const bySubmission = new Map<string, EvidenceRow[]>();
-    for (const row of (rows ?? []) as EvidenceRow[]) {
+    for (const row of scopedRows as EvidenceRow[]) {
       const list = bySubmission.get(row.submission_id) ?? [];
       list.push(row);
       bySubmission.set(row.submission_id, list);
@@ -139,7 +169,7 @@ Deno.serve(async (req: Request) => {
       result[submissionId] = signed;
     }
 
-    return json(200, { evidence: result, expires_in: URL_TTL_SECONDS });
+    return json(200, { evidence: result, client: clientInfo, expires_in: URL_TTL_SECONDS });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return json(500, { error: "Internal server error", detail: message });

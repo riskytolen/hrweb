@@ -23,6 +23,7 @@ import {
 } from "@/lib/tms-epod";
 import { EpodAssignmentBadge } from "./EpodStatusBadge";
 import EpodStopPanel from "./EpodStopPanel";
+import TmsClientSelector, { TMS_CLIENT_CHANGED_EVENT, readTmsClientParam } from "./TmsClientSelector";
 
 interface StatusCounts {
   open: number;
@@ -96,6 +97,16 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [clientTick, setClientTick] = useState(0);
+
+  useEffect(() => {
+    const onClientChanged = () => {
+      setPage(1);
+      setClientTick((tick) => tick + 1);
+    };
+    window.addEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
+    return () => window.removeEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
+  }, []);
 
   const hasDateFilter = dateFrom !== "" || dateTo !== "";
 
@@ -115,6 +126,8 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
       });
       if (status !== "ALL") params.set("status", status);
       if (appliedSearch) params.set("search", appliedSearch);
+      const clientParam = readTmsClientParam();
+      if (clientParam) params.set("client", clientParam);
       // Batas hari WIB agar konsisten dengan zona operasional.
       if (dateFrom) params.set("dateFrom", `${dateFrom}T00:00:00+07:00`);
       if (dateTo) params.set("dateTo", `${dateTo}T23:59:59.999+07:00`);
@@ -137,9 +150,10 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
   }, [appliedSearch, dateFrom, dateTo, page, status]);
 
   useEffect(() => {
+    // clientTick memicu muat ulang saat pilihan client berubah.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-  }, [load]);
+  }, [load, clientTick]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
@@ -192,6 +206,7 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
           <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={() => void load()}>
             Muat ulang
           </Button>
+          <TmsClientSelector compact />
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
@@ -291,7 +306,14 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
                       className="cursor-pointer transition-colors hover:bg-muted/60"
                     >
                       <td className="whitespace-nowrap px-4 py-3">
-                        <span className="block font-bold text-foreground">{item.taskNumber ?? item.taskId.slice(0, 8)}</span>
+                        <span className="flex items-center gap-1.5 font-bold text-foreground">
+                          {item.taskNumber ?? item.taskId.slice(0, 8)}
+                          {item.clientName && (
+                            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                              {item.clientName}
+                            </span>
+                          )}
+                        </span>
                         <span className="block text-[11px] text-muted-foreground">{formatDateTime(item.snapshotAt)}</span>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 font-semibold tabular-nums text-foreground">
@@ -335,6 +357,11 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
                         <span className="text-sm font-bold text-foreground">
                           {item.taskNumber ?? item.taskId.slice(0, 8)}
                         </span>
+                        {item.clientName && (
+                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                            {item.clientName}
+                          </span>
+                        )}
                         <EpodAssignmentBadge status={item.status} />
                       </div>
                       <p className="mt-1 truncate text-xs text-muted-foreground">

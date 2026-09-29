@@ -72,6 +72,7 @@ interface OccurrenceRow {
     track_id: string | null;
     frozen_at: string | null;
     last_synced_at: string;
+    client: { code: string; slug: string; name: string } | null;
   } | null;
 }
 
@@ -132,6 +133,9 @@ function toTaskEntry(row: OccurrenceRow): Record<string, unknown> | null {
     frozen: row.snapshot.frozen_at !== null,
     windowStartedAt: row.window_started_at,
     visibleUntil: row.visible_until,
+    clientCode: row.snapshot.client?.code ?? null,
+    clientSlug: row.snapshot.client?.slug ?? null,
+    clientName: row.snapshot.client?.name ?? null,
   };
 }
 
@@ -140,7 +144,8 @@ const OCCURRENCE_SELECT =
   "group:tms_live_track_groups(id, name, color, status, default_window_start, default_window_end), " +
   "snapshot:tms_live_track_task_snapshots(task_id, task_number, vehicle_id, license_plate, driver_name, " +
   "status_raw, expected_started_on, actual_started_on, actual_arrival_on, terminal_at, timeline, " +
-  "planned_routes, actual_routes, track_id, frozen_at, last_synced_at)";
+  "planned_routes, actual_routes, track_id, frozen_at, last_synced_at, " +
+  "client:tms_clients(code, slug, name))";
 
 /**
  * Board Live Track berkelompok.
@@ -196,6 +201,7 @@ export async function GET(request: NextRequest) {
     accountType: "internal",
     permissions: parsePermissions(role.permissions),
     roleLevel: typeof role?.level === "number" ? role.level : 0,
+    requestedClientRef: params.get("client"),
   });
   if (!scope.ok) return scope.response;
   const allowedClientIds = scope.scope.allowedClientIds;

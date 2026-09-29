@@ -360,16 +360,23 @@ export function normalizeEpodEvidence(raw: unknown): EpodEvidence | null {
 export interface EpodAssignmentListItem extends EpodAssignment {
   assignedName: string | null;
   assignedRoleLabel: string | null;
+  clientCode: string | null;
+  clientSlug: string | null;
+  clientName: string | null;
 }
 
 export function normalizeEpodAssignmentListItem(raw: unknown): EpodAssignmentListItem | null {
   const base = normalizeEpodAssignment(raw);
   if (!base) return null;
   const source = asRecord(raw);
+  const client = asRecord(pick(source, "client"));
   return {
     ...base,
     assignedName: toStr(pick(source, "assigned_name", "assignedName"), 120),
     assignedRoleLabel: toStr(pick(source, "assigned_role_label", "assignedRoleLabel"), 120),
+    clientCode: toStr(pick(client, "code", "clientCode"), 40),
+    clientSlug: toStr(pick(client, "slug", "clientSlug"), 60),
+    clientName: toStr(pick(client, "name", "clientName"), 120),
   };
 }
 

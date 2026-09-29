@@ -218,6 +218,46 @@ export default function AccountsPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Membership client TMS (khusus Super Admin, via API admin).
+  interface TmsClientOption {
+    id: string;
+    code: string;
+    slug: string;
+    name: string;
+  }
+  const [tmsClients, setTmsClients] = useState<TmsClientOption[]>([]);
+  const [userClientIds, setUserClientIds] = useState<string[]>([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+
+  const fetchTmsClients = useCallback(async () => {
+    setClientsLoading(true);
+    try {
+      const res = await fetch("/api/tms/clients", { cache: "no-store" });
+      const payload = (await res.json()) as { data?: TmsClientOption[] };
+      if (res.ok && Array.isArray(payload.data)) setTmsClients(payload.data);
+    } catch {
+      // Abaikan; section membership tetap tampil dengan daftar kosong.
+    } finally {
+      setClientsLoading(false);
+    }
+  }, []);
+
+  const fetchUserMemberships = useCallback(async (userId: string) => {
+    try {
+      const res = await fetch(`/api/admin/tms-client-memberships?userId=${encodeURIComponent(userId)}`, {
+        cache: "no-store",
+      });
+      const payload = (await res.json()) as { data?: string[] };
+      if (res.ok && Array.isArray(payload.data)) {
+        setUserClientIds(payload.data.filter((v): v is string => typeof v === "string"));
+        return;
+      }
+    } catch {
+      // Abaikan; anggap belum ada membership.
+    }
+    setUserClientIds([]);
+  }, []);
+
   // Reset password modal (Fix #6)
   const [showResetPwModal, setShowResetPwModal] = useState(false);
   const [resetPwUser, setResetPwUser] = useState<{ id: string; nama: string } | null>(null);
@@ -342,11 +382,15 @@ export default function AccountsPage() {
     setEditingUserId(null);
     setUserForm({ email: "", nama: "", password: "", role_id: roles[0]?.id || 0, employee_id: "", status: "Aktif", account_type: "internal" });
     setShowPassword(false);
+    setUserClientIds([]);
+    void fetchTmsClients();
     setShowUserModal(true);
   };
 
   const openEditUser = (u: UserWithRole) => {
     setEditingUserId(u.id);
+    void fetchTmsClients();
+    void fetchUserMemberships(u.id);
     setUserForm({
       email: u.email,
       nama: u.nama,
@@ -395,6 +439,15 @@ export default function AccountsPage() {
           .eq("id", editingUserId);
 
         if (error) throw error;
+        const membershipRes = await fetch("/api/admin/tms-client-memberships", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: editingUserId, clientIds: userClientIds }),
+        });
+        if (!membershipRes.ok) {
+          const membershipPayload = (await membershipRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(membershipPayload.error || "Gagal menyimpan membership client.");
+        }
         addToast("success", `Akun ${userForm.nama} berhasil diperbarui.`);
       } else {
         // Fix #1: Create new user via API Route (tidak mengganti session admin)
@@ -1651,6 +1704,55 @@ export default function AccountsPage() {
                       ))}
                     </div>
                   </div>
+                </div>
+
+                {/* Client TMS yang dapat diakses */}
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">
+                    Client TMS
+                  </label>
+                  {clientsLoading ? (
+                    <p className="text-[11px] text-muted-foreground">Memuat daftar client…</p>
+                  ) : tmsClients.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">Belum ada client TMS aktif.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {tmsClients.map((client) => {
+                        const checked = userClientIds.includes(client.id);
+                        return (
+                          <label
+                            key={client.id}
+                            className={cn(
+                              "flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer transition-all",
+                              checked ? "border-primary/30 bg-primary/5" : "border-border hover:bg-muted/30",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setUserClientIds((prev) =>
+                                  prev.includes(client.id)
+                                    ? prev.filter((id) => id !== client.id)
+                                    : [...prev, client.id],
+                                );
+                              }}
+                              className="w-4 h-4 rounded accent-primary"
+                            />
+                            <div>
+                              <p className="text-xs font-semibold text-foreground">{client.name}</p>
+                              <p className="text-[10px] text-muted-foreground">{client.code}</p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {editingUserId
+                      ? "Menentukan data client TMS yang dapat dilihat akun ini."
+                      : "Membership client dapat diatur setelah akun dibuat."}
+                  </p>
                 </div>
               </div>
 

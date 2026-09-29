@@ -104,6 +104,8 @@ export async function authorizeTmsScope(input: {
   permissions: string[];
   roleLevel: number;
   requestedClientId?: string | null;
+  /** Referensi client bebas (id/code/slug, mis. `?client=tuku`) — divalidasi ke scope. */
+  requestedClientRef?: string | null;
 }): Promise<TmsScopeResult> {
   const admin = createAdminClient();
   const memberships = await fetchMembershipClientIds(admin, input.userId);
@@ -124,14 +126,30 @@ export async function authorizeTmsScope(input: {
     };
   }
 
-  if (input.requestedClientId) {
+  const requestedRef = (input.requestedClientRef ?? input.requestedClientId ?? "").trim();
+  if (requestedRef) {
+    // Resolusi id/code/slug ke client aktif. Sanitasi agar aman untuk filter .or().
+    const safeRef = requestedRef.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 60);
+    if (!safeRef) {
+      return { ok: false, response: scopeError("Data tidak ditemukan.", 404) };
+    }
+    const { data: client } = await admin
+      .from("tms_clients")
+      .select("id")
+      .eq("status", "Aktif")
+      .or(`id.eq.${safeRef},code.ilike.${safeRef},slug.ilike.${safeRef}`)
+      .maybeSingle();
+    const resolvedId = (client as { id?: string } | null)?.id ?? null;
     if (
-      scope.allowedClientIds !== "all" &&
-      !scope.allowedClientIds.includes(input.requestedClientId)
+      !resolvedId ||
+      (scope.allowedClientIds !== "all" && !scope.allowedClientIds.includes(resolvedId))
     ) {
       return { ok: false, response: scopeError("Data tidak ditemukan.", 404) };
     }
-    return { ok: true, scope, selectedClientId: input.requestedClientId };
+    // Sempitkan scope efektif ke client yang diminta agar pemanggil cukup
+    // memfilter dengan allowedClientIds.
+    const narrowed: TmsScopeResolution = { ...scope, allowedClientIds: [resolvedId] };
+    return { ok: true, scope: narrowed, selectedClientId: resolvedId };
   }
 
   const selectedClientId =

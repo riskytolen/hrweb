@@ -21,13 +21,24 @@ const createAdminMock = vi.mocked(createAdminClient);
 function mockMemberships(clientIds: string[]) {
   const rows = clientIds.map((client_id) => ({ client_id, client: { status: "Aktif" } }));
   createAdminMock.mockReturnValue({
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          eq: async () => ({ data: rows, error: null }),
+    from: (table: string) => {
+      if (table === "tms_clients") {
+        return {
+          select: () => ({
+            eq: () => ({
+              or: () => ({ maybeSingle: async () => ({ data: { id: "client-b" }, error: null }) }),
+            }),
+          }),
+        };
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: async () => ({ data: rows, error: null }),
+          }),
         }),
-      }),
-    }),
+      };
+    },
   } as never);
 }
 
@@ -122,6 +133,44 @@ describe("authorizeTmsScope", () => {
       requestedClientId: "client-b",
     });
     expect(result).toMatchObject({ ok: true, selectedClientId: "client-b" });
+  });
+
+  it("menyempitkan scope efektif ke client yang diminta", async () => {
+    mockMemberships(["client-a", "client-b"]);
+    createAdminMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "tms_clients") {
+          return {
+            select: () => ({
+              eq: () => ({
+                or: () => ({
+                  maybeSingle: async () => ({ data: { id: "client-b" }, error: null }),
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: async () => ({
+                data: [{ client_id: "client-a" }, { client_id: "client-b" }],
+                error: null,
+              }),
+            }),
+          }),
+        };
+      },
+    } as never);
+    const result = await authorizeTmsScope({
+      userId: "user-1",
+      accountType: "internal",
+      permissions: ["tms.live-view"],
+      roleLevel: 10,
+      requestedClientRef: "client-b",
+    });
+    expect(result).toMatchObject({ ok: true, selectedClientId: "client-b" });
+    if (result.ok) expect(result.scope.allowedClientIds).toEqual(["client-b"]);
   });
 });
 

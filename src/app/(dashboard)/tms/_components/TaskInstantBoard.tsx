@@ -21,6 +21,7 @@ import type {
 } from "@/lib/fleet-task-track";
 import { normalizeRouteList } from "@/lib/fleet-task-track";
 import TaskStatusBadge from "./TaskStatusBadge";
+import TmsClientSelector, { TMS_CLIENT_CHANGED_EVENT, readTmsClientParam } from "./TmsClientSelector";
 
 type BoardMode = "active" | "history";
 
@@ -39,6 +40,9 @@ interface BoardTask {
   vehicleId: number | null;
   licensePlate: string | null;
   driverName: string | null;
+  clientCode: string | null;
+  clientSlug: string | null;
+  clientName: string | null;
   expectedStartedOn: string | null;
   actualStartedOn: string | null;
   actualArrivalOn: string | null;
@@ -86,6 +90,9 @@ interface BoardApiResponse {
       frozen: boolean;
       windowStartedAt: string;
       visibleUntil: string;
+      clientCode?: string | null;
+      clientSlug?: string | null;
+      clientName?: string | null;
     }[];
   }[];
   error?: string;
@@ -238,6 +245,8 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
       try {
         const params = new URLSearchParams();
         if (term.trim()) params.set("search", term.trim());
+        const clientParam = readTmsClientParam();
+        if (clientParam) params.set("client", clientParam);
         if (opts.mode === "history") {
           params.set("mode", "history");
           params.set("from", opts.from);
@@ -266,6 +275,9 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
             vehicleId: task.vehicleId,
             licensePlate: task.licensePlate,
             driverName: task.driverName,
+            clientCode: task.clientCode ?? null,
+            clientSlug: task.clientSlug ?? null,
+            clientName: task.clientName ?? null,
             expectedStartedOn: task.expectedStartedOn,
             actualStartedOn: task.actualStartedOn,
             actualArrivalOn: task.actualArrivalOn,
@@ -301,6 +313,16 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
     [],
   );
 
+  const [clientTick, setClientTick] = useState(0);
+  useEffect(() => {
+    const onClientChanged = () => {
+      setPage(1);
+      setClientTick((tick) => tick + 1);
+    };
+    window.addEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
+    return () => window.removeEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
+  }, []);
+
   useEffect(() => {
     const opts = { mode, from, to, page };
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -317,7 +339,7 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
       abortRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, mode, from, to, page]);
+  }, [search, mode, from, to, page, clientTick]);
 
   const handleSearchSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -381,6 +403,9 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
               {stale && <span className="font-semibold text-amber-600"> · data mungkin basi</span>}
             </p>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <TmsClientSelector compact />
         </div>
         <div className="flex gap-1.5" role="tablist" aria-label="Mode board live track">
           {(
@@ -567,6 +592,11 @@ export default function TaskInstantBoard({ selectedId, onSelect }: TaskInstantBo
                                 <span className="text-sm font-bold text-foreground">
                                   {task.number ?? task.id.slice(0, 8)}
                                 </span>
+                                {task.clientName && (
+                                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                                    {task.clientName}
+                                  </span>
+                                )}
                                 <TaskStatusBadge color={meta.color} label={meta.label} />
                                 {(task.statusRaw === "ENDED" || task.statusRaw === "CANCELED") && (
                                   <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">

@@ -13,10 +13,9 @@ function parseDate(value: string | null): string | undefined {
 }
 
 export async function GET(request: Request) {
-  const auth = await authorizeEpod(false);
-  if (!auth.ok) return auth.response;
-
   const url = new URL(request.url);
+  const auth = await authorizeEpod(false, url.searchParams.get("client"));
+  if (!auth.ok) return auth.response;
   const statusParam = url.searchParams.get("status");
   const status = statusParam && VALID_STATUSES.includes(statusParam as EpodAssignmentStatus) ? statusParam : undefined;
 
