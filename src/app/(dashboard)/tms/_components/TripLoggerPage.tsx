@@ -9,6 +9,7 @@ import {
   Clock3,
   FileSpreadsheet,
   FileText,
+  Loader2,
   RefreshCw,
   Search,
   Store,
@@ -392,8 +393,10 @@ export default function TripLoggerPage() {
   // Memakai endpoint operasional Logger (bukan /api/tms/sla-profiles yang
   // khusus Pengaturan SLA internal) agar akun client ikut mendapat daftar.
   const [slaProfilesError, setSlaProfilesError] = useState<string | null>(null);
+  const [slaProfilesLoading, setSlaProfilesLoading] = useState(false);
   const loadSlaProfiles = useCallback(async () => {
     setSlaProfilesError(null);
+    setSlaProfilesLoading(true);
     try {
       const params = new URLSearchParams();
       const clientParam = readTmsClientParam();
@@ -414,6 +417,8 @@ export default function TripLoggerPage() {
     } catch (err) {
       // Kegagalan request TIDAK disamarkan sebagai "belum ada profil".
       setSlaProfilesError(err instanceof Error ? err.message : "Gagal memuat profil SLA.");
+    } finally {
+      setSlaProfilesLoading(false);
     }
     setSlaProfiles([]);
   }, []);
@@ -923,6 +928,7 @@ export default function TripLoggerPage() {
             <div
               role="tablist"
               aria-label="Profil rute SLA"
+              aria-busy={slaProfilesLoading}
               className="flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-2.5 shadow-sm"
             >
               {slaProfilesError ? (
@@ -932,6 +938,16 @@ export default function TripLoggerPage() {
                     Coba lagi
                   </Button>
                 </p>
+              ) : slaProfilesLoading && slaProfiles.length === 0 ? (
+                <div className="flex items-center gap-1.5" aria-label="Memuat profil SLA">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <span key={index} className="h-7 w-20 shrink-0 animate-pulse rounded-full bg-muted" />
+                  ))}
+                  <span className="flex shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Memuat profil SLA…
+                  </span>
+                </div>
               ) : (
                 slaProfiles.length === 0 &&
                 !profileLoading && (
@@ -940,23 +956,26 @@ export default function TripLoggerPage() {
                   </p>
                 )
               )}
-              {slaProfiles.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={profileId === item.id}
-                  onClick={() => setProfileId(item.id)}
-                  className={cn(
-                    "shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold tabular-nums transition-colors",
-                    profileId === item.id
-                      ? "bg-primary text-white shadow-sm"
-                      : "bg-muted text-muted-foreground hover:bg-muted/70",
-                  )}
-                >
-                  {item.code}
-                </button>
-              ))}
+              {slaProfiles.map((item) => {
+                const isActive = profileId === item.id;
+                const isRefreshing = isActive && (slaProfilesLoading || profileLoading);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={() => setProfileId(item.id)}
+                    className={cn(
+                      "flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold tabular-nums transition-colors",
+                      isActive ? "bg-primary text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-muted/70",
+                    )}
+                  >
+                    {isRefreshing && <Loader2 className="h-3 w-3 animate-spin" aria-label="Memuat data profil" />}
+                    {item.code}
+                  </button>
+                );
+              })}
             </div>
 
             <TripLoggerProfileView
@@ -1053,6 +1072,12 @@ export default function TripLoggerPage() {
                 {filter.label}
               </button>
             ))}
+            {slaProfilesLoading && slaProfiles.length === 0 && !slaProfilesError && (
+              <span className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Memuat profil…
+              </span>
+            )}
             {slaProfiles.length > 0 && (
               <select
                 aria-label="Filter profil rute SLA"
