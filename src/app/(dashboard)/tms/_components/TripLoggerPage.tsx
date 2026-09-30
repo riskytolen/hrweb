@@ -1287,11 +1287,6 @@ export default function TripLoggerPage() {
           )}
         </div>
         )}
-
-        <p className="text-[11px] text-muted-foreground">
-          Waktu masuk/keluar berasal dari timeline Fleet Task McEasy. Suhu hanya tampil bila ada hasil capture perangkat; jika kosong berarti belum ada snapshot suhu untuk titik tersebut.
-          SLA dihitung dari jadwal internal client per kelompok kendaraan (mis. profil VAN Tuku CP); baris tanpa konfigurasi SLA berstatus “SLA Belum Diatur”.
-        </p>
       </div>
     </RouteGuard>
   );
