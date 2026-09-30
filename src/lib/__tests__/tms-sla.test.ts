@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareSlaProfileCode,
   computeSlaDeltaSeconds,
   computeSlaTargetAt,
   evaluateSlaStatus,
@@ -41,6 +42,19 @@ describe("tms-sla", () => {
     expect(matchSlaRouteProfile(["272", "999", "998", "997"], profiles)).toBeNull();
     expect(matchSlaRouteProfile([], profiles)).toBeNull();
     expect(matchSlaRouteProfile(["272"], [])).toBeNull();
+  });
+
+  it("mengurutkan kode profil secara natural (VAN 2 sebelum VAN 10)", () => {
+    const codes = ["VAN 1", "VAN 10", "VAN 11", "VAN 12", "VAN 2", "VAN 3"];
+    expect([...codes].sort(compareSlaProfileCode)).toEqual([
+      "VAN 1",
+      "VAN 2",
+      "VAN 3",
+      "VAN 10",
+      "VAN 11",
+      "VAN 12",
+    ]);
+    expect(compareSlaProfileCode("VAN 1", "VAN 1")).toBe(0);
   });
 
   it("memecah tie-break berdasarkan kode profil", () => {

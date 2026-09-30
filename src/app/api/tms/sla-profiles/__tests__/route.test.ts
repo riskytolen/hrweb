@@ -108,6 +108,32 @@ describe("GET /api/tms/sla-profiles", () => {
     expect(payload.meta.canManage).toBe(true);
   });
 
+  it("orders profiles naturally (VAN 2 before VAN 10)", async () => {
+    const makeProfile = (id: string, code: string) => ({
+      id,
+      code,
+      name: code,
+      client_id: "client-tuku",
+      group_id: "group-cp",
+      departure_target_time: null,
+      departure_day_offset: 0,
+      effective_from: "2026-09-29",
+      effective_until: null,
+      status: "Aktif",
+      source_file: null,
+    });
+    mockAdmin({
+      tms_sla_route_profiles: [makeProfile("p10", "VAN 10"), makeProfile("p2", "VAN 2"), makeProfile("p1", "VAN 1")],
+      tms_live_track_groups: [{ id: "group-cp", name: "CP", client_id: "client-tuku" }],
+      tms_sla_route_stops: [],
+      tms_sla_route_stop_addresses: [],
+    });
+    const response = await GET(new NextRequest("http://localhost/api/tms/sla-profiles"));
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { data: { code: string }[] };
+    expect(payload.data.map((p) => p.code)).toEqual(["VAN 1", "VAN 2", "VAN 10"]);
+  });
+
   it("hides profiles whose group belongs to another client", async () => {
     authorizeMock.mockResolvedValueOnce({
       ok: true,

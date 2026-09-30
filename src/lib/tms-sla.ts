@@ -150,6 +150,32 @@ export function slaStatusLabel(status: SlaStatus | null | undefined, kind?: SlaK
   }
 }
 
+/**
+ * Perbandingan natural untuk kode profil ("VAN 2" < "VAN 10").
+ * String dipecah menjadi segmen angka/huruf; segmen angka dibandingkan
+ * numerik, sisanya leksikografis. Dipakai agar daftar VAN 1-12 selalu
+ * urut benar di Logger Trips maupun Pengaturan SLA.
+ */
+export function compareSlaProfileCode(a: string, b: string): number {
+  const chunksA = a.match(/\d+|\D+/g) ?? [];
+  const chunksB = b.match(/\d+|\D+/g) ?? [];
+  const len = Math.max(chunksA.length, chunksB.length);
+  for (let i = 0; i < len; i++) {
+    const x = chunksA[i] ?? "";
+    const y = chunksB[i] ?? "";
+    if (x === y) continue;
+    const nx = /^\d+$/.test(x) ? Number(x) : NaN;
+    const ny = /^\d+$/.test(y) ? Number(y) : NaN;
+    if (!Number.isNaN(nx) && !Number.isNaN(ny)) {
+      if (nx !== ny) return nx - ny;
+      continue;
+    }
+    const cmp = x.localeCompare(y, "id");
+    if (cmp !== 0) return cmp;
+  }
+  return 0;
+}
+
 /** Label jenis SLA. */
 export function slaKindLabel(kind: SlaKind | null | undefined): string {
   if (kind === "DEPARTURE") return "Keberangkatan";

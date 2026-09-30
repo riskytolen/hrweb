@@ -1,5 +1,6 @@
 import { type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
+import { compareSlaProfileCode } from "@/lib/tms-sla";
 import { authorizeSlaConfig, slaConfigError, slaConfigJson } from "@/lib/tms-sla-auth";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +103,10 @@ export async function GET(request: NextRequest) {
 
   const visible = list.filter((p) => groupNames.has(p.group_id));
 
+  // Urutan natural: "VAN 2" sebelum "VAN 10" (order DB leksikografis).
+  // Menentukan urutan chip Logger Trips dan daftar Pengaturan SLA.
+  const ordered = [...visible].sort((a, b) => compareSlaProfileCode(a.code, b.code));
+
   const stopCounts = new Map<string, number>();
   const unresolvedCounts = new Map<string, number>();
   if (visible.length > 0) {
@@ -136,7 +141,7 @@ export async function GET(request: NextRequest) {
   }
 
   return slaConfigJson({
-    data: visible.map((p) => ({
+    data: ordered.map((p) => ({
       id: p.id,
       code: p.code,
       name: p.name,
