@@ -55,6 +55,7 @@ export interface ProfileRunView {
     compliance: number | null;
   };
   stopVisits: Record<string, ProfileVisitView | null>;
+  departure: DepartureRunView | null;
   extras: ProfileVisitView[];
 }
 
@@ -63,7 +64,19 @@ export interface ProfileInfoView {
   code: string;
   name: string;
   groupName: string | null;
+  departureTargetTime: string | null;
+  departureDayOffset: number;
   status: string;
+}
+
+export interface DepartureRunView {
+  store: string | null;
+  enteredAt: string | null;
+  exitedAt: string | null;
+  slaTargetAt: string | null;
+  slaStatus: string | null;
+  slaDeltaSeconds: number | null;
+  temperatureC: number | null;
 }
 
 export interface ProfileMetaView {
@@ -122,9 +135,15 @@ function statusDot(status: SlaStatus | null): string {
   return "bg-slate-300";
 }
 
-function VisitSlaBadge({ visit }: { visit: ProfileVisitView }) {
-  const status = asSlaStatus(visit.slaStatus);
-  const kind = asSlaKind(visit.slaKind);
+function VisitSlaBadge({
+  status: rawStatus,
+  kind: rawKind,
+}: {
+  status: string | null;
+  kind: string | null;
+}) {
+  const status = asSlaStatus(rawStatus);
+  const kind = asSlaKind(rawKind);
   if (!status) return <span className="text-xs text-muted-foreground">–</span>;
   const variant =
     status === "ON_TIME" ? "success" : status === "LATE" ? "danger" : status === "PENDING" ? "warning" : "muted";
@@ -139,7 +158,8 @@ function RunTimeline({ run, stops }: { run: ProfileRunView; stops: ProfileStopVi
       {stops.map((stop, index) => {
         const visit = run.stopVisits[stop.id] ?? null;
         const status = asSlaStatus(visit?.slaStatus ?? null);
-        const kind = asSlaKind(visit?.slaKind ?? null) ?? (stop.kind === "DEPARTURE" ? "DEPARTURE" : "ARRIVAL");
+        // Titik profil selalu toko (kedatangan); keberangkatan gudang tampil terpisah.
+        const kind = asSlaKind(visit?.slaKind ?? null) ?? "ARRIVAL";
         const arrived = !!visit?.enteredAt || !!visit?.exitedAt;
         return (
           <li key={stop.id} className="relative flex gap-3 pb-5 last:pb-0">
@@ -180,7 +200,7 @@ function RunTimeline({ run, stops }: { run: ProfileRunView; stops: ProfileStopVi
               <p className="mt-1.5 flex flex-wrap items-center gap-2">
                 {visit ? (
                   <>
-                    <VisitSlaBadge visit={visit} />
+                    <VisitSlaBadge status={visit.slaStatus} kind={visit.slaKind} />
                     {visit.slaDeltaSeconds !== null && visit.slaDeltaSeconds !== undefined && (
                       <span className="text-[11px] tabular-nums text-muted-foreground">
                         {formatSlaDelta(visit.slaDeltaSeconds)}
@@ -206,7 +226,76 @@ function RunTimeline({ run, stops }: { run: ProfileRunView; stops: ProfileStopVi
 
 /* ─── Kartu satu perjalanan (FO) ─── */
 
-function RunCard({ run, stops }: { run: ProfileRunView; stops: ProfileStopView[] }) {
+function DepartureBlock({
+  departure,
+  targetTime,
+}: {
+  departure: DepartureRunView | null;
+  targetTime: string | null;
+}) {
+  if (!departure && !targetTime) return null;
+  const arrived = !!departure?.enteredAt || !!departure?.exitedAt;
+  return (
+    <div className="mb-4 rounded-xl bg-muted/60 px-3 py-2.5">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground tabular-nums">
+        {slaKindLabel("DEPARTURE")}
+      </p>
+      <p className="truncate text-sm font-bold text-foreground" title={departure?.store ?? undefined}>
+        {departure?.store ?? "Gudang"}
+      </p>
+      <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-muted-foreground">
+        {targetTime && (
+          <span>
+            Target <strong className="text-foreground">{formatSchedule(targetTime)}</strong>
+          </span>
+        )}
+        {departure ? (
+          <>
+            <span>
+              Masuk <strong className="text-foreground">{formatClock(departure.enteredAt)}</strong>
+            </span>
+            <span>
+              {departure.exitedAt ? (
+                <>Keluar <strong className="text-foreground">{formatClock(departure.exitedAt)}</strong></>
+              ) : arrived ? (
+                <strong className="font-semibold text-sky-600">Di lokasi</strong>
+              ) : (
+                <strong className="font-semibold text-amber-600">Belum berangkat</strong>
+              )}
+            </span>
+          </>
+        ) : (
+          <strong className="font-semibold text-amber-600">Belum berangkat</strong>
+        )}
+      </p>
+      {departure && (
+        <p className="mt-1.5 flex flex-wrap items-center gap-2">
+          <VisitSlaBadge status={departure.slaStatus} kind="DEPARTURE" />
+          {departure.slaDeltaSeconds !== null && departure.slaDeltaSeconds !== undefined && (
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {formatSlaDelta(departure.slaDeltaSeconds)}
+            </span>
+          )}
+          {departure.temperatureC !== null && departure.temperatureC !== undefined && (
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {departure.temperatureC.toFixed(1).replace(".", ",")}°C
+            </span>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RunCard({
+  run,
+  stops,
+  departureTargetTime,
+}: {
+  run: ProfileRunView;
+  stops: ProfileStopView[];
+  departureTargetTime: string | null;
+}) {
   const summary = run.summary;
   return (
     <article className="rounded-2xl border border-border bg-card shadow-sm">
@@ -239,6 +328,7 @@ function RunCard({ run, stops }: { run: ProfileRunView; stops: ProfileStopView[]
         </div>
       </div>
       <div className="px-4 py-4">
+        <DepartureBlock departure={run.departure} targetTime={departureTargetTime} />
         <RunTimeline run={run} stops={stops} />
         {run.extras.length > 0 && (
           <div className="mt-3 rounded-xl bg-muted/60 px-3 py-2.5">
@@ -252,7 +342,7 @@ function RunCard({ run, stops }: { run: ProfileRunView; stops: ProfileStopView[]
                   <span className="text-muted-foreground">
                     {formatClock(extra.enteredAt)} → {extra.exitedAt ? formatClock(extra.exitedAt) : "di lokasi"}
                   </span>
-                  <VisitSlaBadge visit={extra} />
+                  <VisitSlaBadge status={extra.slaStatus} kind={extra.slaKind} />
                 </li>
               ))}
             </ul>
@@ -334,6 +424,7 @@ export default function TripLoggerProfileView({
           {profile.code}
           <span className="ml-2 font-medium text-muted-foreground">
             {profile.groupName ?? ""} · {stops.length} titik
+            {profile.departureTargetTime ? ` · berangkat ${profile.departureTargetTime}` : ""}
           </span>
         </span>
         <span className="tabular-nums text-muted-foreground">
@@ -369,7 +460,7 @@ export default function TripLoggerProfileView({
                   </span>
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground tabular-nums">
-                      {stop.routeOrder} · {slaKindLabel(stop.kind === "DEPARTURE" ? "DEPARTURE" : "ARRIVAL")}
+                      {stop.routeOrder} · {slaKindLabel("ARRIVAL")}
                     </p>
                     <p className="truncate text-sm font-bold text-foreground" title={stop.storeName}>
                       {stop.storeName}
@@ -384,7 +475,14 @@ export default function TripLoggerProfileView({
           </div>
         </div>
       ) : (
-        runs.map((run) => <RunCard key={`${run.serviceDate}-${run.taskId}`} run={run} stops={stops} />)
+        runs.map((run) => (
+          <RunCard
+            key={`${run.serviceDate}-${run.taskId}`}
+            run={run}
+            stops={stops}
+            departureTargetTime={profile?.departureTargetTime ?? null}
+          />
+        ))
       )}
 
       {meta?.truncated && (

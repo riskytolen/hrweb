@@ -73,6 +73,8 @@ function baseTables(overrides: Record<string, unknown> = {}) {
         name: "VAN 1",
         client_id: "client-tuku",
         group_id: "group-cp",
+        departure_target_time: "04:15:00",
+        departure_day_offset: 0,
         status: "Aktif",
       },
       error: null,
@@ -80,8 +82,15 @@ function baseTables(overrides: Record<string, unknown> = {}) {
     tms_live_track_groups: { data: { id: "group-cp", name: "CP" }, error: null },
     tms_sla_route_stops: {
       data: [
-        { id: "stop-1", route_order: 1, store_name: "Gudang", target_time: "04:15:00", target_day_offset: 0 },
-        { id: "stop-2", route_order: 2, store_name: "Toko A", target_time: "04:58:00", target_day_offset: 0 },
+        { id: "stop-1", route_order: 1, store_name: "Toko A", target_time: "04:58:00", target_day_offset: 0 },
+        { id: "stop-2", route_order: 2, store_name: "Toko B", target_time: "05:30:00", target_day_offset: 0 },
+      ],
+      error: null,
+    },
+    tms_sla_route_stop_addresses: {
+      data: [
+        { route_stop_id: "stop-1", vendor_address_id: "addr-a", is_primary: true },
+        { route_stop_id: "stop-2", vendor_address_id: "addr-b", is_primary: true },
       ],
       error: null,
     },
@@ -100,14 +109,15 @@ function baseTables(overrides: Record<string, unknown> = {}) {
           driver_name: "DRIVER",
           route_sequence: 1,
           location_name: "Gudang",
-          arrival_actual: null,
-          departure_actual: "2026-09-29T21:20:00+07:00",
+          address_id: "154634",
+          arrival_actual: "2026-09-30T03:24:00+07:00",
+          departure_actual: "2026-09-30T04:20:00+07:00",
           last_synced_at: "2026-09-30T00:00:00+07:00",
-          sla_route_stop_id: "stop-1",
-          sla_kind: "DEPARTURE",
-          sla_target_at: "2026-09-30T04:15:00+07:00",
-          sla_status: "LATE",
-          sla_delta_seconds: 300,
+          sla_route_stop_id: null,
+          sla_kind: null,
+          sla_target_at: null,
+          sla_status: null,
+          sla_delta_seconds: null,
         },
         {
           id: "v-2",
@@ -118,12 +128,13 @@ function baseTables(overrides: Record<string, unknown> = {}) {
           driver_name: "DRIVER",
           route_sequence: 2,
           location_name: "Toko A",
+          address_id: "addr-a",
           arrival_actual: "2026-09-30T04:50:00+07:00",
           departure_actual: "2026-09-30T05:00:00+07:00",
           last_synced_at: "2026-09-30T00:00:00+07:00",
-          sla_route_stop_id: "stop-2",
+          sla_route_stop_id: "stop-1",
           sla_kind: "ARRIVAL",
-          sla_target_at: "2026-09-30T04:58:00+07:00",
+          sla_target_at: "2026-09-29T21:58:00.000Z",
           sla_status: "ON_TIME",
           sla_delta_seconds: -480,
         },
@@ -183,6 +194,7 @@ describe("GET /api/tms/logger-trips/by-profile", () => {
     for (const table of [
       "tms_sla_route_profiles",
       "tms_sla_route_stops",
+      "tms_sla_route_stop_addresses",
       "tms_sla_task_assignments",
       "tms_trip_visit_logs",
     ]) {
@@ -197,28 +209,139 @@ describe("GET /api/tms/logger-trips/by-profile", () => {
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     const payload = (await response.json()) as {
       data: {
-        profile: { code: string; groupName: string };
+        profile: { code: string; groupName: string; departureTargetTime: string | null };
         stops: { id: string; routeOrder: number; kind: string }[];
         runs: {
           taskNumber: string;
           serviceDate: string;
           summary: { totalStops: number; visitedStops: number; onTime: number; late: number; compliance: number };
+          departure: {
+            store: string | null;
+            enteredAt: string | null;
+            exitedAt: string | null;
+            slaTargetAt: string | null;
+            slaStatus: string | null;
+            slaDeltaSeconds: number | null;
+          } | null;
           stopVisits: Record<string, { slaStatus: string } | null>;
           extras: unknown[];
         }[];
       };
       meta: { totalRuns: number; truncated: boolean };
     };
-    expect(payload.data.profile).toMatchObject({ code: "VAN 1", groupName: "CP" });
+    expect(payload.data.profile).toMatchObject({ code: "VAN 1", groupName: "CP", departureTargetTime: "04:15" });
+    // Semua titik profil adalah toko (kedatangan).
     expect(payload.data.stops.map((s) => s.routeOrder)).toEqual([1, 2]);
-    expect(payload.data.stops[0].kind).toBe("DEPARTURE");
+    expect(payload.data.stops.map((s) => s.kind)).toEqual(["ARRIVAL", "ARRIVAL"]);
     expect(payload.meta).toMatchObject({ totalRuns: 1, truncated: false });
     const run = payload.data.runs[0];
     expect(run).toMatchObject({ taskNumber: "FO-1", serviceDate: "2026-09-30" });
-    expect(run.summary).toMatchObject({ totalStops: 2, visitedStops: 2, onTime: 1, late: 1, compliance: 0.5 });
-    expect(run.stopVisits["stop-1"]?.slaStatus).toBe("LATE");
-    expect(run.stopVisits["stop-2"]?.slaStatus).toBe("ON_TIME");
+    // Gudang (sequence 1) tampil sebagai keberangkatan, bukan ditempel ke toko pertama.
+    expect(run.departure).toMatchObject({
+      store: "Gudang",
+      enteredAt: "2026-09-30T03:24:00+07:00",
+      exitedAt: "2026-09-30T04:20:00+07:00",
+      slaTargetAt: "2026-09-29T21:15:00.000Z",
+      slaStatus: "LATE",
+      slaDeltaSeconds: 300,
+    });
+    expect(run.summary).toMatchObject({ totalStops: 2, visitedStops: 1, onTime: 1, late: 0, compliance: 1 });
+    expect(run.stopVisits["stop-1"]?.slaStatus).toBe("ON_TIME");
+    expect(run.stopVisits["stop-2"]).toBeNull();
     expect(run.extras).toHaveLength(0);
+  });
+
+  it("matches store visits by address id without relying on sequence numbers", async () => {
+    mockSupabase(
+      baseTables({
+        tms_trip_visit_logs: {
+          data: [
+            {
+              id: "v-9",
+              task_id: "task-1",
+              task_number: "FO-1",
+              task_status: "ENDED",
+              license_plate: "B 1 TES",
+              driver_name: "DRIVER",
+              route_sequence: 9,
+              location_name: "Toko B",
+              address_id: "addr-b",
+              arrival_actual: null,
+              departure_actual: null,
+              last_synced_at: "2026-09-30T00:00:00+07:00",
+              sla_route_stop_id: null,
+              sla_kind: null,
+              sla_target_at: null,
+              sla_status: null,
+              sla_delta_seconds: null,
+            },
+          ],
+          error: null,
+        },
+      }),
+    );
+    const response = await GET(request("?profileId=profile-van1&dateFrom=2026-09-30&dateTo=2026-09-30"));
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      data: {
+        runs: {
+          departure: unknown;
+          stopVisits: Record<string, { store: string | null } | null>;
+          extras: unknown[];
+        }[];
+      };
+    };
+    const run = payload.data.runs[0];
+    expect(run.departure).toBeNull();
+    expect(run.stopVisits["stop-1"]).toBeNull();
+    expect(run.stopVisits["stop-2"]?.store).toBe("Toko B");
+    expect(run.extras).toHaveLength(0);
+  });
+
+  it("puts visits with unknown addresses into extras instead of the wrong store", async () => {
+    mockSupabase(
+      baseTables({
+        tms_trip_visit_logs: {
+          data: [
+            {
+              id: "v-x",
+              task_id: "task-1",
+              task_number: "FO-1",
+              task_status: "ENDED",
+              license_plate: "B 1 TES",
+              driver_name: "DRIVER",
+              route_sequence: 2,
+              location_name: "Toko Asing",
+              address_id: "addr-unknown",
+              arrival_actual: "2026-09-30T06:00:00+07:00",
+              departure_actual: "2026-09-30T06:10:00+07:00",
+              last_synced_at: "2026-09-30T00:00:00+07:00",
+              sla_route_stop_id: null,
+              sla_kind: null,
+              sla_target_at: null,
+              sla_status: null,
+              sla_delta_seconds: null,
+            },
+          ],
+          error: null,
+        },
+      }),
+    );
+    const response = await GET(request("?profileId=profile-van1&dateFrom=2026-09-30&dateTo=2026-09-30"));
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      data: {
+        runs: {
+          stopVisits: Record<string, unknown | null>;
+          extras: { store: string | null }[];
+        }[];
+      };
+    };
+    const run = payload.data.runs[0];
+    expect(run.stopVisits["stop-1"]).toBeNull();
+    expect(run.stopVisits["stop-2"]).toBeNull();
+    expect(run.extras).toHaveLength(1);
+    expect(run.extras[0].store).toBe("Toko Asing");
   });
 
   it("shows the profile route with empty runs when no FO is assigned", async () => {

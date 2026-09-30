@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase-server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { canAccessTmsData, type AccountType } from "@/lib/permissions";
 import { authorizeTmsScope } from "@/lib/tms-tenant-auth";
+import { computeSlaDeltaSeconds, computeSlaTargetAt, evaluateSlaStatus } from "@/lib/tms-sla";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,8 @@ interface ProfileRow {
   name: string;
   client_id: string;
   group_id: string;
+  departure_target_time: string | null;
+  departure_day_offset: number | null;
   status: string;
 }
 
@@ -67,6 +70,7 @@ interface VisitRow {
   driver_name: string | null;
   route_sequence: number;
   location_name: string | null;
+  address_id: string | null;
   arrival_actual: string | null;
   departure_actual: string | null;
   last_synced_at: string | null;
@@ -148,7 +152,7 @@ export async function GET(request: NextRequest) {
 
   const { data: profileRow, error: profileError } = await admin
     .from("tms_sla_route_profiles")
-    .select("id, code, name, client_id, group_id, status")
+    .select("id, code, name, client_id, group_id, departure_target_time, departure_day_offset, status")
     .eq("id", profileId)
     .maybeSingle();
   if (profileError) {
@@ -179,7 +183,34 @@ export async function GET(request: NextRequest) {
   }
   const stops = (Array.isArray(stopRows) ? stopRows : []) as unknown as StopRow[];
   const stopById = new Map(stops.map((s) => [s.id, s]));
-  const stopByOrder = new Map(stops.map((s) => [s.route_order, s]));
+
+  // Mapping address McEasy -> titik SLA (primari diutamakan). Dipakai untuk
+  // menempel kunjungan ke titik yang benar tanpa mengandalkan nomor urut,
+  // karena sequence 1 McEasy adalah gudang sedangkan order 1 profil adalah
+  // toko pertama.
+  const stopByAddress = new Map<string, { stop: StopRow; primary: boolean }>();
+  if (stops.length > 0) {
+    const { data: addressRows } = await admin
+      .from("tms_sla_route_stop_addresses")
+      .select("route_stop_id, vendor_address_id, is_primary")
+      .in(
+        "route_stop_id",
+        stops.map((s) => s.id),
+      );
+    for (const row of (Array.isArray(addressRows) ? addressRows : []) as unknown as {
+      route_stop_id: string;
+      vendor_address_id: string;
+      is_primary: boolean | null;
+    }[]) {
+      const stop = row?.route_stop_id ? stopById.get(row.route_stop_id) : undefined;
+      if (!stop || !row.vendor_address_id) continue;
+      const primary = row.is_primary === true;
+      const existing = stopByAddress.get(row.vendor_address_id);
+      if (!existing || (primary && !existing.primary)) {
+        stopByAddress.set(row.vendor_address_id, { stop, primary });
+      }
+    }
+  }
 
   const { data: assignmentRows, error: assignmentError } = await admin
     .from("tms_sla_task_assignments")
@@ -205,7 +236,7 @@ export async function GET(request: NextRequest) {
       .from("tms_trip_visit_logs")
       .select(
         "id, task_id, task_number, task_status, license_plate, driver_name, route_sequence, " +
-          "location_name, arrival_actual, departure_actual, last_synced_at, " +
+          "location_name, address_id, arrival_actual, departure_actual, last_synced_at, " +
           "sla_route_stop_id, sla_kind, sla_target_at, sla_status, sla_delta_seconds",
       )
       .in("task_id", taskIds);
@@ -265,13 +296,49 @@ export async function GET(request: NextRequest) {
       if (!haystack.includes(search)) continue;
     }
 
-    // Tempel kunjungan ke titik SLA: utama via sla_route_stop_id
-    // (otoritatif dari evaluasi), fallback via route_sequence == route_order
-    // untuk baris lama yang belum dievaluasi ulang.
+    // Sequence 1 McEasy selalu gudang (keberangkatan): tampil sebagai baris
+    // tersendiri dan TIDAK ditempel ke titik profil (yang semuanya toko).
+    // Kunjungan toko ditempel via sla_route_stop_id (otoritatif dari
+    // evaluasi), lalu via address_id. Tidak ada fallback nomor-urut karena
+    // urutan McEasy dan urutan profil memang berbeda sistem.
     const usedVisitIds = new Set<string>();
+    let departure: {
+      store: string | null;
+      enteredAt: string | null;
+      exitedAt: string | null;
+      slaTargetAt: string | null;
+      slaStatus: string | null;
+      slaDeltaSeconds: number | null;
+      temperatureC: number | null;
+    } | null = null;
+    const departureTarget =
+      slaProfile.departure_target_time && assignment.service_date
+        ? computeSlaTargetAt(
+            assignment.service_date,
+            slaProfile.departure_target_time,
+            typeof slaProfile.departure_day_offset === "number" ? slaProfile.departure_day_offset : 0,
+          )
+        : null;
+    for (const visit of visits) {
+      if (visit.route_sequence !== 1) continue;
+      usedVisitIds.add(visit.id);
+      if (departure) continue;
+      const target = visit.sla_target_at ?? departureTarget;
+      const actual = visit.departure_actual;
+      departure = {
+        store: visit.location_name,
+        enteredAt: visit.arrival_actual,
+        exitedAt: actual,
+        slaTargetAt: target,
+        slaStatus: visit.sla_status ?? evaluateSlaStatus(target, actual),
+        slaDeltaSeconds: visit.sla_delta_seconds ?? computeSlaDeltaSeconds(target, actual),
+        temperatureC: temperatures.get(`${visit.task_id}:${visit.route_sequence}`) ?? null,
+      };
+    }
     const stopVisits: Record<string, ReturnType<typeof toVisitJson> | null> = {};
     for (const stop of stops) stopVisits[stop.id] = null;
     for (const visit of visits) {
+      if (usedVisitIds.has(visit.id)) continue;
       const direct = visit.sla_route_stop_id ? stopById.get(visit.sla_route_stop_id) : undefined;
       if (direct && !stopVisits[direct.id]) {
         stopVisits[direct.id] = toVisitJson(visit);
@@ -279,10 +346,10 @@ export async function GET(request: NextRequest) {
       }
     }
     for (const visit of visits) {
-      if (usedVisitIds.has(visit.id) || visit.sla_route_stop_id) continue;
-      const fallback = stopByOrder.get(visit.route_sequence);
-      if (fallback && !stopVisits[fallback.id]) {
-        stopVisits[fallback.id] = toVisitJson(visit);
+      if (usedVisitIds.has(visit.id)) continue;
+      const mapped = visit.address_id ? stopByAddress.get(visit.address_id) : undefined;
+      if (mapped && !stopVisits[mapped.stop.id]) {
+        stopVisits[mapped.stop.id] = toVisitJson(visit);
         usedVisitIds.add(visit.id);
       }
     }
@@ -311,6 +378,7 @@ export async function GET(request: NextRequest) {
       unit,
       driver,
       matchScore: assignment.match_score,
+      departure,
       summary: {
         totalStops: stops.length,
         visitedStops,
@@ -345,6 +413,10 @@ export async function GET(request: NextRequest) {
           name: slaProfile.name,
           groupName,
           status: slaProfile.status,
+          departureTargetTime: slaProfile.departure_target_time
+            ? slaProfile.departure_target_time.slice(0, 5)
+            : null,
+          departureDayOffset: slaProfile.departure_day_offset ?? 0,
         },
         stops: stops.map((stop) => ({
           id: stop.id,
@@ -352,7 +424,9 @@ export async function GET(request: NextRequest) {
           storeName: stop.store_name,
           targetTime: stop.target_time,
           dayOffset: stop.target_day_offset ?? 0,
-          kind: stop.route_order === 1 ? "DEPARTURE" : "ARRIVAL",
+          // Semua titik profil adalah toko (kedatangan); keberangkatan
+          // gudang tampil sebagai baris tersendiri per perjalanan.
+          kind: "ARRIVAL",
         })),
         runs,
       },

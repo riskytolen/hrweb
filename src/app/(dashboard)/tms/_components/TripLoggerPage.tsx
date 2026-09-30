@@ -479,10 +479,28 @@ export default function TripLoggerPage() {
     void loadProfileRuns(profileId);
   }, [mode, profileId, loadProfileRuns, clientTick]);
 
-  // Baris datar export mode profil: satu baris per titik per perjalanan.
+  // Baris datar export mode profil: keberangkatan gudang + satu baris per titik per perjalanan.
   const buildProfileExportRows = useCallback((): ProfileTripExportRow[] => {
     const rows: ProfileTripExportRow[] = [];
     for (const run of profileRuns) {
+      if (run.departure || profile?.departureTargetTime) {
+        rows.push({
+          serviceDate: run.serviceDate,
+          taskNumber: run.taskNumber,
+          unit: run.unit,
+          driver: run.driver,
+          routeOrder: 0,
+          storeName: run.departure?.store ?? "Gudang",
+          slaKind: "DEPARTURE",
+          scheduleTarget: profile?.departureTargetTime ?? "",
+          slaTargetAt: run.departure?.slaTargetAt ?? null,
+          enteredAt: run.departure?.enteredAt ?? null,
+          exitedAt: run.departure?.exitedAt ?? null,
+          slaStatus: run.departure ? (run.departure.slaStatus ?? "UNSET") : "PENDING",
+          slaDeltaSeconds: run.departure?.slaDeltaSeconds ?? null,
+          temperatureC: run.departure?.temperatureC ?? null,
+        });
+      }
       for (const stop of profileStops) {
         const visit = run.stopVisits[stop.id] ?? null;
         rows.push({
@@ -492,7 +510,7 @@ export default function TripLoggerPage() {
           driver: run.driver,
           routeOrder: stop.routeOrder,
           storeName: stop.storeName,
-          slaKind: visit?.slaKind ?? (stop.kind === "DEPARTURE" ? "DEPARTURE" : "ARRIVAL"),
+          slaKind: visit?.slaKind ?? "ARRIVAL",
           scheduleTarget: stop.targetTime,
           slaTargetAt: visit?.slaTargetAt ?? null,
           enteredAt: visit?.enteredAt ?? null,
@@ -504,7 +522,7 @@ export default function TripLoggerPage() {
       }
     }
     return rows;
-  }, [profileRuns, profileStops]);
+  }, [profileRuns, profileStops, profile?.departureTargetTime]);
 
   const exportProfileXlsx = useCallback(async () => {
     setExporting("xlsx");
