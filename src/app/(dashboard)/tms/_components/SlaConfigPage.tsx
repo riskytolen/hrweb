@@ -611,222 +611,176 @@ export default function SlaConfigPage() {
           <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-2.5 text-sm text-danger">{error}</p>
         )}
 
-        {/* ── Bagian 1: Daftar profil ── */}
-        <section aria-label="Daftar profil SLA" className="space-y-3">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
-          <h2 className="text-sm font-bold text-foreground">Daftar Profil</h2>
-          <p className="text-xs tabular-nums text-muted-foreground">{filteredProfiles.length} profil</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3">
-          <select
-            aria-label="Filter kelompok"
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs"
-            value={groupFilter}
-            onChange={(event) => {
-              setGroupFilter(event.target.value);
-              setSelectedId(null);
-            }}
+        <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
+          <section
+            aria-label="Daftar profil SLA"
+            className={cn("space-y-3 lg:sticky lg:top-4", selectedId && "hidden lg:block")}
           >
-            <option value="">Semua kelompok</option>
-            {groups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.clientName ? `${group.clientName} · ${group.name}` : group.name}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Filter status"
-            className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs"
-            value={statusFilter}
-            onChange={(event) => {
-              setStatusFilter(event.target.value);
-              setSelectedId(null);
-            }}
-          >
-          <option value="Aktif">Aktif</option>
-          <option value="Tidak Aktif">Tidak Aktif</option>
-          <option value="ALL">Semua status</option>
-          </select>
-        </div>
-
-        <div className="overflow-hidden rounded-2xl border border-border bg-card">
-          <div className="hidden overflow-x-auto lg:block">
-            <table className="w-full min-w-[960px] border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground">
-                  <th className="px-4 py-3 font-semibold">Profil</th>
-                  <th className="px-4 py-3 font-semibold">Kelompok</th>
-                  <th className="px-4 py-3 font-semibold">Berangkat</th>
-                  <th className="px-4 py-3 font-semibold">Berlaku</th>
-                  <th className="px-4 py-3 font-semibold">Titik</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
-                  {canManage && <th className="px-4 py-3 text-right font-semibold">Aksi</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  Array.from({ length: 4 }).map((_, index) => (
-                    <tr key={index} className="animate-pulse border-b border-border/60">
-                      <td className="px-4 py-3"><div className="h-4 w-24 rounded bg-muted" /></td>
-                      <td className="px-4 py-3"><div className="h-4 w-20 rounded bg-muted" /></td>
-                      <td className="px-4 py-3"><div className="h-4 w-14 rounded bg-muted" /></td>
-                      <td className="px-4 py-3"><div className="h-4 w-28 rounded bg-muted" /></td>
-                      <td className="px-4 py-3"><div className="h-4 w-10 rounded bg-muted" /></td>
-                      <td className="px-4 py-3"><div className="h-5 w-16 rounded-full bg-muted" /></td>
-                    </tr>
-                  ))
-                ) : filteredProfiles.length === 0 ? (
-                  <tr>
-                    <td colSpan={canManage ? 7 : 6} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                      Belum ada profil SLA. {canManage ? "Buat profil baru atau import dari Excel." : ""}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredProfiles.map((profile) => (
-                    <tr
-                      key={profile.id}
-                      className={cn(
-                        "cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/40",
-                        selectedId === profile.id && "bg-muted/40",
-                      )}
-                      onClick={() => setSelectedId((prev) => (prev === profile.id ? null : profile.id))}
-                    >
-                      <td className="px-4 py-3">
-                        <p className="text-xs font-bold tabular-nums text-foreground">{profile.code}</p>
-                        <p className="text-[11px] text-muted-foreground">{profile.name}</p>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-foreground">{profile.groupName ?? "–"}</td>
-                      <td className="px-4 py-3 text-xs tabular-nums text-foreground">
-                        {profile.departureTargetTime ?? "–"}
-                      </td>
-                      <td className="px-4 py-3 text-xs tabular-nums text-muted-foreground">
-                        {profile.effectiveFrom}
-                        {profile.effectiveUntil ? ` s/d ${profile.effectiveUntil}` : ""}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs font-semibold tabular-nums text-foreground">{profile.stopCount}</span>
-                        {profile.unresolvedCount > 0 && (
-                          <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600">
-                            <TriangleAlert className="h-3 w-3" />
-                            {profile.unresolvedCount} tanpa ID
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={profile.status === "Aktif" ? "success" : "muted"}>{profile.status}</Badge>
-                      </td>
-                      {canManage && (
-                        <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
-                          <span className="flex items-center justify-end gap-1">
-                            <button
-                              type="button"
-                              title="Ubah profil"
-                              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                              onClick={() =>
-                                setProfileForm({
-                                  id: profile.id,
-                                  groupId: profile.groupId,
-                                  code: profile.code,
-                                  name: profile.name,
-                                  depart: profile.departureTargetTime ?? "",
-                                  departDay: String(profile.departureDayOffset ?? 0),
-                                  effectiveFrom: profile.effectiveFrom,
-                                  effectiveUntil: profile.effectiveUntil ?? "",
-                                })
-                              }
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              title={profile.status === "Aktif" ? "Nonaktifkan" : "Aktifkan"}
-                              disabled={busy === `status-${profile.id}`}
-                              className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                              onClick={() => void toggleProfileStatus(profile)}
-                            >
-                              {profile.status === "Aktif" ? "Nonaktifkan" : "Aktifkan"}
-                            </button>
-                          </span>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Kartu mobile */}
-          <div className="space-y-2.5 p-4 lg:hidden">
-            {filteredProfiles.map((profile) => (
-              <article
-                key={profile.id}
-                className="rounded-xl border border-border bg-background p-3.5"
-                onClick={() => setSelectedId((prev) => (prev === profile.id ? null : profile.id))}
-              >
-                <div className="flex items-start justify-between gap-2">
+            <div className="rounded-3xl border border-border bg-card shadow-sm">
+              <div className="border-b border-border px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-sm font-bold tabular-nums text-foreground">{profile.code}</p>
-                    <p className="text-[11px] text-muted-foreground">{profile.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{profile.groupName ?? "–"}</p>
+                    <h2 className="text-sm font-bold text-foreground">Daftar Profil</h2>
+                    <p className="text-xs tabular-nums text-muted-foreground">{filteredProfiles.length} profil</p>
                   </div>
-                  <Badge variant={profile.status === "Aktif" ? "success" : "muted"}>{profile.status}</Badge>
+                  <Badge variant="muted">{statusFilter === "ALL" ? "Semua" : statusFilter}</Badge>
                 </div>
-                <p className="mt-2 text-[11px] tabular-nums text-muted-foreground">
-                  {profile.stopCount} titik
-                  {profile.unresolvedCount > 0 ? ` · ${profile.unresolvedCount} tanpa ID` : ""}
-                  {profile.departureTargetTime ? ` · berangkat ${profile.departureTargetTime}` : ""}
-                </p>
-                {canManage && (
-                  <div
-                    className="mt-2 flex items-center justify-end gap-1"
-                    onClick={(event) => event.stopPropagation()}
+                <div className="mt-3 grid gap-2">
+                  <select
+                    aria-label="Filter kelompok"
+                    className="rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                    value={groupFilter}
+                    onChange={(event) => {
+                      setGroupFilter(event.target.value);
+                      setSelectedId(null);
+                    }}
                   >
-                    <button
-                      type="button"
-                      title="Ubah profil"
-                      aria-label={`Ubah profil ${profile.code}`}
-                      className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      onClick={() =>
-                        setProfileForm({
-                          id: profile.id,
-                          groupId: profile.groupId,
-                          code: profile.code,
-                          name: profile.name,
-                          depart: profile.departureTargetTime ?? "",
-                          departDay: String(profile.departureDayOffset ?? 0),
-                          effectiveFrom: profile.effectiveFrom,
-                          effectiveUntil: profile.effectiveUntil ?? "",
-                        })
-                      }
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy === `status-${profile.id}`}
-                      className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                      onClick={() => void toggleProfileStatus(profile)}
-                    >
-                      {profile.status === "Aktif" ? "Nonaktifkan" : "Aktifkan"}
-                    </button>
+                    <option value="">Semua kelompok</option>
+                    {groups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.clientName ? `${group.clientName} · ${group.name}` : group.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Filter status"
+                    className="rounded-xl border border-border bg-background px-3 py-2 text-xs"
+                    value={statusFilter}
+                    onChange={(event) => {
+                      setStatusFilter(event.target.value);
+                      setSelectedId(null);
+                    }}
+                  >
+                    <option value="Aktif">Aktif</option>
+                    <option value="Tidak Aktif">Tidak Aktif</option>
+                    <option value="ALL">Semua status</option>
+                  </select>
+                </div>
+              </div>
+              <div className="max-h-[calc(100vh-250px)] min-h-[220px] overflow-y-auto p-3">
+                {loading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 6 }).map((_, index) => (
+                      <div key={index} className="h-20 animate-pulse rounded-2xl bg-muted" />
+                    ))}
+                  </div>
+                ) : filteredProfiles.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
+                    <p className="text-sm font-semibold text-foreground">Belum ada profil SLA</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {canManage ? "Buat profil baru atau import dari Excel." : "Tidak ada profil dalam filter ini."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredProfiles.map((profile) => {
+                      const selected = selectedId === profile.id;
+                      return (
+                        <article
+                          key={profile.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={selected}
+                          className={cn(
+                            "group rounded-2xl border p-3 transition-colors",
+                            selected
+                              ? "border-primary bg-primary/5 shadow-sm"
+                              : "border-border bg-background hover:border-primary/40 hover:bg-muted/30",
+                          )}
+                          onClick={() => setSelectedId(profile.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedId(profile.id);
+                            }
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-extrabold tabular-nums text-foreground">{profile.code}</p>
+                              <p className="truncate text-[11px] text-muted-foreground">{profile.name}</p>
+                            </div>
+                            <Badge variant={profile.status === "Aktif" ? "success" : "muted"}>{profile.status}</Badge>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <span className="rounded-full bg-muted px-2 py-0.5">{profile.groupName ?? "–"}</span>
+                            <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">{profile.stopCount} titik</span>
+                            {profile.departureTargetTime && (
+                              <span className="rounded-full bg-muted px-2 py-0.5 tabular-nums">
+                                Berangkat {profile.departureTargetTime}
+                              </span>
+                            )}
+                            {profile.unresolvedCount > 0 && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 font-bold text-amber-600">
+                                <TriangleAlert className="h-3 w-3" />
+                                {profile.unresolvedCount} tanpa ID
+                              </span>
+                            )}
+                          </div>
+                          {canManage && (
+                            <div className="mt-3 flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+                              <button
+                                type="button"
+                                title="Ubah profil"
+                                aria-label={`Ubah profil ${profile.code}`}
+                                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                onClick={() =>
+                                  setProfileForm({
+                                    id: profile.id,
+                                    groupId: profile.groupId,
+                                    code: profile.code,
+                                    name: profile.name,
+                                    depart: profile.departureTargetTime ?? "",
+                                    departDay: String(profile.departureDayOffset ?? 0),
+                                    effectiveFrom: profile.effectiveFrom,
+                                    effectiveUntil: profile.effectiveUntil ?? "",
+                                  })
+                                }
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy === `status-${profile.id}`}
+                                className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                                onClick={() => void toggleProfileStatus(profile)}
+                              >
+                                {profile.status === "Aktif" ? "Nonaktifkan" : "Aktifkan"}
+                              </button>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
                   </div>
                 )}
-              </article>
-            ))}
-            {filteredProfiles.length === 0 && !loading && (
-              <p className="py-6 text-center text-sm text-muted-foreground">Belum ada profil SLA.</p>
-            )}
-          </div>
-        </div>
-        </section>
+              </div>
+            </div>
+          </section>
 
-        {/* ── Bagian 2: Detail profil ── */}
-        {selectedId && (
-          <section aria-label="Detail profil SLA" className="overflow-hidden rounded-2xl border border-border bg-card">
+          <section aria-label="Detail profil SLA" className="min-w-0">
+            {!selectedId ? (
+              <div className="hidden min-h-[520px] items-center justify-center rounded-3xl border border-dashed border-border bg-card p-8 text-center lg:flex">
+                <div className="max-w-sm">
+                  <AlarmClockCheck className="mx-auto h-8 w-8 text-muted-foreground" />
+                  <p className="mt-3 text-sm font-bold text-foreground">Pilih profil SLA</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Klik salah satu profil di panel kiri untuk melihat dan mengelola titik rute, jam SLA, serta mapping McEasy.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
             <div className="border-b border-border px-4 pb-3 pt-4">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="min-w-0">
+                  <button
+                    type="button"
+                    className="mb-2 text-[11px] font-semibold text-primary lg:hidden"
+                    onClick={() => setSelectedId(null)}
+                  >
+                    ← Kembali ke daftar profil
+                  </button>
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Detail Profil
                   </p>
@@ -916,9 +870,10 @@ export default function SlaConfigPage() {
                 ))}
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              <div className="hidden overflow-x-auto md:block">
                 <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-[1] bg-card">
                     <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground">
                       <th className="w-14 px-4 py-3 font-semibold">No</th>
                       <th className="px-4 py-3 font-semibold">Nama Toko</th>
@@ -1029,9 +984,105 @@ export default function SlaConfigPage() {
                   </tbody>
                 </table>
               </div>
+              <div className="space-y-2.5 p-4 md:hidden">
+                {detail.stops.map((stop) => (
+                  <article key={stop.id} className="rounded-2xl border border-border bg-background p-3.5">
+                    <div className="flex items-start gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-extrabold tabular-nums text-primary">
+                        {stop.order}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-foreground">{stop.storeName}</p>
+                        <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+                          SLA {stop.targetTime}{stop.targetDayOffset > 0 ? ` (+${stop.targetDayOffset} hari)` : ""}
+                        </p>
+                        {stop.unresolved && (
+                          <p className="mt-1 text-[11px] font-semibold text-amber-600">
+                            Belum terhubung — status SLA Belum Diatur
+                          </p>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {stop.addresses.map((address) => (
+                            <span
+                              key={address.id}
+                              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] tabular-nums text-foreground"
+                            >
+                              {address.vendorAddressId}
+                              {address.isPrimary && <span className="font-sans font-bold text-primary">·</span>}
+                              {canManage && (
+                                <button
+                                  type="button"
+                                  aria-label={`Lepas ${address.vendorAddressId}`}
+                                  disabled={busy === `unmap-${address.id}`}
+                                  className="text-muted-foreground hover:text-danger disabled:opacity-50"
+                                  onClick={() => void removeMapping(address.id)}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                        {canManage && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            <input
+                              className="w-28 rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px]"
+                              placeholder="ID baru"
+                              value={mapInputs[stop.id] ?? ""}
+                              onChange={(event) => setMapInputs((prev) => ({ ...prev, [stop.id]: event.target.value }))}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") void addMapping(stop.id);
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={busy === `map-${stop.id}` || !(mapInputs[stop.id] ?? "").trim()}
+                              className="rounded-md bg-muted px-2 py-1 text-[11px] font-bold text-foreground hover:bg-muted/70 disabled:opacity-50"
+                              onClick={() => void addMapping(stop.id)}
+                            >
+                              Tambah ID
+                            </button>
+                            <span className="ml-auto flex gap-1">
+                              <button
+                                type="button"
+                                title="Ubah titik"
+                                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                onClick={() =>
+                                  setStopForm({
+                                    id: stop.id,
+                                    storeName: stop.storeName,
+                                    targetTime: stop.targetTime,
+                                    dayOffset: String(stop.targetDayOffset),
+                                    order: String(stop.order),
+                                    addressIds: "",
+                                  })
+                                }
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Hapus titik"
+                                disabled={busy === `del-stop-${stop.id}`}
+                                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-danger disabled:opacity-50"
+                                onClick={() => void deleteStop(stop)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              </>
+            )}
+              </div>
             )}
           </section>
-        )}
+        </div>
 
         <p className="text-[11px] text-muted-foreground">
           SLA dihitung dari jadwal internal client per kelompok; perubahan jadwal tidak mengubah hasil perjalanan yang
