@@ -7,6 +7,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  FileSpreadsheet,
+  FileText,
   RefreshCw,
   Search,
   Store,
@@ -14,6 +16,13 @@ import {
   Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  LOGGER_TRIP_EXPORT_EXCEL_HEADERS,
+  LOGGER_TRIP_EXPORT_PDF_HEADERS,
+  loggerTripExportFileStamp,
+  toLoggerTripExcelRow,
+  toLoggerTripPdfRow,
+} from "@/lib/tms-logger-export";
 import RouteGuard from "@/components/RouteGuard";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -206,6 +215,7 @@ export default function TripLoggerPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [clientTick, setClientTick] = useState(0);
 
@@ -218,13 +228,13 @@ export default function TripLoggerPage() {
     return () => window.removeEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  // Parameter list dipakai bersama tabel dan export agar isi file
+  // selalu konsisten dengan filter yang sedang aktif.
+  const buildListParams = useCallback(
+    (pageNum: number, limitNum: number) => {
       const params = new URLSearchParams({
-        page: String(page),
-        limit: String(PAGE_SIZE),
+        page: String(pageNum),
+        limit: String(limitNum),
         dateFrom,
         dateTo,
       });
@@ -232,6 +242,16 @@ export default function TripLoggerPage() {
       if (appliedSearch) params.set("search", appliedSearch);
       const clientParam = readTmsClientParam();
       if (clientParam) params.set("client", clientParam);
+      return params;
+    },
+    [appliedSearch, dateFrom, dateTo, visitState],
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = buildListParams(page, PAGE_SIZE);
 
       const response = await fetch(`/api/tms/logger-trips?${params.toString()}`, { cache: "no-store" });
       const payload = (await response.json()) as ListResponse;
@@ -255,7 +275,146 @@ export default function TripLoggerPage() {
     } finally {
       setLoading(false);
     }
-  }, [appliedSearch, dateFrom, dateTo, page, visitState]);
+  }, [buildListParams, page]);
+
+  // Ambil seluruh data sesuai filter aktif (loop paging server, maks 100/halaman).
+  const fetchAllFilteredRows = useCallback(async (): Promise<TripLogRow[]> => {
+    const all: TripLogRow[] = [];
+    let pageNum = 1;
+    for (;;) {
+      const params = buildListParams(pageNum, 100);
+      const response = await fetch(`/api/tms/logger-trips?${params.toString()}`, { cache: "no-store" });
+      const payload = (await response.json()) as ListResponse;
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error ?? "Gagal memuat data export.");
+      }
+      const batch = Array.isArray(payload.data) ? payload.data : [];
+      all.push(...batch);
+      const totalCount = payload.meta?.total ?? 0;
+      if (all.length >= totalCount || batch.length < 100) break;
+      pageNum += 1;
+      if (pageNum > 50) break; // Batas aman: 5000 baris.
+    }
+    return all;
+  }, [buildListParams]);
+
+  const visitFilterLabel = useMemo(
+    () => VISIT_FILTERS.find((filter) => filter.key === visitState)?.label ?? "Semua",
+    [visitState],
+  );
+
+  const exportXlsx = useCallback(async () => {
+    setExporting("xlsx");
+    try {
+      const all = await fetchAllFilteredRows();
+      const stamp = loggerTripExportFileStamp();
+      const now = Date.now();
+      const meta: string[][] = [
+        ["Laporan Logger Trips"],
+        ["Periode", `${dateFrom} s/d ${dateTo}`],
+        ["Status", visitFilterLabel],
+        ...(appliedSearch ? [["Pencarian", appliedSearch]] : []),
+        ["Total kunjungan", String(all.length)],
+        [],
+      ];
+      const headerIndex = meta.length;
+      const sheetRows: string[][] = [
+        ...meta,
+        [...LOGGER_TRIP_EXPORT_EXCEL_HEADERS],
+        ...all.map((row, index) => toLoggerTripExcelRow(row, index, now)),
+      ];
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.aoa_to_sheet(sheetRows);
+      sheet["!cols"] = [
+        { wch: 6 },
+        { wch: 16 },
+        { wch: 14 },
+        { wch: 28 },
+        { wch: 36 },
+        { wch: 22 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 14 },
+        { wch: 16 },
+        { wch: 10 },
+        { wch: 14 },
+      ];
+      const lastRow = sheetRows.length - 1;
+      const lastCol = LOGGER_TRIP_EXPORT_EXCEL_HEADERS.length - 1;
+      sheet["!autofilter"] = {
+        ref: XLSX.utils.encode_range({ s: { r: headerIndex, c: 0 }, e: { r: lastRow, c: lastCol } }),
+      };
+      XLSX.utils.book_append_sheet(workbook, sheet, "Logger Trips");
+      XLSX.writeFile(workbook, `logger-trips-${stamp}.xlsx`);
+    } catch {
+      setError("Gagal mengekspor Excel. Coba lagi.");
+    } finally {
+      setExporting(null);
+    }
+  }, [appliedSearch, dateFrom, dateTo, fetchAllFilteredRows, visitFilterLabel]);
+
+  const exportPdf = useCallback(async () => {
+    setExporting("pdf");
+    try {
+      const all = await fetchAllFilteredRows();
+      const stamp = loggerTripExportFileStamp();
+      const now = Date.now();
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text("Laporan Logger Trips", pageWidth / 2, 14, { align: "center" });
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Periode: ${dateFrom} s/d ${dateTo} · Status: ${visitFilterLabel}`, pageWidth / 2, 20, {
+        align: "center",
+      });
+      doc.text(
+        `Total kunjungan: ${all.length}${appliedSearch ? ` · Cari: ${appliedSearch}` : ""}`,
+        pageWidth / 2,
+        25,
+        { align: "center" },
+      );
+
+      autoTable(doc, {
+        startY: 32,
+        head: [[...LOGGER_TRIP_EXPORT_PDF_HEADERS]],
+        body: all.map((row, index) => toLoggerTripPdfRow(row, index, now)),
+        styles: { fontSize: 8, cellPadding: 2, lineColor: [226, 232, 240], lineWidth: 0.1 },
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          0: { halign: "right", cellWidth: 10 },
+          1: { cellWidth: 25 },
+          2: { cellWidth: 58 },
+          3: { cellWidth: 40 },
+          4: { cellWidth: 30 },
+          5: { cellWidth: 30 },
+          6: { cellWidth: 25 },
+          7: { cellWidth: 32 },
+          8: { halign: "right", cellWidth: 22 },
+        },
+        didDrawPage: () => {
+          const page = doc.getNumberOfPages();
+          doc.setFontSize(8);
+          doc.text(`Halaman ${page}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 8, {
+            align: "right",
+          });
+        },
+      });
+
+      doc.save(`logger-trips-${stamp}.pdf`);
+    } catch {
+      setError("Gagal mengekspor PDF. Coba lagi.");
+    } finally {
+      setExporting(null);
+    }
+  }, [appliedSearch, dateFrom, dateTo, fetchAllFilteredRows, visitFilterLabel]);
 
   useEffect(() => {
     // clientTick memicu muat ulang saat pilihan client berubah.
@@ -284,8 +443,26 @@ export default function TripLoggerPage() {
           description="Waktu masuk dan keluar unit di setiap titik kunjungan beserta suhu kargo"
           icon={Clock3}
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <TmsClientSelector compact />
+              <Button
+                size="sm"
+                variant="outline"
+                icon={FileSpreadsheet}
+                disabled={loading || exporting !== null}
+                onClick={() => void exportXlsx()}
+              >
+                {exporting === "xlsx" ? "Menyiapkan…" : "Export Excel"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                icon={FileText}
+                disabled={loading || exporting !== null}
+                onClick={() => void exportPdf()}
+              >
+                {exporting === "pdf" ? "Menyiapkan…" : "Export PDF"}
+              </Button>
               <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={() => void load()}>
                 Muat ulang
               </Button>
