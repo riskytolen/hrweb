@@ -983,9 +983,13 @@ export default function TripLoggerPage() {
               stops={profileStops}
               runs={profileRuns}
               meta={profileMeta}
-              loading={profileLoading}
-              error={profileError}
-              onRetry={() => void loadProfileRuns(profileId)}
+              // Daftar profil masih fetch dan belum ada profil terpilih:
+              // tampilkan skeleton, bukan empty state "Belum ada profil SLA".
+              loading={profileLoading || (slaProfilesLoading && !profileId)}
+              // Kegagalan daftar profil ikut tampil di area view bila belum
+              // ada profil terpilih, agar tidak tertutup empty state.
+              error={profileError ?? (profile || slaProfilesLoading ? null : slaProfilesError)}
+              onRetry={() => (profileId ? void loadProfileRuns(profileId) : void loadSlaProfiles())}
             />
           </div>
         ) : (
