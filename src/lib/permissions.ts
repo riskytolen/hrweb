@@ -25,6 +25,9 @@ export const TMS_LIVE_TRACK_TASK_INPUT_PERMISSION = "tms.live-track-task.input";
 export const TMS_LOGGER_TRIPS_PERMISSION = "tms.logger-trips";
 export const TMS_LOGGER_TRIPS_VIEW_PERMISSION = "tms.logger-trips.view";
 export const TMS_LOGGER_TRIPS_INPUT_PERMISSION = "tms.logger-trips.input";
+export const TMS_SLA_CONFIG_PERMISSION = "tms.sla-config";
+export const TMS_SLA_CONFIG_VIEW_PERMISSION = "tms.sla-config.view";
+export const TMS_SLA_CONFIG_MANAGE_PERMISSION = "tms.sla-config.manage";
 export const TMS_EPOD_PERMISSION = "tms.epod";
 export const TMS_EPOD_VIEW_PERMISSION = "tms.epod.view";
 export const TMS_EPOD_MANAGE_PERMISSION = "tms.epod.manage";
@@ -359,6 +362,47 @@ export function canManageLiveTrackConfig(
   );
 }
 
+/**
+ * Hak lihat Pengaturan SLA (profil rute + jadwal kedatangan per client).
+ *
+ * Pemegang `tms`/`tms.view`/`tms.input` boleh melihat agar operasional
+ * memahami standar SLA. Mengubah konfigurasi butuh permission manage
+ * eksplisit. Akun external selalu ditolak (konfigurasi internal).
+ */
+export function canViewTmsSlaConfig(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return permissions.some((p) =>
+    [
+      "all",
+      TMS_PERMISSION,
+      TMS_VIEW_PERMISSION,
+      TMS_INPUT_PERMISSION,
+      TMS_SLA_CONFIG_PERMISSION,
+      TMS_SLA_CONFIG_VIEW_PERMISSION,
+      TMS_SLA_CONFIG_MANAGE_PERMISSION,
+    ].includes(p),
+  );
+}
+
+/**
+ * Hak kelola Pengaturan SLA.
+ *
+ * Sengaja TIDAK mengimplikasi dari `tms`/`tms.input` agar standar
+ * kedatangan milik client hanya diubah role yang diberi wewenang eksplisit
+ * (`tms.sla-config.manage`).
+ */
+export function canManageTmsSlaConfig(
+  permissions: string[],
+  accountType: AccountType = "internal",
+): boolean {
+  if (accountType === "external") return false;
+  return permissions.some((p) =>
+    ["all", TMS_SLA_CONFIG_PERMISSION, TMS_SLA_CONFIG_MANAGE_PERMISSION].includes(p),
+  );
+}
 /**
  * Hak kelola Pengaturan Unit Client (mapping unit operasional -> client).
  *

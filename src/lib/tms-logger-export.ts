@@ -5,6 +5,8 @@
  * isi file selalu konsisten dengan filter yang sedang aktif.
  */
 
+import { formatSlaDelta, slaKindLabel, slaStatusLabel, type SlaKind, type SlaStatus } from "./tms-sla";
+
 export interface LoggerTripExportRow {
   id: string;
   taskNumber: string | null;
@@ -17,6 +19,22 @@ export interface LoggerTripExportRow {
   enteredAt: string | null;
   exitedAt: string | null;
   temperatureC: number | null;
+  groupName: string | null;
+  slaProfileCode: string | null;
+  slaKind: SlaKind | string | null;
+  slaTargetAt: string | null;
+  slaStatus: SlaStatus | string | null;
+  slaDeltaSeconds: number | null;
+}
+
+function asSlaStatus(value: SlaStatus | string | null): SlaStatus | null {
+  return value === "ON_TIME" || value === "LATE" || value === "PENDING" || value === "UNSET"
+    ? value
+    : null;
+}
+
+function asSlaKind(value: SlaKind | string | null): SlaKind | null {
+  return value === "DEPARTURE" || value === "ARRIVAL" ? value : null;
 }
 
 export const LOGGER_TRIP_EXPORT_EXCEL_HEADERS = [
@@ -32,6 +50,12 @@ export const LOGGER_TRIP_EXPORT_EXCEL_HEADERS = [
   "Status",
   "Suhu",
   "Status Task",
+  "Kelompok",
+  "Profil Rute",
+  "Jenis SLA",
+  "Target SLA",
+  "Status SLA",
+  "Selisih SLA",
 ] as const;
 
 export const LOGGER_TRIP_EXPORT_PDF_HEADERS = [
@@ -42,7 +66,8 @@ export const LOGGER_TRIP_EXPORT_PDF_HEADERS = [
   "Masuk",
   "Keluar",
   "Durasi",
-  "Status",
+  "Target",
+  "Status SLA",
   "Suhu",
 ] as const;
 
@@ -122,8 +147,10 @@ export function formatLoggerTripTemp(tempC: number | null): string {
   return `${tempC.toFixed(1).replace(".", ",")}°C`;
 }
 
-/** Satu baris body Excel (12 kolom lengkap). */
+/** Satu baris body Excel (18 kolom lengkap). */
 export function toLoggerTripExcelRow(row: LoggerTripExportRow, index: number, nowMs: number): string[] {
+  const slaStatus = asSlaStatus(row.slaStatus);
+  const slaKind = asSlaKind(row.slaKind);
   return [
     String(index + 1),
     row.unit ?? "–",
@@ -137,11 +164,19 @@ export function toLoggerTripExcelRow(row: LoggerTripExportRow, index: number, no
     loggerTripVisitStatusLabel(row),
     formatLoggerTripTemp(row.temperatureC),
     row.taskStatus ?? "–",
+    row.groupName ?? "–",
+    row.slaProfileCode ?? "–",
+    slaKindLabel(slaKind),
+    row.slaTargetAt ? formatLoggerTripDateTime(row.slaTargetAt) : "–",
+    slaStatusLabel(slaStatus, slaKind),
+    formatSlaDelta(row.slaDeltaSeconds),
   ];
 }
 
-/** Satu baris body PDF (9 kolom ringkas agar muat landscape A4). */
+/** Satu baris body PDF (10 kolom ringkas agar muat landscape A4). */
 export function toLoggerTripPdfRow(row: LoggerTripExportRow, index: number, nowMs: number): string[] {
+  const slaStatus = asSlaStatus(row.slaStatus);
+  const slaKind = asSlaKind(row.slaKind);
   return [
     String(index + 1),
     row.unit ?? "–",
@@ -150,7 +185,8 @@ export function toLoggerTripPdfRow(row: LoggerTripExportRow, index: number, nowM
     formatLoggerTripDateTimeShort(row.enteredAt),
     row.exitedAt ? formatLoggerTripDateTimeShort(row.exitedAt) : "Di lokasi",
     formatLoggerTripDuration(loggerTripDurationSeconds(row, nowMs)),
-    loggerTripVisitStatusLabel(row),
+    row.slaTargetAt ? formatLoggerTripDateTimeShort(row.slaTargetAt) : "–",
+    slaStatusLabel(slaStatus, slaKind),
     formatLoggerTripTemp(row.temperatureC),
   ];
 }

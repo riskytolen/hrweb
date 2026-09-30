@@ -12,6 +12,7 @@ import {
   canViewTmsLiveTask,
   canViewTmsLiveView,
   canViewTmsLoggerTrips,
+  canViewTmsSlaConfig,
 } from "@/lib/permissions";
 
 interface RouteGuardProps {
@@ -83,6 +84,7 @@ export default function RouteGuard({ permission, children }: RouteGuardProps) {
     "tms.live-view": canViewTmsLiveView(profile?.roles?.permissions ?? [], profile?.account_type),
     "tms.live-track-task": canViewTmsLiveTask(profile?.roles?.permissions ?? [], profile?.account_type),
     "tms.logger-trips": canViewTmsLoggerTrips(profile?.roles?.permissions ?? [], profile?.account_type),
+    "tms.sla-config": canViewTmsSlaConfig(profile?.roles?.permissions ?? [], profile?.account_type),
     "vehicle-odometer.dashboard": canViewOdometerDashboard(profile?.roles?.permissions ?? [], profile?.account_type),
     "vehicle-odometer.report": canViewOdometerReport(profile?.roles?.permissions ?? [], profile?.account_type),
     "vehicle-odometer.client-unit-config": canManageOdometerClientUnits(

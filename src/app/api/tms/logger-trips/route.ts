@@ -13,6 +13,10 @@ type VisitStateFilter = "ALL" | "ONGOING" | "COMPLETED" | "INCOMPLETE" | "PENDIN
 
 const VISIT_STATES: readonly VisitStateFilter[] = ["ALL", "ONGOING", "COMPLETED", "INCOMPLETE", "PENDING"];
 
+type SlaStateFilter = "ALL" | "ON_TIME" | "LATE" | "PENDING" | "UNSET";
+
+const SLA_STATES: readonly SlaStateFilter[] = ["ALL", "ON_TIME", "LATE", "PENDING", "UNSET"];
+
 function parsePermissions(permissions: unknown): string[] {
   if (Array.isArray(permissions)) return permissions.filter((p): p is string => typeof p === "string");
   if (typeof permissions === "string") {
@@ -67,6 +71,12 @@ interface VisitRow {
   arrival_actual: string | null;
   departure_actual: string | null;
   last_synced_at: string | null;
+  live_track_group_id: string | null;
+  sla_profile_id: string | null;
+  sla_kind: string | null;
+  sla_target_at: string | null;
+  sla_status: string | null;
+  sla_delta_seconds: number | null;
 }
 
 interface TemperatureRow {
@@ -126,6 +136,9 @@ export async function GET(request: NextRequest) {
   const search = params.get("search")?.trim() ?? "";
   const stateParam = (params.get("visitState")?.trim().toUpperCase() ?? "ALL") as VisitStateFilter;
   const visitState: VisitStateFilter = VISIT_STATES.includes(stateParam) ? stateParam : "ALL";
+  const slaParam = (params.get("sla")?.trim().toUpperCase() ?? "ALL") as SlaStateFilter;
+  const slaState: SlaStateFilter = SLA_STATES.includes(slaParam) ? slaParam : "ALL";
+  const slaProfile = params.get("slaProfile")?.trim() ?? "";
   const pageRaw = Number(params.get("page") ?? "1");
   const limitRaw = Number(params.get("limit") ?? String(DEFAULT_LIMIT));
   const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.trunc(pageRaw) : 1;
@@ -163,6 +176,7 @@ export async function GET(request: NextRequest) {
       ilike: (col: string, pattern: string) => Chain;
       not: (col: string, op: string, val: unknown) => Chain;
       is: (col: string, val: null) => Chain;
+      eq: (col: string, val: unknown) => Chain;
     };
     let q = query as unknown as Chain;
     q = q.or(overlap);
@@ -183,6 +197,12 @@ export async function GET(request: NextRequest) {
     } else if (visitState === "PENDING") {
       q = q.is("arrival_actual", null).is("departure_actual", null);
     }
+    if (slaState !== "ALL") {
+      q = q.eq("sla_status", slaState);
+    }
+    if (slaProfile) {
+      q = q.eq("sla_profile_id", slaProfile);
+    }
     return q as unknown as T;
   };
 
@@ -199,22 +219,19 @@ export async function GET(request: NextRequest) {
   if (!scope.ok) return scope.response;
   const scopeIds = scope.scope.allowedClientIds;
 
+  const VISIT_COLUMNS =
+    "id, task_id, task_number, task_status, license_plate, driver_name, route_sequence, " +
+    "point_type, location_name, location_address, arrival_actual, departure_actual, last_synced_at, " +
+    "live_track_group_id, sla_profile_id, sla_kind, sla_target_at, sla_status, sla_delta_seconds";
+
   const dataQuery = applyFilters(
     scopeIds === "all"
       ? supabase
           .from("tms_trip_visit_logs")
-          .select(
-            "id, task_id, task_number, task_status, license_plate, driver_name, route_sequence, " +
-              "point_type, location_name, location_address, arrival_actual, departure_actual, last_synced_at",
-            { count: "exact" },
-          )
+          .select(VISIT_COLUMNS, { count: "exact" })
       : supabase
           .from("tms_trip_visit_logs")
-          .select(
-            "id, task_id, task_number, task_status, license_plate, driver_name, route_sequence, " +
-              "point_type, location_name, location_address, arrival_actual, departure_actual, last_synced_at",
-            { count: "exact" },
-          )
+          .select(VISIT_COLUMNS, { count: "exact" })
           .in("client_id", scopeIds),
   )
     .order("arrival_actual", { ascending: false, nullsFirst: false })
@@ -230,6 +247,30 @@ export async function GET(request: NextRequest) {
   }
 
   const visits = (Array.isArray(rows) ? (rows as unknown as VisitRow[]) : []);
+
+  // Label profil SLA + nama kelompok untuk baris yang sudah dievaluasi.
+  const profileCodes = new Map<string, string>();
+  const groupNames = new Map<string, string>();
+  const profileIds = [...new Set(visits.map((v) => v.sla_profile_id).filter((id): id is string => !!id))];
+  const groupIds = [...new Set(visits.map((v) => v.live_track_group_id).filter((id): id is string => !!id))];
+  if (profileIds.length > 0) {
+    const { data: profileRows } = await supabase
+      .from("tms_sla_route_profiles")
+      .select("id, code")
+      .in("id", profileIds);
+    for (const row of (Array.isArray(profileRows) ? profileRows : []) as { id: string; code: string }[]) {
+      if (row?.id) profileCodes.set(row.id, row.code);
+    }
+  }
+  if (groupIds.length > 0) {
+    const { data: groupRows } = await supabase
+      .from("tms_live_track_groups")
+      .select("id, name")
+      .in("id", groupIds);
+    for (const row of (Array.isArray(groupRows) ? groupRows : []) as { id: string; name: string }[]) {
+      if (row?.id) groupNames.set(row.id, row.name);
+    }
+  }
 
   // Suhu pendukung dari snapshot capture (jika ada).
   const temperatures = new Map<string, number>();
@@ -248,21 +289,27 @@ export async function GET(request: NextRequest) {
   // KPI dihitung dari rentang tanggal yang sama (tanpa paging).
   const countsQuery = applyFilters(
     scopeIds === "all"
-      ? supabase.from("tms_trip_visit_logs").select("arrival_actual, departure_actual", { count: "exact" })
+      ? supabase.from("tms_trip_visit_logs").select("arrival_actual, departure_actual, sla_status", { count: "exact" })
       : supabase
           .from("tms_trip_visit_logs")
-          .select("arrival_actual, departure_actual", { count: "exact" })
+          .select("arrival_actual, departure_actual, sla_status", { count: "exact" })
           .in("client_id", scopeIds),
   );
   const { data: countRows, count: total } = await countsQuery;
   const counts = { completed: 0, ongoing: 0, incomplete: 0, pending: 0 };
+  const sla = { onTime: 0, late: 0, pending: 0, unset: 0, unevaluated: 0 };
   for (const row of (Array.isArray(countRows)
-    ? (countRows as unknown as { arrival_actual: string | null; departure_actual: string | null }[])
+    ? (countRows as unknown as { arrival_actual: string | null; departure_actual: string | null; sla_status: string | null }[])
     : [])) {
     if (row.arrival_actual && row.departure_actual) counts.completed += 1;
     else if (row.arrival_actual) counts.ongoing += 1;
     else if (row.departure_actual) counts.incomplete += 1;
     else counts.pending += 1;
+    if (row.sla_status === "ON_TIME") sla.onTime += 1;
+    else if (row.sla_status === "LATE") sla.late += 1;
+    else if (row.sla_status === "PENDING") sla.pending += 1;
+    else if (row.sla_status === "UNSET") sla.unset += 1;
+    else sla.unevaluated += 1;
   }
 
   let lastSyncedAt: string | null = null;
@@ -288,12 +335,19 @@ export async function GET(request: NextRequest) {
         enteredAt: visit.arrival_actual,
         exitedAt: visit.departure_actual,
         temperatureC: temperatures.get(`${visit.task_id}:${visit.route_sequence}`) ?? null,
+        groupName: (visit.live_track_group_id && groupNames.get(visit.live_track_group_id)) || null,
+        slaProfileCode: (visit.sla_profile_id && profileCodes.get(visit.sla_profile_id)) || null,
+        slaKind: visit.sla_kind,
+        slaTargetAt: visit.sla_target_at,
+        slaStatus: visit.sla_status,
+        slaDeltaSeconds: visit.sla_delta_seconds,
       })),
       meta: {
         total: total ?? count ?? visits.length,
         page,
         limit,
         counts,
+        sla,
         lastSyncedAt,
         fetchedAt: new Date().toISOString(),
       },

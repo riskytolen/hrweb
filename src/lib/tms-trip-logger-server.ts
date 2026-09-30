@@ -8,6 +8,7 @@ import {
 } from "./mceasy-server";
 import { normalizeTaskTripVisits, type TmsTripVisit } from "./tms-trip-logger";
 import { normalizeFleetTaskInstantItem } from "./fleet-task-track";
+import { evaluateSlaForTasks } from "./tms-sla-server";
 
 export interface TripLoggerSyncSummary {
   requestedAt: string;
@@ -20,6 +21,9 @@ export interface TripLoggerSyncSummary {
   reconciledTasks: number;
   truncated: boolean;
   failures: string[];
+  slaTasks: number;
+  slaAssigned: number;
+  slaVisits: number;
 }
 
 interface SyncOptions {
@@ -128,6 +132,9 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
     reconciledTasks: 0,
     truncated: false,
     failures: [],
+    slaTasks: 0,
+    slaAssigned: 0,
+    slaVisits: 0,
   };
 
   const windowStartMs = now - (options.days ?? 7) * 24 * 60 * 60 * 1000;
@@ -196,6 +203,7 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
   await flush(collectRows(unique));
 
   // Rekonsiliasi: visit ONGOING yang task-nya sudah tidak aktif.
+  const reconciledIds: string[] = [];
   try {
     const { data: ongoing, error: ongoingError } = await admin
       .from("tms_trip_visit_logs")
@@ -219,6 +227,7 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
     }
     for (const [taskId, taskNumber] of candidates) {
       summary.reconciledTasks += 1;
+      reconciledIds.push(taskId);
       try {
         const search = taskNumber?.trim() ? taskNumber.trim() : taskId;
         const result = await fetchFleetTaskInstantList({ limit: 10, page: 1, search });
@@ -242,6 +251,21 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
 
   // Visit log baru hasil sync langsung dicap client.
   await stampUnmappedTmsRows(admin);
+
+  // Evaluasi SLA untuk task yang disentuh sync (failure-isolated agar
+  // tidak menggagalkan arsip kunjungan bila konfigurasi SLA bermasalah).
+  try {
+    const slaTaskIds = [...seen];
+    for (const taskId of reconciledIds) {
+      if (!slaTaskIds.includes(taskId)) slaTaskIds.push(taskId);
+    }
+    const slaSummary = await evaluateSlaForTasks(admin, slaTaskIds);
+    summary.slaTasks = slaSummary.tasksChecked;
+    summary.slaAssigned = slaSummary.assigned;
+    summary.slaVisits = slaSummary.visitsUpdated;
+  } catch (error) {
+    summary.failures.push(`Evaluasi SLA: ${errorMessage(error)}`);
+  }
 
   return summary;
 }

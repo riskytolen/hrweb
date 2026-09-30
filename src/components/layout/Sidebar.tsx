@@ -7,8 +7,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/AuthProvider";
 import {
   Users,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelLeftClose,  PanelLeftOpen,
   ChevronDown,
   CreditCard,
   ClipboardCheck,
@@ -48,6 +47,7 @@ import {
   PackageCheck,
   ScrollText,
   Settings2,
+  AlarmClockCheck,
   Car,
   type LucideIcon,
 } from "lucide-react";
@@ -61,6 +61,7 @@ import {
   canViewTmsLiveTask,
   canViewTmsLiveView,
   canViewTmsLoggerTrips,
+  canViewTmsSlaConfig,
 } from "@/lib/permissions";
 
 interface SidebarProps {
@@ -185,6 +186,7 @@ const allSections: MenuSection[] = [
           { name: "Pengaturan Live Track", href: "/tms/live-track-settings", icon: Settings2, permission: "tms.live-track-config" },
           { name: "Monitoring e-POD", href: "/tms/epod", icon: PackageCheck, permission: "tms.epod" },
           { name: "Logger Trips", href: "/tms/logger-trips", icon: ScrollText, permission: "tms.logger-trips" },
+          { name: "Pengaturan SLA", href: "/tms/sla", icon: AlarmClockCheck, permission: "tms.sla-config" },
         ],
       },
       {
@@ -261,6 +263,9 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
             }
             if (item.href === "/tms/logger-trips") {
               return canViewTmsLoggerTrips(profile.roles?.permissions ?? [], profile.account_type);
+            }
+            if (item.href === "/tms/sla") {
+              return canViewTmsSlaConfig(profile.roles?.permissions ?? [], profile.account_type);
             }
             if (item.href === "/operasional-kendaraan/dashboard") {
               return canViewOdometerDashboard(profile.roles?.permissions ?? [], profile.account_type);

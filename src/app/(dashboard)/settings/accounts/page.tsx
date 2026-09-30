@@ -129,6 +129,7 @@ const PERMISSION_SECTIONS: PermissionSection[] = [
       { key: "tms.live-view", label: "Live View" },
       { key: "tms.live-track-task", label: "Live Track Task" },
       { key: "tms.logger-trips", label: "Logger Trips" },
+      { key: "tms.sla-config", label: "Pengaturan SLA" },
     ],
   },
   {
@@ -886,6 +887,27 @@ export default function AccountsPage() {
     });
   };
 
+  // Permission Pengaturan SLA: tidak tampil / lihat / kelola.
+  // Kelola bersifat eksplisit: permission `tms` biasa tidak ikut mengelola.
+  const getSlaConfigState = (): "none" | "view" | "manage" => {
+    if (roleForm.permissions.includes("tms.sla-config.manage")) return "manage";
+    if (roleForm.permissions.includes("tms.sla-config.view")) return "view";
+    if (roleForm.permissions.includes("tms.sla-config")) return "manage";
+    if (getTmsBaseState() !== "none") return "view";
+    return "none";
+  };
+
+  const setSlaConfigState = (state: "none" | "view" | "manage") => {
+    setRoleForm((prev) => {
+      const cleaned = prev.permissions.filter(
+        (p) => p !== "tms.sla-config" && p !== "tms.sla-config.view" && p !== "tms.sla-config.manage",
+      );
+      if (state === "view") return { ...prev, permissions: [...cleaned, "tms.sla-config.view"] };
+      if (state === "manage") return { ...prev, permissions: [...cleaned, "tms.sla-config.manage"] };
+      return { ...prev, permissions: cleaned };
+    });
+  };
+
   // Baris satu modul dengan mode Tidak Tampil / Lihat / Input / Edit.
   const renderModuleRow = (opt: PermissionOption) => {
     const state = getPermissionState(opt.key);
@@ -1112,8 +1134,7 @@ export default function AccountsPage() {
   };
 
   // Baris khusus Pengaturan Live Track: mode Tidak Tampil / Lihat / Kelola.
-  const renderLiveTrackConfigRow = () => {
-    const configState = getLiveTrackConfigState();
+  const renderLiveTrackConfigRow = () => {    const configState = getLiveTrackConfigState();
     return (
       <div
         key="tms.live-track-config"
@@ -1143,6 +1164,54 @@ export default function AccountsPage() {
               className={cn(
                 "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
                 configState === s.value
+                  ? s.value === "manage"
+                    ? "bg-primary text-white shadow-sm"
+                    : s.value === "view"
+                      ? "bg-amber-500 text-white shadow-sm"
+                      : "bg-card text-muted-foreground shadow-sm"
+                  : "text-muted-foreground/60 hover:text-muted-foreground"
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Baris khusus Pengaturan SLA: mode Tidak Tampil / Lihat / Kelola.
+  const renderSlaConfigRow = () => {
+    const slaState = getSlaConfigState();
+    return (
+      <div
+        key="tms.sla-config"
+        className={cn(
+          "flex items-center justify-between p-2.5 rounded-xl border transition-all",
+          slaState === "manage"
+            ? "border-primary/30 bg-primary/5"
+            : slaState === "view"
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-border"
+        )}
+      >
+        <div>
+          <span className="text-xs font-medium text-foreground">Pengaturan SLA</span>
+          <p className="text-[10px] text-muted-foreground">Profil rute & jam kedatangan per client</p>
+        </div>
+        <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+          {([
+            { value: "none" as const, label: "Tidak Tampil" },
+            { value: "view" as const, label: "Lihat" },
+            { value: "manage" as const, label: "Kelola" },
+          ]).map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              onClick={() => setSlaConfigState(s.value)}
+              className={cn(
+                "px-2 py-1 rounded-md text-[10px] font-semibold transition-all",
+                slaState === s.value
                   ? s.value === "manage"
                     ? "bg-primary text-white shadow-sm"
                     : s.value === "view"
@@ -2419,6 +2488,7 @@ export default function AccountsPage() {
                               {renderLiveTrackConfigRow()}
                               {renderEpodRow()}
                               {renderChildRow({ key: "tms.logger-trips", label: "Logger Trips" }, "tms", "TMS induk")}
+                              {renderSlaConfigRow()}
                             </>
                           ) : section.title === "Operasional Kendaraan" ? (
                             <>

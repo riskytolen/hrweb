@@ -23,6 +23,13 @@ import {
   toLoggerTripExcelRow,
   toLoggerTripPdfRow,
 } from "@/lib/tms-logger-export";
+import {
+  computeSlaCompliance,
+  formatSlaCompliance,
+  formatSlaDelta,
+  slaKindLabel,
+  slaStatusLabel,
+} from "@/lib/tms-sla";
 import RouteGuard from "@/components/RouteGuard";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -33,6 +40,7 @@ import TmsClientSelector, { TMS_CLIENT_CHANGED_EVENT, readTmsClientParam } from 
 
 type TempStatus = "NORMAL" | "WASPADA" | "TINGGI";
 type VisitStateFilter = "ALL" | "ONGOING" | "COMPLETED" | "INCOMPLETE" | "PENDING";
+type SlaStateFilter = "ALL" | "ON_TIME" | "LATE" | "PENDING" | "UNSET";
 
 interface TripLogRow {
   id: string;
@@ -48,6 +56,26 @@ interface TripLogRow {
   enteredAt: string | null;
   exitedAt: string | null;
   temperatureC: number | null;
+  groupName: string | null;
+  slaProfileCode: string | null;
+  slaKind: string | null;
+  slaTargetAt: string | null;
+  slaStatus: string | null;
+  slaDeltaSeconds: number | null;
+}
+
+interface SlaCounts {
+  onTime: number;
+  late: number;
+  pending: number;
+  unset: number;
+  unevaluated: number;
+}
+
+interface SlaProfileOption {
+  id: string;
+  code: string;
+  groupName: string | null;
 }
 
 interface VisitCounts {
@@ -65,6 +93,7 @@ interface ListResponse {
     page?: number;
     limit?: number;
     counts?: VisitCounts | null;
+    sla?: SlaCounts | null;
     lastSyncedAt?: string | null;
   };
 }
@@ -75,6 +104,14 @@ const VISIT_FILTERS: { key: VisitStateFilter; label: string }[] = [
   { key: "COMPLETED", label: "Selesai" },
   { key: "INCOMPLETE", label: "Waktu tak lengkap" },
   { key: "PENDING", label: "Belum dikunjungi" },
+];
+
+const SLA_FILTERS: { key: SlaStateFilter; label: string }[] = [
+  { key: "ALL", label: "Semua SLA" },
+  { key: "ON_TIME", label: "Tepat Waktu" },
+  { key: "LATE", label: "Terlambat" },
+  { key: "PENDING", label: "Belum Tiba" },
+  { key: "UNSET", label: "SLA Belum Diatur" },
 ];
 
 const PAGE_SIZE = 15;
@@ -200,16 +237,47 @@ function VisitStateBadge({ row }: { row: TripLogRow }) {
   return <Badge variant="muted">Belum dikunjungi</Badge>;
 }
 
+function SlaBadge({ row }: { row: TripLogRow }) {
+  if (!row.slaStatus) return <span className="text-xs text-muted-foreground">–</span>;
+  const variant =
+    row.slaStatus === "ON_TIME"
+      ? "success"
+      : row.slaStatus === "LATE"
+        ? "danger"
+        : row.slaStatus === "PENDING"
+          ? "info"
+          : "warning";
+  return (
+    <Badge variant={variant}>
+      {slaStatusLabel(
+        row.slaStatus as "ON_TIME" | "LATE" | "PENDING" | "UNSET",
+        row.slaKind === "DEPARTURE" ? "DEPARTURE" : "ARRIVAL",
+      )}
+    </Badge>
+  );
+}
+
+function formatSlaTarget(value: string | null): string {
+  if (!value) return "–";
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return "–";
+  return new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit" }).format(new Date(parsed));
+}
+
 /* ─── Halaman ─── */
 
 export default function TripLoggerPage() {
   const [rows, setRows] = useState<TripLogRow[]>([]);
   const [counts, setCounts] = useState<VisitCounts | null>(null);
+  const [slaCounts, setSlaCounts] = useState<SlaCounts | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [visitState, setVisitState] = useState<VisitStateFilter>("ALL");
+  const [slaState, setSlaState] = useState<SlaStateFilter>("ALL");
+  const [slaProfile, setSlaProfile] = useState("");
+  const [slaProfiles, setSlaProfiles] = useState<SlaProfileOption[]>([]);
   const [dateFrom, setDateFrom] = useState(() => jakartaDate(-6));
   const [dateTo, setDateTo] = useState(() => jakartaDate(0));
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -222,6 +290,7 @@ export default function TripLoggerPage() {
   useEffect(() => {
     const onClientChanged = () => {
       setPage(1);
+      setSlaProfile("");
       setClientTick((tick) => tick + 1);
     };
     window.addEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
@@ -239,12 +308,14 @@ export default function TripLoggerPage() {
         dateTo,
       });
       if (visitState !== "ALL") params.set("visitState", visitState);
+      if (slaState !== "ALL") params.set("sla", slaState);
+      if (slaProfile) params.set("slaProfile", slaProfile);
       if (appliedSearch) params.set("search", appliedSearch);
       const clientParam = readTmsClientParam();
       if (clientParam) params.set("client", clientParam);
       return params;
     },
-    [appliedSearch, dateFrom, dateTo, visitState],
+    [appliedSearch, dateFrom, dateTo, slaProfile, slaState, visitState],
   );
 
   const load = useCallback(async () => {
@@ -261,10 +332,12 @@ export default function TripLoggerPage() {
         setRows([]);
         setTotal(0);
         setCounts(null);
+        setSlaCounts(null);
         return;
       }
       setRows(Array.isArray(payload.data) ? payload.data : []);
       setCounts(payload.meta?.counts ?? null);
+      setSlaCounts(payload.meta?.sla ?? null);
       setTotal(payload.meta?.total ?? 0);
       setLastSyncedAt(payload.meta?.lastSyncedAt ?? null);
     } catch {
@@ -272,10 +345,38 @@ export default function TripLoggerPage() {
       setRows([]);
       setTotal(0);
       setCounts(null);
+      setSlaCounts(null);
     } finally {
       setLoading(false);
     }
   }, [buildListParams, page]);
+
+  // Daftar profil SLA dalam scope client aktif untuk filter profil.
+  const loadSlaProfiles = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      const clientParam = readTmsClientParam();
+      if (clientParam) params.set("client", clientParam);
+      const query = params.toString();
+      const response = await fetch(`/api/tms/sla-profiles${query ? `?${query}` : ""}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as { data?: SlaProfileOption[] };
+      if (response.ok && Array.isArray(payload.data)) {
+        setSlaProfiles(payload.data);
+        return;
+      }
+    } catch {
+      // Filter profil opsional; daftar kosong tetap memungkinkan tabel tampil.
+    }
+    setSlaProfiles([]);
+  }, []);
+
+  useEffect(() => {
+    // clientTick memicu muat ulang saat pilihan client berubah.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadSlaProfiles();
+  }, [loadSlaProfiles, clientTick]);
 
   // Ambil seluruh data sesuai filter aktif (loop paging server, maks 100/halaman).
   const fetchAllFilteredRows = useCallback(async (): Promise<TripLogRow[]> => {
@@ -303,6 +404,19 @@ export default function TripLoggerPage() {
     [visitState],
   );
 
+  const slaFilterLabel = useMemo(
+    () => SLA_FILTERS.find((filter) => filter.key === slaState)?.label ?? "Semua SLA",
+    [slaState],
+  );
+
+  const slaComplianceLabel = useMemo(
+    () =>
+      formatSlaCompliance(
+        computeSlaCompliance(slaCounts?.onTime ?? 0, slaCounts?.late ?? 0),
+      ),
+    [slaCounts],
+  );
+
   const exportXlsx = useCallback(async () => {
     setExporting("xlsx");
     try {
@@ -313,6 +427,7 @@ export default function TripLoggerPage() {
         ["Laporan Logger Trips"],
         ["Periode", `${dateFrom} s/d ${dateTo}`],
         ["Status", visitFilterLabel],
+        ["Status SLA", slaFilterLabel],
         ...(appliedSearch ? [["Pencarian", appliedSearch]] : []),
         ["Total kunjungan", String(all.length)],
         [],
@@ -339,6 +454,12 @@ export default function TripLoggerPage() {
         { wch: 16 },
         { wch: 10 },
         { wch: 14 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 14 },
+        { wch: 20 },
+        { wch: 16 },
+        { wch: 20 },
       ];
       const lastRow = sheetRows.length - 1;
       const lastCol = LOGGER_TRIP_EXPORT_EXCEL_HEADERS.length - 1;
@@ -352,7 +473,7 @@ export default function TripLoggerPage() {
     } finally {
       setExporting(null);
     }
-  }, [appliedSearch, dateFrom, dateTo, fetchAllFilteredRows, visitFilterLabel]);
+  }, [appliedSearch, dateFrom, dateTo, fetchAllFilteredRows, slaFilterLabel, visitFilterLabel]);
 
   const exportPdf = useCallback(async () => {
     setExporting("pdf");
@@ -371,7 +492,7 @@ export default function TripLoggerPage() {
       doc.text("Laporan Logger Trips", pageWidth / 2, 14, { align: "center" });
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      doc.text(`Periode: ${dateFrom} s/d ${dateTo} · Status: ${visitFilterLabel}`, pageWidth / 2, 20, {
+      doc.text(`Periode: ${dateFrom} s/d ${dateTo} · Status: ${visitFilterLabel} · SLA: ${slaFilterLabel}`, pageWidth / 2, 20, {
         align: "center",
       });
       doc.text(
@@ -390,14 +511,15 @@ export default function TripLoggerPage() {
         alternateRowStyles: { fillColor: [248, 250, 252] },
         columnStyles: {
           0: { halign: "right", cellWidth: 10 },
-          1: { cellWidth: 25 },
-          2: { cellWidth: 58 },
-          3: { cellWidth: 40 },
-          4: { cellWidth: 30 },
-          5: { cellWidth: 30 },
-          6: { cellWidth: 25 },
-          7: { cellWidth: 32 },
-          8: { halign: "right", cellWidth: 22 },
+          1: { cellWidth: 22 },
+          2: { cellWidth: 52 },
+          3: { cellWidth: 34 },
+          4: { cellWidth: 26 },
+          5: { cellWidth: 26 },
+          6: { cellWidth: 20 },
+          7: { cellWidth: 26 },
+          8: { cellWidth: 30 },
+          9: { halign: "right", cellWidth: 18 },
         },
         didDrawPage: () => {
           const page = doc.getNumberOfPages();
@@ -414,7 +536,7 @@ export default function TripLoggerPage() {
     } finally {
       setExporting(null);
     }
-  }, [appliedSearch, dateFrom, dateTo, fetchAllFilteredRows, visitFilterLabel]);
+  }, [appliedSearch, dateFrom, dateTo, fetchAllFilteredRows, slaFilterLabel, visitFilterLabel]);
 
   useEffect(() => {
     // clientTick memicu muat ulang saat pilihan client berubah.
@@ -475,6 +597,25 @@ export default function TripLoggerPage() {
           <KpiCard icon={Truck} tileClass="bg-violet-500" label="Sedang di lokasi" value={String(counts?.ongoing ?? 0)} sub="sudah masuk, belum keluar" />
           <KpiCard icon={CheckCircle2} tileClass="bg-emerald-500" label="Kunjungan selesai" value={String(counts?.completed ?? 0)} sub="masuk & keluar tercatat" />
           <KpiCard icon={AlertTriangle} tileClass={(counts?.incomplete ?? 0) > 0 ? "bg-amber-500" : "bg-slate-400"} label="Waktu tak lengkap" value={String(counts?.incomplete ?? 0)} sub="perlu validasi data" />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-2xl border border-border bg-card px-4 py-3 text-xs shadow-sm">
+          <span className="font-bold text-foreground">SLA Kedatangan</span>
+          <span className="tabular-nums text-muted-foreground">
+            Tepat Waktu <strong className="text-emerald-600">{slaCounts?.onTime ?? 0}</strong>
+          </span>
+          <span className="tabular-nums text-muted-foreground">
+            Terlambat <strong className="text-danger">{slaCounts?.late ?? 0}</strong>
+          </span>
+          <span className="tabular-nums text-muted-foreground">
+            Belum Tiba/Berangkat <strong className="text-sky-600">{slaCounts?.pending ?? 0}</strong>
+          </span>
+          <span className="tabular-nums text-muted-foreground">
+            Tanpa SLA <strong className="text-amber-600">{slaCounts?.unset ?? 0}</strong>
+          </span>
+          <span className="ml-auto tabular-nums text-muted-foreground">
+            Kepatuhan <strong className="text-base text-foreground">{slaComplianceLabel}</strong>
+          </span>
         </div>
 
         <div className="rounded-2xl border border-border bg-card">
@@ -543,6 +684,43 @@ export default function TripLoggerPage() {
             ))}
           </div>
 
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2.5">
+            {SLA_FILTERS.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() => {
+                  setSlaState(filter.key);
+                  setPage(1);
+                }}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                  slaState === filter.key ? "bg-emerald-600 text-white" : "bg-muted text-muted-foreground hover:bg-muted/70",
+                )}
+              >
+                {filter.label}
+              </button>
+            ))}
+            {slaProfiles.length > 0 && (
+              <select
+                aria-label="Filter profil rute SLA"
+                className="ml-auto rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-semibold text-muted-foreground"
+                value={slaProfile}
+                onChange={(event) => {
+                  setSlaProfile(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">Semua profil rute</option>
+                {slaProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.groupName ? `${profile.groupName} · ${profile.code}` : profile.code}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           {loading ? (
             <div className="space-y-2 p-4">
               {Array.from({ length: 5 }).map((_, index) => (
@@ -559,16 +737,20 @@ export default function TripLoggerPage() {
             <>
               {/* Tabel desktop */}
               <div className="hidden overflow-x-auto lg:block">
-                <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+                <table className="w-full min-w-[1320px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground">
                       <th className="px-4 py-3 font-semibold">Unit</th>
                       <th className="px-4 py-3 font-semibold">Nama Toko</th>
+                      <th className="px-4 py-3 font-semibold">Profil SLA</th>
                       <th className="px-4 py-3 font-semibold">Driver</th>
                       <th className="px-4 py-3 font-semibold">Masuk Toko</th>
                       <th className="px-4 py-3 font-semibold">Keluar Toko</th>
+                      <th className="px-4 py-3 font-semibold">Target SLA</th>
                       <th className="px-4 py-3 font-semibold">Durasi di Toko</th>
-                      <th className="px-4 py-3 font-semibold">Status</th>
+                      <th className="px-4 py-3 font-semibold">Status SLA</th>
+                      <th className="px-4 py-3 font-semibold">Selisih</th>
+                      <th className="px-4 py-3 font-semibold">Kunjungan</th>
                       <th className="px-4 py-3 font-semibold">Suhu</th>
                     </tr>
                   </thead>
@@ -590,6 +772,18 @@ export default function TripLoggerPage() {
                               {row.address ?? "–"}
                             </p>
                           </td>
+                          <td className="px-4 py-3">
+                            {row.slaProfileCode ? (
+                              <>
+                                <p className="text-xs font-bold tabular-nums text-foreground">{row.slaProfileCode}</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {row.groupName ?? "–"} · {slaKindLabel(row.slaKind === "DEPARTURE" || row.slaKind === "ARRIVAL" ? row.slaKind : null)}
+                                </p>
+                              </>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">–</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-xs text-foreground">{row.driver ?? "–"}</td>
                           <td className="px-4 py-3">
                             <p className="text-sm font-extrabold tabular-nums text-foreground">{formatTime(row.enteredAt)}</p>
@@ -609,7 +803,17 @@ export default function TripLoggerPage() {
                             )}
                           </td>
                           <td className="px-4 py-3">
+                            <p className="text-sm font-extrabold tabular-nums text-foreground">{formatSlaTarget(row.slaTargetAt)}</p>
+                            <p className="text-[11px] text-muted-foreground">{row.slaTargetAt ? formatDate(row.slaTargetAt) : ""}</p>
+                          </td>
+                          <td className="px-4 py-3">
                             <span className="text-xs font-semibold tabular-nums text-foreground">{formatDuration(secs)}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <SlaBadge row={row} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-xs tabular-nums text-foreground">{formatSlaDelta(row.slaDeltaSeconds)}</span>
                           </td>
                           <td className="px-4 py-3">
                             <VisitStateBadge row={row} />
@@ -666,6 +870,19 @@ export default function TripLoggerPage() {
                           <span className="text-muted-foreground">Suhu</span>
                           <TempBadge tempC={row.temperatureC} />
                         </div>
+                        <div className="col-span-2 flex items-center justify-between rounded-lg bg-muted/60 px-2.5 py-2">
+                          <span className="tabular-nums text-foreground">
+                            Target <strong className="text-sm">{formatSlaTarget(row.slaTargetAt)}</strong>
+                            {row.slaProfileCode ? ` · ${row.slaProfileCode}` : ""}
+                          </span>
+                          <SlaBadge row={row} />
+                        </div>
+                        {row.slaDeltaSeconds !== null && row.slaDeltaSeconds !== undefined && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Selisih SLA</span>
+                            <span className="font-semibold tabular-nums text-foreground">{formatSlaDelta(row.slaDeltaSeconds)}</span>
+                          </div>
+                        )}
                       </div>
                     </article>
                   );
@@ -691,6 +908,7 @@ export default function TripLoggerPage() {
 
         <p className="text-[11px] text-muted-foreground">
           Waktu masuk/keluar berasal dari timeline Fleet Task McEasy. Suhu hanya tampil bila ada hasil capture perangkat; jika kosong berarti belum ada snapshot suhu untuk titik tersebut.
+          SLA dihitung dari jadwal internal client per kelompok kendaraan (mis. profil VAN Tuku CP); baris tanpa konfigurasi SLA berstatus “SLA Belum Diatur”.
         </p>
       </div>
     </RouteGuard>

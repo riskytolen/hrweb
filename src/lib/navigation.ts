@@ -2,6 +2,7 @@ import {
   canViewTmsLiveTask,
   canViewTmsLiveView,
   canViewTmsLoggerTrips,
+  canViewTmsSlaConfig,
   permissionMatches,
   type AccountType,
 } from "@/lib/permissions";
@@ -29,6 +30,7 @@ export const ROUTE_BY_PERMISSION: { permission: string; href: string }[] = [
   { permission: "tms.live-view", href: "/tms/live-view" },
   { permission: "tms.live-track-task", href: "/tms/live-track-task" },
   { permission: "tms.logger-trips", href: "/tms/logger-trips" },
+  { permission: "tms.sla-config", href: "/tms/sla" },
   { permission: "tms.epod", href: "/tms/epod" },
   { permission: "vehicle-odometer.dashboard", href: "/operasional-kendaraan/dashboard" },
   { permission: "vehicle-odometer.report", href: "/operasional-kendaraan/laporan" },
@@ -60,6 +62,7 @@ export function getTmsDefaultRoute(
   if (canViewTmsLiveView(safePermissions, accountType)) return "/tms/live-view";
   if (canViewTmsLiveTask(safePermissions, accountType)) return "/tms/live-track-task";
   if (canViewTmsLoggerTrips(safePermissions, accountType)) return "/tms/logger-trips";
+  if (canViewTmsSlaConfig(safePermissions, accountType)) return "/tms/sla";
   if (permissionMatches(safePermissions, "tms.epod", accountType)) return "/tms/epod";
   return "/dashboard";
 }

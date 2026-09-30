@@ -5,6 +5,7 @@ import {
   canManageLiveTrackConfig,
   canManageOdometerClientUnits,
   canManageTmsEpod,
+  canManageTmsSlaConfig,
   canViewLiveTrackConfig,
   canViewOdometerDashboard,
   canViewOdometerReport,
@@ -12,6 +13,7 @@ import {
   canViewTmsLiveTask,
   canViewTmsLiveView,
   canViewTmsLoggerTrips,
+  canViewTmsSlaConfig,
   externalCanViewTms,
   parsePermissions,
   permissionGranted,
@@ -268,8 +270,31 @@ describe("canViewTmsLoggerTrips", () => {
   });
 });
 
-describe("canAccessTmsData", () => {
-  it("memberi akses untuk permission induk lama dan submenu live", () => {
+describe("canViewTmsSlaConfig / canManageTmsSlaConfig", () => {
+  it("memberi akses lihat untuk induk lama dan key sla", () => {
+    expect(canViewTmsSlaConfig(["tms"])).toBe(true);
+    expect(canViewTmsSlaConfig(["tms.view"])).toBe(true);
+    expect(canViewTmsSlaConfig(["tms.sla-config.view"])).toBe(true);
+    expect(canViewTmsSlaConfig(["tms.sla-config.manage"])).toBe(true);
+  });
+
+  it("tidak memberi akses lihat untuk submenu TMS lain saja", () => {
+    expect(canViewTmsSlaConfig(["tms.live-view"])).toBe(false);
+    expect(canViewTmsSlaConfig(["tms.logger-trips"])).toBe(false);
+  });
+
+  it("kelola butuh wewenang eksplisit dan menolak eksternal", () => {
+    expect(canManageTmsSlaConfig(["tms.sla-config.manage"])).toBe(true);
+    expect(canManageTmsSlaConfig(["tms.sla-config"])).toBe(true);
+    expect(canManageTmsSlaConfig(["all"])).toBe(true);
+    expect(canManageTmsSlaConfig(["tms"])).toBe(false);
+    expect(canManageTmsSlaConfig(["tms.input"])).toBe(false);
+    expect(canViewTmsSlaConfig(["tms.sla-config.manage"], "external")).toBe(false);
+    expect(canManageTmsSlaConfig(["all"], "external")).toBe(false);
+  });
+});
+
+describe("canAccessTmsData", () => {  it("memberi akses untuk permission induk lama dan submenu live", () => {
     expect(canAccessTmsData(["all"])).toBe(true);
     expect(canAccessTmsData(["tms"])).toBe(true);
     expect(canAccessTmsData(["tms.view"])).toBe(true);
@@ -282,6 +307,7 @@ describe("canAccessTmsData", () => {
     expect(canAccessTmsData(["tms.epod.view"])).toBe(false);
     expect(canAccessTmsData(["tms.epod.manage"])).toBe(false);
     expect(canAccessTmsData(["tms.live-track-config.manage"])).toBe(false);
+    expect(canAccessTmsData(["tms.sla-config.manage"])).toBe(false);
     expect(canAccessTmsData([])).toBe(false);
   });
 

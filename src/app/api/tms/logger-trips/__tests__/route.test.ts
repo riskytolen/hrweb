@@ -153,4 +153,57 @@ describe("GET /api/tms/logger-trips", () => {
     expect(payload.meta.counts.ongoing).toBe(1);
     expect(payload.meta.lastSyncedAt).toBe("2026-09-22T06:15:00+07:00");
   });
+
+  it("memetakan snapshot SLA, label profil/kelompok, dan ringkasan sla", async () => {
+    mockSupabase({
+      user: { id: "user-1" },
+      profile: activeProfile(["tms.view"]),
+      visits: [
+        {
+          id: "row-sla",
+          task_id: "task-1",
+          task_number: "FO-1001",
+          task_status: "STARTED",
+          license_plate: "B 1234 TES",
+          driver_name: "ASEP SURAHMAN",
+          route_sequence: 2,
+          point_type: "DEFAULT",
+          location_name: "Toko A",
+          location_address: "Jl. A",
+          arrival_actual: "2026-09-30T05:02:00+07:00",
+          departure_actual: "2026-09-30T05:20:00+07:00",
+          last_synced_at: "2026-09-30T05:25:00+07:00",
+          live_track_group_id: "group-cp",
+          sla_profile_id: "profile-van9",
+          sla_kind: "ARRIVAL",
+          sla_target_at: "2026-09-30T05:05:00+07:00",
+          sla_status: "ON_TIME",
+          sla_delta_seconds: -180,
+        },
+      ],
+      count: 1,
+      temperatures: [],
+      countRows: [{ arrival_actual: "2026-09-30T05:02:00+07:00", departure_actual: "2026-09-30T05:20:00+07:00", sla_status: "ON_TIME" }],
+    });
+
+    const response = await GET(request("?sla=ON_TIME"));
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      data: {
+        slaKind: string | null;
+        slaStatus: string | null;
+        slaTargetAt: string | null;
+        slaDeltaSeconds: number | null;
+      }[];
+      meta: { sla: { onTime: number; late: number; pending: number; unset: number; unevaluated: number } };
+    };
+    expect(payload.data).toHaveLength(1);
+    expect(payload.data[0]).toMatchObject({
+      slaKind: "ARRIVAL",
+      slaStatus: "ON_TIME",
+      slaTargetAt: "2026-09-30T05:05:00+07:00",
+      slaDeltaSeconds: -180,
+    });
+    expect(payload.meta.sla).toMatchObject({ onTime: 1, late: 0, pending: 0, unset: 0, unevaluated: 0 });
+  });
 });

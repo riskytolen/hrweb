@@ -24,6 +24,12 @@ const BASE_ROW: LoggerTripExportRow = {
   enteredAt: "2026-09-22T06:12:00+07:00",
   exitedAt: "2026-09-22T06:47:00+07:00",
   temperatureC: -16.2,
+  groupName: "CP",
+  slaProfileCode: "VAN 9",
+  slaKind: "ARRIVAL",
+  slaTargetAt: "2026-09-22T06:15:00+07:00",
+  slaStatus: "LATE",
+  slaDeltaSeconds: 1920,
 };
 
 describe("tms-logger-export", () => {
@@ -62,7 +68,7 @@ describe("tms-logger-export", () => {
     expect(formatLoggerTripTemp(-16.2)).toBe("-16,2°C");
   });
 
-  it("membangun baris Excel 12 kolom dan PDF 9 kolom", () => {
+  it("membangun baris Excel 18 kolom dan PDF 10 kolom", () => {
     const nowMs = Date.parse("2026-09-22T08:00:00+07:00");
     const excel = toLoggerTripExcelRow(BASE_ROW, 0, nowMs);
     expect(excel).toHaveLength(LOGGER_TRIP_EXPORT_EXCEL_HEADERS.length);
@@ -70,16 +76,31 @@ describe("tms-logger-export", () => {
     expect(excel[1]).toBe("B 1234 TES");
     expect(excel[9]).toBe("Selesai");
     expect(excel[10]).toBe("-16,2°C");
+    expect(excel[12]).toBe("CP");
+    expect(excel[13]).toBe("VAN 9");
+    expect(excel[14]).toBe("Kedatangan");
+    expect(excel[16]).toBe("Terlambat");
+    expect(excel[17]).toBe("Terlambat 32 mnt");
 
     const pdf = toLoggerTripPdfRow(BASE_ROW, 0, nowMs);
     expect(pdf).toHaveLength(LOGGER_TRIP_EXPORT_PDF_HEADERS.length);
     expect(pdf[0]).toBe("1");
-    expect(pdf[7]).toBe("Selesai");
+    expect(pdf[8]).toBe("Terlambat");
 
     // Baris berjalan menampilkan "Di lokasi" pada kolom keluar.
     const ongoingExcel = toLoggerTripExcelRow({ ...BASE_ROW, exitedAt: null }, 1, nowMs);
     expect(ongoingExcel[7]).toBe("Di lokasi");
     expect(ongoingExcel[9]).toBe("Di lokasi");
+
+    // Tanpa snapshot SLA: kolom SLA menampilkan strip.
+    const noSla = toLoggerTripExcelRow(
+      { ...BASE_ROW, slaTargetAt: null, slaStatus: null, slaDeltaSeconds: null, slaProfileCode: null },
+      2,
+      nowMs,
+    );
+    expect(noSla[13]).toBe("–");
+    expect(noSla[16]).toBe("–");
+    expect(noSla[17]).toBe("–");
   });
 
   it("membuat stamp file zona Jakarta", () => {
