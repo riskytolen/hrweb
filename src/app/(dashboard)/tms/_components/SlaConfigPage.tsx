@@ -256,6 +256,7 @@ export default function SlaConfigPage() {
     try {
       if (profileForm.id) {
         await api(`/api/tms/sla-profiles/${profileForm.id}`, "PATCH", {
+          code: profileForm.code,
           name: profileForm.name,
           departureTargetTime: profileForm.depart || null,
           departureDayOffset: Number(profileForm.departDay) || 0,
@@ -740,6 +741,7 @@ export default function SlaConfigPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-bold tabular-nums text-foreground">{profile.code}</p>
+                    <p className="text-[11px] text-muted-foreground">{profile.name}</p>
                     <p className="text-[11px] text-muted-foreground">{profile.groupName ?? "–"}</p>
                   </div>
                   <Badge variant={profile.status === "Aktif" ? "success" : "muted"}>{profile.status}</Badge>
@@ -749,6 +751,41 @@ export default function SlaConfigPage() {
                   {profile.unresolvedCount > 0 ? ` · ${profile.unresolvedCount} tanpa ID` : ""}
                   {profile.departureTargetTime ? ` · berangkat ${profile.departureTargetTime}` : ""}
                 </p>
+                {canManage && (
+                  <div
+                    className="mt-2 flex items-center justify-end gap-1"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      title="Ubah profil"
+                      aria-label={`Ubah profil ${profile.code}`}
+                      className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={() =>
+                        setProfileForm({
+                          id: profile.id,
+                          groupId: profile.groupId,
+                          code: profile.code,
+                          name: profile.name,
+                          depart: profile.departureTargetTime ?? "",
+                          departDay: String(profile.departureDayOffset ?? 0),
+                          effectiveFrom: profile.effectiveFrom,
+                          effectiveUntil: profile.effectiveUntil ?? "",
+                        })
+                      }
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy === `status-${profile.id}`}
+                      className="rounded-lg px-2 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                      onClick={() => void toggleProfileStatus(profile)}
+                    >
+                      {profile.status === "Aktif" ? "Nonaktifkan" : "Aktifkan"}
+                    </button>
+                  </div>
+                )}
               </article>
             ))}
             {filteredProfiles.length === 0 && !loading && (
@@ -951,17 +988,21 @@ export default function SlaConfigPage() {
                   </select>
                 </label>
               )}
-              {!profileForm.id && (
-                <label className="block">
-                  <span className="mb-1 block font-semibold text-muted-foreground">Kode profil</span>
-                  <input
-                    className="w-full rounded-lg border border-border bg-background px-2.5 py-2 uppercase"
-                    placeholder="VAN 13"
-                    value={profileForm.code}
-                    onChange={(event) => setProfileForm({ ...profileForm, code: event.target.value })}
-                  />
-                </label>
-              )}
+              <label className="block">
+                <span className="mb-1 block font-semibold text-muted-foreground">Kode profil</span>
+                <input
+                  className="w-full rounded-lg border border-border bg-background px-2.5 py-2 uppercase"
+                  placeholder="VAN 13"
+                  maxLength={40}
+                  value={profileForm.code}
+                  onChange={(event) => setProfileForm({ ...profileForm, code: event.target.value })}
+                />
+                {profileForm.id && (
+                  <span className="mt-1 block text-[11px] text-muted-foreground">
+                    Kode tampil pada chip Logger Trips dan ikut urutan natural (VAN 2 sebelum VAN 10).
+                  </span>
+                )}
+              </label>
               <label className="block">
                 <span className="mb-1 block font-semibold text-muted-foreground">Nama profil</span>
                 <input

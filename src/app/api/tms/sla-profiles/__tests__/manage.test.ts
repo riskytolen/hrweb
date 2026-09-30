@@ -17,7 +17,7 @@ vi.mock("@/lib/supabase-admin", () => ({
 
 import { authorizeSlaConfig } from "@/lib/tms-sla-auth";
 import { createAdminClient } from "@/lib/supabase-admin";
-import { GET as getDetail } from "@/app/api/tms/sla-profiles/[id]/route";
+import { GET as getDetail, PATCH as patchProfile } from "@/app/api/tms/sla-profiles/[id]/route";
 import { POST as createStop } from "@/app/api/tms/sla-profiles/[id]/stops/route";
 import { POST as importProfiles } from "@/app/api/tms/sla-profiles/import/route";
 
@@ -124,6 +124,70 @@ describe("GET /api/tms/sla-profiles/[id]", () => {
     const response = await getDetail(new NextRequest("http://localhost/x"), {
       params: Promise.resolve({ id: "profile-van9" }),
     });
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("PATCH /api/tms/sla-profiles/[id]", () => {
+  function patchAdmin(updateResult: unknown = { data: null, error: null }) {
+    const updateSpy = vi.fn(() => chainable(updateResult));
+    mockAdmin((table: string) => {
+      if (table === "tms_sla_route_profiles") {
+        const chain = chainable({ data: PROFILE, error: null });
+        chain.update = updateSpy;
+        return chain;
+      }
+      return chainable({ data: [], error: null });
+    });
+    return updateSpy;
+  }
+
+  function patchParams() {
+    return { params: Promise.resolve({ id: "profile-van9" }) };
+  }
+
+  it("updates code and name with normalization", async () => {
+    const updateSpy = patchAdmin();
+    const response = await patchProfile(
+      jsonRequest("http://localhost/x", "PATCH", { code: "  van  a ", name: "Rute Pagi CP" }),
+      patchParams(),
+    );
+    expect(response.status).toBe(200);
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "VAN A", name: "Rute Pagi CP" }),
+    );
+  });
+
+  it("rejects empty code with 400", async () => {
+    patchAdmin();
+    const response = await patchProfile(
+      jsonRequest("http://localhost/x", "PATCH", { code: "   " }),
+      patchParams(),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("maps duplicate code conflicts to 409", async () => {
+    patchAdmin({ data: null, error: { message: "duplicate key value violates unique constraint" } });
+    const response = await patchProfile(
+      jsonRequest("http://localhost/x", "PATCH", { code: "VAN 9" }),
+      patchParams(),
+    );
+    expect(response.status).toBe(409);
+  });
+
+  it("rejects profiles outside the caller scope", async () => {
+    allowManage(["client-tuku"]);
+    mockAdmin((table: string) => {
+      if (table === "tms_sla_route_profiles") {
+        return chainable({ data: { ...PROFILE, client_id: "client-lain" }, error: null });
+      }
+      return chainable({ data: [], error: null });
+    });
+    const response = await patchProfile(
+      jsonRequest("http://localhost/x", "PATCH", { name: "Lain" }),
+      patchParams(),
+    );
     expect(response.status).toBe(403);
   });
 });

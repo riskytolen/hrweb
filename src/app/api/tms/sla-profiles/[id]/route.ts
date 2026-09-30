@@ -155,6 +155,7 @@ export async function GET(
 }
 
 interface PatchProfileBody {
+  code?: unknown;
   name?: unknown;
   departureTargetTime?: unknown;
   departureDayOffset?: unknown;
@@ -185,6 +186,12 @@ export async function PATCH(
   if (!loaded.ok) return loaded.response;
 
   const patch: Record<string, unknown> = { updated_by: auth.context.userId, updated_at: new Date().toISOString() };
+  if (body.code !== undefined) {
+    const code = typeof body.code === "string" ? body.code.trim().toUpperCase().replace(/\s+/g, " ") : "";
+    if (!code) return slaConfigError("Kode profil tidak boleh kosong.", 400);
+    if (code.length > 40) return slaConfigError("Kode profil maksimal 40 karakter.", 400);
+    patch.code = code;
+  }
   if (body.name !== undefined) {
     const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
     if (!name) return slaConfigError("Nama profil tidak boleh kosong.", 400);
