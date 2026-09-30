@@ -162,23 +162,40 @@ export default function EpodEvidenceGallery({
             </dl>
 
             {submission.items.length > 0 && (
-              <div className="mt-2">
-                <p className="text-[11px] font-semibold text-muted-foreground">
-                  Barang ({submission.items.length})
-                </p>
-                <ul className="mt-1 space-y-0.5">
-                  {submission.items.map((item, index) => (
-                    <li key={`${item.name}-${index}`} className="flex items-baseline gap-2 text-[11px]">
-                      <span className="min-w-0 flex-1 truncate text-foreground" title={item.name}>
-                        {item.name}
-                      </span>
-                      <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                        {item.quantity}
-                        {item.unit ? ` ${item.unit}` : ""}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+              <div className="mt-2 overflow-hidden rounded-lg border border-border">
+                <table className="w-full border-collapse text-left text-[11px]">
+                  <caption className="px-2.5 py-1.5 text-left font-semibold text-muted-foreground">
+                    Barang ({submission.items.length})
+                  </caption>
+                  <thead>
+                    <tr className="border-y border-border bg-muted/60 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <th scope="col" className="px-2.5 py-1.5 font-semibold">
+                        Nama Barang
+                      </th>
+                      <th scope="col" className="w-16 px-2.5 py-1.5 text-right font-semibold">
+                        Jumlah
+                      </th>
+                      <th scope="col" className="w-20 px-2.5 py-1.5 font-semibold">
+                        Satuan
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {submission.items.map((item, index) => (
+                      <tr key={`${item.name}-${index}`}>
+                        <td className="break-words px-2.5 py-1.5 font-medium text-foreground">
+                          {item.name}
+                        </td>
+                        <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-bold tabular-nums text-foreground">
+                          {item.quantity.toLocaleString("id-ID")}
+                        </td>
+                        <td className="break-words px-2.5 py-1.5 text-muted-foreground">
+                          {item.unit ? item.unit : "–"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 

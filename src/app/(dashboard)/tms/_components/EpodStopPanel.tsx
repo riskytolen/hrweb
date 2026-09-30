@@ -891,6 +891,12 @@ function StopSubmissionForm({
           <p className="text-[11px] font-semibold text-muted-foreground">
             Barang ({filledEpodItems(items).length}) <span className="font-normal">· wajib minimal 1</span>
           </p>
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="min-w-0 flex-1">Nama barang</span>
+            <span className="w-16 shrink-0 text-right">Jumlah</span>
+            <span className="w-20 shrink-0">Satuan</span>
+            <span className="w-7 shrink-0" aria-hidden="true" />
+          </div>
           {items.map((item, index) => (
             <div key={index} className="flex items-center gap-2">
               <input
