@@ -531,6 +531,11 @@ export function normalizeFleetTaskInstantItem(raw: unknown): FleetTaskInstantIte
   };
 }
 
+/** Status SLA kedatangan/keberangkatan per titik (cermin `tms-sla.ts`). */
+export type FleetTaskSlaStatus = "ON_TIME" | "LATE" | "PENDING" | "UNSET";
+/** Jenis target SLA titik: gudang (berangkat) atau toko (tiba). */
+export type FleetTaskSlaKind = "DEPARTURE" | "ARRIVAL";
+
 export interface FleetTaskTimelinePoint {
   sequence: number | null;
   pointType: string | null;
@@ -548,6 +553,15 @@ export interface FleetTaskTimelinePoint {
   arrivalActual: string | null;
   departureTarget: string | null;
   departureActual: string | null;
+  /**
+   * Status SLA internal per titik (ditempel API board dari
+   * `tms_trip_visit_logs`, bukan dari vendor). Opsional agar payload lama
+   * dan titik sintetis e-POD tetap valid.
+   */
+  slaTargetAt?: string | null;
+  slaStatus?: FleetTaskSlaStatus | null;
+  slaDeltaSeconds?: number | null;
+  slaKind?: FleetTaskSlaKind | null;
 }
 
 export interface FleetTaskInstantDetail extends FleetTaskInstantItem {
@@ -602,7 +616,30 @@ function normalizeTimelinePoint(item: unknown): FleetTaskTimelinePoint | null {
     arrivalActual: toDateString(pickFirst(arrivalSource, ["actual"])),
     departureTarget: toDateString(pickFirst(departureSource, ["target"])),
     departureActual: toDateString(pickFirst(departureSource, ["actual"])),
+    slaTargetAt: toDateString(pickFirst(source, ["sla_target_at", "slaTargetAt"])),
+    slaStatus: toSlaStatus(pickFirst(source, ["sla_status", "slaStatus"])),
+    slaDeltaSeconds: toSlaDeltaSeconds(pickFirst(source, ["sla_delta_seconds", "slaDeltaSeconds"])),
+    slaKind: toSlaKind(pickFirst(source, ["sla_kind", "slaKind"])),
   };
+}
+
+/** Validasi status SLA; nilai asing dinormalisasi ke null (data rusak dibuang). */
+function toSlaStatus(value: unknown): FleetTaskSlaStatus | null {
+  if (value !== "ON_TIME" && value !== "LATE" && value !== "PENDING" && value !== "UNSET") return null;
+  return value;
+}
+
+/** Validasi jenis SLA; nilai asing dinormalisasi ke null. */
+function toSlaKind(value: unknown): FleetTaskSlaKind | null {
+  if (value !== "DEPARTURE" && value !== "ARRIVAL") return null;
+  return value;
+}
+
+/** Selisih detik SLA sebagai bilangan bulat; non-numerik menjadi null. */
+function toSlaDeltaSeconds(value: unknown): number | null {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null) return null;
+  return Math.trunc(parsed);
 }
 
 /** Normalisasi daftar titik rute dan urutkan berdasarkan `plan_sequence`. */

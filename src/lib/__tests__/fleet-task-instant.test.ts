@@ -159,6 +159,59 @@ describe("normalizeFleetTaskInstantDetail", () => {
   });
 });
 
+describe("normalizeFleetTaskInstantItem SLA fields", () => {
+  it("carries SLA status per timeline point", () => {
+    const item = normalizeFleetTaskInstantItem({
+      id: "task-1",
+      timeline_route: [
+        {
+          plan_sequence: 1,
+          address: { name: "Gudang" },
+          sla_target_at: "2026-09-27T21:40:00.000Z",
+          sla_status: "LATE",
+          sla_delta_seconds: 600,
+          sla_kind: "DEPARTURE",
+        },
+        {
+          plan_sequence: 2,
+          address: { name: "Toko A" },
+          sla_target_at: null,
+          sla_status: "UNSET",
+          sla_delta_seconds: null,
+          sla_kind: null,
+        },
+      ],
+    });
+    expect(item?.timeline[0]).toMatchObject({
+      slaTargetAt: "2026-09-27T21:40:00.000Z",
+      slaStatus: "LATE",
+      slaDeltaSeconds: 600,
+      slaKind: "DEPARTURE",
+    });
+    expect(item?.timeline[1].slaStatus).toBe("UNSET");
+  });
+
+  it("nulls unknown SLA values instead of passing them through", () => {
+    const item = normalizeFleetTaskInstantItem({
+      id: "task-1",
+      timeline_route: [
+        {
+          plan_sequence: 1,
+          address: { name: "Gudang" },
+          sla_status: "TERLAMBAT",
+          sla_kind: "WAREHOUSE",
+          sla_delta_seconds: "bukan-angka",
+        },
+      ],
+    });
+    expect(item?.timeline[0]).toMatchObject({
+      slaStatus: null,
+      slaKind: null,
+      slaDeltaSeconds: null,
+    });
+  });
+});
+
 describe("normalizeTripDetailTrail", () => {
   it("maps valid GPS points and sorts them by time", () => {
     const trail = normalizeTripDetailTrail({

@@ -113,7 +113,56 @@ function shortClock(value: string): string {
   return value.slice(0, 5).replace(":", ".");
 }
 
-function toTaskEntry(row: OccurrenceRow): Record<string, unknown> | null {
+interface SlaVisitRow {
+  task_id: string;
+  route_sequence: number;
+  sla_target_at: string | null;
+  sla_status: string | null;
+  sla_delta_seconds: number | null;
+  sla_kind: string | null;
+}
+
+/** Kunci sequence titik timeline lintas format (snapshot ternormalisasi / mentah vendor). */
+function timelineSequenceOf(point: unknown): number | null {
+  if (!point || typeof point !== "object") return null;
+  const source = point as Record<string, unknown>;
+  for (const key of ["plan_sequence", "planSequence", "sequence", "order"]) {
+    const value = source[key];
+    const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value.trim()) : NaN;
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return null;
+}
+
+/**
+ * Tempel status SLA internal per titik ke timeline board (dicocokkan via
+ * route_sequence). Timeline di-clone agar snapshot tidak termutasi; baris
+ * SLA yang tidak cocok diabaikan.
+ */
+function attachSlaToTimeline(
+  timeline: unknown,
+  slaBySequence: Map<number, SlaVisitRow> | undefined,
+): unknown[] {
+  if (!Array.isArray(timeline)) return [];
+  if (!slaBySequence || slaBySequence.size === 0) return timeline;
+  return timeline.map((point) => {
+    const sequence = timelineSequenceOf(point);
+    const sla = sequence === null ? undefined : slaBySequence.get(sequence);
+    if (!sla || point === null || typeof point !== "object") return point;
+    return {
+      ...(point as Record<string, unknown>),
+      slaTargetAt: sla.sla_target_at,
+      slaStatus: sla.sla_status,
+      slaDeltaSeconds: sla.sla_delta_seconds,
+      slaKind: sla.sla_kind,
+    };
+  });
+}
+
+function toTaskEntry(
+  row: OccurrenceRow,
+  slaByTask?: Map<string, Map<number, SlaVisitRow>>,
+): Record<string, unknown> | null {
   if (!row.snapshot) return null;
   return {
     id: row.snapshot.task_id,
@@ -126,7 +175,7 @@ function toTaskEntry(row: OccurrenceRow): Record<string, unknown> | null {
     actualStartedOn: row.snapshot.actual_started_on,
     actualArrivalOn: row.snapshot.actual_arrival_on,
     terminalAt: row.snapshot.terminal_at ?? row.terminal_at,
-    timeline: Array.isArray(row.snapshot.timeline) ? row.snapshot.timeline : [],
+    timeline: attachSlaToTimeline(row.snapshot.timeline, slaByTask?.get(row.snapshot.task_id)),
     plannedRoutes: Array.isArray(row.snapshot.planned_routes) ? row.snapshot.planned_routes : [],
     actualRoutes: Array.isArray(row.snapshot.actual_routes) ? row.snapshot.actual_routes : [],
     trackId: row.snapshot.track_id,
@@ -137,6 +186,37 @@ function toTaskEntry(row: OccurrenceRow): Record<string, unknown> | null {
     clientSlug: row.snapshot.client?.slug ?? null,
     clientName: row.snapshot.client?.name ?? null,
   };
+}
+
+/**
+ * Ambil status SLA per (task, sequence) dari `tms_trip_visit_logs`.
+ * Best-effort: gagal baca SLA tidak menggagalkan board (map kosong).
+ */
+async function fetchSlaByTask(
+  admin: ReturnType<typeof createAdminClient>,
+  taskIds: string[],
+): Promise<Map<string, Map<number, SlaVisitRow>>> {
+  const result = new Map<string, Map<number, SlaVisitRow>>();
+  const unique = [...new Set(taskIds.filter((id) => typeof id === "string" && id !== ""))].slice(0, 1000);
+  if (unique.length === 0) return result;
+  try {
+    const { data, error } = await admin
+      .from("tms_trip_visit_logs")
+      .select("task_id, route_sequence, sla_target_at, sla_status, sla_delta_seconds, sla_kind")
+      .in("task_id", unique);
+    if (error || !Array.isArray(data)) return result;
+    for (const row of data as unknown as SlaVisitRow[]) {
+      if (!row || typeof row.task_id !== "string") continue;
+      const sequence = typeof row.route_sequence === "number" ? row.route_sequence : Number(row.route_sequence);
+      if (!Number.isFinite(sequence)) continue;
+      const bySequence = result.get(row.task_id) ?? new Map<number, SlaVisitRow>();
+      bySequence.set(Math.trunc(sequence), row);
+      result.set(row.task_id, bySequence);
+    }
+  } catch {
+    // Abaikan: board tetap tampil tanpa badge SLA.
+  }
+  return result;
 }
 
 const OCCURRENCE_SELECT =
@@ -238,6 +318,10 @@ export async function GET(request: NextRequest) {
   }
 
   const rows = (Array.isArray(data) ? data : []) as unknown as OccurrenceRow[];
+  const slaByTask = await fetchSlaByTask(
+    admin,
+    rows.map((row) => row.task_id),
+  );
 
   const groups = new Map<
     string,
@@ -264,7 +348,7 @@ export async function GET(request: NextRequest) {
       windowLabel: `${shortClock(row.group.default_window_start)}–${shortClock(row.group.default_window_end)} WIB`,
       tasks: [],
     };
-    const taskEntry = toTaskEntry(row);
+    const taskEntry = toTaskEntry(row, slaByTask);
     if (!taskEntry) continue;
     entry.tasks.push(taskEntry);
     groups.set(row.group.id, entry);
@@ -389,6 +473,10 @@ async function getHistoryBoard(
     return errorJson("Gagal memuat riwayat Live Track.", 502);
   }
   const occRows = (Array.isArray(occData) ? occData : []) as unknown as OccurrenceRow[];
+  const slaByTask = await fetchSlaByTask(
+    admin,
+    occRows.map((row) => row.task_id),
+  );
 
   // Satu occurrence terbaru per (task, kelompok) agar FO tidak tampil ganda.
   const occByTask = new Map<string, OccurrenceRow[]>();
@@ -430,7 +518,7 @@ async function getHistoryBoard(
         windowLabel: `${shortClock(row.group.default_window_start)}–${shortClock(row.group.default_window_end)} WIB`,
         tasks: [],
       };
-      const taskEntry = toTaskEntry(row);
+      const taskEntry = toTaskEntry(row, slaByTask);
       if (!taskEntry) continue;
       entry.tasks.push(taskEntry);
       groups.set(row.group.id, entry);

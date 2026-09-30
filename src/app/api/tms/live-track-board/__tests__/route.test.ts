@@ -151,6 +151,88 @@ describe("GET /api/tms/live-track-board", () => {
     expect(payload.data[0].tasks[0]).toMatchObject({ id: "task-1", number: "FO-9445" });
   });
 
+  it("attaches SLA status to board timelines by route sequence", async () => {
+    mockAuth(activeProfile(["tms.view"]));
+    const rows = [
+      {
+        task_id: "task-1",
+        group_id: "group-1",
+        group_vehicle_id: "rel-1",
+        window_started_at: "2026-09-27T23:00:00.000Z",
+        visible_until: "2026-09-28T11:00:00.000Z",
+        terminal_at: null,
+        first_visible_at: "2026-09-27T23:05:00.000Z",
+        group: {
+          id: "group-1",
+          name: "CP Suka",
+          color: "#0284c7",
+          status: "Aktif",
+          default_window_start: "06:00:00",
+          default_window_end: "18:00:00",
+        },
+        snapshot: {
+          task_id: "task-1",
+          task_number: "FO-9445",
+          vehicle_id: 11418,
+          license_plate: "B 9448 BRO",
+          driver_name: "ABDUL YAMAN",
+          status_raw: "STARTED",
+          expected_started_on: null,
+          actual_started_on: "2026-09-27T23:10:00.000Z",
+          actual_arrival_on: null,
+          terminal_at: null,
+          timeline: [
+            { sequence: 1, name: "Gudang" },
+            { sequence: 2, name: "Toko A" },
+          ],
+          planned_routes: [],
+          actual_routes: [],
+          track_id: null,
+          frozen_at: null,
+          last_synced_at: "2026-09-28T00:00:00.000Z",
+        },
+      },
+    ];
+    const slaRows = [
+      {
+        task_id: "task-1",
+        route_sequence: 1,
+        sla_target_at: "2026-09-27T21:40:00.000Z",
+        sla_status: "LATE",
+        sla_delta_seconds: 600,
+        sla_kind: "DEPARTURE",
+      },
+      {
+        task_id: "task-1",
+        route_sequence: 2,
+        sla_target_at: "2026-09-27T22:02:00.000Z",
+        sla_status: "ON_TIME",
+        sla_delta_seconds: -120,
+        sla_kind: "ARRIVAL",
+      },
+    ];
+    const occChain = chainable({ data: rows, error: null });
+    const slaChain = chainable({ data: slaRows, error: null });
+    createAdminMock.mockReturnValue({
+      from: vi.fn((table: string) => (table === "tms_trip_visit_logs" ? slaChain : occChain)),
+    } as never);
+
+    const response = await GET(request());
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      data: { tasks: { timeline: Record<string, unknown>[] }[] }[];
+    };
+    const timeline = payload.data[0].tasks[0].timeline;
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0]).toMatchObject({
+      slaTargetAt: "2026-09-27T21:40:00.000Z",
+      slaStatus: "LATE",
+      slaDeltaSeconds: 600,
+      slaKind: "DEPARTURE",
+    });
+    expect(timeline[1]).toMatchObject({ slaStatus: "ON_TIME", slaKind: "ARRIVAL" });
+  });
+
   it("filters the active board to running tasks only", async () => {
     mockAuth(activeProfile(["tms.view"]));
     const chain = chainable({ data: [], error: null });

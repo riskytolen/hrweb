@@ -37,6 +37,7 @@ import {
   resolveRoutePointSequence,
   type TmsRoutePointTemperature,
 } from "@/lib/tms-point-temperature";
+import { formatSlaDelta, slaStatusLabel } from "@/lib/tms-sla";
 import { useAuth } from "@/components/AuthProvider";
 import { canViewTmsEpod } from "@/lib/permissions";
 import {
@@ -212,6 +213,40 @@ function pointTime(point: FleetTaskTimelinePoint): {
   if (point.arrivalTarget) return { at: point.arrivalTarget, label: "Target tiba", kind: "target" };
   if (point.departureTarget) return { at: point.departureTarget, label: "Target berangkat", kind: "target" };
   return { at: null, label: "", kind: "target" };
+}
+
+/**
+ * Badge status SLA internal per titik (tepat waktu / terlambat / menunggu).
+ * Null bila titik tidak punya konfigurasi SLA (UNSET) agar daftar rute
+ * tidak ramai oleh titik tanpa target.
+ */
+function slaBadgeForPoint(point: FleetTaskTimelinePoint): {
+  text: string;
+  tone: string;
+  title: string;
+} | null {
+  const status = point.slaStatus ?? null;
+  if (!status || status === "UNSET") return null;
+  const kind = point.slaKind ?? null;
+  const targetClock = point.slaTargetAt ? formatClock(point.slaTargetAt) : null;
+  const verb = kind === "DEPARTURE" ? "berangkat" : "tiba";
+  const title = targetClock ? `Target ${verb} ${targetClock}` : "Status SLA kedatangan";
+  if (status === "LATE") {
+    const delta = point.slaDeltaSeconds ?? null;
+    return {
+      text: delta !== null && delta > 0 ? formatSlaDelta(delta) : "Terlambat",
+      tone: "bg-rose-500/10 text-rose-600",
+      title,
+    };
+  }
+  if (status === "ON_TIME") {
+    return { text: "Tepat waktu", tone: "bg-emerald-500/10 text-emerald-600", title };
+  }
+  return {
+    text: slaStatusLabel(status, kind),
+    tone: "bg-amber-500/10 text-amber-600",
+    title,
+  };
 }
 
 function isLatLng(value: unknown): value is LatLng {
@@ -446,6 +481,18 @@ function RoutePointList({
                       {time.kind === "actual" && ` · ${formatRelativeTime(time.at)}`}
                     </span>
                   )}
+                  {(() => {
+                    const sla = slaBadgeForPoint(point);
+                    if (!sla) return null;
+                    return (
+                      <span
+                        className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", sla.tone)}
+                        title={`Status SLA · ${sla.title}`}
+                      >
+                        {sla.text}
+                      </span>
+                    );
+                  })()}
                   {temperatureLabel && (
                     <span title="Suhu kendaraan saat berada pada titik ini">{temperatureLabel}</span>
                   )}
@@ -1079,6 +1126,22 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
       ? `${routeNames[0]} → ${routeNames[routeNames.length - 1]}`
       : (shown?.currentPointName ?? null);
 
+  /** Ringkasan status SLA seluruh titik rute FO terpilih. */
+  const slaSummary = useMemo(() => {
+    let onTime = 0;
+    let late = 0;
+    let pending = 0;
+    for (const point of displayTimeline) {
+      if (point.slaStatus === "ON_TIME") onTime += 1;
+      else if (point.slaStatus === "LATE") late += 1;
+      else if (point.slaStatus === "PENDING") pending += 1;
+    }
+    if (onTime + late + pending === 0) return null;
+    const parts = [`${onTime} tepat waktu`, `${late} terlambat`];
+    if (pending > 0) parts.push(`${pending} menunggu`);
+    return `SLA: ${parts.join(" · ")}`;
+  }, [displayTimeline]);
+
   return (
     <div className="space-y-4">
       {/* Live Fleet Overview */}
@@ -1234,6 +1297,14 @@ export default function TaskInstantSidePanel({ item, onBack }: TaskInstantSidePa
             {routeSummary && (
               <p className="truncate text-xs text-muted-foreground" title={routeSummary}>
                 {routeSummary}
+              </p>
+            )}
+            {slaSummary && (
+              <p
+                className="text-xs font-semibold tabular-nums text-muted-foreground"
+                title="Ringkasan status SLA titik rute"
+              >
+                {slaSummary}
               </p>
             )}
             <div className="space-y-2 rounded-xl bg-muted/50 p-3">
