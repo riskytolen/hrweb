@@ -19,9 +19,14 @@ import { cn } from "@/lib/utils";
 import {
   LOGGER_TRIP_EXPORT_EXCEL_HEADERS,
   LOGGER_TRIP_EXPORT_PDF_HEADERS,
+  PROFILE_TRIP_EXPORT_EXCEL_HEADERS,
+  PROFILE_TRIP_EXPORT_PDF_HEADERS,
   loggerTripExportFileStamp,
   toLoggerTripExcelRow,
   toLoggerTripPdfRow,
+  toProfileTripExcelRow,
+  toProfileTripPdfRow,
+  type ProfileTripExportRow,
 } from "@/lib/tms-logger-export";
 import {
   computeSlaCompliance,
@@ -35,6 +40,12 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import PageHeader from "@/components/ui/PageHeader";
 import TmsClientSelector, { TMS_CLIENT_CHANGED_EVENT, readTmsClientParam } from "./TmsClientSelector";
+import TripLoggerProfileView, {
+  type ProfileInfoView,
+  type ProfileMetaView,
+  type ProfileRunView,
+  type ProfileStopView,
+} from "./TripLoggerProfileView";
 
 /* ─── Tipe data ─── */
 
@@ -76,6 +87,18 @@ interface SlaProfileOption {
   id: string;
   code: string;
   groupName: string | null;
+}
+
+type LoggerMode = "profile" | "list";
+
+interface ProfileListResponse {
+  data?: {
+    profile: ProfileInfoView;
+    stops: ProfileStopView[];
+    runs: ProfileRunView[];
+  };
+  error?: string;
+  meta?: ProfileMetaView | null;
 }
 
 interface VisitCounts {
@@ -278,6 +301,17 @@ export default function TripLoggerPage() {
   const [slaState, setSlaState] = useState<SlaStateFilter>("ALL");
   const [slaProfile, setSlaProfile] = useState("");
   const [slaProfiles, setSlaProfiles] = useState<SlaProfileOption[]>([]);
+  // Mode tampilan: "profile" = logger per rute SLA (default), "list" = semua kunjungan.
+  const [mode, setMode] = useState<LoggerMode>("profile");
+  const [profileId, setProfileId] = useState("");
+  const [profile, setProfile] = useState<ProfileInfoView | null>(null);
+  const [profileStops, setProfileStops] = useState<ProfileStopView[]>([]);
+  const [profileRuns, setProfileRuns] = useState<ProfileRunView[]>([]);
+  const [profileMeta, setProfileMeta] = useState<ProfileMetaView | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSearch, setProfileSearch] = useState("");
+  const [appliedProfileSearch, setAppliedProfileSearch] = useState("");
   const [dateFrom, setDateFrom] = useState(() => jakartaDate(-6));
   const [dateTo, setDateTo] = useState(() => jakartaDate(0));
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -291,6 +325,9 @@ export default function TripLoggerPage() {
     const onClientChanged = () => {
       setPage(1);
       setSlaProfile("");
+      setProfileId("");
+      setProfileSearch("");
+      setAppliedProfileSearch("");
       setClientTick((tick) => tick + 1);
     };
     window.addEventListener(TMS_CLIENT_CHANGED_EVENT, onClientChanged);
@@ -377,6 +414,178 @@ export default function TripLoggerPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadSlaProfiles();
   }, [loadSlaProfiles, clientTick]);
+
+  // Logger per profil: perjalanan dikelompokkan per FO + tanggal layanan,
+  // titik berurutan sesuai route_order SLA.
+  const loadProfileRuns = useCallback(
+    async (pid: string) => {
+      if (!pid) return;
+      setProfileLoading(true);
+      setProfileError(null);
+      try {
+        const params = new URLSearchParams({ profileId: pid, dateFrom, dateTo });
+        if (appliedProfileSearch) params.set("search", appliedProfileSearch);
+        const clientParam = readTmsClientParam();
+        if (clientParam) params.set("client", clientParam);
+        const response = await fetch(`/api/tms/logger-trips/by-profile?${params.toString()}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as ProfileListResponse;
+        if (!response.ok || payload.error || !payload.data) {
+          throw new Error(payload.error ?? "Gagal memuat logger profil.");
+        }
+        setProfile(payload.data.profile);
+        setProfileStops(Array.isArray(payload.data.stops) ? payload.data.stops : []);
+        setProfileRuns(Array.isArray(payload.data.runs) ? payload.data.runs : []);
+        setProfileMeta(payload.meta ?? null);
+      } catch (err) {
+        setProfileError(err instanceof Error ? err.message : "Gagal memuat logger profil.");
+        setProfile(null);
+        setProfileStops([]);
+        setProfileRuns([]);
+        setProfileMeta(null);
+      } finally {
+        setProfileLoading(false);
+      }
+    },
+    [appliedProfileSearch, dateFrom, dateTo],
+  );
+
+  // Default ke profil pertama bila daftar profil tersedia.
+  useEffect(() => {
+    if (mode !== "profile" || profileId || slaProfiles.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setProfileId(slaProfiles[0].id);
+  }, [mode, profileId, slaProfiles]);
+
+  useEffect(() => {
+    if (mode !== "profile" || !profileId) return;
+    // clientTick memicu muat ulang saat pilihan client berubah.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadProfileRuns(profileId);
+  }, [mode, profileId, loadProfileRuns, clientTick]);
+
+  // Baris datar export mode profil: satu baris per titik per perjalanan.
+  const buildProfileExportRows = useCallback((): ProfileTripExportRow[] => {
+    const rows: ProfileTripExportRow[] = [];
+    for (const run of profileRuns) {
+      for (const stop of profileStops) {
+        const visit = run.stopVisits[stop.id] ?? null;
+        rows.push({
+          serviceDate: run.serviceDate,
+          taskNumber: run.taskNumber,
+          unit: run.unit,
+          driver: run.driver,
+          routeOrder: stop.routeOrder,
+          storeName: stop.storeName,
+          slaKind: visit?.slaKind ?? (stop.kind === "DEPARTURE" ? "DEPARTURE" : "ARRIVAL"),
+          scheduleTarget: stop.targetTime,
+          slaTargetAt: visit?.slaTargetAt ?? null,
+          enteredAt: visit?.enteredAt ?? null,
+          exitedAt: visit?.exitedAt ?? null,
+          slaStatus: visit ? (visit.slaStatus ?? "UNSET") : "PENDING",
+          slaDeltaSeconds: visit?.slaDeltaSeconds ?? null,
+          temperatureC: visit?.temperatureC ?? null,
+        });
+      }
+    }
+    return rows;
+  }, [profileRuns, profileStops]);
+
+  const exportProfileXlsx = useCallback(async () => {
+    setExporting("xlsx");
+    try {
+      const rows = buildProfileExportRows();
+      const code = profile?.code ?? "profil";
+      const stamp = loggerTripExportFileStamp();
+      const meta: string[][] = [
+        [`Logger ${code}`],
+        ["Periode", `${dateFrom} s/d ${dateTo}`],
+        ["Perjalanan", String(profileRuns.length)],
+        ...(appliedProfileSearch ? [["Pencarian", appliedProfileSearch]] : []),
+        ["Total titik", String(rows.length)],
+        [],
+      ];
+      const headerIndex = meta.length;
+      const sheetRows: string[][] = [
+        ...meta,
+        [...PROFILE_TRIP_EXPORT_EXCEL_HEADERS],
+        ...rows.map((row, index) => toProfileTripExcelRow(row, index)),
+      ];
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.aoa_to_sheet(sheetRows);
+      sheet["!cols"] = [
+        { wch: 6 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 },
+        { wch: 8 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 20 },
+        { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 10 },
+      ];
+      const lastRow = sheetRows.length - 1;
+      const lastCol = PROFILE_TRIP_EXPORT_EXCEL_HEADERS.length - 1;
+      sheet["!autofilter"] = {
+        ref: XLSX.utils.encode_range({ s: { r: headerIndex, c: 0 }, e: { r: lastRow, c: lastCol } }),
+      };
+      XLSX.utils.book_append_sheet(workbook, sheet, code.slice(0, 28));
+      XLSX.writeFile(workbook, `logger-${code}-${dateFrom}_${dateTo}-${stamp}.xlsx`);
+    } catch {
+      setProfileError("Gagal mengekspor Excel. Coba lagi.");
+    } finally {
+      setExporting(null);
+    }
+  }, [appliedProfileSearch, buildProfileExportRows, dateFrom, dateTo, profile?.code, profileRuns.length]);
+
+  const exportProfilePdf = useCallback(async () => {
+    setExporting("pdf");
+    try {
+      const rows = buildProfileExportRows();
+      const code = profile?.code ?? "profil";
+      const stamp = loggerTripExportFileStamp();
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Logger ${code}`, pageWidth / 2, 14, { align: "center" });
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Periode: ${dateFrom} s/d ${dateTo} · ${profileRuns.length} perjalanan · ${rows.length} titik`, pageWidth / 2, 20, {
+        align: "center",
+      });
+      autoTable(doc, {
+        startY: 27,
+        head: [[...PROFILE_TRIP_EXPORT_PDF_HEADERS]],
+        body: rows.map((row, index) => toProfileTripPdfRow(row, index)),
+        styles: { fontSize: 8, cellPadding: 2, lineColor: [226, 232, 240], lineWidth: 0.1 },
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          0: { halign: "right", cellWidth: 10 },
+          1: { cellWidth: 56 },
+          2: { cellWidth: 20 },
+          3: { cellWidth: 28 },
+          4: { cellWidth: 28 },
+          5: { cellWidth: 30 },
+          6: { cellWidth: 30 },
+          7: { halign: "right", cellWidth: 20 },
+        },
+        didDrawPage: () => {
+          const page = doc.getNumberOfPages();
+          doc.setFontSize(8);
+          doc.text(`Halaman ${page}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 8, {
+            align: "right",
+          });
+        },
+      });
+      doc.save(`logger-${code}-${dateFrom}_${dateTo}-${stamp}.pdf`);
+    } catch {
+      setProfileError("Gagal mengekspor PDF. Coba lagi.");
+    } finally {
+      setExporting(null);
+    }
+  }, [buildProfileExportRows, dateFrom, dateTo, profile?.code, profileRuns.length]);
 
   // Ambil seluruh data sesuai filter aktif (loop paging server, maks 100/halaman).
   const fetchAllFilteredRows = useCallback(async (): Promise<TripLogRow[]> => {
@@ -571,8 +780,8 @@ export default function TripLoggerPage() {
                 size="sm"
                 variant="outline"
                 icon={FileSpreadsheet}
-                disabled={loading || exporting !== null}
-                onClick={() => void exportXlsx()}
+                disabled={loading || profileLoading || exporting !== null}
+                onClick={() => void (mode === "profile" ? exportProfileXlsx() : exportXlsx())}
               >
                 {exporting === "xlsx" ? "Menyiapkan…" : "Export Excel"}
               </Button>
@@ -580,44 +789,166 @@ export default function TripLoggerPage() {
                 size="sm"
                 variant="outline"
                 icon={FileText}
-                disabled={loading || exporting !== null}
-                onClick={() => void exportPdf()}
+                disabled={loading || profileLoading || exporting !== null}
+                onClick={() => void (mode === "profile" ? exportProfilePdf() : exportPdf())}
               >
                 {exporting === "pdf" ? "Menyiapkan…" : "Export PDF"}
               </Button>
-              <Button size="sm" variant="outline" icon={RefreshCw} disabled={loading} onClick={() => void load()}>
+              <Button
+                size="sm"
+                variant="outline"
+                icon={RefreshCw}
+                disabled={loading || profileLoading}
+                onClick={() => {
+                  if (mode === "profile") void loadProfileRuns(profileId);
+                  else void load();
+                }}
+              >
                 Muat ulang
               </Button>
             </div>
           }
         />
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard icon={Store} tileClass="bg-sky-500" label="Total kunjungan" value={String(total)} sub={lastSyncedAt ? `Sinkron ${formatDateTimeShort(lastSyncedAt)}` : "Sinkronisasi McEasy"} />
-          <KpiCard icon={Truck} tileClass="bg-violet-500" label="Sedang di lokasi" value={String(counts?.ongoing ?? 0)} sub="sudah masuk, belum keluar" />
-          <KpiCard icon={CheckCircle2} tileClass="bg-emerald-500" label="Kunjungan selesai" value={String(counts?.completed ?? 0)} sub="masuk & keluar tercatat" />
-          <KpiCard icon={AlertTriangle} tileClass={(counts?.incomplete ?? 0) > 0 ? "bg-amber-500" : "bg-slate-400"} label="Waktu tak lengkap" value={String(counts?.incomplete ?? 0)} sub="perlu validasi data" />
+        {mode === "list" && (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <KpiCard icon={Store} tileClass="bg-sky-500" label="Total kunjungan" value={String(total)} sub={lastSyncedAt ? `Sinkron ${formatDateTimeShort(lastSyncedAt)}` : "Sinkronisasi McEasy"} />
+              <KpiCard icon={Truck} tileClass="bg-violet-500" label="Sedang di lokasi" value={String(counts?.ongoing ?? 0)} sub="sudah masuk, belum keluar" />
+              <KpiCard icon={CheckCircle2} tileClass="bg-emerald-500" label="Kunjungan selesai" value={String(counts?.completed ?? 0)} sub="masuk & keluar tercatat" />
+              <KpiCard icon={AlertTriangle} tileClass={(counts?.incomplete ?? 0) > 0 ? "bg-amber-500" : "bg-slate-400"} label="Waktu tak lengkap" value={String(counts?.incomplete ?? 0)} sub="perlu validasi data" />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-2xl border border-border bg-card px-4 py-3 text-xs shadow-sm">
+              <span className="font-bold text-foreground">SLA Kedatangan</span>
+              <span className="tabular-nums text-muted-foreground">
+                Tepat Waktu <strong className="text-emerald-600">{slaCounts?.onTime ?? 0}</strong>
+              </span>
+              <span className="tabular-nums text-muted-foreground">
+                Terlambat <strong className="text-danger">{slaCounts?.late ?? 0}</strong>
+              </span>
+              <span className="tabular-nums text-muted-foreground">
+                Belum Tiba/Berangkat <strong className="text-sky-600">{slaCounts?.pending ?? 0}</strong>
+              </span>
+              <span className="tabular-nums text-muted-foreground">
+                Tanpa SLA <strong className="text-amber-600">{slaCounts?.unset ?? 0}</strong>
+              </span>
+              <span className="ml-auto tabular-nums text-muted-foreground">
+                Kepatuhan <strong className="text-base text-foreground">{slaComplianceLabel}</strong>
+              </span>
+            </div>
+          </>
+        )}
+
+        {/* Mode tampilan: logger per rute SLA atau semua kunjungan */}
+        <div
+          role="tablist"
+          aria-label="Mode tampilan logger"
+          className="flex gap-1 rounded-2xl border border-border bg-card p-1.5 shadow-sm"
+        >
+          {(
+            [
+              { key: "profile", label: "Per Profil SLA" },
+              { key: "list", label: "Semua Kunjungan" },
+            ] as { key: LoggerMode; label: string }[]
+          ).map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={mode === tab.key}
+              onClick={() => setMode(tab.key)}
+              className={cn(
+                "flex-1 rounded-xl px-3 py-2 text-xs font-bold transition-colors sm:flex-none sm:px-6",
+                mode === tab.key ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-2xl border border-border bg-card px-4 py-3 text-xs shadow-sm">
-          <span className="font-bold text-foreground">SLA Kedatangan</span>
-          <span className="tabular-nums text-muted-foreground">
-            Tepat Waktu <strong className="text-emerald-600">{slaCounts?.onTime ?? 0}</strong>
-          </span>
-          <span className="tabular-nums text-muted-foreground">
-            Terlambat <strong className="text-danger">{slaCounts?.late ?? 0}</strong>
-          </span>
-          <span className="tabular-nums text-muted-foreground">
-            Belum Tiba/Berangkat <strong className="text-sky-600">{slaCounts?.pending ?? 0}</strong>
-          </span>
-          <span className="tabular-nums text-muted-foreground">
-            Tanpa SLA <strong className="text-amber-600">{slaCounts?.unset ?? 0}</strong>
-          </span>
-          <span className="ml-auto tabular-nums text-muted-foreground">
-            Kepatuhan <strong className="text-base text-foreground">{slaComplianceLabel}</strong>
-          </span>
-        </div>
+        {mode === "profile" ? (
+          <div className="space-y-3">
+            {/* Filter tanggal + pencarian FO/unit/driver */}
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="flex items-center gap-2 text-xs">
+                <input
+                  type="date"
+                  aria-label="Tanggal mulai"
+                  className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                  value={dateFrom}
+                  max={dateTo}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                />
+                <span className="text-muted-foreground">s.d.</span>
+                <input
+                  type="date"
+                  aria-label="Tanggal akhir"
+                  className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                  value={dateTo}
+                  min={dateFrom}
+                  max={jakartaDate(0)}
+                  onChange={(event) => setDateTo(event.target.value)}
+                />
+              </div>
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-3 text-xs"
+                  placeholder="Cari nomor FO, unit, atau driver"
+                  aria-label="Cari nomor FO, unit, atau driver"
+                  value={profileSearch}
+                  onChange={(event) => setProfileSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") setAppliedProfileSearch(profileSearch.trim());
+                  }}
+                />
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setAppliedProfileSearch(profileSearch.trim())}>
+                Cari
+              </Button>
+            </div>
 
+            {/* Chip profil rute SLA */}
+            <div
+              role="tablist"
+              aria-label="Profil rute SLA"
+              className="flex gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-2.5 shadow-sm"
+            >
+              {slaProfiles.length === 0 && !profileLoading && (
+                <p className="px-2 py-1 text-xs text-muted-foreground">Belum ada profil SLA untuk client ini.</p>
+              )}
+              {slaProfiles.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={profileId === item.id}
+                  onClick={() => setProfileId(item.id)}
+                  className={cn(
+                    "shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold tabular-nums transition-colors",
+                    profileId === item.id
+                      ? "bg-primary text-white shadow-sm"
+                      : "bg-muted text-muted-foreground hover:bg-muted/70",
+                  )}
+                >
+                  {item.code}
+                </button>
+              ))}
+            </div>
+
+            <TripLoggerProfileView
+              profile={profile}
+              stops={profileStops}
+              runs={profileRuns}
+              meta={profileMeta}
+              loading={profileLoading}
+              error={profileError}
+              onRetry={() => void loadProfileRuns(profileId)}
+            />
+          </div>
+        ) : (
         <div className="rounded-2xl border border-border bg-card">
           <div className="flex flex-wrap items-center gap-2 border-b border-border p-4">
             <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -905,6 +1236,7 @@ export default function TripLoggerPage() {
             </>
           )}
         </div>
+        )}
 
         <p className="text-[11px] text-muted-foreground">
           Waktu masuk/keluar berasal dari timeline Fleet Task McEasy. Suhu hanya tampil bila ada hasil capture perangkat; jika kosong berarti belum ada snapshot suhu untuk titik tersebut.

@@ -191,6 +191,109 @@ export function toLoggerTripPdfRow(row: LoggerTripExportRow, index: number, nowM
   ];
 }
 
+/* ─── Export per profil SLA ─── */
+
+/** Satu baris datar untuk export mode profil (satu titik dalam satu perjalanan). */
+export interface ProfileTripExportRow {
+  serviceDate: string;
+  taskNumber: string | null;
+  unit: string | null;
+  driver: string | null;
+  routeOrder: number;
+  storeName: string;
+  slaKind: SlaKind | string | null;
+  /** Jam jadwal profil ("HH:MM:SS") — ditampilkan "04.15". */
+  scheduleTarget: string;
+  slaTargetAt: string | null;
+  enteredAt: string | null;
+  exitedAt: string | null;
+  slaStatus: SlaStatus | string | null;
+  slaDeltaSeconds: number | null;
+  temperatureC: number | null;
+}
+
+export const PROFILE_TRIP_EXPORT_EXCEL_HEADERS = [
+  "No",
+  "Tanggal",
+  "Nomor FO",
+  "Unit",
+  "Driver",
+  "Urutan",
+  "Titik",
+  "Jenis SLA",
+  "Target Jadwal",
+  "Target Aktual",
+  "Masuk",
+  "Keluar",
+  "Status SLA",
+  "Selisih SLA",
+  "Suhu",
+] as const;
+
+export const PROFILE_TRIP_EXPORT_PDF_HEADERS = [
+  "No",
+  "Titik",
+  "Target",
+  "Masuk",
+  "Keluar",
+  "Status SLA",
+  "Selisih",
+  "Suhu",
+] as const;
+
+/** "04:15:00" -> "04.15"; nilai tak dikenal dikembalikan apa adanya. */
+export function formatProfileScheduleTime(value: string): string {
+  const match = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(value.trim());
+  if (!match) return value;
+  return `${match[1].padStart(2, "0")}.${match[2]}`;
+}
+
+function profileVisitLabel(row: ProfileTripExportRow): string {
+  if (row.enteredAt && row.exitedAt) return "Selesai";
+  if (row.enteredAt) return "Di lokasi";
+  if (row.exitedAt) return "Waktu tak lengkap";
+  return "Belum dikunjungi";
+}
+
+/** Satu baris body Excel profil (15 kolom). */
+export function toProfileTripExcelRow(row: ProfileTripExportRow, index: number): string[] {
+  const slaStatus = asSlaStatus(row.slaStatus);
+  const slaKind = asSlaKind(row.slaKind);
+  return [
+    String(index + 1),
+    row.serviceDate,
+    row.taskNumber ?? "–",
+    row.unit ?? "–",
+    row.driver ?? "–",
+    String(row.routeOrder),
+    row.storeName,
+    slaKindLabel(slaKind),
+    formatProfileScheduleTime(row.scheduleTarget),
+    row.slaTargetAt ? formatLoggerTripDateTime(row.slaTargetAt) : "–",
+    row.enteredAt ? formatLoggerTripDateTime(row.enteredAt) : "–",
+    row.exitedAt ? formatLoggerTripDateTime(row.exitedAt) : profileVisitLabel(row),
+    slaStatusLabel(slaStatus, slaKind),
+    formatSlaDelta(row.slaDeltaSeconds),
+    formatLoggerTripTemp(row.temperatureC),
+  ];
+}
+
+/** Satu baris body PDF profil (8 kolom ringkas). */
+export function toProfileTripPdfRow(row: ProfileTripExportRow, index: number): string[] {
+  const slaStatus = asSlaStatus(row.slaStatus);
+  const slaKind = asSlaKind(row.slaKind);
+  return [
+    String(index + 1),
+    row.storeName,
+    formatProfileScheduleTime(row.scheduleTarget),
+    row.enteredAt ? formatLoggerTripDateTimeShort(row.enteredAt) : "–",
+    row.exitedAt ? formatLoggerTripDateTimeShort(row.exitedAt) : profileVisitLabel(row),
+    slaStatusLabel(slaStatus, slaKind),
+    formatSlaDelta(row.slaDeltaSeconds),
+    formatLoggerTripTemp(row.temperatureC),
+  ];
+}
+
 /** Stamp nama file `YYYYMMDD-HHmm` dalam zona Asia/Jakarta. */
 export function loggerTripExportFileStamp(now: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {

@@ -2,14 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   LOGGER_TRIP_EXPORT_EXCEL_HEADERS,
   LOGGER_TRIP_EXPORT_PDF_HEADERS,
+  PROFILE_TRIP_EXPORT_EXCEL_HEADERS,
+  PROFILE_TRIP_EXPORT_PDF_HEADERS,
   formatLoggerTripDuration,
   formatLoggerTripTemp,
+  formatProfileScheduleTime,
   loggerTripDurationSeconds,
   loggerTripExportFileStamp,
   loggerTripVisitStatusLabel,
   toLoggerTripExcelRow,
   toLoggerTripPdfRow,
+  toProfileTripExcelRow,
+  toProfileTripPdfRow,
   type LoggerTripExportRow,
+  type ProfileTripExportRow,
 } from "@/lib/tms-logger-export";
 
 const BASE_ROW: LoggerTripExportRow = {
@@ -107,5 +113,51 @@ describe("tms-logger-export", () => {
     const stamp = loggerTripExportFileStamp(new Date("2026-09-30T10:00:00Z"));
     // 10:00 UTC = 17:00 WIB.
     expect(stamp).toBe("20260930-1700");
+  });
+
+  it("memformat jam jadwal profil dan baris export profil", () => {
+    expect(formatProfileScheduleTime("04:15:00")).toBe("04.15");
+    expect(formatProfileScheduleTime("4:05")).toBe("04.05");
+    expect(formatProfileScheduleTime("–")).toBe("–");
+
+    const row: ProfileTripExportRow = {
+      serviceDate: "2026-09-30",
+      taskNumber: "FO-1",
+      unit: "B 1 TES",
+      driver: "DRIVER",
+      routeOrder: 2,
+      storeName: "Toko A",
+      slaKind: "ARRIVAL",
+      scheduleTarget: "04:58:00",
+      slaTargetAt: "2026-09-30T04:58:00+07:00",
+      enteredAt: "2026-09-30T04:50:00+07:00",
+      exitedAt: "2026-09-30T05:00:00+07:00",
+      slaStatus: "ON_TIME",
+      slaDeltaSeconds: -480,
+      temperatureC: -16.2,
+    };
+    const excel = toProfileTripExcelRow(row, 0);
+    expect(excel).toHaveLength(PROFILE_TRIP_EXPORT_EXCEL_HEADERS.length);
+    expect(excel[0]).toBe("1");
+    expect(excel[5]).toBe("2");
+    expect(excel[6]).toBe("Toko A");
+    expect(excel[7]).toBe("Kedatangan");
+    expect(excel[8]).toBe("04.58");
+    expect(excel[12]).toBe("Tepat Waktu");
+    expect(excel[13]).toBe("8 mnt lebih awal");
+    expect(excel[14]).toBe("-16,2°C");
+
+    const pdf = toProfileTripPdfRow(row, 0);
+    expect(pdf).toHaveLength(PROFILE_TRIP_EXPORT_PDF_HEADERS.length);
+    expect(pdf[1]).toBe("Toko A");
+    expect(pdf[5]).toBe("Tepat Waktu");
+
+    // Titik yang belum dikunjungi menampilkan status tunggu.
+    const pending = toProfileTripExcelRow(
+      { ...row, enteredAt: null, exitedAt: null, slaStatus: "PENDING", slaDeltaSeconds: null },
+      1,
+    );
+    expect(pending[11]).toBe("Belum dikunjungi");
+    expect(pending[12]).toBe("Belum Tiba");
   });
 });
