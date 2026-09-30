@@ -389,22 +389,31 @@ export default function TripLoggerPage() {
   }, [buildListParams, page]);
 
   // Daftar profil SLA dalam scope client aktif untuk filter profil.
+  // Memakai endpoint operasional Logger (bukan /api/tms/sla-profiles yang
+  // khusus Pengaturan SLA internal) agar akun client ikut mendapat daftar.
+  const [slaProfilesError, setSlaProfilesError] = useState<string | null>(null);
   const loadSlaProfiles = useCallback(async () => {
+    setSlaProfilesError(null);
     try {
       const params = new URLSearchParams();
       const clientParam = readTmsClientParam();
       if (clientParam) params.set("client", clientParam);
       const query = params.toString();
-      const response = await fetch(`/api/tms/sla-profiles${query ? `?${query}` : ""}`, {
+      const response = await fetch(`/api/tms/logger-trips/profiles${query ? `?${query}` : ""}`, {
         cache: "no-store",
       });
-      const payload = (await response.json()) as { data?: SlaProfileOption[] };
-      if (response.ok && Array.isArray(payload.data)) {
-        setSlaProfiles(payload.data);
-        return;
+      const payload = (await response.json()) as { data?: SlaProfileOption[]; error?: string };
+      if (!response.ok || payload.error || !Array.isArray(payload.data)) {
+        throw new Error(payload.error ?? "Gagal memuat profil SLA.");
       }
-    } catch {
-      // Filter profil opsional; daftar kosong tetap memungkinkan tabel tampil.
+      const list = payload.data;
+      setSlaProfiles(list);
+      // Profil terpilih yang hilang dari daftar baru ikut direset.
+      setProfileId((prev) => (prev && list.some((p) => p.id === prev) ? prev : ""));
+      return;
+    } catch (err) {
+      // Kegagalan request TIDAK disamarkan sebagai "belum ada profil".
+      setSlaProfilesError(err instanceof Error ? err.message : "Gagal memuat profil SLA.");
     }
     setSlaProfiles([]);
   }, []);
@@ -914,10 +923,22 @@ export default function TripLoggerPage() {
             <div
               role="tablist"
               aria-label="Profil rute SLA"
-              className="flex gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-2.5 shadow-sm"
+              className="flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-border bg-card p-2.5 shadow-sm"
             >
-              {slaProfiles.length === 0 && !profileLoading && (
-                <p className="px-2 py-1 text-xs text-muted-foreground">Belum ada profil SLA untuk client ini.</p>
+              {slaProfilesError ? (
+                <p className="flex flex-wrap items-center gap-2 px-2 py-1 text-xs text-danger" role="alert">
+                  <span>{slaProfilesError}</span>
+                  <Button size="sm" variant="outline" onClick={() => void loadSlaProfiles()}>
+                    Coba lagi
+                  </Button>
+                </p>
+              ) : (
+                slaProfiles.length === 0 &&
+                !profileLoading && (
+                  <p className="px-2 py-1 text-xs text-muted-foreground">
+                    Belum ada profil SLA untuk client ini. Hubungi administrator bila rute seharusnya sudah tersedia.
+                  </p>
+                )
               )}
               {slaProfiles.map((item) => (
                 <button

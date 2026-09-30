@@ -320,7 +320,7 @@ export default function TripLoggerProfileView({
         <RouteIcon className="h-6 w-6 text-muted-foreground" />
         <p className="text-sm font-semibold text-foreground">Belum ada profil SLA</p>
         <p className="max-w-md text-xs text-muted-foreground">
-          Profil rute SLA belum dikonfigurasi untuk client ini. Tambahkan lewat menu Pengaturan SLA agar logger per rute tampil di sini.
+          Profil rute SLA belum tersedia untuk client ini. Hubungi administrator bila rute seharusnya sudah tersedia.
         </p>
       </div>
     );
