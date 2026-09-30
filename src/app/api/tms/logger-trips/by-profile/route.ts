@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { createAdminClient } from "@/lib/supabase-admin";
 import { canAccessTmsData, type AccountType } from "@/lib/permissions";
 import { authorizeTmsScope } from "@/lib/tms-tenant-auth";
 
@@ -140,27 +141,35 @@ export async function GET(request: NextRequest) {
   if (!scope.ok) return scope.response;
   const scopeIds = scope.scope.allowedClientIds;
 
-  const { data: profileRow, error: profileError } = await supabase
+  // Data operasional dibaca via admin client: tabel SLA di-REVOKE dari
+  // role authenticated (hanya service_role yang punya SELECT), sedangkan
+  // pembatasan antar-client tetap ditegakkan manual via client scope di bawah.
+  const admin = createAdminClient();
+
+  const { data: profileRow, error: profileError } = await admin
     .from("tms_sla_route_profiles")
     .select("id, code, name, client_id, group_id, status")
     .eq("id", profileId)
     .maybeSingle();
+  if (profileError) {
+    return errorJson("Gagal memuat profil SLA.", 502);
+  }
   const slaProfile = (profileRow ?? null) as unknown as ProfileRow | null;
-  if (profileError || !slaProfile) {
+  if (!slaProfile) {
     return errorJson("Profil SLA tidak ditemukan.", 404);
   }
   if (scopeIds !== "all" && !scopeIds.includes(slaProfile.client_id)) {
     return errorJson("Profil SLA di luar cakupan akses Anda.", 403);
   }
 
-  const { data: groupRow } = await supabase
+  const { data: groupRow } = await admin
     .from("tms_live_track_groups")
     .select("id, name")
     .eq("id", slaProfile.group_id)
     .maybeSingle();
   const groupName = ((groupRow ?? null) as unknown as { name?: string } | null)?.name ?? null;
 
-  const { data: stopRows, error: stopsError } = await supabase
+  const { data: stopRows, error: stopsError } = await admin
     .from("tms_sla_route_stops")
     .select("id, route_order, store_name, target_time, target_day_offset")
     .eq("profile_id", profileId)
@@ -172,7 +181,7 @@ export async function GET(request: NextRequest) {
   const stopById = new Map(stops.map((s) => [s.id, s]));
   const stopByOrder = new Map(stops.map((s) => [s.route_order, s]));
 
-  const { data: assignmentRows, error: assignmentError } = await supabase
+  const { data: assignmentRows, error: assignmentError } = await admin
     .from("tms_sla_task_assignments")
     .select("task_id, service_date, match_score")
     .eq("profile_id", profileId)
@@ -192,7 +201,7 @@ export async function GET(request: NextRequest) {
   const temperatures = new Map<string, number>();
   let lastSyncedAt: string | null = null;
   if (taskIds.length > 0) {
-    const { data: visitRows } = await supabase
+    const { data: visitRows } = await admin
       .from("tms_trip_visit_logs")
       .select(
         "id, task_id, task_number, task_status, license_plate, driver_name, route_sequence, " +
@@ -209,7 +218,7 @@ export async function GET(request: NextRequest) {
         lastSyncedAt = row.last_synced_at;
       }
     }
-    const { data: tempRows } = await supabase
+    const { data: tempRows } = await admin
       .from("tms_route_point_temperatures")
       .select("task_id, route_sequence, temperatures")
       .in("task_id", taskIds);

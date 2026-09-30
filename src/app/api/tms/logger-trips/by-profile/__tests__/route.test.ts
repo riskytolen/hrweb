@@ -18,10 +18,16 @@ vi.mock("@/lib/supabase-server", () => ({
   createClient: vi.fn(),
 }));
 
+vi.mock("@/lib/supabase-admin", () => ({
+  createAdminClient: vi.fn(),
+}));
+
 import { createClient } from "@/lib/supabase-server";
+import { createAdminClient } from "@/lib/supabase-admin";
 import { GET } from "@/app/api/tms/logger-trips/by-profile/route";
 
 const createClientMock = vi.mocked(createClient);
+const createAdminMock = vi.mocked(createAdminClient);
 
 function chainable(result: unknown) {
   const chain: Record<string, unknown> = {};
@@ -44,11 +50,17 @@ function activeProfile(permissions: string[]) {
   };
 }
 
+// Auth + profil user lewat user client; seluruh data operasional (profil SLA,
+// stops, assignments, visits, suhu) lewat admin client karena tabel SLA
+// di-REVOKE dari role authenticated.
+let adminFromSpy: ReturnType<typeof vi.fn> = vi.fn();
 function mockSupabase(tables: Record<string, unknown>) {
   createClientMock.mockResolvedValue({
     auth: { getUser: async () => ({ data: { user: { id: "user-1" } }, error: null }) },
-    from: (table: string) => chainable(tables[table] ?? { data: [], error: null }),
+    from: (table: string) => chainable(tables[table] ?? { data: null, error: null }),
   } as never);
+  adminFromSpy = vi.fn((table: string) => chainable(tables[table] ?? { data: [], error: null }));
+  createAdminMock.mockReturnValue({ from: adminFromSpy } as never);
 }
 
 function baseTables(overrides: Record<string, unknown> = {}) {
@@ -148,6 +160,34 @@ describe("GET /api/tms/logger-trips/by-profile", () => {
     mockSupabase(baseTables({ tms_sla_route_profiles: { data: null, error: null } }));
     const response = await GET(request("?profileId=missing&dateFrom=2026-09-30"));
     expect(response.status).toBe(404);
+    const payload = (await response.json()) as { error?: string };
+    expect(payload.error).toBe("Profil SLA tidak ditemukan.");
+  });
+
+  it("returns 502 when the profile query fails (not masked as 404)", async () => {
+    mockSupabase(
+      baseTables({ tms_sla_route_profiles: { data: null, error: { message: "permission denied" } } }),
+    );
+    const response = await GET(request("?profileId=profile-van1&dateFrom=2026-09-30"));
+    expect(response.status).toBe(502);
+    const payload = (await response.json()) as { error?: string };
+    expect(payload.error).toBe("Gagal memuat profil SLA.");
+  });
+
+  it("reads operational data through the admin client", async () => {
+    mockSupabase(baseTables());
+    const response = await GET(request("?profileId=profile-van1&dateFrom=2026-09-30"));
+    expect(response.status).toBe(200);
+    expect(createAdminMock).toHaveBeenCalled();
+    const adminFrom = adminFromSpy;
+    for (const table of [
+      "tms_sla_route_profiles",
+      "tms_sla_route_stops",
+      "tms_sla_task_assignments",
+      "tms_trip_visit_logs",
+    ]) {
+      expect(adminFrom).toHaveBeenCalledWith(table);
+    }
   });
 
   it("groups visits per run ordered by the SLA route", async () => {
