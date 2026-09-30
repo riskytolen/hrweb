@@ -313,7 +313,7 @@ export default function TripLoggerPage() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileSearch, setProfileSearch] = useState("");
   const [appliedProfileSearch, setAppliedProfileSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState(() => jakartaDate(-6));
+  const [dateFrom, setDateFrom] = useState(() => jakartaDate(0));
   const [dateTo, setDateTo] = useState(() => jakartaDate(0));
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
