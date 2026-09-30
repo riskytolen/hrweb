@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlarmClockCheck,
   Download,
+  ListOrdered,
   Pencil,
   Plus,
   RefreshCw,
@@ -247,6 +248,28 @@ export default function SlaConfigPage() {
 
   const filteredProfiles = useMemo(() => profiles, [profiles]);
 
+  // Nomor urut titik loncat (mis. 1,3,4,5) bila ada titik yang dihapus manual.
+  const stopGap = useMemo(() => {
+    if (!detail || detail.stops.length === 0) return null;
+    const orders = detail.stops.map((stop) => stop.order).sort((a, b) => a - b);
+    if (orders.every((order, index) => order === index + 1)) return null;
+    return orders.join(", ");
+  }, [detail]);
+
+  const renumberStops = useCallback(async () => {
+    if (!selectedId) return;
+    setBusy("renumber");
+    setError(null);
+    try {
+      await api(`/api/tms/sla-profiles/${selectedId}/renumber`, "POST", {});
+      await loadDetail(selectedId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal merapikan nomor titik.");
+    } finally {
+      setBusy(null);
+    }
+  }, [selectedId, loadDetail]);
+
   /* ─── Aksi profil ─── */
 
   const submitProfile = useCallback(async () => {
@@ -336,7 +359,7 @@ export default function SlaConfigPage() {
   const deleteStop = useCallback(
     async (stop: SlaStop) => {
       if (!selectedId) return;
-      if (!window.confirm(`Hapus titik "${stop.storeName}" beserta mapping-nya?`)) return;
+      if (!window.confirm(`Hapus titik "${stop.storeName}" beserta mapping-nya? Nomor sisa titik akan dirapatkan otomatis.`)) return;
       setBusy(`del-stop-${stop.id}`);
       try {
         await api(`/api/tms/sla-profiles/${selectedId}/stops/${stop.id}`, "DELETE");
@@ -588,6 +611,12 @@ export default function SlaConfigPage() {
           <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-2.5 text-sm text-danger">{error}</p>
         )}
 
+        {/* ── Bagian 1: Daftar profil ── */}
+        <section aria-label="Daftar profil SLA" className="space-y-3">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
+          <h2 className="text-sm font-bold text-foreground">Daftar Profil</h2>
+          <p className="text-xs tabular-nums text-muted-foreground">{filteredProfiles.length} profil</p>
+        </div>
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3">
           <select
             aria-label="Filter kelompok"
@@ -614,13 +643,10 @@ export default function SlaConfigPage() {
               setSelectedId(null);
             }}
           >
-            <option value="Aktif">Aktif</option>
-            <option value="Tidak Aktif">Tidak Aktif</option>
-            <option value="ALL">Semua status</option>
+          <option value="Aktif">Aktif</option>
+          <option value="Tidak Aktif">Tidak Aktif</option>
+          <option value="ALL">Semua status</option>
           </select>
-          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-            {filteredProfiles.length} profil
-          </span>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -793,42 +819,95 @@ export default function SlaConfigPage() {
             )}
           </div>
         </div>
+        </section>
 
-        {/* Detail profil */}
+        {/* ── Bagian 2: Detail profil ── */}
         {selectedId && (
-          <div className="overflow-hidden rounded-2xl border border-border bg-card">
-            <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
-              <p className="text-sm font-bold text-foreground">
-                {detail ? `${detail.code} · ${detail.groupName ?? ""}` : "Memuat…"}
-              </p>
-              {detail?.unresolvedCount !== undefined && detail.unresolvedCount > 0 && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600">
-                  <TriangleAlert className="h-3 w-3" />
-                  {detail.unresolvedCount} titik belum terhubung ke McEasy
-                </span>
-              )}
-              <span className="ml-auto flex items-center gap-2">
-                {canManage && detail && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    icon={Plus}
-                    onClick={() =>
-                      setStopForm({ id: null, storeName: "", targetTime: "", dayOffset: "0", order: "", addressIds: "" })
-                    }
-                  >
-                    Tambah Titik
-                  </Button>
+          <section aria-label="Detail profil SLA" className="overflow-hidden rounded-2xl border border-border bg-card">
+            <div className="border-b border-border px-4 pb-3 pt-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Detail Profil
+                  </p>
+                  <p className="truncate text-sm font-bold tabular-nums text-foreground">
+                    {detail ? `${detail.code} · ${detail.name}` : "Memuat…"}
+                  </p>
+                </div>
+                {detail && (
+                  <Badge variant={detail.status === "Aktif" ? "success" : "muted"}>{detail.status}</Badge>
                 )}
-                <button
-                  type="button"
-                  aria-label="Tutup detail"
-                  className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
-                  onClick={() => setSelectedId(null)}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </span>
+                {detail?.unresolvedCount !== undefined && detail.unresolvedCount > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600">
+                    <TriangleAlert className="h-3 w-3" />
+                    {detail.unresolvedCount} titik belum terhubung ke McEasy
+                  </span>
+                )}
+                <span className="ml-auto flex flex-wrap items-center gap-2">
+                  {canManage && detail && stopGap && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      icon={ListOrdered}
+                      disabled={busy === "renumber"}
+                      onClick={() => void renumberStops()}
+                    >
+                      {busy === "renumber" ? "Merapikan…" : "Rapatkan Nomor"}
+                    </Button>
+                  )}
+                  {canManage && detail && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      icon={Plus}
+                      onClick={() =>
+                        setStopForm({ id: null, storeName: "", targetTime: "", dayOffset: "0", order: "", addressIds: "" })
+                      }
+                    >
+                      Tambah Titik
+                    </Button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="Tutup detail"
+                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
+                    onClick={() => setSelectedId(null)}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </span>
+              </div>
+              {detail && (
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+                  <div>
+                    <dt className="font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Kelompok</dt>
+                    <dd className="mt-0.5 text-foreground">{detail.groupName ?? "–"}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Berangkat gudang</dt>
+                    <dd className="mt-0.5 tabular-nums text-foreground">
+                      {detail.departureTargetTime ?? "–"}
+                      {detail.departureDayOffset > 0 ? ` (+${detail.departureDayOffset} hari)` : ""}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Berlaku</dt>
+                    <dd className="mt-0.5 tabular-nums text-foreground">
+                      {detail.effectiveFrom}
+                      {detail.effectiveUntil ? ` s/d ${detail.effectiveUntil}` : ""}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold uppercase tracking-wider text-[10px] text-muted-foreground">Titik</dt>
+                    <dd className="mt-0.5 tabular-nums text-foreground">{detail.stops.length} titik</dd>
+                  </div>
+                </dl>
+              )}
+              {detail && stopGap && (
+                <p className="mt-2 text-[11px] font-semibold text-amber-600">
+                  Nomor urut loncat ({stopGap}). Klik “Rapatkan Nomor” agar menjadi 1..{detail.stops.length}.
+                </p>
+              )}
             </div>
             {detailLoading || !detail ? (
               <div className="space-y-2 p-4">
@@ -951,7 +1030,7 @@ export default function SlaConfigPage() {
                 </table>
               </div>
             )}
-          </div>
+          </section>
         )}
 
         <p className="text-[11px] text-muted-foreground">

@@ -19,6 +19,8 @@ import { authorizeSlaConfig } from "@/lib/tms-sla-auth";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { GET as getDetail, PATCH as patchProfile } from "@/app/api/tms/sla-profiles/[id]/route";
 import { POST as createStop } from "@/app/api/tms/sla-profiles/[id]/stops/route";
+import { DELETE as deleteStop } from "@/app/api/tms/sla-profiles/[id]/stops/[stopId]/route";
+import { POST as renumberStops } from "@/app/api/tms/sla-profiles/[id]/renumber/route";
 import { POST as importProfiles } from "@/app/api/tms/sla-profiles/import/route";
 
 const authorizeMock = vi.mocked(authorizeSlaConfig);
@@ -32,6 +34,7 @@ function chainable(result: unknown) {
   chain.select = vi.fn(() => chain);
   chain.insert = vi.fn(() => chain);
   chain.update = vi.fn(() => chain);
+  chain.delete = vi.fn(() => chain);
   chain.single = vi.fn(async () => result);
   chain.maybeSingle = vi.fn(async () => result);
   chain.then = (resolve: (value: unknown) => void) => resolve(result);
@@ -188,6 +191,146 @@ describe("PATCH /api/tms/sla-profiles/[id]", () => {
       jsonRequest("http://localhost/x", "PATCH", { name: "Lain" }),
       patchParams(),
     );
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("DELETE /api/tms/sla-profiles/[id]/stops/[stopId]", () => {
+  const STOP_ROW = {
+    id: "stop-2",
+    profile_id: "profile-van9",
+    route_order: 2,
+    store_name: "BSD Online",
+  };
+
+  function stopTableMock(remaining: { id: string; route_order: number }[]) {
+    const updateCalls: { patch: unknown; id: unknown }[] = [];
+    let calls = 0;
+    mockAdmin((table: string) => {
+      if (table === "tms_sla_route_profiles") return chainable({ data: PROFILE, error: null });
+      calls += 1;
+      if (calls === 1) return chainable({ data: STOP_ROW, error: null });
+      if (calls === 2) return chainable({ data: { id: "stop-2" }, error: null });
+      const chain = chainable({ data: remaining, error: null });
+      const rawUpdate = chain.update as (...args: unknown[]) => unknown;
+      chain.update = vi.fn((patch: unknown) => {
+        rawUpdate(patch);
+        return {
+          eq: vi.fn((_column: string, id: unknown) => {
+            updateCalls.push({ patch, id });
+            return chainable({ data: null, error: null });
+          }),
+        };
+      });
+      return chain;
+    });
+    return updateCalls;
+  }
+
+  function stopParams() {
+    return { params: Promise.resolve({ id: "profile-van9", stopId: "stop-2" }) };
+  }
+
+  it("merapatkan nomor sisa titik setelah hapus", async () => {
+    const updateCalls = stopTableMock([
+      { id: "stop-1", route_order: 1 },
+      { id: "stop-3", route_order: 3 },
+      { id: "stop-4", route_order: 4 },
+    ]);
+    const response = await deleteStop(new NextRequest("http://localhost/x", { method: "DELETE" }), stopParams());
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { data: { id: string }; meta: { renumbered: boolean } };
+    expect(payload.data.id).toBe("stop-2");
+    expect(payload.meta.renumbered).toBe(true);
+    const finals = updateCalls.filter((c) => (c.patch as { route_order: number }).route_order < 1000);
+    expect(finals).toHaveLength(2);
+    expect(finals).toContainEqual({
+      patch: expect.objectContaining({ route_order: 2 }),
+      id: "stop-3",
+    });
+    expect(finals).toContainEqual({
+      patch: expect.objectContaining({ route_order: 3 }),
+      id: "stop-4",
+    });
+  });
+
+  it("tidak menulis ulang bila nomor sudah rapat", async () => {
+    const updateCalls = stopTableMock([{ id: "stop-1", route_order: 1 }]);
+    const response = await deleteStop(new NextRequest("http://localhost/x", { method: "DELETE" }), stopParams());
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { meta: { renumbered: boolean } };
+    expect(payload.meta.renumbered).toBe(false);
+    expect(updateCalls).toHaveLength(0);
+  });
+});
+
+describe("POST /api/tms/sla-profiles/[id]/renumber", () => {
+  function renumberMock(profile: unknown, rows: { id: string; route_order: number }[]) {
+    const updateCalls: { patch: unknown; id: unknown }[] = [];
+    let calls = 0;
+    mockAdmin((table: string) => {
+      if (table === "tms_sla_route_profiles") return chainable({ data: profile, error: null });
+      calls += 1;
+      if (calls > 1) {
+        const chain = chainable({ data: null, error: null });
+        chain.update = vi.fn((patch: unknown) => ({
+          eq: vi.fn((_column: string, id: unknown) => {
+            updateCalls.push({ patch, id });
+            return chainable({ data: null, error: null });
+          }),
+        }));
+        return chain;
+      }
+      return chainable({ data: rows, error: null });
+    });
+    return updateCalls;
+  }
+
+  it("merapatkan nomor yang loncat", async () => {
+    const updateCalls = renumberMock(PROFILE, [
+      { id: "stop-1", route_order: 1 },
+      { id: "stop-3", route_order: 3 },
+      { id: "stop-5", route_order: 5 },
+    ]);
+    const response = await renumberStops(new NextRequest("http://localhost/x", { method: "POST" }), {
+      params: Promise.resolve({ id: "profile-van9" }),
+    });
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      data: { stops: { id: string; routeOrder: number }[]; changed: boolean };
+    };
+    expect(payload.data.changed).toBe(true);
+    expect(payload.data.stops).toEqual([
+      { id: "stop-1", routeOrder: 1 },
+      { id: "stop-3", routeOrder: 2 },
+      { id: "stop-5", routeOrder: 3 },
+    ]);
+    expect(updateCalls).toContainEqual({
+      patch: expect.objectContaining({ route_order: 2 }),
+      id: "stop-3",
+    });
+  });
+
+  it("no-op bila nomor sudah rapat", async () => {
+    const updateCalls = renumberMock(PROFILE, [
+      { id: "stop-1", route_order: 1 },
+      { id: "stop-2", route_order: 2 },
+    ]);
+    const response = await renumberStops(new NextRequest("http://localhost/x", { method: "POST" }), {
+      params: Promise.resolve({ id: "profile-van9" }),
+    });
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { data: { changed: boolean } };
+    expect(payload.data.changed).toBe(false);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("rejects profiles outside the caller scope", async () => {
+    allowManage(["client-tuku"]);
+    renumberMock({ ...PROFILE, client_id: "client-lain" }, []);
+    const response = await renumberStops(new NextRequest("http://localhost/x", { method: "POST" }), {
+      params: Promise.resolve({ id: "profile-van9" }),
+    });
     expect(response.status).toBe(403);
   });
 });

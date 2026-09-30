@@ -2,6 +2,7 @@ import { type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { authorizeSlaConfig, slaConfigError, slaConfigJson } from "@/lib/tms-sla-auth";
 import { normalizeSlaStoreKey } from "@/lib/tms-sla";
+import { renumberProfileStops } from "@/lib/tms-sla-stop-order";
 
 export const dynamic = "force-dynamic";
 
@@ -124,5 +125,14 @@ export async function DELETE(
 
   const { error: deleteError } = await admin.from("tms_sla_route_stops").delete().eq("id", stopId);
   if (deleteError) return slaConfigError("Gagal menghapus titik SLA.", 502);
-  return slaConfigJson({ data: { id: stopId } });
+  // Rapatkan nomor sisa titik agar tidak loncat (1,3,4,5 -> 1,2,3,4).
+  try {
+    const renumbered = await renumberProfileStops(admin, id);
+    return slaConfigJson({ data: { id: stopId }, meta: { renumbered: renumbered.changed } });
+  } catch {
+    return slaConfigJson(
+      { data: { id: stopId }, meta: { renumbered: false } },
+      200,
+    );
+  }
 }
