@@ -282,6 +282,29 @@ export async function GET(request: NextRequest) {
     temperatureC: temperatures.get(`${visit.task_id}:${visit.route_sequence}`) ?? null,
   });
 
+  const toArrivalVisitJson = (visit: VisitRow, stop: StopRow, serviceDate: string) => {
+    const target =
+      visit.sla_target_at ??
+      computeSlaTargetAt(
+        serviceDate,
+        stop.target_time,
+        typeof stop.target_day_offset === "number" ? stop.target_day_offset : 0,
+      );
+    const actual = visit.arrival_actual;
+    return {
+      id: visit.id,
+      routeSequence: visit.route_sequence,
+      store: visit.location_name,
+      enteredAt: visit.arrival_actual,
+      exitedAt: visit.departure_actual,
+      slaKind: visit.sla_kind ?? "ARRIVAL",
+      slaTargetAt: target,
+      slaStatus: visit.sla_status ?? evaluateSlaStatus(target, actual),
+      slaDeltaSeconds: visit.sla_delta_seconds ?? computeSlaDeltaSeconds(target, actual),
+      temperatureC: temperatures.get(`${visit.task_id}:${visit.route_sequence}`) ?? null,
+    };
+  };
+
   const runs: Record<string, unknown>[] = [];
   for (const assignment of assignments) {
     const visits = (visitsByTask.get(assignment.task_id) ?? []).sort(
@@ -341,7 +364,7 @@ export async function GET(request: NextRequest) {
       if (usedVisitIds.has(visit.id)) continue;
       const direct = visit.sla_route_stop_id ? stopById.get(visit.sla_route_stop_id) : undefined;
       if (direct && !stopVisits[direct.id]) {
-        stopVisits[direct.id] = toVisitJson(visit);
+        stopVisits[direct.id] = toArrivalVisitJson(visit, direct, assignment.service_date);
         usedVisitIds.add(visit.id);
       }
     }
@@ -349,7 +372,7 @@ export async function GET(request: NextRequest) {
       if (usedVisitIds.has(visit.id)) continue;
       const mapped = visit.address_id ? stopByAddress.get(visit.address_id) : undefined;
       if (mapped && !stopVisits[mapped.stop.id]) {
-        stopVisits[mapped.stop.id] = toVisitJson(visit);
+        stopVisits[mapped.stop.id] = toArrivalVisitJson(visit, mapped.stop, assignment.service_date);
         usedVisitIds.add(visit.id);
       }
     }

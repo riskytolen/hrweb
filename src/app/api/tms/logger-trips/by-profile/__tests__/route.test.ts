@@ -266,7 +266,7 @@ describe("GET /api/tms/logger-trips/by-profile", () => {
               route_sequence: 9,
               location_name: "Toko B",
               address_id: "addr-b",
-              arrival_actual: null,
+              arrival_actual: "2026-09-30T05:20:00+07:00",
               departure_actual: null,
               last_synced_at: "2026-09-30T00:00:00+07:00",
               sla_route_stop_id: null,
@@ -286,7 +286,10 @@ describe("GET /api/tms/logger-trips/by-profile", () => {
       data: {
         runs: {
           departure: unknown;
-          stopVisits: Record<string, { store: string | null } | null>;
+          stopVisits: Record<
+            string,
+            { store: string | null; slaStatus: string | null; slaTargetAt: string | null; slaDeltaSeconds: number | null } | null
+          >;
           extras: unknown[];
         }[];
       };
@@ -294,8 +297,77 @@ describe("GET /api/tms/logger-trips/by-profile", () => {
     const run = payload.data.runs[0];
     expect(run.departure).toBeNull();
     expect(run.stopVisits["stop-1"]).toBeNull();
-    expect(run.stopVisits["stop-2"]?.store).toBe("Toko B");
+    expect(run.stopVisits["stop-2"]).toMatchObject({
+      store: "Toko B",
+      slaStatus: "ON_TIME",
+      slaTargetAt: "2026-09-29T22:30:00.000Z",
+      slaDeltaSeconds: -600,
+    });
     expect(run.extras).toHaveLength(0);
+  });
+
+  it("computes arrival SLA fallback for late and pending stores when snapshots are empty", async () => {
+    mockSupabase(
+      baseTables({
+        tms_trip_visit_logs: {
+          data: [
+            {
+              id: "v-late",
+              task_id: "task-1",
+              task_number: "FO-1",
+              task_status: "STARTED",
+              license_plate: "B 1 TES",
+              driver_name: "DRIVER",
+              route_sequence: 2,
+              location_name: "Toko A",
+              address_id: "addr-a",
+              arrival_actual: "2026-09-30T05:07:00+07:00",
+              departure_actual: "2026-09-30T05:20:00+07:00",
+              last_synced_at: "2026-09-30T00:00:00+07:00",
+              sla_route_stop_id: null,
+              sla_kind: null,
+              sla_target_at: null,
+              sla_status: null,
+              sla_delta_seconds: null,
+            },
+            {
+              id: "v-pending",
+              task_id: "task-1",
+              task_number: "FO-1",
+              task_status: "STARTED",
+              license_plate: "B 1 TES",
+              driver_name: "DRIVER",
+              route_sequence: 3,
+              location_name: "Toko B",
+              address_id: "addr-b",
+              arrival_actual: null,
+              departure_actual: null,
+              last_synced_at: "2026-09-30T00:00:00+07:00",
+              sla_route_stop_id: null,
+              sla_kind: null,
+              sla_target_at: null,
+              sla_status: null,
+              sla_delta_seconds: null,
+            },
+          ],
+          error: null,
+        },
+      }),
+    );
+    const response = await GET(request("?profileId=profile-van1&dateFrom=2026-09-30&dateTo=2026-09-30"));
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      data: {
+        runs: {
+          summary: { late: number; pending: number };
+          stopVisits: Record<string, { slaStatus: string | null; slaDeltaSeconds: number | null } | null>;
+        }[];
+      };
+    };
+    const run = payload.data.runs[0];
+    expect(run.stopVisits["stop-1"]).toMatchObject({ slaStatus: "LATE", slaDeltaSeconds: 540 });
+    expect(run.stopVisits["stop-2"]).toMatchObject({ slaStatus: "PENDING", slaDeltaSeconds: null });
+    expect(run.summary).toMatchObject({ late: 1, pending: 1 });
   });
 
   it("puts visits with unknown addresses into extras instead of the wrong store", async () => {
