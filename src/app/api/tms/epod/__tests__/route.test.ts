@@ -336,9 +336,11 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
 
   const context = { params: Promise.resolve({ stopId: "s1" }) };
 
-  it("menolak pengantaran tanpa barang", async () => {
+  it("menerima pengantaran tanpa barang", async () => {
     mockProfile(["tms.epod.manage"]);
     getStopDetailMock.mockResolvedValue(deliveryStop as never);
+    const rpc = vi.fn().mockResolvedValue({ data: { id: "sub1" }, error: null });
+    createAdminMock.mockReturnValue({ rpc } as never);
 
     const response = await submitStop(
       submitRequest({
@@ -355,9 +357,7 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
       context,
     );
 
-    expect(response.status).toBe(400);
-    const payload = (await response.json()) as { error: string };
-    expect(payload.error).toContain("Minimal satu barang");
+    expect(response.status).toBe(200);
   });
 
   it("menolak pengantaran tanpa tanda tangan", async () => {
@@ -381,7 +381,7 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
     expect(payload.error).toContain("Tanda tangan");
   });
 
-  it("meneruskan daftar barang ke RPC sebagai p_items", async () => {
+  it("mengirim p_items kosong apa pun input barang", async () => {
     mockProfile(["tms.epod.manage"]);
     getStopDetailMock.mockResolvedValue(deliveryStop as never);
     const rpc = vi.fn().mockResolvedValue({ data: { id: "sub1" }, error: null });
@@ -409,10 +409,7 @@ describe("POST /api/tms/epod/stops/[stopId]/submissions", () => {
     expect(rpc).toHaveBeenCalledWith(
       "tms_epod_submit",
       expect.objectContaining({
-        p_items: [
-          { name: "Kopi", quantity: 2, unit: "karton" },
-          { name: "Gula", quantity: 1.5, unit: null },
-        ],
+        p_items: [],
         p_evidence: expect.arrayContaining([
           expect.objectContaining({ path: "a/b.jpg", evidence_type: "PHOTO" }),
           expect.objectContaining({ path: "a/sign.png", evidence_type: "RECIPIENT_SIGNATURE" }),

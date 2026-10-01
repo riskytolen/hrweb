@@ -422,13 +422,6 @@ export function haversineMeters(
   return earthRadius * 2 * Math.asin(Math.sqrt(a));
 }
 
-/** Nilai mentah baris barang dari form (kuantitas masih berupa teks). */
-export interface EpodItemInput {
-  name: string;
-  quantity: string;
-  unit: string;
-}
-
 export interface EpodSubmissionInput {
   stopType: EpodStopType;
   result: EpodDeliveryResult | null;
@@ -440,41 +433,6 @@ export interface EpodSubmissionInput {
   longitude: number | null;
   distanceMeters: number | null;
   outOfRadiusReason: string;
-  items: EpodItemInput[];
-}
-
-/** Baris yang benar-benar diisi pengguna (mengabaikan baris kosong). */
-export function filledEpodItems(items: EpodItemInput[]): EpodItemInput[] {
-  return items.filter((item) => item.name.trim() || item.quantity.trim() || item.unit.trim());
-}
-
-/** Ubah input form menjadi payload yang dikirim ke API. */
-export function toEpodItemPayload(
-  items: EpodItemInput[],
-): { name: string; quantity: number; unit: string | null }[] {
-  return filledEpodItems(items).map((item) => ({
-    name: item.name.trim(),
-    quantity: Number(item.quantity),
-    unit: item.unit.trim() || null,
-  }));
-}
-
-/** Validasi daftar barang: wajib minimal 1, nama terisi, kuantitas > 0. */
-export function validateEpodItems(items: EpodItemInput[]): string | null {
-  const filled = filledEpodItems(items);
-  if (filled.length < 1) return "Minimal satu barang wajib diisi.";
-  if (filled.length > TMS_EPOD_MAX_ITEMS) {
-    return `Jumlah barang maksimal ${TMS_EPOD_MAX_ITEMS}.`;
-  }
-  for (const item of filled) {
-    const name = item.name.trim();
-    if (!name) return "Nama barang wajib diisi.";
-    const quantity = Number(item.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      return `Kuantitas barang "${name}" harus lebih dari 0.`;
-    }
-  }
-  return null;
 }
 
 /** Validasi bersama client & server. Mengembalikan pesan error atau null. */
@@ -496,8 +454,6 @@ export function validateEpodSubmission(input: EpodSubmissionInput): string | nul
     return null;
   }
   if (input.result === null) return "Hasil pengiriman wajib dipilih.";
-  const itemsError = validateEpodItems(input.items);
-  if (itemsError) return itemsError;
   if (input.result !== "REJECTED" && !input.recipientName.trim()) {
     return "Nama penerima wajib diisi.";
   }

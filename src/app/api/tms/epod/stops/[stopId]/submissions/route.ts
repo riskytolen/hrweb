@@ -3,10 +3,8 @@ import { authorizeEpod, epodError, epodJson } from "@/lib/tms-epod-auth";
 import { getStopDetail } from "@/lib/tms-epod-data";
 import {
   haversineMeters,
-  toEpodItemPayload,
   validateEpodSubmission,
   type EpodDeliveryResult,
-  type EpodItemInput,
 } from "@/lib/tms-epod";
 
 export const dynamic = "force-dynamic";
@@ -47,24 +45,6 @@ function parseEvidence(value: unknown): EvidenceInput[] {
   return result;
 }
 
-function parseItems(value: unknown): EpodItemInput[] {
-  if (!Array.isArray(value)) return [];
-  const result: EpodItemInput[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const source = item as Record<string, unknown>;
-    result.push({
-      name: typeof source.name === "string" ? source.name.slice(0, 200) : "",
-      quantity:
-        typeof source.quantity === "string" || typeof source.quantity === "number"
-          ? String(source.quantity).slice(0, 30)
-          : "",
-      unit: typeof source.unit === "string" ? source.unit.slice(0, 40) : "",
-    });
-  }
-  return result;
-}
-
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ stopId: string }> },
@@ -98,7 +78,6 @@ export async function POST(
       ? new Date(source.capturedAtDevice).toISOString()
       : null;
   const evidence = parseEvidence(source.evidence);
-  const items = parseItems(source.items);
 
   try {
     const detail = await getStopDetail(stopId, auth.context.allowedClientIds);
@@ -128,7 +107,6 @@ export async function POST(
       longitude,
       distanceMeters,
       outOfRadiusReason,
-      items,
     });
     if (validationError) return epodError(validationError, 400);
 
@@ -151,7 +129,7 @@ export async function POST(
         sort_order: item.sortOrder,
         evidence_type: item.evidenceType,
       })),
-      p_items: toEpodItemPayload(items),
+      p_items: [],
       p_actor_user: auth.context.userId,
       p_actor_employee_id: null,
       p_actor_type: "WEB_ADMIN",
