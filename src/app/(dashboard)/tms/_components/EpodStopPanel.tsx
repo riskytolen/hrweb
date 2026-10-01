@@ -907,8 +907,8 @@ function StopSubmissionForm({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
-          multiple
+          accept="image/*"
+          capture="environment"
           className="hidden"
           onChange={(event) => void handleFiles(event.target.files)}
         />
