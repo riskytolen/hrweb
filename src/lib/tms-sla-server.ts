@@ -206,6 +206,8 @@ export async function evaluateSlaForTasks(
       const status: SlaStatus = evaluateSlaStatus(target, actual);
       visitUpdates.push({
         id: visit.id,
+        task_id: visit.task_id,
+        route_sequence: visit.route_sequence,
         live_track_group_id: occurrence.groupId,
         sla_profile_id: profile.id,
         sla_route_stop_id: stopId,
@@ -225,7 +227,11 @@ export async function evaluateSlaForTasks(
     if (assignmentError) throw new Error(`Gagal menyimpan assignment SLA: ${assignmentError.message}`);
   }
   if (visitUpdates.length > 0) {
-    const { error: updateError } = await admin.from("tms_trip_visit_logs").upsert(visitUpdates);
+    // Snapshot SLA di-upsert per id baris kunjungan. Sertakan task_id dan
+    // route_sequence karena keduanya wajib NOT NULL di tabel.
+    const { error: updateError } = await admin
+      .from("tms_trip_visit_logs")
+      .upsert(visitUpdates, { onConflict: "id" });
     if (updateError) throw new Error(`Gagal menyimpan snapshot SLA: ${updateError.message}`);
   }
   summary.visitsUpdated = visitUpdates.length;

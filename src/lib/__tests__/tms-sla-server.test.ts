@@ -94,6 +94,18 @@ describe("evaluateSlaForTasks", () => {
 
     const updates = stubs.visitStub.upsert.mock.calls[0][0] as Record<string, unknown>[];
     expect(updates).toHaveLength(5);
+    // Snapshot SLA di-upsert per id baris, tetapi task_id dan route_sequence
+    // wajib NOT NULL sehingga harus ikut dikirim.
+    expect(stubs.visitStub.upsert).toHaveBeenCalledWith(expect.any(Array), { onConflict: "id" });
+    expect(updates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "v-gudang", task_id: "task-1", route_sequence: 1 }),
+        expect.objectContaining({ id: "v-ontime", task_id: "task-1", route_sequence: 2 }),
+        expect.objectContaining({ id: "v-late", task_id: "task-1", route_sequence: 3 }),
+        expect.objectContaining({ id: "v-unknown", task_id: "task-1", route_sequence: 4 }),
+        expect.objectContaining({ id: "v-pending", task_id: "task-1", route_sequence: 5 }),
+      ]),
+    );
     const byId = Object.fromEntries(updates.map((u) => [u.id, u]));
     // Gudang: target berangkat 30 Sep 04:15 WIB (= 29 Sep 21:15 UTC), aktual 21:40 -> terlambat.
     expect(byId["v-gudang"]).toMatchObject({ sla_kind: "DEPARTURE", sla_status: "LATE" });

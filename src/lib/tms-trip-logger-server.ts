@@ -138,11 +138,13 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
   };
 
   const windowStartMs = now - (options.days ?? 7) * 24 * 60 * 60 * 1000;
+  const backfillTaskIds = new Set<string>();
 
   const collectRows = (tasks: CollectedTask[]): Record<string, unknown>[] => {
     const rows: Record<string, unknown>[] = [];
     for (const task of tasks) {
       summary.tasksChecked += 1;
+      let taskHasVisits = false;
       try {
         const normalized = normalizeFleetTaskInstantItem(task.raw);
         if (!normalized) continue;
@@ -157,11 +159,13 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
             if (!inWindow) continue;
           }
           summary.visitsInWindow += 1;
+          taskHasVisits = true;
           rows.push(toRowPayload(visit));
         }
       } catch (error) {
         summary.failures.push(`Task ${task.id}: ${errorMessage(error)}`);
       }
+      if (mode === "backfill" && taskHasVisits) backfillTaskIds.add(task.id);
     }
     return rows;
   };
@@ -188,6 +192,18 @@ export async function syncTripVisitLogs(options: SyncOptions = {}): Promise<Trip
       }
     }
     await stampUnmappedTmsRows(admin);
+
+    // Backfill dipakai untuk memperbaiki data lama, sehingga kunjungan yang
+    // ikut diperbarui juga harus dievaluasi SLA-nya. Kegagalan evaluasi
+    // tidak boleh menggagalkan arsip kunjungan.
+    try {
+      const slaSummary = await evaluateSlaForTasks(admin, [...backfillTaskIds]);
+      summary.slaTasks = slaSummary.tasksChecked;
+      summary.slaAssigned = slaSummary.assigned;
+      summary.slaVisits = slaSummary.visitsUpdated;
+    } catch (error) {
+      summary.failures.push(`Evaluasi SLA: ${errorMessage(error)}`);
+    }
     return summary;
   }
 
