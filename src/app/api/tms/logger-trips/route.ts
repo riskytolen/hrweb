@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase-server";
+import { createAdminClient } from "@/lib/supabase-admin";
 import { canAccessTmsData, type AccountType } from "@/lib/permissions";
 import { authorizeTmsScope } from "@/lib/tms-tenant-auth";
 
@@ -256,8 +257,9 @@ export async function GET(request: NextRequest) {
   const groupNames = new Map<string, string>();
   const profileIds = [...new Set(visits.map((v) => v.sla_profile_id).filter((id): id is string => !!id))];
   const groupIds = [...new Set(visits.map((v) => v.live_track_group_id).filter((id): id is string => !!id))];
+  const admin = profileIds.length > 0 || groupIds.length > 0 ? createAdminClient() : null;
   if (profileIds.length > 0) {
-    const { data: profileRows } = await supabase
+    const { data: profileRows } = await admin!
       .from("tms_sla_route_profiles")
       .select("id, code")
       .in("id", profileIds);
@@ -266,7 +268,7 @@ export async function GET(request: NextRequest) {
     }
   }
   if (groupIds.length > 0) {
-    const { data: groupRows } = await supabase
+    const { data: groupRows } = await admin!
       .from("tms_live_track_groups")
       .select("id, name")
       .in("id", groupIds);

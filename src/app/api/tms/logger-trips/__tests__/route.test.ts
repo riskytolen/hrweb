@@ -18,10 +18,16 @@ vi.mock("@/lib/supabase-server", () => ({
   createClient: vi.fn(),
 }));
 
+vi.mock("@/lib/supabase-admin", () => ({
+  createAdminClient: vi.fn(),
+}));
+
 import { createClient } from "@/lib/supabase-server";
+import { createAdminClient } from "@/lib/supabase-admin";
 import { GET } from "@/app/api/tms/logger-trips/route";
 
 const createClientMock = vi.mocked(createClient);
+const createAdminMock = vi.mocked(createAdminClient);
 
 // Builder rantai Supabase yang bisa di-await dan mengembalikan hasil preset.
 function chainable(result: unknown) {
@@ -47,6 +53,8 @@ function mockSupabase(options: {
   count?: number | null;
   temperatures?: unknown[];
   countRows?: unknown[];
+  slaProfiles?: unknown[];
+  groups?: unknown[];
 }) {
   const visitsResult = { data: options.visits ?? [], error: null, count: options.count ?? null };
   const countResult = { data: options.countRows ?? [], error: null, count: options.count ?? null };
@@ -70,6 +78,13 @@ function mockSupabase(options: {
   createClientMock.mockResolvedValue({
     auth: { getUser: async () => ({ data: { user: options.user ?? null }, error: null }) },
     from,
+  } as never);
+  const adminTables: Record<string, unknown[]> = {
+    tms_sla_route_profiles: options.slaProfiles ?? [],
+    tms_live_track_groups: options.groups ?? [],
+  };
+  createAdminMock.mockReturnValue({
+    from: (table: string) => chainable({ data: adminTables[table] ?? [], error: null }),
   } as never);
 
   return { visitQueries };
@@ -189,6 +204,8 @@ describe("GET /api/tms/logger-trips", () => {
       count: 1,
       temperatures: [],
       countRows: [{ arrival_actual: "2026-09-30T05:02:00+07:00", departure_actual: "2026-09-30T05:20:00+07:00", sla_status: "ON_TIME" }],
+      slaProfiles: [{ id: "profile-van9", code: "RUTE 9" }],
+      groups: [{ id: "group-cp", name: "CP" }],
     });
 
     const response = await GET(request("?sla=ON_TIME"));
@@ -199,6 +216,8 @@ describe("GET /api/tms/logger-trips", () => {
         slaStatus: string | null;
         slaTargetAt: string | null;
         slaDeltaSeconds: number | null;
+        slaProfileCode: string | null;
+        groupName: string | null;
       }[];
       meta: { sla: { onTime: number; late: number; pending: number; unset: number; unevaluated: number } };
     };
@@ -208,7 +227,10 @@ describe("GET /api/tms/logger-trips", () => {
       slaStatus: "ON_TIME",
       slaTargetAt: "2026-09-30T05:05:00+07:00",
       slaDeltaSeconds: -180,
+      slaProfileCode: "RUTE 9",
+      groupName: "CP",
     });
+    expect(createAdminMock).toHaveBeenCalledOnce();
     expect(payload.meta.sla).toMatchObject({ onTime: 1, late: 0, pending: 0, unset: 0, unevaluated: 0 });
   });
 
