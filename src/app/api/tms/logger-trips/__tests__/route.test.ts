@@ -54,11 +54,14 @@ function mockSupabase(options: {
   const profileResult = { data: options.profile ?? null, error: null };
 
   let visitCalls = 0;
+  const visitQueries: Record<string, unknown>[] = [];
   const from: FromHandler = (table: string) => {
     if (table === "user_profiles") return chainable(profileResult);
     if (table === "tms_trip_visit_logs") {
       visitCalls += 1;
-      return chainable(visitCalls === 1 ? visitsResult : countResult);
+      const query = chainable(visitCalls === 1 ? visitsResult : countResult);
+      if (visitCalls === 1) visitQueries.push(query);
+      return query;
     }
     if (table === "tms_route_point_temperatures") return chainable(tempResult);
     return chainable({ data: [], error: null });
@@ -68,6 +71,8 @@ function mockSupabase(options: {
     auth: { getUser: async () => ({ data: { user: options.user ?? null }, error: null }) },
     from,
   } as never);
+
+  return { visitQueries };
 }
 
 function activeProfile(permissions: string[]) {
@@ -205,5 +210,23 @@ describe("GET /api/tms/logger-trips", () => {
       slaDeltaSeconds: -180,
     });
     expect(payload.meta.sla).toMatchObject({ onTime: 1, late: 0, pending: 0, unset: 0, unevaluated: 0 });
+  });
+
+  it("menyertakan baris belum dikunjungi dalam rentang last_synced_at", async () => {
+    const { visitQueries } = mockSupabase({
+      user: { id: "user-1" },
+      profile: activeProfile(["tms.view"]),
+      visits: [],
+      count: 0,
+      temperatures: [],
+      countRows: [],
+    });
+
+    const response = await GET(request("?visitState=PENDING&dateFrom=2026-10-02&dateTo=2026-10-03"));
+    expect(response.status).toBe(200);
+    const dataQuery = visitQueries[0] as unknown as { or: { mock: { calls: [string][] } } };
+    expect(dataQuery.or.mock.calls[0][0]).toContain(
+      "and(arrival_actual.is.null,departure_actual.is.null,last_synced_at.gte.2026-10-02T00:00:00+07:00,last_synced_at.lte.2026-10-03T23:59:59.999+07:00)",
+    );
   });
 });

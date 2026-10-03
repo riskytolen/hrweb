@@ -25,9 +25,10 @@ export interface TenantStampSummary {
 
 /**
  * Cap client_id pada baris TMS yang masih null setelah sync, berdasarkan
- * mapping unit aktif (`tms_client_vehicle_assignments`) dan relasi parent.
- * Baris yang tidak bisa dipetakan tetap null (= UNASSIGNED, disembunyikan
- * dari user scoped). Idempotent dan aman dipanggil setiap siklus sync.
+ * mapping unit aktif (`tms_client_vehicle_assignments`), occurrence task,
+ * dan relasi parent. Baris yang tidak bisa dipetakan tetap null
+ * (= UNASSIGNED, disembunyikan dari user scoped). Idempotent dan aman
+ * dipanggil setiap siklus sync.
  */
 export async function stampUnmappedTmsRows(admin: Admin): Promise<TenantStampSummary> {
   const summary: TenantStampSummary = {
@@ -174,6 +175,49 @@ export async function stampUnmappedTmsRows(admin: Admin): Promise<TenantStampSum
           .update({ client_id: clientId })
           .in("id", ids);
         if (!error) summary.occurrences += ids.length;
+      }
+    }
+
+    // Visit log: fallback client dari occurrence terbaru bila mapping unit
+    // tidak mengenalkan kendaraan. Ini mencegah FO yang jelas-jelas masuk
+    // group tertentu menghilang dari tampilan client-scoped.
+    const { data: unmappedVisits } = await admin
+      .from("tms_trip_visit_logs")
+      .select("id, task_id")
+      .is("client_id", null)
+      .limit(1000);
+    const unmappedVisitRows = (
+      Array.isArray(unmappedVisits) ? unmappedVisits : []
+    ) as { id: string; task_id: string }[];
+    if (unmappedVisitRows.length > 0) {
+      const taskIds = [...new Set(unmappedVisitRows.map((row) => row.task_id).filter(Boolean))];
+      if (taskIds.length > 0) {
+        const { data: taskOccurrences } = await admin
+          .from("tms_live_track_task_occurrences")
+          .select("task_id, client_id, window_started_at")
+          .in("task_id", taskIds)
+          .order("window_started_at", { ascending: false });
+        const clientByTask = new Map<string, string>();
+        for (const occurrence of (
+          Array.isArray(taskOccurrences) ? taskOccurrences : []
+        ) as { task_id: string; client_id: string | null }[]) {
+          if (!occurrence || clientByTask.has(occurrence.task_id)) continue;
+          if (typeof occurrence.client_id === "string" && occurrence.client_id) {
+            clientByTask.set(occurrence.task_id, occurrence.client_id);
+          }
+        }
+        const visitsByClient = new Map<string, string[]>();
+        for (const row of unmappedVisitRows) {
+          const clientId = clientByTask.get(row.task_id);
+          if (!clientId) continue;
+          const list = visitsByClient.get(clientId) ?? [];
+          list.push(row.id);
+          visitsByClient.set(clientId, list);
+        }
+        for (const [clientId, ids] of visitsByClient) {
+          const { error } = await admin.from("tms_trip_visit_logs").update({ client_id: clientId }).in("id", ids);
+          if (!error) summary.visitLogs += ids.length;
+        }
       }
     }
   } catch {

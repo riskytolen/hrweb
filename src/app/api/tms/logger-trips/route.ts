@@ -164,11 +164,14 @@ export async function GET(request: NextRequest) {
   const toIso = `${toDay}T23:59:59.999+07:00`;
 
   // Kunjungan yang bersinggungan dengan rentang tanggal: masuk/keluar di
-  // dalamnya, atau masih berlangsung dan sudah masuk sebelum rentang berakhir.
+  // dalamnya, masih berlangsung dan sudah masuk sebelum rentang berakhir,
+  // atau belum punya waktu masuk/keluar tetapi terakhir disinkronkan pada
+  // rentang tersebut.
   const overlap =
     `and(arrival_actual.gte.${fromIso},arrival_actual.lte.${toIso}),` +
     `and(departure_actual.gte.${fromIso},departure_actual.lte.${toIso}),` +
-    `and(arrival_actual.lte.${toIso},departure_actual.is.null)`;
+    `and(arrival_actual.lte.${toIso},departure_actual.is.null),` +
+    `and(arrival_actual.is.null,departure_actual.is.null,last_synced_at.gte.${fromIso},last_synced_at.lte.${toIso})`;
 
   const applyFilters = <T>(query: T): T => {
     type Chain = {
