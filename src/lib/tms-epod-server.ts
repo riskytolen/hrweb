@@ -12,6 +12,7 @@ import {
   TMS_EPOD_RETENTION_MONTHS,
   type EpodAssignment,
 } from "./tms-epod";
+import { slaServiceDate } from "./tms-sla";
 
 const ASSIGNMENTS = "tms_epod_assignments";
 const STOPS = "tms_epod_stops";
@@ -55,26 +56,79 @@ async function fetchTasksByStatus(
 }
 
 /**
+ * Tanggal operasional FO (YYYY-MM-DD, zona Asia/Jakarta).
+ * Prioritas: tanggal layanan occurrence Live Track, lalu jadwal/aktual
+ * mulai FO, lalu target/aktual titik pertama, terakhir tanggal snapshot.
+ */
+export function resolveEpodOperationalDate(
+  task: FleetTaskInstantItem,
+  occurrenceWindowStartedAt: string | null,
+  nowIso: string,
+): string {
+  const fromOccurrence = occurrenceWindowStartedAt ? slaServiceDate(occurrenceWindowStartedAt) : null;
+  if (fromOccurrence) return fromOccurrence;
+  for (const candidate of [task.expectedStartedOn, task.actualStartedOn]) {
+    if (!candidate) continue;
+    const parsed = slaServiceDate(candidate);
+    if (parsed) return parsed;
+  }
+  for (const point of task.timeline ?? []) {
+    for (const candidate of [
+      point.departureTarget,
+      point.arrivalTarget,
+      point.departureActual,
+      point.arrivalActual,
+    ]) {
+      if (!candidate) continue;
+      const parsed = slaServiceDate(candidate);
+      if (parsed) return parsed;
+    }
+  }
+  return slaServiceDate(nowIso) ?? nowIso.slice(0, 10);
+}
+
+async function loadOperationalWindowByTask(
+  admin: ReturnType<typeof createAdminClient>,
+  taskIds: string[],
+): Promise<Map<string, string>> {
+  const byTask = new Map<string, string>();
+  if (taskIds.length === 0) return byTask;
+  const { data, error } = await admin
+    .from("tms_live_track_task_occurrences")
+    .select("task_id, window_started_at")
+    .in("task_id", taskIds)
+    .order("window_started_at", { ascending: false });
+  if (error) throw new Error(`Gagal memuat occurrence operasional: ${error.message}`);
+  for (const row of (data ?? []) as { task_id: string; window_started_at: string | null }[]) {
+    if (!row?.task_id || byTask.has(row.task_id) || !row.window_started_at) continue;
+    byTask.set(row.task_id, row.window_started_at);
+  }
+  return byTask;
+}
+
+/**
  * Kolom yang boleh diperbarui pada setiap sinkronisasi sebelum snapshot
  * dibekukan. `snapshot_at` sengaja tidak ikut agar waktu snapshot pertama
- * tidak tertimpa dan urutan daftar tetap stabil.
+ * tidak tertimpa; `operational_date` ikut agar tanggal FO tetap mengikuti
+ * tanggal layanan occurrence terbaru.
  */
-function syncRow(task: FleetTaskInstantItem, nowIso: string) {
+function syncRow(task: FleetTaskInstantItem, nowIso: string, operationalDate: string) {
   return {
     task_number: task.number,
     task_status_raw: task.statusRaw,
     vehicle_id: task.vehicleId,
     license_plate: task.licensePlate,
     vendor_driver_name: task.driverName,
+    operational_date: operationalDate,
     last_synced_at: nowIso,
   };
 }
 
 /** Baris lengkap saat assignment pertama kali dibuat. */
-function insertRow(task: FleetTaskInstantItem, nowIso: string) {
+function insertRow(task: FleetTaskInstantItem, nowIso: string, operationalDate: string) {
   return {
     task_id: task.id,
-    ...syncRow(task, nowIso),
+    ...syncRow(task, nowIso, operationalDate),
     snapshot_at: nowIso,
   };
 }
@@ -205,9 +259,16 @@ export async function syncActiveEpodAssignments(
     failures.push(`Gagal memuat FO STARTED: ${errorMessage(startedResult.reason)}`);
   }
 
+  let operationalWindowByTask = new Map<string, string>();
+  try {
+    operationalWindowByTask = await loadOperationalWindowByTask(admin, [...taskMap.keys()]);
+  } catch (error) {
+    failures.push(errorMessage(error));
+  }
+
   const { data: existingRows, error: existingError } = await admin
     .from(ASSIGNMENTS)
-    .select("id,task_id,frozen_at,status,task_status_raw");
+    .select("id,task_id,frozen_at,status,task_status_raw,operational_date");
   if (existingError) {
     failures.push(`Gagal membaca assignment e-POD: ${existingError.message}`);
     return {
@@ -234,9 +295,14 @@ export async function syncActiveEpodAssignments(
     const existing = existingByTask.get(task.id);
     try {
       if (!existing) {
+        const operationalDate = resolveEpodOperationalDate(
+          task,
+          operationalWindowByTask.get(task.id) ?? null,
+          nowIso,
+        );
         const { data: inserted, error: insertError } = await admin
           .from(ASSIGNMENTS)
-          .insert(insertRow(task, nowIso))
+          .insert(insertRow(task, nowIso, operationalDate))
           .select("id")
           .single();
         if (insertError || !inserted) {
@@ -250,16 +316,25 @@ export async function syncActiveEpodAssignments(
       }
 
       if (existing.frozenAt) {
+        const occurrenceWindow = operationalWindowByTask.get(task.id) ?? null;
+        const occurrenceDate = occurrenceWindow ? slaServiceDate(occurrenceWindow) : null;
+        const operationalDate =
+          occurrenceDate ?? existing.operationalDate ?? resolveEpodOperationalDate(task, null, nowIso);
         await admin
           .from(ASSIGNMENTS)
-          .update({ task_status_raw: task.statusRaw, last_synced_at: nowIso })
+          .update({ task_status_raw: task.statusRaw, operational_date: operationalDate, last_synced_at: nowIso })
           .eq("id", existing.id);
         continue;
       }
 
+      const operationalDate = resolveEpodOperationalDate(
+        task,
+        operationalWindowByTask.get(task.id) ?? null,
+        nowIso,
+      );
       const { error: updateError } = await admin
         .from(ASSIGNMENTS)
-        .update(syncRow(task, nowIso))
+        .update(syncRow(task, nowIso, operationalDate))
         .eq("id", existing.id);
       if (updateError) {
         failures.push(`Gagal memperbarui assignment FO ${task.number ?? task.id}: ${updateError.message}`);
@@ -278,8 +353,8 @@ export async function syncActiveEpodAssignments(
   // Assignment yang sudah tidak muncul di Index (kemungkinan ENDED/CANCELED)
   // disinkronkan statusnya sekali agar tidak selamanya "STARTED".
   // Assignment frozen ikut direkonsiliasi, tetapi HANYA kolom
-  // task_status_raw/last_synced_at yang diperbarui: stop, bukti, dan
-  // snapshot tetap dibekukan agar pekerjaan e-POD tidak berubah.
+  // task_status_raw/operational_date/last_synced_at yang diperbarui: stop,
+  // bukti, dan snapshot tetap dibekukan agar pekerjaan e-POD tidak berubah.
   const orphaned = [...existingByTask.values()]
     .filter(
       (assignment) =>

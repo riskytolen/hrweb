@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   epodTripStatusLabel,
   formatDistance,
+  formatEpodOperationalDate,
   haversineMeters,
   normalizeEpodAssignment,
   normalizeEpodAssignmentList,
@@ -200,12 +201,38 @@ describe("normalizer baris database", () => {
       delivery_done_count: "3",
       delivery_total_count: 6,
       snapshot_at: "2026-09-22T00:00:00Z",
+      operational_date: "2026-09-22",
     });
     expect(assignment?.taskId).toBe("t1");
     expect(assignment?.status).toBe("IN_PROGRESS");
     expect(assignment?.loadingStatus).toBe("LOADING_COMPLETED");
     expect(assignment?.deliveryDoneCount).toBe(3);
     expect(assignment?.deliveryTotalCount).toBe(6);
+    expect(assignment?.operationalDate).toBe("2026-09-22");
+  });
+
+  it("menormalisasi operational_date dan menolak format rusak", () => {
+    expect(
+      normalizeEpodAssignment({ id: "a1", task_id: "t1", operational_date: "2026-09-22" })
+        ?.operationalDate,
+    ).toBe("2026-09-22");
+    expect(
+      normalizeEpodAssignment({ id: "a1", task_id: "t1", operational_date: "22-09-2026" })
+        ?.operationalDate,
+    ).toBeNull();
+    expect(
+      normalizeEpodAssignment({ id: "a1", task_id: "t1", operationalDate: "2026-09-22" })
+        ?.operationalDate,
+    ).toBe("2026-09-22");
+  });
+
+  it("formatEpodOperationalDate menampilkan tanggal saja tanpa jam", () => {
+    const label = formatEpodOperationalDate("2026-10-03", "2026-10-02T23:34:00.355Z");
+    expect(label).not.toContain(":");
+    expect(label).not.toContain("06.34");
+    expect(label.length).toBeGreaterThan(0);
+    expect(formatEpodOperationalDate(null, "2026-10-02T23:34:00.355Z")).not.toContain(":");
+    expect(formatEpodOperationalDate(null, null)).toBe("–");
   });
 
   it("membaca completed_at bila ada dan null bila belum selesai", () => {

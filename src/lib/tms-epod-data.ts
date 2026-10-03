@@ -19,6 +19,7 @@ import {
   normalizePointTemperatureList,
   type TmsRoutePointTemperature,
 } from "./tms-point-temperature";
+import { slaServiceDate } from "./tms-sla";
 import { isRecordInScope, type ClientScope } from "./tms-tenant-auth";
 
 const ASSIGNMENTS = "tms_epod_assignments";
@@ -106,6 +107,18 @@ async function loadPetugasInfo(
   return info;
 }
 
+/**
+ * Ubah batas filter ISO (mis. `2026-09-27T00:00:00+07:00`) menjadi tanggal
+ * operasional YYYY-MM-DD dalam zona Asia/Jakarta.
+ */
+export function operationalDateBound(value: string | undefined): string | null {
+  if (!value) return null;
+  const viaService = slaServiceDate(value);
+  if (viaService) return viaService;
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+  return match ? match[1] : null;
+}
+
 /** Label tampil role petugas: label baku untuk 4 role operasional, nama jabatan untuk OTHER. */
 export function resolvePetugasRoleLabel(
   role: EpodAssignment["assignedRole"],
@@ -145,8 +158,10 @@ export async function listAssignments(
   }
 
   if (filters.status) query = query.eq("status", filters.status);
-  if (filters.dateFrom) query = query.gte("snapshot_at", filters.dateFrom);
-  if (filters.dateTo) query = query.lte("snapshot_at", filters.dateTo);
+  const fromDate = operationalDateBound(filters.dateFrom);
+  const toDate = operationalDateBound(filters.dateTo);
+  if (fromDate) query = query.gte("operational_date", fromDate);
+  if (toDate) query = query.lte("operational_date", toDate);
   if (filters.search) {
     const term = cleanSearchTerm(filters.search);
     if (term) query = query.or(`task_number.ilike.%${term}%,license_plate.ilike.%${term}%`);
@@ -154,6 +169,7 @@ export async function listAssignments(
 
   const from = (filters.page - 1) * filters.limit;
   const { data, count, error } = await query
+    .order("operational_date", { ascending: false, nullsFirst: false })
     .order("snapshot_at", { ascending: false })
     .range(from, from + filters.limit - 1);
 
@@ -441,12 +457,14 @@ export async function countAssignmentsByLifecycle(
     CANCELLED: () => baseQuery().eq("status", "CANCELLED"),
   };
 
+  const countFromDate = operationalDateBound(filters.dateFrom);
+  const countToDate = operationalDateBound(filters.dateTo);
   const results = await Promise.all(
     (Object.keys(bucketQueries) as EpodLifecycleBucket[]).map((bucket) => {
       let query = bucketQueries[bucket]();
       if (clientScope !== "all") query = query.in("client_id", clientScope);
-      if (filters.dateFrom) query = query.gte("snapshot_at", filters.dateFrom);
-      if (filters.dateTo) query = query.lte("snapshot_at", filters.dateTo);
+      if (countFromDate) query = query.gte("operational_date", countFromDate);
+      if (countToDate) query = query.lte("operational_date", countToDate);
       if (term) query = query.or(`task_number.ilike.%${term}%,license_plate.ilike.%${term}%`);
       return query;
     }),

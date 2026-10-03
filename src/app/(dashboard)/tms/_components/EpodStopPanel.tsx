@@ -30,6 +30,7 @@ import { compressFile, formatFileSize } from "@/lib/file-compression";
 import {
   EPOD_PETUGAS_ROLE_LABELS,
   formatDistance,
+  formatEpodOperationalDate,
   haversineMeters,
   TMS_EPOD_COMPRESS_KB,
   TMS_EPOD_GEOFENCE_METERS,
@@ -1217,8 +1218,10 @@ export default function EpodStopPanel({
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
             <CalendarDays className="h-3.5 w-3.5" />
-            <span className="font-semibold text-foreground">Snapshot</span>
-            <span className="tabular-nums">{formatDateTime(assignment.snapshotAt)}</span>
+            <span className="font-semibold text-foreground">Tanggal operasional</span>
+            <span className="tabular-nums">
+              {formatEpodOperationalDate(assignment.operationalDate, assignment.snapshotAt)}
+            </span>
           </span>
           {assignment.status === "COMPLETED" && (
             <Button

@@ -10,6 +10,7 @@ import {
   EPOD_ASSIGNMENT_STATUS_LABEL,
   EPOD_RESULT_LABEL,
   formatDistance,
+  formatEpodOperationalDate,
   type EpodAssignment,
   type EpodAssignmentStatus,
   type EpodDeliveryResult,
@@ -492,6 +493,10 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
       `${assignment.deliveryDoneCount} dari ${assignment.deliveryTotalCount} titik pengantaran`,
     ],
     ["Jumlah Titik", `${stops.length} titik`],
+    [
+      "Tanggal operasional",
+      formatEpodOperationalDate(assignment.operationalDate, assignment.snapshotAt),
+    ],
     ["Snapshot", formatDateTime(assignment.snapshotAt)],
     ["Selesai Loading", formatDateTime(assignment.loadingCompletedAt)],
   ]);

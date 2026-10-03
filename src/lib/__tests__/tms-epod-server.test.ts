@@ -13,7 +13,7 @@ vi.mock("@/lib/supabase-admin", () => ({
 
 import { fetchFleetTaskInstantDetail, fetchFleetTaskInstantList } from "@/lib/mceasy-server";
 import { createAdminClient } from "@/lib/supabase-admin";
-import { syncActiveEpodAssignments } from "@/lib/tms-epod-server";
+import { resolveEpodOperationalDate, syncActiveEpodAssignments } from "@/lib/tms-epod-server";
 
 const fetchListMock = vi.mocked(fetchFleetTaskInstantList);
 const fetchDetailMock = vi.mocked(fetchFleetTaskInstantDetail);
@@ -52,6 +52,7 @@ interface ReadResults {
   stops?: unknown[];
   submissions?: unknown[];
   evidence?: unknown[];
+  occurrences?: unknown[];
 }
 
 /**
@@ -74,7 +75,9 @@ function installAdminMock(options: {
           ? reads.stops ?? []
           : table === "tms_epod_submissions"
             ? reads.submissions ?? []
-            : reads.evidence ?? [];
+            : table === "tms_live_track_task_occurrences"
+              ? reads.occurrences ?? []
+              : reads.evidence ?? [];
     const result = { data, error: null };
     const chain: Record<string, unknown> = {};
     for (const method of ["select", "eq", "in", "lt", "is", "order", "limit", "neq"]) {
@@ -153,6 +156,7 @@ describe("syncActiveEpodAssignments", () => {
     expect(insert.task_id).toBe("t1");
     expect(insert.task_number).toBe("FO-1");
     expect(typeof insert.snapshot_at).toBe("string");
+    expect(insert.operational_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(insert.license_plate).toBe("B 1 XYZ");
 
     const stops = store.upserts.find((entry) => entry.table === "tms_epod_stops");
@@ -202,6 +206,7 @@ describe("syncActiveEpodAssignments", () => {
     expect(update).not.toHaveProperty("snapshot_at");
     expect(update).not.toHaveProperty("task_id");
     expect(update.task_status_raw).toBe("STARTED");
+    expect(update.operational_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(typeof update.last_synced_at).toBe("string");
 
     expect(store.rpcs).toContainEqual({
@@ -233,7 +238,11 @@ describe("syncActiveEpodAssignments", () => {
     expect(store.upserts).toHaveLength(0);
     expect(store.rpcs).toHaveLength(0);
     expect(store.updates).toHaveLength(1);
-    expect(Object.keys(store.updates[0]).sort()).toEqual(["last_synced_at", "task_status_raw"]);
+    expect(Object.keys(store.updates[0]).sort()).toEqual([
+      "last_synced_at",
+      "operational_date",
+      "task_status_raw",
+    ]);
   });
 
   it("merekonsiliasi assignment yang hilang dari Index lewat endpoint Show", async () => {
@@ -311,5 +320,57 @@ describe("syncActiveEpodAssignments", () => {
 
     expect(summary.failures.some((failure) => failure.includes("SCHEDULED"))).toBe(true);
     expect(summary.assignmentsCreated).toBe(1);
+  });
+
+  it("mengutamakan tanggal layanan occurrence untuk operational_date", async () => {
+    const store = captured();
+    installAdminMock({
+      captured: store,
+      reads: {
+        assignments: [],
+        occurrences: [{ task_id: "t1", window_started_at: "2026-09-28T19:30:00Z" }],
+      },
+    });
+
+    const summary = await syncActiveEpodAssignments(Date.parse("2026-10-03T00:00:00Z"));
+
+    expect(summary.assignmentsCreated).toBe(1);
+    expect(store.inserts[0].operational_date).toBe("2026-09-29");
+  });
+
+  it("resolveEpodOperationalDate memakai fallback jadwal lalu snapshot", async () => {
+    const base = {
+      id: "t1",
+      number: "FO-1",
+      statusRaw: "SCHEDULED",
+      statusName: null,
+      statusColor: null,
+      vehicleId: null,
+      licensePlate: null,
+      driverName: null,
+      expectedStartedOn: null,
+      expectedArrivalOn: null,
+      estimatedArrivalOn: null,
+      actualStartedOn: null,
+      actualArrivalOn: null,
+      totalPoint: null,
+      currentPoint: null,
+      currentPointName: null,
+      currentPointStatus: null,
+      trackLink: null,
+      trackId: null,
+      createdOn: null,
+      timeline: [],
+    } as const;
+    expect(
+      resolveEpodOperationalDate(
+        { ...base, expectedStartedOn: "2026-09-28T20:00:00Z", timeline: [] },
+        null,
+        "2026-10-03T00:00:00Z",
+      ),
+    ).toBe("2026-09-29");
+    expect(
+      resolveEpodOperationalDate({ ...base, expectedStartedOn: null, timeline: [] }, null, "2026-10-03T00:00:00Z"),
+    ).toBe("2026-10-03");
   });
 });

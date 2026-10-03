@@ -20,6 +20,7 @@ import { canManageTmsEpod, canViewTmsEpod } from "@/lib/permissions";
 import {
   EPOD_LIFECYCLE_BUCKET_LABEL,
   epodTripStatusLabel,
+  formatEpodOperationalDate,
   normalizeEpodAssignmentList,
   type EpodAssignmentListItem,
   type EpodAssignmentStatus,
@@ -82,13 +83,6 @@ function EpodTripBadge({ taskStatusRaw }: { taskStatusRaw: string | null }) {
 }
 
 const PAGE_SIZE = 15;
-
-function formatDateTime(value: string | null): string {
-  if (!value) return "–";
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return "–";
-  return new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeStyle: "short" }).format(new Date(parsed));
-}
 
 function KpiCard({
   icon: Icon,
@@ -437,7 +431,9 @@ function EpodMonitoringInner({ canManage }: { canManage: boolean }) {
                             </span>
                           )}
                         </span>
-                        <span className="block text-[11px] text-muted-foreground">{formatDateTime(item.snapshotAt)}</span>
+                        <span className="block text-[11px] text-muted-foreground">
+                          {formatEpodOperationalDate(item.operationalDate, item.snapshotAt)}
+                        </span>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 font-semibold tabular-nums text-foreground">
                         {item.licensePlate ?? "–"}

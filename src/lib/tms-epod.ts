@@ -59,6 +59,8 @@ export interface EpodAssignment {
   deliveryDoneCount: number;
   deliveryTotalCount: number;
   snapshotAt: string;
+  /** Tanggal operasional FO (YYYY-MM-DD, zona Asia/Jakarta). */
+  operationalDate: string | null;
   frozenAt: string | null;
   lastSyncedAt: string | null;
   /** Waktu e-POD selesai; null bila status belum COMPLETED. */
@@ -177,6 +179,14 @@ function toAssignedSource(value: unknown): EpodSource | null {
   return normalized === "MOBILE" || normalized === "WEB" ? normalized : null;
 }
 
+function toOperationalDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  const parsed = Date.parse(`${trimmed}T00:00:00+07:00`);
+  return Number.isNaN(parsed) ? null : trimmed;
+}
+
 const ACTOR_TYPES: readonly EpodActorType[] = [
   "WEB_ADMIN",
   "DRIVER",
@@ -267,6 +277,7 @@ export function normalizeEpodAssignment(raw: unknown): EpodAssignment | null {
     deliveryDoneCount: toInt(pick(source, "delivery_done_count", "deliveryDoneCount")),
     deliveryTotalCount: toInt(pick(source, "delivery_total_count", "deliveryTotalCount")),
     snapshotAt: toStr(pick(source, "snapshot_at", "snapshotAt"), 40) ?? new Date(0).toISOString(),
+    operationalDate: toOperationalDate(pick(source, "operational_date", "operationalDate")),
     /** Waktu e-POD selesai (null bila belum COMPLETED). */
     completedAt: toStr(pick(source, "completed_at", "completedAt"), 40),
     frozenAt: toStr(pick(source, "frozen_at", "frozenAt"), 40),
@@ -542,4 +553,36 @@ export function formatDistance(meters: number | null): string {
   if (meters === null || !Number.isFinite(meters)) return "–";
   if (meters < 1000) return `${Math.round(meters)} m`;
   return `${(meters / 1000).toFixed(1)} km`;
+}
+
+/**
+ * Label tanggal operasional FO (tanggal saja, tanpa jam, zona WIB).
+ * Prioritas: `operationalDate` (YYYY-MM-DD), lalu tanggal Jakarta dari
+ * `fallbackSnapshotAt`. Mengembalikan "–" bila keduanya tidak valid.
+ */
+export function formatEpodOperationalDate(
+  operationalDate: string | null | undefined,
+  fallbackSnapshotAt?: string | null,
+): string {
+  const formatJakartaDate = (parsed: number): string | null => {
+    if (Number.isNaN(parsed)) return null;
+    try {
+      return new Intl.DateTimeFormat("id-ID", {
+        dateStyle: "medium",
+        timeZone: "Asia/Jakarta",
+      }).format(new Date(parsed));
+    } catch {
+      return null;
+    }
+  };
+
+  if (typeof operationalDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(operationalDate.trim())) {
+    const label = formatJakartaDate(Date.parse(`${operationalDate.trim()}T00:00:00+07:00`));
+    if (label) return label;
+  }
+  if (typeof fallbackSnapshotAt === "string" && fallbackSnapshotAt.trim() !== "") {
+    const label = formatJakartaDate(Date.parse(fallbackSnapshotAt));
+    if (label) return label;
+  }
+  return "–";
 }

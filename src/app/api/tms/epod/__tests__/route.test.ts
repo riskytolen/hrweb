@@ -142,6 +142,7 @@ describe("GET /api/tms/epod", () => {
           deliveryDoneCount: 0,
           deliveryTotalCount: 3,
           snapshotAt: "2026-09-22T00:00:00Z",
+          operationalDate: "2026-09-22",
           completedAt: null,
           frozenAt: null,
           lastSyncedAt: null,
