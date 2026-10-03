@@ -302,8 +302,8 @@ export default function TripLoggerPage() {
   const [slaState, setSlaState] = useState<SlaStateFilter>("ALL");
   const [slaProfile, setSlaProfile] = useState("");
   const [slaProfiles, setSlaProfiles] = useState<SlaProfileOption[]>([]);
-  // Mode tampilan: "profile" = logger per rute SLA (default), "list" = semua kunjungan.
-  const [mode, setMode] = useState<LoggerMode>("profile");
+  // Mode tampilan: "profile" = logger per rute SLA, "list" = semua kunjungan (default).
+  const [mode, setMode] = useState<LoggerMode>("list");
   const [profileId, setProfileId] = useState("");
   const [profile, setProfile] = useState<ProfileInfoView | null>(null);
   const [profileStops, setProfileStops] = useState<ProfileStopView[]>([]);
