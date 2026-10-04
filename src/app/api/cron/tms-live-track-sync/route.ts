@@ -16,7 +16,7 @@ function secretsMatch(provided: string, expected: string): boolean {
 
 /**
  * Sinkronisasi terjadwal Live Track berkelompok dari McEasy ke Supabase.
- * Dipanggil oleh Supabase Cron setiap 2 menit; bukan endpoint browser.
+ * Dipanggil oleh Supabase Cron setiap 3 menit; bukan endpoint browser.
  */
 export async function POST(request: Request) {
   const expectedSecret = (

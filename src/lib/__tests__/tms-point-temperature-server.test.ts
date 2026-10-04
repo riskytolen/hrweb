@@ -120,4 +120,16 @@ describe("captureActiveRoutePointTemperatures", () => {
     expect(store.upsert).not.toHaveBeenCalled();
     expect(summary).toMatchObject({ snapshotsUpserted: 0, pointsSkipped: 1 });
   });
+
+  it("tidak menjalankan retention delete dari worker (retention pindah ke cron DB harian)", async () => {
+    const now = Date.now();
+    const store = mockStore([{ task_id: "task-1", route_sequence: 2 }]);
+    fetchListMock.mockResolvedValue({ items: [activeTask()], total: 1, page: 1, counts: null });
+    fetchStatusMock.mockResolvedValue(vehicleStatus(now) as never);
+
+    await captureActiveRoutePointTemperatures(now);
+
+    expect(store.remove).not.toHaveBeenCalled();
+    expect(store.lt).not.toHaveBeenCalled();
+  });
 });

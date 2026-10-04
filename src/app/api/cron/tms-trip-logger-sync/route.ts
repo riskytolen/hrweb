@@ -16,7 +16,7 @@ function secretsMatch(provided: string, expected: string): boolean {
 
 /**
  * Sinkronisasi terjadwal Logger Trips dari timeline McEasy ke Supabase.
- * Dipanggil oleh Supabase Cron setiap 2 menit; bukan endpoint browser.
+ * Dipanggil oleh Supabase Cron setiap 5 menit; bukan endpoint browser.
  *
  * Body opsional: { "mode": "backfill", "days": 7, "maxPages": 30 }.
  */

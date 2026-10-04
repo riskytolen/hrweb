@@ -16,7 +16,7 @@ function secretsMatch(provided: string, expected: string): boolean {
 
 /**
  * Sinkronisasi FO aktif ke pool e-POD.
- * Dipanggil oleh Supabase Cron setiap 2 menit; bukan endpoint browser.
+ * Dipanggil oleh Supabase Cron setiap 5 menit; bukan endpoint browser.
  */
 export async function POST(request: Request) {
   // Pakai secret khusus e-POD bila tersedia; jika belum diisi, jatuh ke

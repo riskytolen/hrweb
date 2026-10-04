@@ -126,42 +126,48 @@ export async function syncLiveTrack(now = Date.now(), options: SyncOptions = {})
   const maxReconcile = options.maxReconcile ?? DEFAULT_MAX_RECONCILE;
   let detailFetches = 0;
 
-  // 1. Katalog unit dari McEasy.
+  // 1. Katalog unit dari McEasy via satu RPC (bulk, bukan N+1 upsert).
+  // Baris dideduplikasi di aplikasi (terakhir menang, sama seperti upsert
+  // serial lama); validasi dan failure isolation per kendaraan ada di RPC.
   try {
     const statuses = await fetchMcEasyVehicleStatuses({ withAddress: false });
     summary.vehiclesSeen = statuses.length;
-    const seenIds = new Set<number>();
+    const nowIso = new Date(now).toISOString();
+    const deduped = new Map<
+      number,
+      { mceasy_vehicle_id: number; license_plate: string; license_plate_key: string; vendor_groups: unknown }
+    >();
     for (const status of statuses) {
-      seenIds.add(status.vehicleId);
-      const { error } = await admin.from("tms_live_track_vehicles").upsert(
-        {
-          mceasy_vehicle_id: status.vehicleId,
-          license_plate: status.licensePlate,
-          license_plate_key: normalizeLiveTrackPlateKey(status.licensePlate),
-          vendor_groups: status.vehicleGroups,
-          last_seen_at: new Date(now).toISOString(),
-          last_synced_at: new Date(now).toISOString(),
-          status: "active",
-          updated_at: new Date(now).toISOString(),
-        },
-        { onConflict: "mceasy_vehicle_id" },
-      );
-      if (error) {
-        summary.failures.push(`Katalog unit ${status.vehicleId}: ${error.message}`);
-      } else {
-        summary.vehiclesCataloged += 1;
+      if (!Number.isFinite(status.vehicleId)) {
+        summary.failures.push(`Katalog unit ${String(status.vehicleId)}: mceasy_vehicle_id tidak valid.`);
+        continue;
       }
+      const plate = status.licensePlate?.trim() ? status.licensePlate.toUpperCase() : "";
+      const plateKey = normalizeLiveTrackPlateKey(status.licensePlate);
+      if (!plate || !plateKey) {
+        summary.failures.push(`Katalog unit ${status.vehicleId}: license_plate tidak valid.`);
+        continue;
+      }
+      deduped.set(status.vehicleId, {
+        mceasy_vehicle_id: status.vehicleId,
+        license_plate: plate,
+        license_plate_key: plateKey,
+        vendor_groups: Array.isArray(status.vehicleGroups) ? status.vehicleGroups : [],
+      });
     }
-    // Tandai stale untuk unit katalog yang tidak terlihat.
-    const { data: catalog } = await admin.from("tms_live_track_vehicles").select("mceasy_vehicle_id");
-    const missing = ((Array.isArray(catalog) ? catalog : []) as { mceasy_vehicle_id: number }[])
-      .map((row) => row.mceasy_vehicle_id)
-      .filter((id) => !seenIds.has(id));
-    for (const id of missing) {
-      await admin
-        .from("tms_live_track_vehicles")
-        .update({ status: "stale", last_synced_at: new Date(now).toISOString() })
-        .eq("mceasy_vehicle_id", id);
+    const { data, error } = await admin.rpc("tms_live_track_apply_catalog", {
+      p_vehicles: [...deduped.values()],
+      p_synced_at: nowIso,
+    });
+    if (error) throw new Error(`Terapkan katalog unit: ${error.message}`);
+    const applied = (data ?? {}) as {
+      upserted?: number;
+      stale_marked?: number;
+      failures?: { vehicle_id?: string | number | null; error?: string }[];
+    };
+    summary.vehiclesCataloged = applied.upserted ?? 0;
+    for (const failure of Array.isArray(applied.failures) ? applied.failures : []) {
+      summary.failures.push(`Katalog unit ${failure.vehicle_id ?? "?"}: ${failure.error ?? "gagal"}`);
     }
   } catch (error) {
     summary.failures.push(`Sinkronisasi katalog unit: ${errorMessage(error)}`);

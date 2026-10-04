@@ -16,12 +16,10 @@ import {
   TMS_POINT_CAPTURE_MAX_STARTED_TASKS,
   TMS_POINT_CAPTURE_RADIUS_METERS,
   TMS_POINT_CAPTURE_VEHICLE_FRESHNESS_MS,
-  TMS_POINT_TEMPERATURE_RETENTION_MONTHS,
 } from "./tms-point-temperature";
 
 const TABLE = "tms_route_point_temperatures";
 const VEHICLE_STATUS_BATCH_SIZE = 5;
-const RETENTION_MS = TMS_POINT_TEMPERATURE_RETENTION_MONTHS * 30 * 24 * 60 * 60 * 1000;
 
 export interface RoutePointTemperatureCaptureSummary {
   requestedAt: string;
@@ -229,12 +227,9 @@ export async function captureActiveRoutePointTemperatures(
     }
   }
 
-  const cutoff = new Date(now - RETENTION_MS).toISOString();
-  const { error: purgeError } = await admin.from(TABLE).delete().lt("measured_at", cutoff);
-  if (purgeError) {
-    failures.push(`Gagal membersihkan snapshot lama: ${purgeError.message}`);
-  }
-
+  // Retention dipindahkan ke cron database harian
+  // (purge-tms-point-temperatures) agar worker setiap-menit tidak
+  // mengirim DELETE yang hampir selalu no-op.
   return {
     requestedAt: new Date(now).toISOString(),
     activeTasksFound: total,
