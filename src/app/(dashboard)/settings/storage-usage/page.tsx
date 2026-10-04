@@ -21,8 +21,8 @@ type StorageStats = {
   buckets: BucketStats[];
 };
 
-const DATABASE_QUOTA_BYTES = 500 * 1024 * 1024; // 500 MB (Free plan)
-const STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GB (Free plan)
+const DATABASE_QUOTA_BYTES = 500 * 1024 * 1024; // Kuota paket Free (bukan kuota real-time dari API Supabase)
+const STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024; // Kuota paket Free (bukan kuota real-time dari API Supabase)
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + " GB";
@@ -33,7 +33,11 @@ function formatBytes(bytes: number): string {
 
 function usagePercent(used: number, quota: number): number {
   if (quota <= 0) return 0;
-  return Math.min((used / quota) * 100, 100);
+  return (used / quota) * 100;
+}
+
+function barWidth(pct: number): number {
+  return Math.min(Math.max(pct, 0), 100);
 }
 
 function barColor(pct: number): string {
@@ -64,7 +68,7 @@ function UsageCard({
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">{title}</p>
           <p className="text-2xl font-bold text-slate-900 mt-1">{usedPretty}</p>
-          <p className="text-xs text-slate-400 mt-0.5">dari {quotaPretty}</p>
+          <p className="text-xs text-slate-400 mt-0.5">dari kuota Free {quotaPretty}</p>
         </div>
         <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
           <Icon className="w-5 h-5 text-blue-600" />
@@ -74,7 +78,7 @@ function UsageCard({
         <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
           <div
             className={cn("h-full rounded-full transition-all duration-500", barColor(pct))}
-            style={{ width: `${pct}%` }}
+            style={{ width: `${barWidth(pct)}%` }}
           />
         </div>
         <div className="flex justify-between mt-1.5">
@@ -97,6 +101,11 @@ function BucketIcon({ name }: { name: string }) {
     "recruitment-docs": "bg-orange-100 text-orange-600",
     "ga-vehicle-docs": "bg-cyan-100 text-cyan-600",
     "company-legal-documents": "bg-indigo-100 text-indigo-600",
+    "tms-epod-evidence": "bg-rose-100 text-rose-600",
+    "finance-assets": "bg-teal-100 text-teal-600",
+    "ga-asset-photos": "bg-sky-100 text-sky-600",
+    "ga-vehicle-photos": "bg-lime-100 text-lime-600",
+    "legal-documents": "bg-fuchsia-100 text-fuchsia-600",
   };
   const color = colors[name] || "bg-slate-100 text-slate-600";
   return (
@@ -113,6 +122,11 @@ function bucketLabel(name: string): string {
     "recruitment-docs": "Dokumen Rekrutmen",
     "ga-vehicle-docs": "Dokumen Kendaraan",
     "company-legal-documents": "Legalitas Perusahaan",
+    "tms-epod-evidence": "Bukti e-POD",
+    "finance-assets": "Aset Finance",
+    "ga-asset-photos": "Foto Inventaris Aset",
+    "ga-vehicle-photos": "Foto Kendaraan",
+    "legal-documents": "Dokumen Legal",
   };
   return labels[name] || name;
 }
@@ -123,8 +137,8 @@ export default function StorageUsagePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const fetchStats = async () => {
-    setLoading(true);
+  const fetchStats = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/admin/storage-usage");
@@ -142,7 +156,30 @@ export default function StorageUsagePage() {
   };
 
   useEffect(() => {
-    if (!authLoading && isSuperAdmin) fetchStats();
+    if (authLoading || !isSuperAdmin) return;
+
+    let cancelled = false;
+    fetch("/api/admin/storage-usage")
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Gagal memuat data");
+        }
+        return res.json() as Promise<StorageStats>;
+      })
+      .then((data) => {
+        if (!cancelled) setStats(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Terjadi kesalahan");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [authLoading, isSuperAdmin]);
 
   if (authLoading) {
@@ -176,7 +213,7 @@ export default function StorageUsagePage() {
         icon={HardDrive}
         actions={
           <button
-            onClick={fetchStats}
+            onClick={() => void fetchStats()}
             disabled={loading}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-50"
           >
@@ -206,7 +243,7 @@ export default function StorageUsagePage() {
               title="Database"
               icon={Database}
               usedBytes={stats.database_size_bytes}
-              usedPretty={stats.database_size_pretty}
+              usedPretty={formatBytes(stats.database_size_bytes)}
               quotaBytes={DATABASE_QUOTA_BYTES}
               quotaPretty="500 MB"
             />
@@ -214,7 +251,7 @@ export default function StorageUsagePage() {
               title="Storage"
               icon={HardDrive}
               usedBytes={stats.storage_total_bytes}
-              usedPretty={stats.storage_total_pretty}
+              usedPretty={formatBytes(stats.storage_total_bytes)}
               quotaBytes={STORAGE_QUOTA_BYTES}
               quotaPretty="1 GB"
             />
@@ -223,6 +260,9 @@ export default function StorageUsagePage() {
           <div className="mt-6 bg-white rounded-xl border border-slate-200">
             <div className="px-5 py-4 border-b border-slate-100">
               <h2 className="text-sm font-semibold text-slate-700">Bucket</h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Persentase = kontribusi terhadap kuota Storage 1 GB.
+              </p>
             </div>
             <div className="divide-y divide-slate-100">
               {stats.buckets.map((bucket) => {
@@ -242,11 +282,11 @@ export default function StorageUsagePage() {
                       <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div
                           className={cn("h-full rounded-full", barColor(pct))}
-                          style={{ width: `${pct}%` }}
+                          style={{ width: `${barWidth(pct)}%` }}
                         />
                       </div>
                     </div>
-                    <span className="text-xs text-slate-400 w-10 text-right">{pct.toFixed(0)}%</span>
+                    <span className="text-xs text-slate-400 w-12 text-right">{pct.toFixed(1)}%</span>
                   </div>
                 );
               })}
@@ -255,7 +295,8 @@ export default function StorageUsagePage() {
 
           <div className="mt-4 px-5 py-3 bg-slate-50 rounded-xl">
             <p className="text-xs text-slate-400">
-              Limit berdasarkan plan <strong className="text-slate-500">Free</strong>.
+              Angka pembanding memakai kuota paket <strong className="text-slate-500">Free</strong> (database 500 MB, storage 1 GB),
+              bukan kuota real-time dari API Supabase.
               Upgrade ke <strong className="text-slate-500">Pro</strong> untuk database 8 GB dan storage 100 GB.
             </p>
           </div>

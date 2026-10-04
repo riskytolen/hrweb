@@ -1,6 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
 
+function hasAllPermission(permissions: unknown): boolean {
+  if (Array.isArray(permissions)) return permissions.includes("all");
+  if (typeof permissions === "string") {
+    try {
+      const parsed = JSON.parse(permissions) as unknown;
+      return Array.isArray(parsed) && parsed.includes("all");
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 export async function GET() {
   try {
     const supabase = await createClient();
@@ -18,11 +31,19 @@ export async function GET() {
 
     const { data: profile } = await supabase
       .from("user_profiles")
-      .select("*, roles(id, nama, level)")
+      .select("status, account_type, roles(id, nama, level, permissions, status)")
       .eq("id", user.id)
       .single();
 
-    if (!profile || !profile.roles || profile.roles.level < 100) {
+    const roleRelation = profile?.roles;
+    const role = Array.isArray(roleRelation) ? roleRelation[0] : roleRelation;
+    const isSuperAdmin =
+      profile?.status === "Aktif" &&
+      profile.account_type === "internal" &&
+      role?.status !== "Tidak Aktif" &&
+      ((role?.level ?? 0) >= 100 || hasAllPermission(role?.permissions));
+
+    if (!isSuperAdmin) {
       return NextResponse.json(
         { error: "Unauthorized. Super Admin access required." },
         { status: 403 }
