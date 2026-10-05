@@ -13,13 +13,17 @@ import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import RouteGuard from "@/components/RouteGuard";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
-import type { DbFinanceInvoice, DbFinanceInvoicePayment, DbFinanceClient } from "@/lib/supabase";
+import type { DbFinanceInvoice, DbFinanceInvoicePayment, DbFinanceClient, DbFinanceCompanySettings } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import {
   totalPaid, invoiceStatus, statusColor, generateInvoiceNo, computePpn, PAYMENT_METHODS,
   downloadCsv, fmtDate,
 } from "@/lib/finance";
+import {
+  filterInvoicesByDate, filterPaymentsByDate, summarizeInvoiceCohort, summarizePayments,
+  exportRevenueInvoicesPdf, exportRevenuePaymentsPdf,
+} from "@/lib/finance-revenue-report";
 
 type Tab = "invoices" | "payments" | "clients";
 type InvStatus = "Lunas" | "Sebagian" | "Belum Lunas";
@@ -53,6 +57,12 @@ export default function FinancePendapatanPage() {
   const [ppnDefault, setPpnDefault] = useState(0);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("Semua");
+  const [invoiceFrom, setInvoiceFrom] = useState("");
+  const [invoiceTo, setInvoiceTo] = useState("");
+  const [paymentFrom, setPaymentFrom] = useState("");
+  const [paymentTo, setPaymentTo] = useState("");
+  const [company, setCompany] = useState<DbFinanceCompanySettings | null>(null);
+  const [exporting, setExporting] = useState<null | "invoice-pdf" | "payment-pdf">(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = useCallback((type: "success" | "error", msg: string) => {
@@ -101,12 +111,36 @@ export default function FinancePendapatanPage() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: invData }, { data: payData }, { data: clData }, { data: settingsData }] = await Promise.all([
-        supabase.from("finance_invoices").select("*, client:finance_clients(*)").order("invoice_date", { ascending: false }).order("id", { ascending: false }),
-        supabase.from("finance_invoice_payments").select("*, invoice:finance_invoices(id, invoice_no, total_amount)").order("payment_date", { ascending: false }).order("id", { ascending: false }),
-        supabase.from("finance_clients").select("*").order("company_name", { ascending: true }),
-        supabase.from("finance_company_settings").select("ppn_default").eq("id", 1).maybeSingle(),
+      const PAGE = 1000;
+      async function fetchPaged(table: string, select: string, orders: { col: string; asc: boolean }[]) {
+        const all: Record<string, unknown>[] = [];
+        let offset = 0;
+        for (;;) {
+          let q = (supabase.from(table as never).select(select) as unknown as {
+            order(col: string, opts: { ascending: boolean }): unknown;
+            range(from: number, to: number): Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+          });
+          for (const o of orders) q = q.order(o.col, { ascending: o.asc }) as typeof q;
+          const { data, error } = await q.range(offset, offset + PAGE - 1);
+          if (error) throw error;
+          const rows = (data ?? []) as Record<string, unknown>[];
+          all.push(...rows);
+          if (rows.length < PAGE) break;
+          offset += PAGE;
+          if (offset > 20000) break;
+        }
+        return all;
+      }
+      const [invRaw, payRaw, clRaw, settingsRes] = await Promise.all([
+        fetchPaged("finance_invoices", "*, client:finance_clients(*)", [{ col: "invoice_date", asc: false }, { col: "id", asc: false }]),
+        fetchPaged("finance_invoice_payments", "*, invoice:finance_invoices(id, invoice_no, total_amount)", [{ col: "payment_date", asc: false }, { col: "id", asc: false }]),
+        fetchPaged("finance_clients", "*", [{ col: "company_name", asc: true }]),
+        supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
       ]);
+      const invData = invRaw as unknown as InvoiceRow[];
+      const payData = payRaw as unknown as PaymentRow[];
+      const clData = clRaw as unknown as DbFinanceClient[];
+      const settingsData = settingsRes.data as DbFinanceCompanySettings | null;
       if (invData) {
         const payMap = new Map<number, DbFinanceInvoicePayment[]>();
         (payData ?? []).forEach((p) => {
@@ -114,14 +148,17 @@ export default function FinancePendapatanPage() {
           list.push(p);
           payMap.set(p.invoice_id, list);
         });
-        setInvoices((invData as InvoiceRow[]).map((inv) => {
+        setInvoices(invData.map((inv) => {
           const paid = totalPaid(payMap.get(inv.id) || []);
           return { ...inv, paid, status: invoiceStatus(inv.total_amount, paid), payments: payMap.get(inv.id) || [] };
         }));
       }
-      if (payData) setPayments(payData as PaymentRow[]);
-      if (clData) setClients(clData as DbFinanceClient[]);
-      if (settingsData) setPpnDefault(Number(settingsData.ppn_default) || 0);
+      if (payData) setPayments(payData);
+      if (clData) setClients(clData);
+      if (settingsData) {
+        setPpnDefault(Number(settingsData.ppn_default) || 0);
+        setCompany(settingsData);
+      }
     } catch {
       addToast("error", "Gagal memuat data pendapatan.");
     } finally {
@@ -323,25 +360,58 @@ export default function FinancePendapatanPage() {
     }
   };
 
-  // ─── Filters ───
+  // ─── Filters (tanggal terpisah per tab, search/status hanya untuk tabel+export) ───
+  const invoicePeriodInvoices = useMemo(
+    () => filterInvoicesByDate(invoices, invoiceFrom, invoiceTo),
+    [invoices, invoiceFrom, invoiceTo],
+  );
+  const invoiceCohort = useMemo(
+    () => summarizeInvoiceCohort(invoicePeriodInvoices.map((i) => ({ total_amount: i.total_amount, paid: i.paid ?? 0, status: i.status }))),
+    [invoicePeriodInvoices],
+  );
   const filteredInvoices = useMemo(() => {
-    return invoices.filter((inv) => {
+    return invoicePeriodInvoices.filter((inv) => {
       const s = search.toLowerCase();
       const matchSearch = !s || inv.invoice_no.toLowerCase().includes(s) || (inv.client?.company_name || inv.client?.contact_name || "").toLowerCase().includes(s);
       const matchStatus = filterStatus === "Semua" || inv.status === filterStatus;
       return matchSearch && matchStatus;
     });
-  }, [invoices, search, filterStatus]);
+  }, [invoicePeriodInvoices, search, filterStatus]);
+
+  const paymentPeriodPayments = useMemo(
+    () => filterPaymentsByDate(payments, paymentFrom, paymentTo),
+    [payments, paymentFrom, paymentTo],
+  );
+  const paymentSummary = useMemo(
+    () => summarizePayments(paymentPeriodPayments.map((p) => ({ amount: p.amount, method: p.method }))),
+    [paymentPeriodPayments],
+  );
+  const invoiceClientMap = useMemo(() => {
+    const m = new Map<number, string>();
+    invoices.forEach((inv) => {
+      m.set(inv.id, inv.client ? (inv.client.company_name || inv.client.contact_name) : "—");
+    });
+    return m;
+  }, [invoices]);
 
   const filteredPayments = useMemo(() => {
     const s = search.toLowerCase();
-    return payments.filter((p) => !s || (p.invoice?.invoice_no || "").toLowerCase().includes(s) || (p.notes || "").toLowerCase().includes(s));
-  }, [payments, search]);
+    return paymentPeriodPayments.filter((p) => !s || (p.invoice?.invoice_no || "").toLowerCase().includes(s) || (p.notes || "").toLowerCase().includes(s));
+  }, [paymentPeriodPayments, search]);
 
   const filteredClients = useMemo(() => {
     const s = search.toLowerCase();
     return clients.filter((c) => !s || c.contact_name.toLowerCase().includes(s) || (c.company_name || "").toLowerCase().includes(s) || (c.email || "").toLowerCase().includes(s));
   }, [clients, search]);
+
+  const companyInfo = useMemo(() => ({
+    company_name: company?.company_name || "Perusahaan",
+    address: company?.address ?? null,
+    phone: company?.phone ?? null,
+    email: company?.email ?? null,
+    npwp: company?.npwp ?? null,
+    logo_url: company?.logo_url ?? null,
+  }), [company]);
 
   const exportInvoicesCsv = () => {
     const rows: (string | number | null | undefined)[][] = [
@@ -363,18 +433,63 @@ export default function FinancePendapatanPage() {
     downloadCsv("pendapatan-pembayaran.csv", rows);
   };
 
-  const summary = useMemo(() => {
-    const totalInv = invoices.reduce((s, i) => s + i.total_amount, 0);
-    const totalPaidAll = invoices.reduce((s, i) => s + (i.paid ?? 0), 0);
-    return {
-      totalInv,
-      totalPaidAll,
-      piutang: totalInv - totalPaidAll,
-      lunas: invoices.filter((i) => i.status === "Lunas").length,
-      sebagian: invoices.filter((i) => i.status === "Sebagian").length,
-      belum: invoices.filter((i) => i.status === "Belum Lunas").length,
-    };
-  }, [invoices]);
+  const exportInvoicesPdf = async () => {
+    if (filteredInvoices.length === 0) {
+      addToast("error", "Tidak ada invoice pada filter aktif.");
+      return;
+    }
+    setExporting("invoice-pdf");
+    try {
+      const rows = filteredInvoices.map((inv) => ({
+        invoice_no: inv.invoice_no,
+        invoice_date: inv.invoice_date,
+        due_date: inv.due_date,
+        clientName: inv.client ? (inv.client.company_name || inv.client.contact_name) : "—",
+        description: inv.description,
+        subtotal: inv.subtotal,
+        ppn_percent: Number(inv.ppn_percent),
+        ppn_amount: inv.ppn_amount,
+        total_amount: inv.total_amount,
+        paid: inv.paid ?? 0,
+        remaining: inv.total_amount - (inv.paid ?? 0),
+        status: inv.status || "Belum Lunas",
+      }));
+      const summary = summarizeInvoiceCohort(filteredInvoices.map((i) => ({ total_amount: i.total_amount, paid: i.paid ?? 0, status: i.status })));
+      await exportRevenueInvoicesPdf({ rows, from: invoiceFrom, to: invoiceTo, statusFilter: filterStatus, search, company: companyInfo, summary });
+      setShowExportMenu(false);
+      addToast("success", "PDF Register Invoice diunduh.");
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Gagal membuat PDF invoice.");
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportPaymentsPdf = async () => {
+    if (filteredPayments.length === 0) {
+      addToast("error", "Tidak ada pembayaran pada filter aktif.");
+      return;
+    }
+    setExporting("payment-pdf");
+    try {
+      const rows = filteredPayments.map((p) => ({
+        payment_date: p.payment_date,
+        invoice_no: p.invoice?.invoice_no || `Invoice #${p.invoice_id}`,
+        clientName: invoiceClientMap.get(p.invoice_id) || "—",
+        method: p.method || "—",
+        amount: p.amount,
+        notes: p.notes,
+      }));
+      const summary = summarizePayments(filteredPayments.map((p) => ({ amount: p.amount, method: p.method })));
+      await exportRevenuePaymentsPdf({ rows, from: paymentFrom, to: paymentTo, search, company: companyInfo, summary });
+      setShowExportMenu(false);
+      addToast("success", "PDF Register Pembayaran diunduh.");
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Gagal membuat PDF pembayaran.");
+    } finally {
+      setExporting(null);
+    }
+  };
 
   return (
     <RouteGuard permission="finance">
@@ -389,17 +504,39 @@ export default function FinancePendapatanPage() {
               className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted"
             >
               <FileDown className="w-4 h-4" />
-              Export CSV
+              Export
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-20">
-                <button onClick={() => { exportInvoicesCsv(); setShowExportMenu(false); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
-                  Export Invoices
-                </button>
-                <button onClick={() => { exportPaymentsCsv(); setShowExportMenu(false); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
-                  Export Pembayaran
-                </button>
+              <div className="absolute right-0 top-full mt-2 w-56 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-20">
+                {tab === "payments" ? (
+                  <>
+                    <button onClick={() => { exportPaymentsCsv(); setShowExportMenu(false); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
+                      Export Pembayaran (CSV)
+                    </button>
+                    <button onClick={() => { void exportPaymentsPdf(); }} disabled={exporting === "payment-pdf"} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted disabled:opacity-50">
+                      {exporting === "payment-pdf" ? "Membuat PDF..." : "Export Pembayaran (PDF)"}
+                    </button>
+                  </>
+                ) : tab === "clients" ? (
+                  <>
+                    <button onClick={() => { exportInvoicesCsv(); setShowExportMenu(false); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
+                      Export Invoices (CSV)
+                    </button>
+                    <button onClick={() => { exportPaymentsCsv(); setShowExportMenu(false); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
+                      Export Pembayaran (CSV)
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => { exportInvoicesCsv(); setShowExportMenu(false); }} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
+                      Export Invoices (CSV)
+                    </button>
+                    <button onClick={() => { void exportInvoicesPdf(); }} disabled={exporting === "invoice-pdf"} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted disabled:opacity-50">
+                      {exporting === "invoice-pdf" ? "Membuat PDF..." : "Export Invoices (PDF)"}
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -430,48 +567,88 @@ export default function FinancePendapatanPage() {
         ))}
       </div>
 
-      {/* KPI invoices */}
-      <div className="grid gap-3 sm:gap-4 grid-cols-2 xl:grid-cols-4 mb-4">
-        <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
-          <p className="text-xs font-semibold text-muted-foreground">Total Invoice</p>
-          <p className="text-lg font-bold text-foreground mt-1 tabular-nums">{formatCurrency(summary.totalInv)}</p>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
-          <p className="text-xs font-semibold text-muted-foreground">Terkumpul</p>
-          <p className="text-lg font-bold text-success mt-1 tabular-nums">{formatCurrency(summary.totalPaidAll)}</p>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
-          <p className="text-xs font-semibold text-muted-foreground">Piutang</p>
-          <p className="text-lg font-bold text-warning mt-1 tabular-nums">{formatCurrency(summary.piutang)}</p>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
-          <p className="text-xs font-semibold text-muted-foreground">Status</p>
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            <span className="px-2 py-0.5 rounded-full bg-success-light text-success text-[10px] font-semibold">Lunas {summary.lunas}</span>
-            <span className="px-2 py-0.5 rounded-full bg-warning-light text-warning text-[10px] font-semibold">Sebagian {summary.sebagian}</span>
-            <span className="px-2 py-0.5 rounded-full bg-danger-light text-danger text-[10px] font-semibold">Belum {summary.belum}</span>
+      {/* KPI kontekstual per tab */}
+      {tab === "invoices" && (
+        <div className="grid gap-3 sm:gap-4 grid-cols-2 xl:grid-cols-4 mb-4">
+          <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground">Total Invoice</p>
+            <p className="text-lg font-bold text-foreground mt-1 tabular-nums">{formatCurrency(invoiceCohort.totalInv)}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">{invoiceCohort.count} invoice{(invoiceFrom || invoiceTo) ? " • periode terfilter" : ""}</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground">Terkumpul</p>
+            <p className="text-lg font-bold text-success mt-1 tabular-nums">{formatCurrency(invoiceCohort.totalPaid)}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">Seluruh bayar milik invoice periode</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground">Piutang</p>
+            <p className="text-lg font-bold text-warning mt-1 tabular-nums">{formatCurrency(invoiceCohort.piutang)}</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground">Status</p>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              <span className="px-2 py-0.5 rounded-full bg-success-light text-success text-[10px] font-semibold">Lunas {invoiceCohort.lunas}</span>
+              <span className="px-2 py-0.5 rounded-full bg-warning-light text-warning text-[10px] font-semibold">Sebagian {invoiceCohort.sebagian}</span>
+              <span className="px-2 py-0.5 rounded-full bg-danger-light text-danger text-[10px] font-semibold">Belum {invoiceCohort.belum}</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+      {tab === "payments" && (
+        <div className="grid gap-3 sm:gap-4 grid-cols-2 xl:grid-cols-4 mb-4">
+          <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground">Transaksi</p>
+            <p className="text-lg font-bold text-foreground mt-1 tabular-nums">{paymentSummary.count}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">{(paymentFrom || paymentTo) ? "Periode terfilter" : "Semua periode"}</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground">Total Diterima</p>
+            <p className="text-lg font-bold text-success mt-1 tabular-nums">{formatCurrency(paymentSummary.total)}</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground">Rata-rata</p>
+            <p className="text-lg font-bold text-foreground mt-1 tabular-nums">{formatCurrency(paymentSummary.average)}</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
+            <p className="text-xs font-semibold text-muted-foreground">Metode Dominan</p>
+            <p className="text-lg font-bold text-foreground mt-1">{paymentSummary.dominantMethod}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">{paymentSummary.byMethod.slice(0, 2).map((m) => `${m.method} (${m.count})`).join(" • ") || "—"}</p>
+          </div>
+        </div>
+      )}
 
       {/* ══════════ INVOICES ══════════ */}
       {tab === "invoices" && (
         <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 max-w-sm">
-              <Search className="w-4 h-4 text-muted-foreground" />
-              <input type="text" placeholder="Cari no. invoice atau klien..." value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground/60" />
+          <div className="p-4 border-b border-border flex flex-col gap-3">
+            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 max-w-sm">
+                <Search className="w-4 h-4 text-muted-foreground" />
+                <input type="text" placeholder="Cari no. invoice atau klien..." value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground/60" />
+              </div>
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none">
+                {["Semua", "Lunas", "Sebagian", "Belum Lunas"].map((s) => <option key={s}>{s}</option>)}
+              </select>
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <button onClick={fetchAll} className="p-2 rounded-lg hover:bg-muted text-muted-foreground" title="Refresh"><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></button>
+                {canInput && (
+                  <button onClick={openNewInvoice} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 shadow-sm">
+                    <Plus className="w-4 h-4" /> Buat Invoice
+                  </button>
+                )}
+              </div>
             </div>
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none">
-              {["Semua", "Lunas", "Sebagian", "Belum Lunas"].map((s) => <option key={s}>{s}</option>)}
-            </select>
-            <div className="flex items-center gap-2 sm:ml-auto">
-              <button onClick={fetchAll} className="p-2 rounded-lg hover:bg-muted text-muted-foreground" title="Refresh"><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></button>
-              {canInput && (
-                <button onClick={openNewInvoice} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 shadow-sm">
-                  <Plus className="w-4 h-4" /> Buat Invoice
-                </button>
-              )}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground">Periode invoice:</span>
+              <div className="flex flex-col sm:flex-row gap-2 flex-1">
+                <DatePicker value={invoiceFrom} onChange={setInvoiceFrom} placeholder="Dari tanggal" maxDate={invoiceTo || undefined} className="w-full sm:w-48" />
+                <DatePicker value={invoiceTo} onChange={setInvoiceTo} placeholder="Sampai tanggal" minDate={invoiceFrom || undefined} className="w-full sm:w-48" />
+                {(invoiceFrom || invoiceTo) && (
+                  <button onClick={() => { setInvoiceFrom(""); setInvoiceTo(""); }} className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs font-semibold text-muted-foreground hover:bg-muted">
+                    <X className="w-3.5 h-3.5" /> Reset
+                  </button>
+                )}
+              </div>
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -559,13 +736,27 @@ export default function FinancePendapatanPage() {
       {/* ══════════ PAYMENTS ══════════ */}
       {tab === "payments" && (
         <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 max-w-sm">
-              <Search className="w-4 h-4 text-muted-foreground" />
-              <input type="text" placeholder="Cari no. invoice..." value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground/60" />
+          <div className="p-4 border-b border-border flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 max-w-sm">
+                <Search className="w-4 h-4 text-muted-foreground" />
+                <input type="text" placeholder="Cari no. invoice..." value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground/60" />
+              </div>
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <button onClick={fetchAll} className="p-2 rounded-lg hover:bg-muted text-muted-foreground" title="Refresh"><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></button>
+              </div>
             </div>
-            <div className="flex items-center gap-2 sm:ml-auto">
-              <button onClick={fetchAll} className="p-2 rounded-lg hover:bg-muted text-muted-foreground" title="Refresh"><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></button>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground">Periode pembayaran:</span>
+              <div className="flex flex-col sm:flex-row gap-2 flex-1">
+                <DatePicker value={paymentFrom} onChange={setPaymentFrom} placeholder="Dari tanggal" maxDate={paymentTo || undefined} className="w-full sm:w-48" />
+                <DatePicker value={paymentTo} onChange={setPaymentTo} placeholder="Sampai tanggal" minDate={paymentFrom || undefined} className="w-full sm:w-48" />
+                {(paymentFrom || paymentTo) && (
+                  <button onClick={() => { setPaymentFrom(""); setPaymentTo(""); }} className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs font-semibold text-muted-foreground hover:bg-muted">
+                    <X className="w-3.5 h-3.5" /> Reset
+                  </button>
+                )}
+              </div>
             </div>
           </div>
           <div className="overflow-x-auto">
