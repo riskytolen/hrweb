@@ -415,11 +415,11 @@ export default function FinancePendapatanPage() {
 
   const exportInvoicesCsv = () => {
     const rows: (string | number | null | undefined)[][] = [
-      ["No", "No. Invoice", "Tanggal", "Jatuh Tempo", "Klien", "Subtotal", "PPN %", "PPN", "Total", "Dibayar", "Status", "Deskripsi"],
+      ["No", "No. Invoice", "Tanggal", "Jatuh Tempo", "Klien", "Subtotal", "PPN %", "PPN", "Total", "Dibayar", "Status", "Deskripsi", "Catatan"],
       ...filteredInvoices.map((inv, i) => [
         i + 1, inv.invoice_no, inv.invoice_date, inv.due_date || "",
         inv.client ? (inv.client.company_name || inv.client.contact_name) : "",
-        inv.subtotal, inv.ppn_percent, inv.ppn_amount, inv.total_amount, inv.paid ?? 0, inv.status, inv.description || "",
+        inv.subtotal, inv.ppn_percent, inv.ppn_amount, inv.total_amount, inv.paid ?? 0, inv.status, inv.description || "", inv.notes || "",
       ]),
     ];
     downloadCsv("pendapatan-invoices.csv", rows);
@@ -678,6 +678,7 @@ export default function FinancePendapatanPage() {
                         <td className="px-4 py-3">
                           <p className="font-semibold text-foreground">{inv.invoice_no}</p>
                           <p className="text-[11px] text-muted-foreground">{inv.description || "—"}</p>
+                          {inv.notes && <p className="text-[11px] text-muted-foreground italic break-words">Catatan: {inv.notes}</p>}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {fmtDate(inv.invoice_date)}
