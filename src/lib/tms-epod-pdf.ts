@@ -24,6 +24,7 @@ import {
   indexPointTemperaturesBySequence,
   type TmsRoutePointTemperature,
 } from "./tms-point-temperature";
+import { loadDownscaledLogoDataUrl } from "./pdf-logo";
 
 /** Lebar maksimum sisi foto di dalam PDF (px). */
 const PHOTO_MAX_DIMENSION = 1280;
@@ -209,18 +210,8 @@ export async function exportEpodPdf(taskId: string): Promise<void> {
   const temperatureBySequence = indexPointTemperaturesBySequence(pointTemperatures);
   const taskLabel = assignment.taskNumber ?? assignment.taskId;
 
-  let logo: HTMLImageElement | null = null;
-  try {
-    const image = new Image();
-    image.src = "/jamslogistics.png";
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error("logo"));
-    });
-    logo = image;
-  } catch {
-    logo = null;
-  }
+  // Logo di-downscale agar PDF tidak menggembung (aset sumber beresolusi besar).
+  const logo = await loadDownscaledLogoDataUrl("/jamslogistics.png");
 
   const drawHeader = () => {
     if (logo) {

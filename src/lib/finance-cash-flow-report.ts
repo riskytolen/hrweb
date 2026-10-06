@@ -11,6 +11,8 @@
  *   saldo awal, total periode, maupun saldo akhir.
  */
 
+import { downscaleDataUrl } from "./pdf-logo";
+
 export type CashEntryType = "payment" | "expense" | "adjustment";
 
 export interface CashPaymentInput {
@@ -435,7 +437,9 @@ export async function exportCashFlowPdf(args: {
   const margin = 14;
   const periodLabel = formatCashPeriodLabel(args.from, args.to);
 
-  const logoDataUrl = args.company.logo_url ? await loadImageDataUrl(args.company.logo_url) : null;
+  const rawLogo = args.company.logo_url ? await loadImageDataUrl(args.company.logo_url) : null;
+  // Downscale agar logo besar tidak menggembungkan PDF.
+  const logoDataUrl = rawLogo ? ((await downscaleDataUrl(rawLogo)) ?? rawLogo) : null;
   drawReportHeader(doc, { pageWidth, margin, company: args.company, logoDataUrl, periodLabel });
 
   let y = 42;

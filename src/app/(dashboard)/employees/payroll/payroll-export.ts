@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { loadDownscaledLogoDataUrl } from "@/lib/pdf-logo";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, type PayrollRow } from "./constants";
 
 type PeriodRange = { start: string; end: string; label: string };
@@ -33,7 +34,7 @@ type PdfDoc = {
   setLineWidth: (width: number) => void;
   setPage: (pageNumber: number) => void;
   setTextColor: (...args: number[]) => void;
-  addImage: (imageData: HTMLImageElement, format: string, x: number, y: number, width: number, height: number) => void;
+  addImage: (imageData: string | HTMLImageElement, format: string, x: number, y: number, width: number, height: number) => void;
   line: (x1: number, y1: number, x2: number, y2: number) => void;
   rect: (x: number, y: number, width: number, height: number, style?: string) => void;
   roundedRect: (x: number, y: number, width: number, height: number, rx: number, ry: number, style?: string) => void;
@@ -116,18 +117,11 @@ async function getPayrollCompanyInfo(): Promise<PayrollCompanyInfo> {
 }
 
 async function addLogo(doc: PdfDoc, pageWidth: number, y: number, width: number, height: number): Promise<boolean> {
-  try {
-    const logo = new Image();
-    await new Promise<void>((resolve, reject) => {
-      logo.onload = () => resolve();
-      logo.onerror = () => reject(new Error("Logo gagal dimuat"));
-      logo.src = "/jamslogistics.png";
-    });
-    doc.addImage(logo, "PNG", (pageWidth - width) / 2, y, width, height);
-    return true;
-  } catch {
-    return false;
-  }
+  // Logo di-downscale agar PDF tidak menggembung (aset sumber beresolusi besar).
+  const logo = await loadDownscaledLogoDataUrl("/jamslogistics.png");
+  if (!logo) return false;
+  doc.addImage(logo, "PNG", (pageWidth - width) / 2, y, width, height);
+  return true;
 }
 
 async function addPortraitHeader(doc: PdfDoc, company: PayrollCompanyInfo): Promise<number> {

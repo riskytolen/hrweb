@@ -10,6 +10,8 @@
  * - KPI Pembayaran dihitung dari pembayaran yang payment_date-nya masuk periode.
  */
 
+import { downscaleDataUrl } from "./pdf-logo";
+
 export interface RevenueDateRange {
   from: string;
   to: string;
@@ -414,7 +416,9 @@ export async function exportRevenueInvoicesPdf(args: {
   if (args.search.trim()) filterBits.push(`Cari: ${args.search.trim()}`);
   const filterLine = filterBits.join(" • ");
 
-  const logoDataUrl = args.company.logo_url ? await loadImageDataUrl(args.company.logo_url) : null;
+  const rawLogo = args.company.logo_url ? await loadImageDataUrl(args.company.logo_url) : null;
+  // Downscale agar logo besar tidak menggembungkan PDF.
+  const logoDataUrl = rawLogo ? ((await downscaleDataUrl(rawLogo)) ?? rawLogo) : null;
   drawReportHeader(doc, {
     pageWidth,
     margin,
@@ -531,7 +535,9 @@ export async function exportRevenuePaymentsPdf(args: {
   const periodLabel = formatPeriodLabel(args.from, args.to);
   const filterLine = args.search.trim() ? `Cari: ${args.search.trim()}` : "";
 
-  const logoDataUrl = args.company.logo_url ? await loadImageDataUrl(args.company.logo_url) : null;
+  const rawLogo = args.company.logo_url ? await loadImageDataUrl(args.company.logo_url) : null;
+  // Downscale agar logo besar tidak menggembungkan PDF.
+  const logoDataUrl = rawLogo ? ((await downscaleDataUrl(rawLogo)) ?? rawLogo) : null;
   drawReportHeader(doc, {
     pageWidth,
     margin,

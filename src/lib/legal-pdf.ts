@@ -1,5 +1,6 @@
 import type { DbLegalDocument } from "@/lib/supabase";
 import { supabase } from "@/lib/supabase";
+import { loadDownscaledLogoDataUrl } from "./pdf-logo";
 
 type EmployeeInfo = {
   id?: string;
@@ -117,14 +118,13 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
     }
   };
 
-  // ═══ KOP SURAT (logo di tengah) ═══
+  // ═══ KOP SURAT (logo di tengah, di-downscale agar PDF kecil) ═══
   try {
-    const logoImg = new Image();
-    logoImg.src = "/jamslogistics.png";
-    await new Promise((resolve, reject) => { logoImg.onload = resolve; logoImg.onerror = reject; });
+    const logoDataUrl = await loadDownscaledLogoDataUrl("/jamslogistics.png");
+    if (!logoDataUrl) throw new Error("logo");
     const logoW = 70;
     const logoH = 25;
-    pdf.addImage(logoImg, "PNG", (pageWidth - logoW) / 2, y, logoW, logoH);
+    pdf.addImage(logoDataUrl, "PNG", (pageWidth - logoW) / 2, y, logoW, logoH);
     y += logoH + 4;
   } catch {
     pdf.setFontSize(16);
@@ -334,14 +334,13 @@ export async function generateSP(doc: DbLegalDocument, employee: EmployeeInfo) {
   const { data: settingData } = await supabase.from("legal_settings").select("masa_berlaku_bulan").eq("kode", doc.tingkat_sp).single();
   const masaBerlaku = settingData?.masa_berlaku_bulan || 6;
 
-  // ═══ KOP SURAT (logo komplit di tengah) ═══
+  // ═══ KOP SURAT (logo komplit di tengah, di-downscale agar PDF kecil) ═══
   try {
-    const logoImg = new Image();
-    logoImg.src = "/jamslogistics.png";
-    await new Promise((resolve, reject) => { logoImg.onload = resolve; logoImg.onerror = reject; });
+    const logoDataUrl = await loadDownscaledLogoDataUrl("/jamslogistics.png");
+    if (!logoDataUrl) throw new Error("logo");
     const logoW = 70;
     const logoH = 25;
-    pdf.addImage(logoImg, "PNG", (pageWidth - logoW) / 2, y, logoW, logoH);
+    pdf.addImage(logoDataUrl, "PNG", (pageWidth - logoW) / 2, y, logoW, logoH);
     y += logoH + 4;
   } catch {
     // Fallback text jika logo gagal
@@ -502,12 +501,11 @@ export async function generateSuratPernyataan(
   const fs = 9;
   const lh = 3.8;
 
-  // ═══ KOP SURAT ═══
+  // ═══ KOP SURAT (logo di-downscale agar PDF kecil) ═══
   try {
-    const logoImg = new Image();
-    logoImg.src = "/jamslogistics.png";
-    await new Promise((resolve, reject) => { logoImg.onload = resolve; logoImg.onerror = reject; });
-    pdf.addImage(logoImg, "PNG", (pageWidth - 60) / 2, y, 60, 21);
+    const logoDataUrl = await loadDownscaledLogoDataUrl("/jamslogistics.png");
+    if (!logoDataUrl) throw new Error("logo");
+    pdf.addImage(logoDataUrl, "PNG", (pageWidth - 60) / 2, y, 60, 21);
     y += 24;
   } catch {
     pdf.setFontSize(14);
