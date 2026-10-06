@@ -24,6 +24,13 @@ type CompanyInfo = {
 
 const BULAN_ROMAWI = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
 
+// Override tetap khusus PDF Legal & Administrasi (HRM).
+const LEGAL_PDF_ALAMAT =
+  "Perum Citayem Elok, Kampung Duren Baru Rt. 002/006, Kel. Susukan Kec. Bojong Gede, Kab Bogor, Provinsi Jawa Barat, 16920";
+const LEGAL_PDF_TELP = "+62 857-8000-3034";
+const LEGAL_PDF_PENANDATANGAN_NAMA = "Adi Sujono";
+const LEGAL_PDF_PENANDATANGAN_JABATAN = "HRGA";
+
 async function getCompanyInfo(): Promise<CompanyInfo> {
   const { data } = await supabase.from("company_settings").select("kode, nilai");
   const map: Record<string, string> = {};
@@ -31,8 +38,8 @@ async function getCompanyInfo(): Promise<CompanyInfo> {
   return {
     nama_perusahaan: map.nama_perusahaan || "JAMS LOGISTICS",
     nama_badan_hukum: map.nama_badan_hukum || "CV. JAMI BERKAH TRANSINDO",
-    alamat: map.alamat || "",
-    no_telp: map.no_telp || "",
+    alamat: LEGAL_PDF_ALAMAT,
+    no_telp: LEGAL_PDF_TELP,
     email: map.email || "",
     kota_surat: map.kota_surat || "Jakarta",
     penandatangan_nama: map.penandatangan_nama || "",
@@ -275,25 +282,13 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
 
   y += 25;
   pdf.setFont("helvetica", "normal");
-  pdf.text(`(${company.penandatangan_nama || "________________"})`, colLeft, y, { align: "center" });
+  pdf.text(`(${LEGAL_PDF_PENANDATANGAN_NAMA})`, colLeft, y, { align: "center" });
   pdf.text(`(${employee.nama})`, colRight, y, { align: "center" });
   y += 4;
   pdf.setFontSize(8);
   pdf.setTextColor(100);
-  pdf.text(company.penandatangan_jabatan, colLeft, y, { align: "center" });
+  pdf.text(LEGAL_PDF_PENANDATANGAN_JABATAN, colLeft, y, { align: "center" });
   if (employee.jabatan) pdf.text(employee.jabatan, colRight, y, { align: "center" });
-
-  // Mengetahui
-  pdf.setTextColor(0);
-  pdf.setFontSize(10);
-  y += 10;
-  pdf.setFont("helvetica", "bold");
-  pdf.text("Mengetahui,", pageWidth / 2, y, { align: "center" });
-  y += 5;
-  pdf.setFont("helvetica", "normal");
-  pdf.text(company.mengetahui_jabatan, pageWidth / 2, y, { align: "center" });
-  y += 22;
-  pdf.text(`(${company.mengetahui_nama || "________________"})`, pageWidth / 2, y, { align: "center" });
 
   // ═══ FOOTER ═══
   addFooter();
@@ -445,23 +440,13 @@ export async function generateSP(doc: DbLegalDocument, employee: EmployeeInfo) {
   const colRight = pageWidth - margin - 35;
 
   pdf.setFont("helvetica", "bold");
-  pdf.text(company.penandatangan_jabatan, colLeft, y, { align: "center" });
+  pdf.text(LEGAL_PDF_PENANDATANGAN_JABATAN, colLeft, y, { align: "center" });
   pdf.text("Karyawan", colRight, y, { align: "center" });
 
   y += 22;
   pdf.setFont("helvetica", "normal");
-  pdf.text(`(${company.penandatangan_nama || "________________"})`, colLeft, y, { align: "center" });
+  pdf.text(`(${LEGAL_PDF_PENANDATANGAN_NAMA})`, colLeft, y, { align: "center" });
   pdf.text(`(${employee.nama})`, colRight, y, { align: "center" });
-
-  // Mengetahui
-  y += 12;
-  pdf.setFont("helvetica", "bold");
-  pdf.text("Mengetahui", pageWidth / 2, y, { align: "center" });
-  y += 5;
-  pdf.setFont("helvetica", "normal");
-  pdf.text(company.mengetahui_jabatan, pageWidth / 2, y, { align: "center" });
-  y += 22;
-  pdf.text(`(${company.mengetahui_nama || "________________"})`, pageWidth / 2, y, { align: "center" });
 
   // ═══ FOOTER ═══
   const footerY = pageHeight - 15;
