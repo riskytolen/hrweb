@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  Landmark, Plus, Search, Pencil, Trash2, X, RefreshCw, FileDown,
+  Landmark, Plus, Search, Pencil, Trash2, X, RefreshCw, FileDown, ChevronDown,
   AlertTriangle, ArrowUpRight, ArrowDownRight, Wallet, Scale,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
@@ -13,10 +13,13 @@ import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import RouteGuard from "@/components/RouteGuard";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
-import type { DbFinanceCashAdjustment } from "@/lib/supabase";
+import type { DbFinanceCashAdjustment, DbFinanceCompanySettings } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
-import { buildCashFlow, downloadCsv, fmtDate } from "@/lib/finance";
+import { downloadCsv, fmtDate } from "@/lib/finance";
+import {
+  computeCashFlowPeriod, buildCashFlowFilename, exportCashFlowPdf, formatCashPeriodLabel,
+} from "@/lib/finance-cash-flow-report";
 
 interface Toast { id: number; type: "success" | "error"; msg: string }
 
@@ -30,11 +33,17 @@ export default function FinanceArusKasPage() {
 
   const [loading, setLoading] = useState(true);
   const [initialBalance, setInitialBalance] = useState(0);
-  const [payments, setPayments] = useState<{ payment_date: string; amount: number; method: string | null; invoice_no: string; client_name: string | null }[]>([]);
-  const [expenses, setExpenses] = useState<{ expense_date: string; amount: number; method: string | null; description: string; category_name: string | null }[]>([]);
+  const [payments, setPayments] = useState<{ id: number; payment_date: string; amount: number; method: string | null; invoice_no: string; client_name: string | null }[]>([]);
+  const [expenses, setExpenses] = useState<{ id: number; expense_date: string; amount: number; method: string | null; description: string; category_name: string | null }[]>([]);
   const [adjustments, setAdjustments] = useState<DbFinanceCashAdjustment[]>([]);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("Semua");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [company, setCompany] = useState<DbFinanceCompanySettings | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = useCallback((type: "success" | "error", msg: string) => {
@@ -53,35 +62,64 @@ export default function FinanceArusKasPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; label: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: settingsData }, { data: payData }, { data: expData }, { data: adjData }] = await Promise.all([
-        supabase.from("finance_company_settings").select("initial_cash_balance").eq("id", 1).maybeSingle(),
-        supabase.from("finance_invoice_payments").select("payment_date, amount, method, invoice:finance_invoices(invoice_no, client:finance_clients(contact_name, company_name))").order("payment_date", { ascending: true }),
-        supabase.from("finance_expenses").select("expense_date, amount, method, description, category:finance_expense_categories(name)").order("expense_date", { ascending: true }),
-        supabase.from("finance_cash_adjustments").select("*").order("adjustment_date", { ascending: true }).order("id", { ascending: true }),
+      const PAGE = 1000;
+      async function fetchPaged(table: string, select: string, orders: { col: string; asc: boolean }[]) {
+        const all: Record<string, unknown>[] = [];
+        let offset = 0;
+        for (;;) {
+          let q = (supabase.from(table as never).select(select) as unknown as {
+            order(col: string, opts: { ascending: boolean }): unknown;
+            range(from: number, to: number): Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+          });
+          for (const o of orders) q = q.order(o.col, { ascending: o.asc }) as typeof q;
+          const { data, error } = await q.range(offset, offset + PAGE - 1);
+          if (error) throw error;
+          const rows = (data ?? []) as Record<string, unknown>[];
+          all.push(...rows);
+          if (rows.length < PAGE) break;
+          offset += PAGE;
+          if (offset > 20000) break;
+        }
+        return all;
+      }
+      const [settingsRes, payRaw, expRaw, adjRaw] = await Promise.all([
+        supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
+        fetchPaged("finance_invoice_payments", "id, payment_date, amount, method, invoice:finance_invoices(invoice_no, client:finance_clients(contact_name, company_name))", [{ col: "payment_date", asc: true }, { col: "id", asc: true }]),
+        fetchPaged("finance_expenses", "id, expense_date, amount, method, description, category:finance_expense_categories(name)", [{ col: "expense_date", asc: true }, { col: "id", asc: true }]),
+        fetchPaged("finance_cash_adjustments", "*", [{ col: "adjustment_date", asc: true }, { col: "id", asc: true }]),
       ]);
-      if (settingsData) setInitialBalance(Number(settingsData.initial_cash_balance) || 0);
-      if (payData) {
-        setPayments((payData as unknown as { payment_date: string; amount: number; method: string | null; invoice: { invoice_no: string; client: { contact_name: string; company_name: string | null } | null } | null }[]).map((p) => ({
-          payment_date: p.payment_date,
-          amount: p.amount,
-          method: p.method,
-          invoice_no: p.invoice?.invoice_no ?? "Invoice",
-          client_name: p.invoice?.client ? (p.invoice.client.company_name || p.invoice.client.contact_name) : null,
-        })));
+      if (settingsRes.error) throw settingsRes.error;
+      const settingsData = settingsRes.data as DbFinanceCompanySettings | null;
+      if (settingsData) {
+        setInitialBalance(Number(settingsData.initial_cash_balance) || 0);
+        setCompany(settingsData);
       }
-      if (expData) {
-        setExpenses((expData as unknown as { expense_date: string; amount: number; method: string | null; description: string; category: { name: string } | null }[]).map((e) => ({
-          expense_date: e.expense_date,
-          amount: e.amount,
-          method: e.method,
-          description: e.description,
-          category_name: e.category?.name ?? null,
-        })));
-      }
-      if (adjData) setAdjustments(adjData as DbFinanceCashAdjustment[]);
+      setPayments((payRaw as unknown as { id: number; payment_date: string; amount: number; method: string | null; invoice: { invoice_no: string; client: { contact_name: string; company_name: string | null } | null } | null }[]).map((p) => ({
+        id: p.id,
+        payment_date: p.payment_date,
+        amount: p.amount,
+        method: p.method,
+        invoice_no: p.invoice?.invoice_no ?? "Invoice",
+        client_name: p.invoice?.client ? (p.invoice.client.company_name || p.invoice.client.contact_name) : null,
+      })));
+      setExpenses((expRaw as unknown as { id: number; expense_date: string; amount: number; method: string | null; description: string; category: { name: string } | null }[]).map((e) => ({
+        id: e.id,
+        expense_date: e.expense_date,
+        amount: e.amount,
+        method: e.method,
+        description: e.description,
+        category_name: e.category?.name ?? null,
+      })));
+      setAdjustments(adjRaw as unknown as DbFinanceCashAdjustment[]);
     } catch {
       addToast("error", "Gagal memuat data arus kas.");
     } finally {
@@ -93,29 +131,31 @@ export default function FinanceArusKasPage() {
     (async () => { await fetchAll(); })();
   }, [fetchAll]);
 
-  const flow = useMemo(() => buildCashFlow(initialBalance, payments, expenses, adjustments), [initialBalance, payments, expenses, adjustments]);
-
-  const stats = useMemo(() => {
-    const totalIn = flow.reduce((s, e) => s + e.masuk, 0);
-    const totalOut = flow.reduce((s, e) => s + e.keluar, 0);
-    return {
-      totalIn,
-      totalOut,
-      net: totalIn - totalOut,
-      balance: flow.length > 0 ? flow[flow.length - 1].balance : initialBalance,
-      countIn: flow.filter((e) => e.masuk > 0).length,
-      countOut: flow.filter((e) => e.keluar > 0).length,
-    };
-  }, [flow, initialBalance]);
+  // Periode akuntansi: tanggal menentukan saldo awal/akhir; search/jenis hanya filter tampilan.
+  const period = useMemo(
+    () => computeCashFlowPeriod(initialBalance, payments, expenses, adjustments, dateFrom, dateTo),
+    [initialBalance, payments, expenses, adjustments, dateFrom, dateTo],
+  );
+  const stats = period.summary;
+  const periodLabel = useMemo(() => formatCashPeriodLabel(dateFrom, dateTo), [dateFrom, dateTo]);
 
   const filtered = useMemo(() => {
     const s = search.toLowerCase();
-    return flow.filter((e) => {
+    return period.entries.filter((e) => {
       const matchSearch = !s || e.label.toLowerCase().includes(s) || e.detail.toLowerCase().includes(s) || (e.method || "").toLowerCase().includes(s);
       const matchType = filterType === "Semua" || (filterType === "Masuk" ? e.masuk > 0 : filterType === "Keluar" ? e.keluar > 0 : true);
       return matchSearch && matchType;
     });
-  }, [flow, search, filterType]);
+  }, [period, search, filterType]);
+
+  const companyInfo = useMemo(() => ({
+    company_name: company?.company_name || "Perusahaan",
+    address: company?.address ?? null,
+    phone: company?.phone ?? null,
+    email: company?.email ?? null,
+    npwp: company?.npwp ?? null,
+    logo_url: company?.logo_url ?? null,
+  }), [company]);
 
   const openNew = () => {
     setEditing(null);
@@ -177,11 +217,37 @@ export default function FinanceArusKasPage() {
   };
 
   const exportCsv = () => {
+    const shownIn = filtered.reduce((s, e) => s + e.masuk, 0);
+    const shownOut = filtered.reduce((s, e) => s + e.keluar, 0);
     const rows: (string | number | null | undefined)[][] = [
+      ["Arus Kas", periodLabel],
+      ["Saldo Awal Periode", stats.openingBalance],
       ["No", "Tanggal", "Jenis", "Keterangan", "Detail", "Metode", "Masuk (Rp)", "Keluar (Rp)", "Saldo (Rp)"],
       ...filtered.map((e, i) => [i + 1, e.tanggal, e.type === "payment" ? "Pembayaran" : e.type === "expense" ? "Pengeluaran" : "Penyesuaian", e.label, e.detail, e.method || "", e.masuk, e.keluar, e.balance]),
+      ["", "", "", `Total (${filtered.length} baris tampil)`, "", "", shownIn, shownOut, ""],
+      ["Saldo Akhir Periode", stats.endingBalance],
     ];
-    downloadCsv("arus-kas.csv", rows);
+    downloadCsv(buildCashFlowFilename("csv", dateFrom, dateTo), rows);
+    setShowExportMenu(false);
+  };
+
+  const exportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      await exportCashFlowPdf({
+        entries: period.entries,
+        summary: stats,
+        from: dateFrom,
+        to: dateTo,
+        company: companyInfo,
+      });
+      setShowExportMenu(false);
+      addToast("success", "PDF Buku Kas diunduh.");
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Gagal membuat PDF arus kas.");
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   return (
@@ -191,10 +257,26 @@ export default function FinanceArusKasPage() {
         description="Mutasi kas masuk & keluar dengan saldo berjalan"
         icon={Landmark}
         actions={
-          <button onClick={exportCsv} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted">
-            <FileDown className="w-4 h-4" />
-            Export CSV
-          </button>
+          <div className="relative" ref={exportRef}>
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted"
+            >
+              <FileDown className="w-4 h-4" />
+              Export
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-20">
+                <button onClick={exportCsv} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
+                  Export CSV
+                </button>
+                <button onClick={() => { void exportPdf(); }} disabled={exportingPdf} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted disabled:opacity-50">
+                  {exportingPdf ? "Membuat PDF..." : "Export PDF"}
+                </button>
+              </div>
+            )}
+          </div>
         }
       />
 
@@ -205,8 +287,8 @@ export default function FinanceArusKasPage() {
             <p className="text-xs font-semibold text-muted-foreground">Saldo Kas</p>
             <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center"><Wallet className="w-4 h-4 text-primary" /></div>
           </div>
-          <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", stats.balance < 0 ? "text-danger" : "text-foreground")}>{formatCurrency(stats.balance)}</p>
-          <p className="text-[11px] text-muted-foreground mt-1">Saldo awal {formatCurrency(initialBalance)}</p>
+          <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", stats.endingBalance < 0 ? "text-danger" : "text-foreground")}>{formatCurrency(stats.endingBalance)}</p>
+          <p className="text-[11px] text-muted-foreground mt-1">Saldo awal periode {formatCurrency(stats.openingBalance)}</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
           <div className="flex items-center justify-between gap-2">
@@ -238,29 +320,50 @@ export default function FinanceArusKasPage() {
 
       {/* Toolbar */}
       <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center gap-3">
-          <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 max-w-sm">
-            <Search className="w-4 h-4 text-muted-foreground" />
-            <input type="text" placeholder="Cari keterangan, invoice, metode..." value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground/60" />
+        <div className="p-4 border-b border-border flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 max-w-sm">
+              <Search className="w-4 h-4 text-muted-foreground" />
+              <input type="text" placeholder="Cari keterangan, invoice, metode..." value={search} onChange={(e) => setSearch(e.target.value)} className="bg-transparent text-sm outline-none w-full text-foreground placeholder:text-muted-foreground/60" />
+            </div>
+            <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none">
+              {["Semua", "Masuk", "Keluar"].map((s) => <option key={s}>{s}</option>)}
+            </select>
+            <div className="flex items-center gap-2 sm:ml-auto">
+              <button onClick={fetchAll} className="p-2 rounded-lg hover:bg-muted text-muted-foreground" title="Refresh"><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></button>
+              {canInput && (
+                <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 shadow-sm">
+                  <Plus className="w-4 h-4" /> Penyesuaian Kas
+                </button>
+              )}
+            </div>
           </div>
-          <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-3 py-2 rounded-xl border border-border bg-muted/30 text-sm text-foreground outline-none">
-            {["Semua", "Masuk", "Keluar"].map((s) => <option key={s}>{s}</option>)}
-          </select>
-          <div className="flex items-center gap-2 sm:ml-auto">
-            <button onClick={fetchAll} className="p-2 rounded-lg hover:bg-muted text-muted-foreground" title="Refresh"><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></button>
-            {canInput && (
-              <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-sm font-semibold hover:opacity-90 shadow-sm">
-                <Plus className="w-4 h-4" /> Penyesuaian Kas
-              </button>
-            )}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground">Periode kas:</span>
+            <div className="flex flex-col sm:flex-row gap-2 flex-1">
+              <DatePicker value={dateFrom} onChange={setDateFrom} placeholder="Dari tanggal" maxDate={dateTo || undefined} className="w-full sm:w-48" />
+              <DatePicker value={dateTo} onChange={setDateTo} placeholder="Sampai tanggal" minDate={dateFrom || undefined} className="w-full sm:w-48" />
+              {(dateFrom || dateTo) && (
+                <button onClick={() => { setDateFrom(""); setDateTo(""); }} className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs font-semibold text-muted-foreground hover:bg-muted">
+                  <X className="w-3.5 h-3.5" /> Reset
+                </button>
+              )}
+            </div>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            Periode: {periodLabel} • Saldo awal {formatCurrency(stats.openingBalance)} • Menampilkan {filtered.length} dari {stats.count} mutasi
+          </p>
         </div>
 
         <div className="overflow-x-auto">
           {loading ? (
             <div className="flex items-center justify-center py-20"><div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" /></div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-20 text-muted-foreground text-sm">Belum ada transaksi arus kas.</div>
+            <div className="text-center py-20 text-muted-foreground text-sm">
+              {stats.count === 0
+                ? `Tidak ada mutasi pada periode ini. Saldo awal ${formatCurrency(stats.openingBalance)}.`
+                : "Tidak ada mutasi yang cocok dengan pencarian/filter."}
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -276,8 +379,8 @@ export default function FinanceArusKasPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((e, i) => (
-                  <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
+                {filtered.map((e) => (
+                  <tr key={e.key} className="border-b border-border/50 hover:bg-muted/20">
                     <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{fmtDate(e.tanggal)}</td>
                     <td className="px-4 py-3">
                       <span className={cn(
