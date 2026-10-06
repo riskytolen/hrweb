@@ -147,6 +147,144 @@ export function daysOverdue(dueDate: string | null): number {
   return diff > 0 ? diff : 0;
 }
 
+/** Tanggal akhir periode Laba Rugi (bulanan/tahunan) dalam format YYYY-MM-DD. */
+export function periodEndDate(viewYear: number, viewMonth: number | null): string {
+  if (viewMonth === null) return `${viewYear}-12-31`;
+  const lastDay = new Date(viewYear, viewMonth + 1, 0).getDate();
+  return `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+}
+
+export interface ReceivableInvoiceInput {
+  id: number;
+  invoice_no: string;
+  invoice_date: string;
+  due_date: string | null;
+  total_amount: number;
+  clientName?: string | null;
+}
+
+export interface ReceivablePaymentInput {
+  invoice_id: number;
+  payment_date: string;
+  amount: number;
+}
+
+export type ReceivableBucket =
+  | "Belum jatuh tempo"
+  | "Terlambat 1–30 hari"
+  | "Terlambat 31–60 hari"
+  | "Terlambat 61–90 hari"
+  | "Terlambat > 90 hari";
+
+export interface ReceivableItem {
+  id: number;
+  invoice_no: string;
+  clientName: string;
+  invoice_date: string;
+  due_date: string | null;
+  total: number;
+  paid: number;
+  remaining: number;
+  overdueDays: number;
+  bucket: ReceivableBucket;
+}
+
+export interface ReceivableSummary {
+  /** Total nilai invoice s.d. akhir periode. */
+  totalInvoiced: number;
+  /** Total pembayaran diterima s.d. akhir periode (hanya untuk invoice dalam periode). */
+  totalPaid: number;
+  /** Sisa piutang pada akhir periode. */
+  totalReceivable: number;
+  /** Jumlah invoice yang masih memiliki sisa > 0. */
+  unpaidCount: number;
+  /** Jumlah invoice belum lunas yang sudah lewat jatuh tempo per tanggal referensi. */
+  overdueCount: number;
+  /** Nilai piutang yang sudah lewat jatuh tempo per tanggal referensi. */
+  overdueAmount: number;
+  /** Invoice belum lunas, diurutkan yang paling terlambat dulu. */
+  items: ReceivableItem[];
+}
+
+/** Kelompok umur piutang berdasarkan hari keterlambatan. */
+export function receivableBucket(overdueDays: number, hasDueDate: boolean): ReceivableBucket {
+  if (!hasDueDate || overdueDays <= 0) return "Belum jatuh tempo";
+  if (overdueDays <= 30) return "Terlambat 1–30 hari";
+  if (overdueDays <= 60) return "Terlambat 31–60 hari";
+  if (overdueDays <= 90) return "Terlambat 61–90 hari";
+  return "Terlambat > 90 hari";
+}
+
+/** Hari keterlambatan terhadap tanggal referensi YYYY-MM-DD (murni, mudah diuji). */
+export function receivableOverdueDays(dueDate: string | null, referenceDate: string): number {
+  if (!dueDate) return 0;
+  const ref = new Date(referenceDate + "T00:00:00").getTime();
+  const due = new Date(dueDate + "T00:00:00").getTime();
+  if (Number.isNaN(ref) || Number.isNaN(due)) return 0;
+  const diff = Math.floor((ref - due) / 86400000);
+  return diff > 0 ? diff : 0;
+}
+
+/**
+ * Ringkas piutang pada akhir periode.
+ * - Invoice dihitung bila invoice_date <= periodEnd.
+ * - Pembayaran dihitung bila payment_date <= periodEnd.
+ * - Keterlambatan dihitung terhadap referenceDate (biasanya hari ini).
+ */
+export function summarizeReceivables(
+  invoices: ReceivableInvoiceInput[],
+  payments: ReceivablePaymentInput[],
+  periodEnd: string,
+  referenceDate: string,
+): ReceivableSummary {
+  const paidByInvoice = new Map<number, number>();
+  for (const p of payments) {
+    if (!p.payment_date || p.payment_date > periodEnd) continue;
+    paidByInvoice.set(p.invoice_id, (paidByInvoice.get(p.invoice_id) ?? 0) + (p.amount || 0));
+  }
+
+  let totalInvoiced = 0;
+  let totalPaid = 0;
+  const items: ReceivableItem[] = [];
+
+  for (const inv of invoices) {
+    if (!inv.invoice_date || inv.invoice_date > periodEnd) continue;
+    const total = inv.total_amount || 0;
+    const paid = paidByInvoice.get(inv.id) ?? 0;
+    const remaining = total - paid;
+    totalInvoiced += total;
+    totalPaid += Math.min(paid, total);
+    if (remaining > 0) {
+      const overdueDays = receivableOverdueDays(inv.due_date, referenceDate);
+      items.push({
+        id: inv.id,
+        invoice_no: inv.invoice_no,
+        clientName: inv.clientName || "—",
+        invoice_date: inv.invoice_date,
+        due_date: inv.due_date,
+        total,
+        paid,
+        remaining,
+        overdueDays,
+        bucket: receivableBucket(overdueDays, !!inv.due_date),
+      });
+    }
+  }
+
+  items.sort((a, b) => b.overdueDays - a.overdueDays || b.remaining - a.remaining);
+
+  const overdueItems = items.filter((i) => i.overdueDays > 0);
+  return {
+    totalInvoiced,
+    totalPaid,
+    totalReceivable: totalInvoiced - totalPaid,
+    unpaidCount: items.length,
+    overdueCount: overdueItems.length,
+    overdueAmount: overdueItems.reduce((s, i) => s + i.remaining, 0),
+    items,
+  };
+}
+
 export function csvEscape(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const s = String(value);

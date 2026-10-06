@@ -1,34 +1,49 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { PieChart, FileDown, TrendingUp, TrendingDown, PiggyBank, Percent, ChevronLeft, ChevronRight, Scale } from "lucide-react";
+import Link from "next/link";
+import { PieChart, FileDown, TrendingUp, TrendingDown, PiggyBank, Percent, ChevronLeft, ChevronRight, Scale, Wallet } from "lucide-react";
 import {
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
 import PageHeader from "@/components/ui/PageHeader";
 import RouteGuard from "@/components/RouteGuard";
-import { cn, formatCurrency, formatNumber } from "@/lib/utils";
+import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
-import { downloadCsv, monthLabel } from "@/lib/finance";
+import { downloadCsv, monthLabel, periodEndDate, summarizeReceivables } from "@/lib/finance";
 
 interface CategoryAgg { name: string; color: string; total: number }
+
+interface LabaRugiInvoice {
+  id: number;
+  invoice_no: string;
+  invoice_date: string;
+  due_date: string | null;
+  total_amount: number;
+  client?: { contact_name: string; company_name: string | null } | null;
+}
+
+interface LabaRugiPayment { invoice_id: number; payment_date: string; amount: number }
 
 export default function FinanceLabaRugiPage() {
   const [loading, setLoading] = useState(true);
   const [viewYear, setViewYear] = useState(new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState<number | null>(new Date().getMonth());
-  const [invoices, setInvoices] = useState<{ invoice_date: string; total_amount: number }[]>([]);
+  const [invoices, setInvoices] = useState<LabaRugiInvoice[]>([]);
+  const [payments, setPayments] = useState<LabaRugiPayment[]>([]);
   const [expenses, setExpenses] = useState<{ expense_date: string; amount: number; category: { name: string; color: string } | null }[]>([]);
   const [toast, setToast] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: invData }, { data: expData }] = await Promise.all([
-        supabase.from("finance_invoices").select("invoice_date, total_amount"),
+      const [{ data: invData }, { data: payData }, { data: expData }] = await Promise.all([
+        supabase.from("finance_invoices").select("id, invoice_no, invoice_date, due_date, total_amount, client:finance_clients(contact_name, company_name)"),
+        supabase.from("finance_invoice_payments").select("invoice_id, payment_date, amount"),
         supabase.from("finance_expenses").select("expense_date, amount, category:finance_expense_categories(name, color)"),
       ]);
-      if (invData) setInvoices(invData as typeof invoices);
+      if (invData) setInvoices(invData as unknown as LabaRugiInvoice[]);
+      if (payData) setPayments(payData as unknown as LabaRugiPayment[]);
       if (expData) setExpenses(expData as unknown as typeof expenses);
     } catch {
       setToast({ type: "error", msg: "Gagal memuat data laba rugi." });
@@ -90,6 +105,23 @@ export default function FinanceLabaRugiPage() {
     return { prefix, pendapatan, pengeluaran, laba, margin, categories, topExpense, expenseShare, countInv: pInvoices.length, countExp: pExpenses.length };
   }, [invoices, expenses, viewYear, viewMonth]);
 
+  // Piutang pada akhir periode: invoice terbit s.d. akhir periode dikurangi
+  // pembayaran yang diterima s.d. akhir periode. Keterlambatan dihitung per hari ini.
+  const periodEnd = useMemo(() => periodEndDate(viewYear, viewMonth), [viewYear, viewMonth]);
+  const receivables = useMemo(() => summarizeReceivables(
+    invoices.map((i) => ({
+      id: i.id,
+      invoice_no: i.invoice_no,
+      invoice_date: i.invoice_date,
+      due_date: i.due_date,
+      total_amount: i.total_amount,
+      clientName: i.client ? (i.client.company_name || i.client.contact_name) : null,
+    })),
+    payments,
+    periodEnd,
+    localDateStr(),
+  ), [invoices, payments, periodEnd]);
+
   const periodLabel = viewMonth === null
     ? `Tahun ${viewYear}`
     : `${monthLabel(viewYear, viewMonth)}`;
@@ -133,6 +165,17 @@ export default function FinanceLabaRugiPage() {
       ["Pengeluaran (expense date)", formatCurrency(period.pengeluaran)],
       ["Laba Bersih", formatCurrency(period.laba)],
       ["Margin Laba", `${period.margin.toFixed(2)}%`],
+      [],
+      [`Piutang (posisi akhir periode ${periodEnd})`],
+      ["Total invoice s.d. akhir periode", formatCurrency(receivables.totalInvoiced)],
+      ["Pembayaran diterima s.d. akhir periode", formatCurrency(receivables.totalPaid)],
+      ["Sisa piutang", formatCurrency(receivables.totalReceivable)],
+      ["Invoice belum lunas", receivables.unpaidCount],
+      ["Piutang jatuh tempo (per hari ini)", `${receivables.overdueCount} invoice • ${formatCurrency(receivables.overdueAmount)}`],
+      [],
+      ["Rincian Piutang Belum Lunas"],
+      ["No", "No. Invoice", "Klien", "Jatuh Tempo", "Total", "Dibayar", "Sisa", "Status"],
+      ...receivables.items.map((r, idx) => [idx + 1, r.invoice_no, r.clientName, r.due_date || "—", r.total, r.paid, r.remaining, r.bucket]),
       [],
       ["Pengeluaran per Kategori"],
       ["Kategori", "Nominal", "Persentase"],
@@ -249,6 +292,84 @@ export default function FinanceLabaRugiPage() {
             </div>
           </div>
 
+          {/* Ringkasan Piutang — posisi akhir periode, tanpa mengubah laba */}
+          <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden mb-4">
+            <div className="flex items-center gap-2 p-4 border-b border-border">
+              <div className="w-8 h-8 rounded-lg bg-warning-light flex items-center justify-center">
+                <Wallet className="w-4 h-4 text-warning" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-foreground">Ringkasan Piutang</h2>
+                <p className="text-[11px] text-muted-foreground">Posisi akhir {periodLabel} • keterlambatan per hari ini</p>
+              </div>
+              <Link href="/finance/pendapatan" className="ml-auto text-xs font-semibold text-primary hover:underline">
+                Lihat semua
+              </Link>
+            </div>
+            <div className="grid gap-3 sm:gap-4 grid-cols-2 xl:grid-cols-4 p-4">
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground">Invoice s.d. akhir periode</p>
+                <p className="text-lg font-bold text-foreground mt-1 tabular-nums">{formatCurrency(receivables.totalInvoiced)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground">Sudah diterima</p>
+                <p className="text-lg font-bold text-success mt-1 tabular-nums">{formatCurrency(receivables.totalPaid)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground">Sisa piutang</p>
+                <p className="text-lg font-bold text-warning mt-1 tabular-nums">{formatCurrency(receivables.totalReceivable)}</p>
+                <p className="text-[11px] text-muted-foreground mt-1">{receivables.unpaidCount} invoice belum lunas</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground">Jatuh tempo</p>
+                <p className="text-lg font-bold text-danger mt-1 tabular-nums">{formatCurrency(receivables.overdueAmount)}</p>
+                <p className="text-[11px] text-muted-foreground mt-1">{receivables.overdueCount} invoice terlambat</p>
+              </div>
+            </div>
+            {receivables.items.length > 0 && (
+              <div className="overflow-x-auto border-t border-border/50">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left px-4 py-2.5 font-semibold text-muted-foreground">Invoice</th>
+                      <th className="text-left px-4 py-2.5 font-semibold text-muted-foreground">Jatuh Tempo</th>
+                      <th className="text-right px-4 py-2.5 font-semibold text-muted-foreground">Sisa</th>
+                      <th className="text-left px-4 py-2.5 font-semibold text-muted-foreground">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receivables.items.slice(0, 8).map((r) => (
+                      <tr key={r.id} className="border-b border-border/50 last:border-0">
+                        <td className="px-4 py-2.5">
+                          <p className="font-semibold text-foreground">{r.invoice_no}</p>
+                          <p className="text-[11px] text-muted-foreground truncate max-w-[220px]">{r.clientName}</p>
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
+                          {r.due_date || "—"}
+                          {r.overdueDays > 0 && <span className="text-danger font-semibold"> • {r.overdueDays} hari</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-warning tabular-nums">{formatCurrency(r.remaining)}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={cn(
+                            "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold",
+                            r.overdueDays > 0 ? "bg-danger-light text-danger" : "bg-warning-light text-warning"
+                          )}>
+                            {r.bucket}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {receivables.items.length > 8 && (
+                  <p className="px-4 py-2.5 text-[11px] text-muted-foreground border-t border-border/50">
+                    Menampilkan 8 dari {receivables.items.length} invoice belum lunas — rincian lengkap dan pencatatan pembayaran ada di halaman Pendapatan.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Pie pengeluaran per kategori */}
             <div className="bg-card rounded-2xl border border-border shadow-sm p-4 sm:p-5">
@@ -322,6 +443,14 @@ export default function FinanceLabaRugiPage() {
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">
                 <span className="text-muted-foreground flex items-center gap-2"><TrendingDown className="w-4 h-4 text-danger" /> Pengeluaran</span>
                 <span className="font-bold text-danger tabular-nums">{formatCurrency(period.pengeluaran)}</span>
+              </div>
+              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Sudah diterima (s.d. akhir periode)</span>
+                <span className="font-bold text-success tabular-nums">{formatCurrency(receivables.totalPaid)}</span>
+              </div>
+              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-warning" /> Masih piutang (belum menjadi kas)</span>
+                <span className="font-bold text-warning tabular-nums">{formatCurrency(receivables.totalReceivable)}</span>
               </div>
               <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", profitTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
                 <span className={cn("flex items-center gap-2", profitTone === "success" ? "text-success" : "text-danger")}>
