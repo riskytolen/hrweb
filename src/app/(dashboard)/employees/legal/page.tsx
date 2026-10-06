@@ -364,7 +364,7 @@ export default function LegalPage() {
       // Fetch data pegawai lengkap dengan jabatan via join
       const { data: emp } = await supabase
         .from("pegawai")
-        .select("id, nama, no_ktp, alamat_domisili, jabatan_id, jabatan:jabatan_id(nama)")
+        .select("id, nama, no_ktp, alamat_domisili, jabatan_id, gaji_pokok, jabatan:jabatan_id(nama)")
         .eq("id", row.employee_id)
         .single();
       const employeeInfo = {
@@ -373,6 +373,7 @@ export default function LegalPage() {
         no_ktp: emp?.no_ktp || undefined,
         alamat: emp?.alamat_domisili || undefined,
         jabatan: (emp?.jabatan as any)?.nama || undefined,
+        gaji_pokok: Number(emp?.gaji_pokok) || 0,
       };
 
       setPdfProgress("Menyiapkan dokumen...");

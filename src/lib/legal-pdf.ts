@@ -7,6 +7,7 @@ type EmployeeInfo = {
   no_ktp?: string;
   alamat?: string;
   jabatan?: string;
+  gaji_pokok?: number;
 };
 
 type CompanyInfo = {
@@ -56,6 +57,15 @@ function formatTanggalPanjang(d: string): string {
 function formatTanggalShort(d: string): string {
   const dt = new Date(d + "T00:00:00");
   return `${String(dt.getDate()).padStart(2, "0")} ${["JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"][dt.getMonth()]} ${dt.getFullYear()}`;
+}
+
+function formatRupiah(n: number): string {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(n || 0);
 }
 
 /**
@@ -241,7 +251,11 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
 
   // ═══ PASAL 3 ═══
   addSectionTitle("Pasal 3 – Hak dan Kewajiban");
-  addParagraph("1. PIHAK KEDUA berhak menerima upah/gaji sesuai dengan ketentuan yang berlaku di perusahaan.");
+  if (employee.gaji_pokok && employee.gaji_pokok > 0) {
+    addParagraph(`1. PIHAK KEDUA berhak menerima upah/gaji pokok sebesar ${formatRupiah(employee.gaji_pokok)} per bulan, sesuai ketentuan penggajian yang berlaku di perusahaan.`);
+  } else {
+    addParagraph("1. PIHAK KEDUA berhak menerima upah/gaji sesuai dengan ketentuan yang berlaku di perusahaan.");
+  }
   addParagraph("2. PIHAK KEDUA berhak mendapatkan perlindungan keselamatan dan kesehatan kerja.");
   addParagraph("3. PIHAK KEDUA wajib mematuhi seluruh peraturan perusahaan dan tata tertib yang berlaku.");
   addParagraph("4. PIHAK KEDUA wajib menjaga kerahasiaan seluruh informasi perusahaan.");
