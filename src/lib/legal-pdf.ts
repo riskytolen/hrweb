@@ -109,12 +109,22 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
     pdf.text(`Hp : ${company.no_telp} | Email : ${company.email}`, margin, fy + 3.5);
   };
 
+  // Helper: kembalikan style body normal (hitam) setelah footer/page baru.
+  // jsPDF mempertahankan text color/font antar halaman, jadi tanpa reset
+  // isi halaman 2 akan ikut abu-abu dan kecil seperti footer.
+  const resetBodyStyle = () => {
+    pdf.setTextColor(0);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+  };
+
   // Helper: check page break
   const checkPage = (needed: number) => {
     if (y > pageHeight - needed) {
       addFooter();
       pdf.addPage();
       y = 20;
+      resetBodyStyle();
     }
   };
 
@@ -404,10 +414,16 @@ export async function generateSP(doc: DbLegalDocument, employee: EmployeeInfo) {
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(10);
 
+  // jsPDF mempertahankan text color antar halaman; pastikan halaman baru SP tetap hitam.
+  // Sengaja hanya reset warna (bukan font) agar bullet pelanggaran yang bold tidak jadi normal.
+  const resetPageTextColor = () => {
+    pdf.setTextColor(0);
+  };
+
   const addParagraph = (text: string, indent = 0) => {
     const lines = pdf.splitTextToSize(text, contentWidth - indent);
     for (const line of lines) {
-      if (y > pageHeight - 50) { pdf.addPage(); y = 20; }
+      if (y > pageHeight - 50) { pdf.addPage(); y = 20; resetPageTextColor(); }
       pdf.text(line, margin + indent, y);
       y += 5;
     }
@@ -421,7 +437,7 @@ export async function generateSP(doc: DbLegalDocument, employee: EmployeeInfo) {
   pdf.setFont("helvetica", "bold");
   const pelanggaranLines = (doc.pelanggaran || "INDISIPLINER").split("\n");
   for (const line of pelanggaranLines) {
-    if (y > pageHeight - 50) { pdf.addPage(); y = 20; }
+    if (y > pageHeight - 50) { pdf.addPage(); y = 20; resetPageTextColor(); }
     pdf.text(`•  ${line.trim()}`, margin + 5, y);
     y += 5.5;
   }
@@ -443,7 +459,7 @@ export async function generateSP(doc: DbLegalDocument, employee: EmployeeInfo) {
   addParagraph("Kepada yang bersangkutan harap diperhatikan dan diperbaiki dengan segera.");
 
   // ═══ TANDA TANGAN ═══
-  if (y > pageHeight - 70) { pdf.addPage(); y = 20; }
+  if (y > pageHeight - 70) { pdf.addPage(); y = 20; resetPageTextColor(); }
   y += 8;
   pdf.setFontSize(10);
   pdf.text(`${company.kota_surat}, ${formatTanggalShort(doc.tanggal_terbit)}`, margin, y);
