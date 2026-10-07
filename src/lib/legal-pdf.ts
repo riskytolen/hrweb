@@ -253,6 +253,7 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
   addParagraph("2. Apabila jangka waktu perjanjian ini berakhir dan tidak diperpanjang, maka hubungan kerja antara kedua belah pihak berakhir dengan sendirinya.");
   addParagraph("3. Apabila PIHAK KEDUA memutuskan hubungan kerja secara sepihak atau secara sengaja tidak masuk 3 (tiga) hari berturut-turut tanpa keterangan dan bukti yang jelas, maka PIHAK KEDUA dianggap mangkir dan dianggap mengundurkan diri secara sepihak, dan oleh karena itu PIHAK KEDUA tidak berhak untuk mendapatkan haknya.");
   addParagraph("4. Apabila PIHAK KEDUA terjerumus dalam tindak pidana secara langsung atau tidak langsung, maka PIHAK PERTAMA berhak untuk menonaktifkan status pekerja PIHAK KEDUA. Apabila PIHAK KEDUA terbukti melakukan tindak pidana, maka PIHAK PERTAMA berhak untuk memutus perjanjian ini dan membayar sisa gaji, insentif, atau pembayaran lainnya sesuai dengan ketentuan perusahaan. PIHAK PERTAMA tidak bertanggung jawab atas tindakan pidana yang dilakukan oleh PIHAK KEDUA.");
+  addParagraph("5. Apabila PIHAK KEDUA mengundurkan diri sebelum masa berakhirnya kontrak, maka PIHAK PERTAMA hanya membayarkan sisa gaji pokok yang tersisa.");
 
   // ═══ PASAL 2 ═══
   addSectionTitle("Pasal 2 – Tugas dan Tanggung Jawab");
