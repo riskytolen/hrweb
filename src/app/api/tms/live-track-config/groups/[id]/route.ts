@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase-admin";
+import { stampGroupMembersClient } from "@/lib/tms-group-client";
 import {
   authorizeLiveTrackConfig,
   liveTrackConfigError,
@@ -79,7 +80,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     .select("client_id")
     .eq("id", id)
     .maybeSingle();
-  if ((saved as { client_id?: string | null } | null)?.client_id == null) {
+  let resolvedClientId = (saved as { client_id?: string | null } | null)?.client_id ?? null;
+  if (resolvedClientId == null) {
     const requestedClientId =
       typeof (input as { clientId?: unknown }).clientId === "string"
         ? ((input as { clientId?: unknown }).clientId as string)
@@ -97,6 +99,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         .from("tms_live_track_groups")
         .update({ client_id: clientToStamp, updated_at: new Date().toISOString() })
         .eq("id", id);
+      resolvedClientId = clientToStamp;
+    }
+  }
+  // Unit yang baru ditambahkan ke grup harus ikut terpetakan ke client yang
+  // sama, kalau tidak snapshot/e-POD-nya tak terlihat oleh user client.
+  if (resolvedClientId) {
+    const memberError = await stampGroupMembersClient(admin, id, resolvedClientId, input.members);
+    if (memberError) {
+      return liveTrackConfigError(memberError, 502);
     }
   }
   return liveTrackConfigJson({ data });

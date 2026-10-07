@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase-admin";
+import { stampGroupMembersClient } from "@/lib/tms-group-client";
 import {
   authorizeLiveTrackConfig,
   liveTrackConfigError,
@@ -214,7 +215,8 @@ export async function POST(request: Request) {
 
 /**
  * Cap client_id pada grup + unit anggotanya (hanya yang masih null agar
- * tidak menimpa mapping client lain).
+ * tidak menimpa mapping client lain) serta daftarkan mapping kanonik unit
+ * agar snapshot dan e-POD ikut terpetakan pada sync berikutnya.
  */
 async function stampGroupClient(
   admin: ReturnType<typeof createAdminClient>,
@@ -228,21 +230,5 @@ async function stampGroupClient(
     .eq("id", groupId);
   if (groupError) return `Gagal menandai client kelompok: ${groupError.message}`;
 
-  const mceasyIds = [...new Set(members.map((m) => m.mceasyVehicleId).filter((v) => Number.isFinite(v)))];
-  if (mceasyIds.length > 0) {
-    const { error: vehicleError } = await admin
-      .from("tms_live_track_vehicles")
-      .update({ client_id: clientId, updated_at: new Date().toISOString() })
-      .is("client_id", null)
-      .in("mceasy_vehicle_id", mceasyIds);
-    if (vehicleError) return `Gagal menandai client unit: ${vehicleError.message}`;
-
-    const { error: memberError } = await admin
-      .from("tms_live_track_group_vehicles")
-      .update({ client_id: clientId })
-      .eq("group_id", groupId)
-      .is("client_id", null);
-    if (memberError) return `Gagal menandai client anggota: ${memberError.message}`;
-  }
-  return null;
+  return stampGroupMembersClient(admin, groupId, clientId, members);
 }

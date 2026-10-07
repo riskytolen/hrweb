@@ -224,6 +224,100 @@ export async function stampUnmappedTmsRows(admin: Admin): Promise<TenantStampSum
     // Abaikan; baris tetap UNASSIGNED.
   }
 
+  // Snapshot & e-POD: fallback client dari occurrence terbaru bila mapping
+  // unit tidak mengenalkan kendaraan. Ini mencegah FO yang jelas-jelas masuk
+  // grup client tertentu tampil tanpa label lalu hilang dari Monitoring e-POD
+  // client tersebut walau unitnya belum terdaftar di mapping kanonik.
+  // Dijalankan sebelum cascade agar turunan e-POD ikut tercap dalam siklus sama.
+  try {
+    const { data: unmappedSnaps } = await admin
+      .from("tms_live_track_task_snapshots")
+      .select("task_id")
+      .is("client_id", null)
+      .limit(1000);
+    const snapTaskIds = [
+      ...new Set(
+        ((Array.isArray(unmappedSnaps) ? unmappedSnaps : []) as { task_id: string }[])
+          .map((row) => row.task_id)
+          .filter(Boolean),
+      ),
+    ];
+    const clientByTask = new Map<string, string>();
+    if (snapTaskIds.length > 0) {
+      const { data: taskOccurrences } = await admin
+        .from("tms_live_track_task_occurrences")
+        .select("task_id, client_id, window_started_at")
+        .in("task_id", snapTaskIds)
+        .order("window_started_at", { ascending: false });
+      for (const occurrence of (
+        Array.isArray(taskOccurrences) ? taskOccurrences : []
+      ) as { task_id: string; client_id: string | null }[]) {
+        if (!occurrence || clientByTask.has(occurrence.task_id)) continue;
+        if (typeof occurrence.client_id === "string" && occurrence.client_id) {
+          clientByTask.set(occurrence.task_id, occurrence.client_id);
+        }
+      }
+      const snapsByClient = new Map<string, string[]>();
+      for (const taskId of snapTaskIds) {
+        const clientId = clientByTask.get(taskId);
+        if (!clientId) continue;
+        const list = snapsByClient.get(clientId) ?? [];
+        list.push(taskId);
+        snapsByClient.set(clientId, list);
+      }
+      for (const [clientId, ids] of snapsByClient) {
+        const { error } = await admin
+          .from("tms_live_track_task_snapshots")
+          .update({ client_id: clientId })
+          .in("task_id", ids);
+        if (!error) summary.snapshots += ids.length;
+      }
+    }
+
+    const { data: unmappedEpod } = await admin
+      .from("tms_epod_assignments")
+      .select("id, task_id")
+      .is("client_id", null)
+      .limit(1000);
+    const unmappedEpodRows = (
+      Array.isArray(unmappedEpod) ? unmappedEpod : []
+    ) as { id: string; task_id: string }[];
+    if (unmappedEpodRows.length > 0) {
+      const epodClientByTask = new Map<string, string>(clientByTask);
+      const missingTaskIds = [
+        ...new Set(unmappedEpodRows.map((row) => row.task_id).filter((taskId) => taskId && !epodClientByTask.has(taskId))),
+      ];
+      if (missingTaskIds.length > 0) {
+        const { data: taskSnaps } = await admin
+          .from("tms_live_track_task_snapshots")
+          .select("task_id, client_id")
+          .in("task_id", missingTaskIds);
+        for (const snap of (
+          Array.isArray(taskSnaps) ? taskSnaps : []
+        ) as { task_id: string; client_id: string | null }[]) {
+          if (!snap || epodClientByTask.has(snap.task_id)) continue;
+          if (typeof snap.client_id === "string" && snap.client_id) {
+            epodClientByTask.set(snap.task_id, snap.client_id);
+          }
+        }
+      }
+      const epodByClient = new Map<string, string[]>();
+      for (const row of unmappedEpodRows) {
+        const clientId = epodClientByTask.get(row.task_id);
+        if (!clientId) continue;
+        const list = epodByClient.get(clientId) ?? [];
+        list.push(row.id);
+        epodByClient.set(clientId, list);
+      }
+      for (const [clientId, ids] of epodByClient) {
+        const { error } = await admin.from("tms_epod_assignments").update({ client_id: clientId }).in("id", ids);
+        if (!error) summary.assignments += ids.length;
+      }
+    }
+  } catch {
+    // Abaikan; baris tetap UNASSIGNED.
+  }
+
   // e-POD turunan + membership grup + config events: dari parent.
   const cascades: { table: string; parentTable: string; parentKey: string; summaryKey: keyof TenantStampSummary }[] = [
     { table: "tms_epod_stops", parentTable: "tms_epod_assignments", parentKey: "assignment_id", summaryKey: "stops" },
