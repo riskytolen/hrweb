@@ -102,7 +102,7 @@ export default function FinanceLabaRugiPage() {
     const topExpense = categories[0]?.total || 0;
     const expenseShare = pengeluaran > 0 ? categories.map((c) => ({ ...c, pct: (c.total / pengeluaran) * 100 })) : [];
 
-    return { prefix, pendapatan, pengeluaran, laba, margin, categories, topExpense, expenseShare, countInv: pInvoices.length, countExp: pExpenses.length };
+    return { prefix, pendapatan, pengeluaran, laba, margin, categories, topExpense, expenseShare, countInv: pInvoices.length, countExp: pExpenses.length, invoiceIds: new Set(pInvoices.map((i) => i.id)) };
   }, [invoices, expenses, viewYear, viewMonth]);
 
   // Piutang murni per periode terpilih: hanya invoice yang terbit dalam periode
@@ -112,8 +112,8 @@ export default function FinanceLabaRugiPage() {
   const periodStart = useMemo(() => periodStartDate(viewYear, viewMonth), [viewYear, viewMonth]);
   const periodEnd = useMemo(() => periodEndDate(viewYear, viewMonth), [viewYear, viewMonth]);
   const cashOnHand = useMemo(
-    () => summarizeCashOnHand(payments, expenses, periodStart, periodEnd),
-    [payments, expenses, periodStart, periodEnd]
+    () => summarizeCashOnHand(payments, expenses, periodStart, periodEnd, period.invoiceIds),
+    [payments, expenses, periodStart, periodEnd, period.invoiceIds]
   );
   const receivables = useMemo(() => summarizeReceivables(
     invoices.map((i) => ({
@@ -175,7 +175,7 @@ export default function FinanceLabaRugiPage() {
       ["Margin Laba", `${period.margin.toFixed(2)}%`],
       [],
       ["Laba On Hand (berbasis kas)"],
-      ["Pembayaran benar-benar diterima", formatCurrency(cashOnHand.received)],
+      ["Pembayaran invoice periode yang diterima", formatCurrency(cashOnHand.received)],
       ["Pengeluaran periode", formatCurrency(cashOnHand.expenses)],
       ["Laba On Hand", formatCurrency(cashOnHand.profit)],
       ["Margin On Hand", `${cashOnHand.margin.toFixed(2)}%`],
@@ -303,7 +303,7 @@ export default function FinanceLabaRugiPage() {
               <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", cashOnHand.profit >= 0 ? "text-success" : "text-danger")}>
                 {formatCurrency(cashOnHand.profit)}
               </p>
-              <p className="text-[11px] text-muted-foreground mt-1">Diterima − Pengeluaran</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Diterima invoice periode − Pengeluaran</p>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
@@ -470,7 +470,7 @@ export default function FinanceLabaRugiPage() {
                 <span className="font-bold text-danger tabular-nums">{formatCurrency(period.pengeluaran)}</span>
               </div>
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">
-                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Pembayaran diterima (on hand)</span>
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Pembayaran invoice periode (on hand)</span>
                 <span className="font-bold text-success tabular-nums">{formatCurrency(cashOnHand.received)}</span>
               </div>
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">

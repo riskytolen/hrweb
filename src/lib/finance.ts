@@ -175,15 +175,17 @@ export interface CashOnHandSummary {
   margin: number;
 }
 
-/** Laba berbasis kas: pembayaran benar-benar masuk dikurangi pengeluaran periode. */
+/** Laba berbasis kas: pembayaran invoice periode yang benar-benar masuk dikurangi pengeluaran periode. */
 export function summarizeCashOnHand(
-  payments: { payment_date: string; amount: number }[],
+  payments: { invoice_id?: number; payment_date: string; amount: number }[],
   expenses: { expense_date: string; amount: number }[],
   periodStart: string,
   periodEnd: string,
+  invoiceIds?: Set<number>,
 ): CashOnHandSummary {
   const received = payments
     .filter((p) => p.payment_date >= periodStart && p.payment_date <= periodEnd)
+    .filter((p) => !invoiceIds || (p.invoice_id !== undefined && invoiceIds.has(p.invoice_id)))
     .reduce((s, p) => s + (p.amount || 0), 0);
   const periodExpenses = expenses
     .filter((e) => e.expense_date >= periodStart && e.expense_date <= periodEnd)
