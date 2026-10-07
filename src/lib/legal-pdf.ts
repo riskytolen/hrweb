@@ -250,8 +250,9 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
   // ═══ PASAL 1 ═══
   addSectionTitle("Pasal 1 – Jangka Waktu Perjanjian");
   addParagraph(`1. Perjanjian kerja ini berlaku untuk jangka waktu tertentu, terhitung mulai tanggal ${formatTanggalShort(doc.tanggal_terbit)} sampai dengan tanggal ${formatTanggalShort(doc.tanggal_berakhir || doc.tanggal_terbit)}.`);
-  addParagraph(`2. Perjanjian ini merupakan kontrak ke-${doc.kontrak_ke || 1} (${["satu", "dua", "tiga", "empat", "lima"][((doc.kontrak_ke || 1) - 1)] || doc.kontrak_ke}).`);
-  addParagraph("3. Apabila jangka waktu perjanjian ini berakhir dan tidak diperpanjang, maka hubungan kerja antara kedua belah pihak berakhir dengan sendirinya.");
+  addParagraph("2. Apabila jangka waktu perjanjian ini berakhir dan tidak diperpanjang, maka hubungan kerja antara kedua belah pihak berakhir dengan sendirinya.");
+  addParagraph("3. Apabila PIHAK KEDUA memutuskan hubungan kerja secara sepihak atau secara sengaja tidak masuk 3 (tiga) hari berturut-turut tanpa keterangan dan bukti yang jelas, maka PIHAK KEDUA dianggap mangkir dan dianggap mengundurkan diri secara sepihak, dan oleh karena itu PIHAK KEDUA tidak berhak untuk mendapatkan haknya.");
+  addParagraph("4. Apabila PIHAK KEDUA terjerumus dalam tindak pidana secara langsung atau tidak langsung, maka PIHAK PERTAMA berhak untuk menonaktifkan status pekerja PIHAK KEDUA. Apabila PIHAK KEDUA terbukti melakukan tindak pidana, maka PIHAK PERTAMA berhak untuk memutus perjanjian ini dan membayar sisa gaji, insentif, atau pembayaran lainnya sesuai dengan ketentuan perusahaan. PIHAK PERTAMA tidak bertanggung jawab atas tindakan pidana yang dilakukan oleh PIHAK KEDUA.");
 
   // ═══ PASAL 2 ═══
   addSectionTitle("Pasal 2 – Tugas dan Tanggung Jawab");
@@ -262,11 +263,11 @@ export async function generatePKWT(doc: DbLegalDocument, employee: EmployeeInfo)
   // ═══ PASAL 3 ═══
   addSectionTitle("Pasal 3 – Hak dan Kewajiban");
   if (employee.gaji_pokok && employee.gaji_pokok > 0) {
-    addParagraph(`1. PIHAK KEDUA berhak menerima upah/gaji pokok sebesar ${formatRupiah(employee.gaji_pokok)} per bulan, sesuai ketentuan penggajian yang berlaku di perusahaan.`);
+    addParagraph(`1. PIHAK KEDUA berhak menerima upah/gaji pokok sebesar ${formatRupiah(employee.gaji_pokok)} per bulan di luar insentif pekerjaan, uang makan, uang jalan, uang lembur, atau variabel lainnya sesuai dengan ketentuan penggajian yang berlaku di perusahaan.`);
   } else {
-    addParagraph("1. PIHAK KEDUA berhak menerima upah/gaji sesuai dengan ketentuan yang berlaku di perusahaan.");
+    addParagraph("1. PIHAK KEDUA berhak menerima upah/gaji sesuai dengan ketentuan yang berlaku di perusahaan, di luar insentif pekerjaan, uang makan, uang jalan, uang lembur, atau variabel lainnya sesuai dengan ketentuan penggajian yang berlaku di perusahaan.");
   }
-  addParagraph("2. PIHAK KEDUA berhak mendapatkan perlindungan keselamatan dan kesehatan kerja.");
+  addParagraph("2. PIHAK KEDUA berhak mendapatkan perlindungan keselamatan dan kesehatan kerja sesuai dengan ketentuan pembagian porsi pembayaran yang berlaku di perusahaan.");
   addParagraph("3. PIHAK KEDUA wajib mematuhi seluruh peraturan perusahaan dan tata tertib yang berlaku.");
   addParagraph("4. PIHAK KEDUA wajib menjaga kerahasiaan seluruh informasi perusahaan.");
 
