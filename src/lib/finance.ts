@@ -147,11 +147,25 @@ export function daysOverdue(dueDate: string | null): number {
   return diff > 0 ? diff : 0;
 }
 
+/** Tanggal awal periode Laba Rugi (bulanan/tahunan) dalam format YYYY-MM-DD. */
+export function periodStartDate(viewYear: number, viewMonth: number | null): string {
+  if (viewMonth === null) return `${viewYear}-01-01`;
+  return `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-01`;
+}
+
 /** Tanggal akhir periode Laba Rugi (bulanan/tahunan) dalam format YYYY-MM-DD. */
 export function periodEndDate(viewYear: number, viewMonth: number | null): string {
   if (viewMonth === null) return `${viewYear}-12-31`;
   const lastDay = new Date(viewYear, viewMonth + 1, 0).getDate();
   return `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+}
+
+/**
+ * Tanggal referensi keterlambatan: hari ini untuk periode berjalan,
+ * akhir periode untuk periode lampau.
+ */
+export function receivableReferenceDate(today: string, periodEnd: string): string {
+  return today < periodEnd ? today : periodEnd;
 }
 
 export interface ReceivableInvoiceInput {
@@ -190,11 +204,11 @@ export interface ReceivableItem {
 }
 
 export interface ReceivableSummary {
-  /** Total nilai invoice s.d. akhir periode. */
+  /** Total nilai invoice yang terbit dalam periode. */
   totalInvoiced: number;
-  /** Total pembayaran diterima s.d. akhir periode (hanya untuk invoice dalam periode). */
+  /** Total pembayaran dalam periode untuk invoice periode tersebut. */
   totalPaid: number;
-  /** Sisa piutang pada akhir periode. */
+  /** Sisa piutang periode (invoice periode dikurangi pembayaran periode). */
   totalReceivable: number;
   /** Jumlah invoice yang masih memiliki sisa > 0. */
   unpaidCount: number;
@@ -226,20 +240,22 @@ export function receivableOverdueDays(dueDate: string | null, referenceDate: str
 }
 
 /**
- * Ringkas piutang pada akhir periode.
- * - Invoice dihitung bila invoice_date <= periodEnd.
- * - Pembayaran dihitung bila payment_date <= periodEnd.
- * - Keterlambatan dihitung terhadap referenceDate (biasanya hari ini).
+ * Ringkas piutang murni per periode terpilih (tanpa membawa saldo bulan sebelumnya).
+ * - Invoice dihitung bila periodStart <= invoice_date <= periodEnd.
+ * - Pembayaran dihitung bila periodStart <= payment_date <= periodEnd.
+ * - Keterlambatan dihitung terhadap referenceDate (akhir periode untuk periode
+ *   lampau, hari ini untuk periode berjalan).
  */
 export function summarizeReceivables(
   invoices: ReceivableInvoiceInput[],
   payments: ReceivablePaymentInput[],
+  periodStart: string,
   periodEnd: string,
   referenceDate: string,
 ): ReceivableSummary {
   const paidByInvoice = new Map<number, number>();
   for (const p of payments) {
-    if (!p.payment_date || p.payment_date > periodEnd) continue;
+    if (!p.payment_date || p.payment_date < periodStart || p.payment_date > periodEnd) continue;
     paidByInvoice.set(p.invoice_id, (paidByInvoice.get(p.invoice_id) ?? 0) + (p.amount || 0));
   }
 
@@ -248,7 +264,7 @@ export function summarizeReceivables(
   const items: ReceivableItem[] = [];
 
   for (const inv of invoices) {
-    if (!inv.invoice_date || inv.invoice_date > periodEnd) continue;
+    if (!inv.invoice_date || inv.invoice_date < periodStart || inv.invoice_date > periodEnd) continue;
     const total = inv.total_amount || 0;
     const paid = paidByInvoice.get(inv.id) ?? 0;
     const remaining = total - paid;
