@@ -41,7 +41,7 @@ describe("finance receivables helpers", () => {
     expect(receivableBucket(120, true)).toBe("Terlambat > 90 hari");
   });
 
-  it("piutang = total invoice periode - pembayaran periode, tanpa hitung ganda", () => {
+  it("piutang = total invoice periode - seluruh pembayaran invoice periode, tanpa hitung ganda", () => {
     const summary = summarizeReceivables(
       [
         { id: 1, invoice_no: "INV-1", invoice_date: "2026-10-01", due_date: "2026-10-10", total_amount: 10_000_000, clientName: "A" },
@@ -80,7 +80,7 @@ describe("finance receivables helpers", () => {
     expect(summary.items[0].invoice_no).toBe("INV-OKT");
   });
 
-  it("pembayaran November tidak mengurangi piutang laporan Oktober", () => {
+  it("pembayaran November tetap mengurangi piutang invoice Oktober", () => {
     const summary = summarizeReceivables(
       [{ id: 1, invoice_no: "INV-1", invoice_date: "2026-10-20", due_date: "2026-11-20", total_amount: 3_000_000 }],
       [{ invoice_id: 1, payment_date: "2026-11-02", amount: 3_000_000 }],
@@ -88,11 +88,12 @@ describe("finance receivables helpers", () => {
       "2026-10-31",
       "2026-10-31",
     );
-    expect(summary.totalReceivable).toBe(3_000_000);
-    expect(summary.unpaidCount).toBe(1);
+    expect(summary.totalPaid).toBe(3_000_000);
+    expect(summary.totalReceivable).toBe(0);
+    expect(summary.unpaidCount).toBe(0);
   });
 
-  it("pembayaran sebelum periode tidak mengurangi piutang periode", () => {
+  it("pembayaran sebelum periode tetap mengurangi piutang invoice periode", () => {
     const summary = summarizeReceivables(
       [{ id: 1, invoice_no: "INV-1", invoice_date: "2026-10-05", due_date: "2026-11-05", total_amount: 2_000_000 }],
       [{ invoice_id: 1, payment_date: "2026-09-28", amount: 500_000 }],
@@ -100,8 +101,8 @@ describe("finance receivables helpers", () => {
       "2026-10-31",
       "2026-10-31",
     );
-    expect(summary.totalPaid).toBe(0);
-    expect(summary.totalReceivable).toBe(2_000_000);
+    expect(summary.totalPaid).toBe(500_000);
+    expect(summary.totalReceivable).toBe(1_500_000);
   });
 
   it("invoice lunas tidak masuk daftar piutang", () => {
@@ -132,7 +133,7 @@ describe("finance receivables helpers", () => {
     expect(summary.items[0].invoice_no).toBe("INV-1");
   });
 
-  it("laba on hand hanya memakai pembayaran invoice periode dan pengeluaran periode", () => {
+  it("laba on hand memakai seluruh pembayaran invoice periode dan pengeluaran periode", () => {
     const summary = summarizeCashOnHand(
       [
         { invoice_id: 1, payment_date: "2026-09-30", amount: 1_000_000 },
@@ -149,10 +150,10 @@ describe("finance receivables helpers", () => {
       "2026-10-31",
       new Set([1, 2]),
     );
-    expect(summary.received).toBe(7_000_000);
+    expect(summary.received).toBe(17_000_000);
     expect(summary.expenses).toBe(2_500_000);
-    expect(summary.profit).toBe(4_500_000);
-    expect(summary.margin).toBeCloseTo(64.2857, 4);
+    expect(summary.profit).toBe(14_500_000);
+    expect(summary.margin).toBeCloseTo(85.2941, 4);
   });
 
   it("laba on hand mengabaikan pembayaran invoice luar periode", () => {

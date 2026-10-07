@@ -175,7 +175,7 @@ export interface CashOnHandSummary {
   margin: number;
 }
 
-/** Laba berbasis kas: pembayaran invoice periode yang benar-benar masuk dikurangi pengeluaran periode. */
+/** Laba berbasis kas: pembayaran yang sudah diterima untuk invoice periode dikurangi pengeluaran periode. */
 export function summarizeCashOnHand(
   payments: { invoice_id?: number; payment_date: string; amount: number }[],
   expenses: { expense_date: string; amount: number }[],
@@ -184,8 +184,7 @@ export function summarizeCashOnHand(
   invoiceIds?: Set<number>,
 ): CashOnHandSummary {
   const received = payments
-    .filter((p) => p.payment_date >= periodStart && p.payment_date <= periodEnd)
-    .filter((p) => !invoiceIds || (p.invoice_id !== undefined && invoiceIds.has(p.invoice_id)))
+    .filter((p) => invoiceIds ? p.invoice_id !== undefined && invoiceIds.has(p.invoice_id) : p.payment_date >= periodStart && p.payment_date <= periodEnd)
     .reduce((s, p) => s + (p.amount || 0), 0);
   const periodExpenses = expenses
     .filter((e) => e.expense_date >= periodStart && e.expense_date <= periodEnd)
@@ -237,9 +236,9 @@ export interface ReceivableItem {
 export interface ReceivableSummary {
   /** Total nilai invoice yang terbit dalam periode. */
   totalInvoiced: number;
-  /** Total pembayaran dalam periode untuk invoice periode tersebut. */
+  /** Total seluruh pembayaran milik invoice periode tersebut. */
   totalPaid: number;
-  /** Sisa piutang periode (invoice periode dikurangi pembayaran periode). */
+  /** Sisa piutang periode (invoice periode dikurangi pembayaran milik invoice periode). */
   totalReceivable: number;
   /** Jumlah invoice yang masih memiliki sisa > 0. */
   unpaidCount: number;
@@ -273,7 +272,8 @@ export function receivableOverdueDays(dueDate: string | null, referenceDate: str
 /**
  * Ringkas piutang murni per periode terpilih (tanpa membawa saldo bulan sebelumnya).
  * - Invoice dihitung bila periodStart <= invoice_date <= periodEnd.
- * - Pembayaran dihitung bila periodStart <= payment_date <= periodEnd.
+ * - Pembayaran dihitung dari seluruh pembayaran milik invoice periode tersebut,
+ *   agar konsisten dengan ringkasan Pendapatan.
  * - Keterlambatan dihitung terhadap referenceDate (akhir periode untuk periode
  *   lampau, hari ini untuk periode berjalan).
  */
@@ -284,9 +284,14 @@ export function summarizeReceivables(
   periodEnd: string,
   referenceDate: string,
 ): ReceivableSummary {
+  const periodInvoiceIds = new Set(
+    invoices
+      .filter((inv) => inv.invoice_date && inv.invoice_date >= periodStart && inv.invoice_date <= periodEnd)
+      .map((inv) => inv.id)
+  );
   const paidByInvoice = new Map<number, number>();
   for (const p of payments) {
-    if (!p.payment_date || p.payment_date < periodStart || p.payment_date > periodEnd) continue;
+    if (!periodInvoiceIds.has(p.invoice_id)) continue;
     paidByInvoice.set(p.invoice_id, (paidByInvoice.get(p.invoice_id) ?? 0) + (p.amount || 0));
   }
 

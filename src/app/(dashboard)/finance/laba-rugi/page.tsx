@@ -105,9 +105,9 @@ export default function FinanceLabaRugiPage() {
     return { prefix, pendapatan, pengeluaran, laba, margin, categories, topExpense, expenseShare, countInv: pInvoices.length, countExp: pExpenses.length, invoiceIds: new Set(pInvoices.map((i) => i.id)) };
   }, [invoices, expenses, viewYear, viewMonth]);
 
-  // Piutang murni per periode terpilih: hanya invoice yang terbit dalam periode
-  // dikurangi pembayaran yang diterima dalam periode yang sama. Tanpa membawa
-  // saldo bulan sebelumnya. Keterlambatan memakai akhir periode untuk periode
+  // Piutang murni per periode terpilih: hanya invoice yang terbit dalam periode,
+  // dikurangi seluruh pembayaran milik invoice periode tersebut. Tanpa membawa
+  // invoice bulan sebelumnya. Keterlambatan memakai akhir periode untuk periode
   // lampau dan hari ini untuk periode berjalan.
   const periodStart = useMemo(() => periodStartDate(viewYear, viewMonth), [viewYear, viewMonth]);
   const periodEnd = useMemo(() => periodEndDate(viewYear, viewMonth), [viewYear, viewMonth]);
@@ -182,7 +182,7 @@ export default function FinanceLabaRugiPage() {
       [],
       [`Piutang periode ${periodLabel} (tanpa saldo bulan sebelumnya)`],
       ["Invoice periode ini", formatCurrency(receivables.totalInvoiced)],
-      ["Diterima periode ini", formatCurrency(receivables.totalPaid)],
+      ["Diterima invoice periode", formatCurrency(receivables.totalPaid)],
       ["Piutang periode ini", formatCurrency(receivables.totalReceivable)],
       ["Invoice belum lunas", receivables.unpaidCount],
       ["Piutang jatuh tempo", `${receivables.overdueCount} invoice • ${formatCurrency(receivables.overdueAmount)}`],
@@ -337,7 +337,7 @@ export default function FinanceLabaRugiPage() {
                 <p className="text-lg font-bold text-foreground mt-1 tabular-nums">{formatCurrency(receivables.totalInvoiced)}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-muted-foreground">Diterima periode ini</p>
+                <p className="text-xs font-semibold text-muted-foreground">Diterima invoice periode</p>
                 <p className="text-lg font-bold text-success mt-1 tabular-nums">{formatCurrency(receivables.totalPaid)}</p>
               </div>
               <div>
