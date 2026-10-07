@@ -10,7 +10,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import RouteGuard from "@/components/RouteGuard";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
-import { downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeReceivables } from "@/lib/finance";
+import { downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeCashOnHand, summarizeReceivables } from "@/lib/finance";
 
 interface CategoryAgg { name: string; color: string; total: number }
 
@@ -111,6 +111,10 @@ export default function FinanceLabaRugiPage() {
   // lampau dan hari ini untuk periode berjalan.
   const periodStart = useMemo(() => periodStartDate(viewYear, viewMonth), [viewYear, viewMonth]);
   const periodEnd = useMemo(() => periodEndDate(viewYear, viewMonth), [viewYear, viewMonth]);
+  const cashOnHand = useMemo(
+    () => summarizeCashOnHand(payments, expenses, periodStart, periodEnd),
+    [payments, expenses, periodStart, periodEnd]
+  );
   const receivables = useMemo(() => summarizeReceivables(
     invoices.map((i) => ({
       id: i.id,
@@ -170,6 +174,12 @@ export default function FinanceLabaRugiPage() {
       ["Laba Bersih", formatCurrency(period.laba)],
       ["Margin Laba", `${period.margin.toFixed(2)}%`],
       [],
+      ["Laba On Hand (berbasis kas)"],
+      ["Pembayaran benar-benar diterima", formatCurrency(cashOnHand.received)],
+      ["Pengeluaran periode", formatCurrency(cashOnHand.expenses)],
+      ["Laba On Hand", formatCurrency(cashOnHand.profit)],
+      ["Margin On Hand", `${cashOnHand.margin.toFixed(2)}%`],
+      [],
       [`Piutang periode ${periodLabel} (tanpa saldo bulan sebelumnya)`],
       ["Invoice periode ini", formatCurrency(receivables.totalInvoiced)],
       ["Diterima periode ini", formatCurrency(receivables.totalPaid)],
@@ -193,6 +203,7 @@ export default function FinanceLabaRugiPage() {
   };
 
   const profitTone = period.laba >= 0 ? "success" : "danger";
+  const cashProfitTone = cashOnHand.profit >= 0 ? "success" : "danger";
   const deltaIncome = prevPeriod.pendapatan > 0 ? ((period.pendapatan - prevPeriod.pendapatan) / prevPeriod.pendapatan) * 100 : 0;
   const deltaExpense = prevPeriod.pengeluaran > 0 ? ((period.pengeluaran - prevPeriod.pengeluaran) / prevPeriod.pengeluaran) * 100 : 0;
 
@@ -243,7 +254,7 @@ export default function FinanceLabaRugiPage() {
       ) : (
         <>
           {/* KPI */}
-          <div className="grid gap-3 sm:gap-4 grid-cols-2 xl:grid-cols-4 mb-4">
+          <div className="grid gap-3 sm:gap-4 grid-cols-2 xl:grid-cols-5 mb-4">
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold text-muted-foreground">Pendapatan</p>
@@ -283,6 +294,16 @@ export default function FinanceLabaRugiPage() {
                 {formatCurrency(period.laba)}
               </p>
               <p className="text-[11px] text-muted-foreground mt-1">Pendapatan − Pengeluaran</p>
+            </div>
+            <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-muted-foreground">Laba On Hand</p>
+                <div className="w-8 h-8 rounded-lg bg-success-light flex items-center justify-center"><Wallet className="w-4 h-4 text-success" /></div>
+              </div>
+              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", cashOnHand.profit >= 0 ? "text-success" : "text-danger")}>
+                {formatCurrency(cashOnHand.profit)}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">Diterima − Pengeluaran</p>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
@@ -449,12 +470,20 @@ export default function FinanceLabaRugiPage() {
                 <span className="font-bold text-danger tabular-nums">{formatCurrency(period.pengeluaran)}</span>
               </div>
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">
-                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Diterima periode ini</span>
-                <span className="font-bold text-success tabular-nums">{formatCurrency(receivables.totalPaid)}</span>
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Pembayaran diterima (on hand)</span>
+                <span className="font-bold text-success tabular-nums">{formatCurrency(cashOnHand.received)}</span>
               </div>
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">
                 <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-warning" /> Piutang periode ini (belum menjadi kas)</span>
                 <span className="font-bold text-warning tabular-nums">{formatCurrency(receivables.totalReceivable)}</span>
+              </div>
+              <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", cashProfitTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
+                <span className={cn("flex items-center gap-2", cashProfitTone === "success" ? "text-success" : "text-danger")}>
+                  <Wallet className="w-4 h-4" /> Laba On Hand
+                </span>
+                <span className={cn("tabular-nums text-base", cashProfitTone === "success" ? "text-success" : "text-danger")}>
+                  {formatCurrency(cashOnHand.profit)}
+                </span>
               </div>
               <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", profitTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
                 <span className={cn("flex items-center gap-2", profitTone === "success" ? "text-success" : "text-danger")}>

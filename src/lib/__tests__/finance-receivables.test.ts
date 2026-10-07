@@ -5,6 +5,7 @@ import {
   receivableBucket,
   receivableOverdueDays,
   receivableReferenceDate,
+  summarizeCashOnHand,
   summarizeReceivables,
 } from "../finance";
 
@@ -129,5 +130,27 @@ describe("finance receivables helpers", () => {
     expect(summary.overdueCount).toBe(1);
     expect(summary.overdueAmount).toBe(3_000_000);
     expect(summary.items[0].invoice_no).toBe("INV-1");
+  });
+
+  it("laba on hand hanya memakai pembayaran masuk periode dikurangi pengeluaran periode", () => {
+    const summary = summarizeCashOnHand(
+      [
+        { payment_date: "2026-09-30", amount: 1_000_000 },
+        { payment_date: "2026-10-02", amount: 4_000_000 },
+        { payment_date: "2026-10-20", amount: 3_000_000 },
+        { payment_date: "2026-11-01", amount: 9_000_000 },
+      ],
+      [
+        { expense_date: "2026-10-05", amount: 2_000_000 },
+        { expense_date: "2026-10-10", amount: 500_000 },
+        { expense_date: "2026-11-02", amount: 7_000_000 },
+      ],
+      "2026-10-01",
+      "2026-10-31",
+    );
+    expect(summary.received).toBe(7_000_000);
+    expect(summary.expenses).toBe(2_500_000);
+    expect(summary.profit).toBe(4_500_000);
+    expect(summary.margin).toBeCloseTo(64.2857, 4);
   });
 });

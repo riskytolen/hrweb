@@ -168,6 +168,35 @@ export function receivableReferenceDate(today: string, periodEnd: string): strin
   return today < periodEnd ? today : periodEnd;
 }
 
+export interface CashOnHandSummary {
+  received: number;
+  expenses: number;
+  profit: number;
+  margin: number;
+}
+
+/** Laba berbasis kas: pembayaran benar-benar masuk dikurangi pengeluaran periode. */
+export function summarizeCashOnHand(
+  payments: { payment_date: string; amount: number }[],
+  expenses: { expense_date: string; amount: number }[],
+  periodStart: string,
+  periodEnd: string,
+): CashOnHandSummary {
+  const received = payments
+    .filter((p) => p.payment_date >= periodStart && p.payment_date <= periodEnd)
+    .reduce((s, p) => s + (p.amount || 0), 0);
+  const periodExpenses = expenses
+    .filter((e) => e.expense_date >= periodStart && e.expense_date <= periodEnd)
+    .reduce((s, e) => s + (e.amount || 0), 0);
+  const profit = received - periodExpenses;
+  return {
+    received,
+    expenses: periodExpenses,
+    profit,
+    margin: received > 0 ? (profit / received) * 100 : 0,
+  };
+}
+
 export interface ReceivableInvoiceInput {
   id: number;
   invoice_no: string;
