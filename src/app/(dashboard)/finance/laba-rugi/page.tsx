@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
-import { PieChart, FileDown, TrendingUp, TrendingDown, PiggyBank, Percent, ChevronLeft, ChevronRight, Scale, Wallet } from "lucide-react";
+import { PieChart, FileDown, TrendingUp, TrendingDown, PiggyBank, Percent, ChevronLeft, ChevronRight, ChevronDown, Scale, Wallet } from "lucide-react";
 import {
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
@@ -10,7 +10,9 @@ import PageHeader from "@/components/ui/PageHeader";
 import RouteGuard from "@/components/RouteGuard";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
+import type { DbFinanceCompanySettings } from "@/lib/supabase";
 import { downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeCashOnHand, summarizeReceivables } from "@/lib/finance";
+import { exportProfitLossPdf } from "@/lib/finance-profit-loss-report";
 
 interface CategoryAgg { name: string; color: string; total: number }
 
@@ -32,30 +34,46 @@ export default function FinanceLabaRugiPage() {
   const [invoices, setInvoices] = useState<LabaRugiInvoice[]>([]);
   const [payments, setPayments] = useState<LabaRugiPayment[]>([]);
   const [expenses, setExpenses] = useState<{ expense_date: string; amount: number; category: { name: string; color: string } | null }[]>([]);
+  const [company, setCompany] = useState<DbFinanceCompanySettings | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; msg: string } | null>(null);
+
+  const showToast = useCallback((type: "success" | "error", msg: string) => {
+    setToast({ type, msg });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: invData }, { data: payData }, { data: expData }] = await Promise.all([
+      const [{ data: invData }, { data: payData }, { data: expData }, settingsRes] = await Promise.all([
         supabase.from("finance_invoices").select("id, invoice_no, invoice_date, due_date, total_amount, client:finance_clients(contact_name, company_name)"),
         supabase.from("finance_invoice_payments").select("invoice_id, payment_date, amount"),
         supabase.from("finance_expenses").select("expense_date, amount, category:finance_expense_categories(name, color)"),
+        supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
       ]);
       if (invData) setInvoices(invData as unknown as LabaRugiInvoice[]);
       if (payData) setPayments(payData as unknown as LabaRugiPayment[]);
       if (expData) setExpenses(expData as unknown as typeof expenses);
+      if (settingsRes.data) setCompany(settingsRes.data as DbFinanceCompanySettings);
     } catch {
-      setToast({ type: "error", msg: "Gagal memuat data laba rugi." });
-      setTimeout(() => setToast(null), 3000);
+      showToast("error", "Gagal memuat data laba rugi.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     (async () => { await fetchAll(); })();
   }, [fetchAll]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const yearData = useMemo(() => {
     const map = new Map<string, { pendapatan: number; pengeluaran: number }>();
@@ -165,6 +183,15 @@ export default function FinanceLabaRugiPage() {
     setViewYear(y);
   };
 
+  const companyInfo = useMemo(() => ({
+    company_name: company?.company_name || "Perusahaan",
+    address: company?.address ?? null,
+    phone: company?.phone ?? null,
+    email: company?.email ?? null,
+    npwp: company?.npwp ?? null,
+    logo_url: company?.logo_url ?? null,
+  }), [company]);
+
   const exportCsv = () => {
     const rows: (string | number | null | undefined)[][] = [
       [`Laporan Laba Rugi — ${periodLabel}`],
@@ -200,6 +227,56 @@ export default function FinanceLabaRugiPage() {
       ...invoices.filter((i) => i.invoice_date.startsWith(period.prefix)).map((i, idx) => [idx + 1, i.invoice_date, i.total_amount]),
     ];
     downloadCsv(`laba-rugi-${period.prefix}.csv`, rows);
+    setShowExportMenu(false);
+  };
+
+  const exportPdf = async () => {
+    setExportingPdf(true);
+    try {
+      await exportProfitLossPdf({
+        periodLabel,
+        periodPrefix: period.prefix,
+        pendapatan: period.pendapatan,
+        pengeluaran: period.pengeluaran,
+        laba: period.laba,
+        margin: period.margin,
+        cashReceived: cashOnHand.received,
+        cashExpenses: cashOnHand.expenses,
+        cashProfit: cashOnHand.profit,
+        cashMargin: cashOnHand.margin,
+        totalInvoiced: receivables.totalInvoiced,
+        totalPaid: receivables.totalPaid,
+        totalReceivable: receivables.totalReceivable,
+        unpaidCount: receivables.unpaidCount,
+        overdueCount: receivables.overdueCount,
+        overdueAmount: receivables.overdueAmount,
+        categories: period.expenseShare.map((c) => ({ name: c.name, total: c.total, pct: c.pct })),
+        incomes: invoices
+          .filter((i) => i.invoice_date.startsWith(period.prefix))
+          .map((i) => ({
+            invoice_no: i.invoice_no,
+            invoice_date: i.invoice_date,
+            clientName: i.client ? (i.client.company_name || i.client.contact_name) : "—",
+            total_amount: i.total_amount,
+          })),
+        receivables: receivables.items.map((r) => ({
+          invoice_no: r.invoice_no,
+          clientName: r.clientName,
+          due_date: r.due_date,
+          total: r.total,
+          paid: r.paid,
+          remaining: r.remaining,
+          bucket: r.bucket,
+        })),
+        company: companyInfo,
+      });
+      setShowExportMenu(false);
+      showToast("success", "PDF Laba Rugi diunduh.");
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Gagal membuat PDF laba rugi.");
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   const profitTone = period.laba >= 0 ? "success" : "danger";
@@ -214,10 +291,26 @@ export default function FinanceLabaRugiPage() {
         description="Perbandingan pendapatan dan pengeluaran"
         icon={PieChart}
         actions={
-          <button onClick={exportCsv} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted">
-            <FileDown className="w-4 h-4" />
-            Export CSV
-          </button>
+          <div className="relative" ref={exportRef}>
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted"
+            >
+              <FileDown className="w-4 h-4" />
+              Export
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-20">
+                <button onClick={exportCsv} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
+                  Export CSV
+                </button>
+                <button onClick={() => { void exportPdf(); }} disabled={exportingPdf} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted disabled:opacity-50">
+                  {exportingPdf ? "Membuat PDF..." : "Export PDF"}
+                </button>
+              </div>
+            )}
+          </div>
         }
       />
 
@@ -499,7 +592,7 @@ export default function FinanceLabaRugiPage() {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 right-4 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium text-white bg-danger">
+        <div className={cn("fixed bottom-4 right-4 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium text-white", toast.type === "success" ? "bg-success" : "bg-danger")}>
           {toast.msg}
         </div>
       )}
