@@ -1,5 +1,4 @@
 import { createAdminClient } from "@/lib/supabase-admin";
-import { stampGroupMembersClient } from "@/lib/tms-group-client";
 import {
   authorizeLiveTrackConfig,
   liveTrackConfigError,
@@ -40,19 +39,37 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from("tms_live_track_groups")
+    .select("client_id")
+    .eq("id", id)
+    .maybeSingle();
+  const existingClientId =
+    (existing as { client_id?: string | null } | null)?.client_id ?? null;
   // Kelompok milik client lain tidak boleh diubah.
   if (auth.context.allowedClientIds !== "all") {
-    const { data: existing } = await admin
-      .from("tms_live_track_groups")
-      .select("client_id")
-      .eq("id", id)
-      .maybeSingle();
-    const existingClientId =
-      (existing as { client_id?: string | null } | null)?.client_id ?? null;
     if (!existingClientId || !auth.context.allowedClientIds.includes(existingClientId)) {
       return liveTrackConfigError("Kelompok tidak ditemukan.", 404);
     }
   }
+  // Client pemilik ikut ke RPC; kepemilikan grup yang sudah ada tidak
+  // dipindahkan diam-diam (pindah unit antar client lewat dua kali simpan).
+  const requestedClientId =
+    typeof (input as { clientId?: unknown }).clientId === "string"
+      ? ((input as { clientId?: unknown }).clientId as string)
+      : null;
+  let resolvedClientId: string | null = existingClientId;
+  if (resolvedClientId == null) {
+    if (auth.context.allowedClientIds === "all") {
+      resolvedClientId = requestedClientId;
+    } else if (auth.context.allowedClientIds.length === 1) {
+      resolvedClientId = auth.context.allowedClientIds[0] ?? null;
+    } else if (requestedClientId && auth.context.allowedClientIds.includes(requestedClientId)) {
+      resolvedClientId = requestedClientId;
+    }
+  }
+  // Rekonsiliasi mapping unit + data aktif berjalan di dalam RPC
+  // (satu transaksi dengan penyimpanan kelompok).
   const { data, error } = await admin.rpc("tms_live_track_config_save_group", {
     p_group: {
       id,
@@ -69,46 +86,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     },
     p_members: toRpcMembers(input.members),
     p_actor_user: auth.context.userId,
+    p_client_id: resolvedClientId,
   });
 
   if (error) {
     return liveTrackConfigError(error.message || "Gagal menyimpan kelompok.", 400);
-  }
-  // Cap client bila kelompok belum punya (grup lama pra-tenant).
-  const { data: saved } = await admin
-    .from("tms_live_track_groups")
-    .select("client_id")
-    .eq("id", id)
-    .maybeSingle();
-  let resolvedClientId = (saved as { client_id?: string | null } | null)?.client_id ?? null;
-  if (resolvedClientId == null) {
-    const requestedClientId =
-      typeof (input as { clientId?: unknown }).clientId === "string"
-        ? ((input as { clientId?: unknown }).clientId as string)
-        : null;
-    let clientToStamp: string | null = null;
-    if (auth.context.allowedClientIds === "all") {
-      clientToStamp = requestedClientId;
-    } else if (auth.context.allowedClientIds.length === 1) {
-      clientToStamp = auth.context.allowedClientIds[0] ?? null;
-    } else if (requestedClientId && auth.context.allowedClientIds.includes(requestedClientId)) {
-      clientToStamp = requestedClientId;
-    }
-    if (clientToStamp) {
-      await admin
-        .from("tms_live_track_groups")
-        .update({ client_id: clientToStamp, updated_at: new Date().toISOString() })
-        .eq("id", id);
-      resolvedClientId = clientToStamp;
-    }
-  }
-  // Unit yang baru ditambahkan ke grup harus ikut terpetakan ke client yang
-  // sama, kalau tidak snapshot/e-POD-nya tak terlihat oleh user client.
-  if (resolvedClientId) {
-    const memberError = await stampGroupMembersClient(admin, id, resolvedClientId, input.members);
-    if (memberError) {
-      return liveTrackConfigError(memberError, 502);
-    }
   }
   return liveTrackConfigJson({ data });
 }

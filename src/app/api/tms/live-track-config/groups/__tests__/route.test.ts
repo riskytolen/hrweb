@@ -150,4 +150,26 @@ describe("POST /api/tms/live-track-config/groups", () => {
       }),
     );
   });
+
+  it("forwards the requested client to the RPC for reconciliation", async () => {
+    mockAuth(activeProfile(["tms.live-track-config.manage"]));
+    const rpc = vi.fn(async () => ({ data: { group_id: "g-1", member_count: 1 }, error: null }));
+    createAdminMock.mockReturnValue({ rpc } as never);
+    const response = await POST(postRequest({ ...validBody, clientId: "client-tuku" }));
+    expect(response.status).toBe(201);
+    expect(rpc).toHaveBeenCalledWith(
+      "tms_live_track_config_save_group",
+      expect.objectContaining({ p_client_id: "client-tuku" }),
+    );
+  });
+
+  it("maps RPC conflict errors to 400 with the database message", async () => {
+    mockAuth(activeProfile(["tms.live-track-config.manage"]));
+    const rpc = vi.fn(async () => ({ data: null, error: { message: "Unit B 1 A masih aktif pada client Lain" } }));
+    createAdminMock.mockReturnValue({ rpc } as never);
+    const response = await POST(postRequest({ ...validBody, clientId: "client-tuku" }));
+    expect(response.status).toBe(400);
+    const payload = (await response.json()) as { error: string };
+    expect(payload.error).toContain("masih aktif pada client");
+  });
 });

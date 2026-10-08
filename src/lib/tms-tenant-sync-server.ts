@@ -21,14 +21,18 @@ export interface TenantStampSummary {
   visitLogs: number;
   temperatures: number;
   groups: number;
+  sweepDeactivated: number;
+  sweepDetached: number;
 }
 
 /**
  * Cap client_id pada baris TMS yang masih null setelah sync, berdasarkan
- * mapping unit aktif (`tms_client_vehicle_assignments`), occurrence task,
- * dan relasi parent. Baris yang tidak bisa dipetakan tetap null
- * (= UNASSIGNED, disembunyikan dari user scoped). Idempotent dan aman
- * dipanggil setiap siklus sync.
+ * mapping unit aktif (`tms_client_vehicle_assignments`) dan relasi parent.
+ * Kepemilikan unit ditentukan oleh rekonsiliasi kelompok (sumber kebenaran);
+ * fungsi ini hanya mencap dari mapping kanonik dan menjalankan sweeper
+ * mapping basi. Baris yang tidak bisa dipetakan tetap null (= UNASSIGNED,
+ * disembunyikan dari user scoped). Idempotent dan aman dipanggil setiap
+ * siklus sync.
  */
 export async function stampUnmappedTmsRows(admin: Admin): Promise<TenantStampSummary> {
   const summary: TenantStampSummary = {
@@ -42,6 +46,8 @@ export async function stampUnmappedTmsRows(admin: Admin): Promise<TenantStampSum
     visitLogs: 0,
     temperatures: 0,
     groups: 0,
+    sweepDeactivated: 0,
+    sweepDetached: 0,
   };
 
   const today = new Date().toISOString().slice(0, 10);
@@ -224,98 +230,16 @@ export async function stampUnmappedTmsRows(admin: Admin): Promise<TenantStampSum
     // Abaikan; baris tetap UNASSIGNED.
   }
 
-  // Snapshot & e-POD: fallback client dari occurrence terbaru bila mapping
-  // unit tidak mengenalkan kendaraan. Ini mencegah FO yang jelas-jelas masuk
-  // grup client tertentu tampil tanpa label lalu hilang dari Monitoring e-POD
-  // client tersebut walau unitnya belum terdaftar di mapping kanonik.
-  // Dijalankan sebelum cascade agar turunan e-POD ikut tercap dalam siklus sama.
+  // Sweeper mapping basi: nonaktifkan assignment group-managed yang unitnya
+  // sudah tidak berada di kelompok aktif mana pun, lalu lepas data FO aktif.
+  // Menangani kelompok kedaluwarsa tanpa perlu edit manual. Best-effort.
   try {
-    const { data: unmappedSnaps } = await admin
-      .from("tms_live_track_task_snapshots")
-      .select("task_id")
-      .is("client_id", null)
-      .limit(1000);
-    const snapTaskIds = [
-      ...new Set(
-        ((Array.isArray(unmappedSnaps) ? unmappedSnaps : []) as { task_id: string }[])
-          .map((row) => row.task_id)
-          .filter(Boolean),
-      ),
-    ];
-    const clientByTask = new Map<string, string>();
-    if (snapTaskIds.length > 0) {
-      const { data: taskOccurrences } = await admin
-        .from("tms_live_track_task_occurrences")
-        .select("task_id, client_id, window_started_at")
-        .in("task_id", snapTaskIds)
-        .order("window_started_at", { ascending: false });
-      for (const occurrence of (
-        Array.isArray(taskOccurrences) ? taskOccurrences : []
-      ) as { task_id: string; client_id: string | null }[]) {
-        if (!occurrence || clientByTask.has(occurrence.task_id)) continue;
-        if (typeof occurrence.client_id === "string" && occurrence.client_id) {
-          clientByTask.set(occurrence.task_id, occurrence.client_id);
-        }
-      }
-      const snapsByClient = new Map<string, string[]>();
-      for (const taskId of snapTaskIds) {
-        const clientId = clientByTask.get(taskId);
-        if (!clientId) continue;
-        const list = snapsByClient.get(clientId) ?? [];
-        list.push(taskId);
-        snapsByClient.set(clientId, list);
-      }
-      for (const [clientId, ids] of snapsByClient) {
-        const { error } = await admin
-          .from("tms_live_track_task_snapshots")
-          .update({ client_id: clientId })
-          .in("task_id", ids);
-        if (!error) summary.snapshots += ids.length;
-      }
-    }
-
-    const { data: unmappedEpod } = await admin
-      .from("tms_epod_assignments")
-      .select("id, task_id")
-      .is("client_id", null)
-      .limit(1000);
-    const unmappedEpodRows = (
-      Array.isArray(unmappedEpod) ? unmappedEpod : []
-    ) as { id: string; task_id: string }[];
-    if (unmappedEpodRows.length > 0) {
-      const epodClientByTask = new Map<string, string>(clientByTask);
-      const missingTaskIds = [
-        ...new Set(unmappedEpodRows.map((row) => row.task_id).filter((taskId) => taskId && !epodClientByTask.has(taskId))),
-      ];
-      if (missingTaskIds.length > 0) {
-        const { data: taskSnaps } = await admin
-          .from("tms_live_track_task_snapshots")
-          .select("task_id, client_id")
-          .in("task_id", missingTaskIds);
-        for (const snap of (
-          Array.isArray(taskSnaps) ? taskSnaps : []
-        ) as { task_id: string; client_id: string | null }[]) {
-          if (!snap || epodClientByTask.has(snap.task_id)) continue;
-          if (typeof snap.client_id === "string" && snap.client_id) {
-            epodClientByTask.set(snap.task_id, snap.client_id);
-          }
-        }
-      }
-      const epodByClient = new Map<string, string[]>();
-      for (const row of unmappedEpodRows) {
-        const clientId = epodClientByTask.get(row.task_id);
-        if (!clientId) continue;
-        const list = epodByClient.get(clientId) ?? [];
-        list.push(row.id);
-        epodByClient.set(clientId, list);
-      }
-      for (const [clientId, ids] of epodByClient) {
-        const { error } = await admin.from("tms_epod_assignments").update({ client_id: clientId }).in("id", ids);
-        if (!error) summary.assignments += ids.length;
-      }
-    }
+    const { data: sweep } = await admin.rpc("tms_client_sweep_stale_assignments", { p_limit: 500 });
+    const counts = (sweep ?? {}) as { deactivated?: unknown; detached?: unknown };
+    if (typeof counts.deactivated === "number") summary.sweepDeactivated += counts.deactivated;
+    if (typeof counts.detached === "number") summary.sweepDetached += counts.detached;
   } catch {
-    // Abaikan; baris tetap UNASSIGNED.
+    // Abaikan; pembersihan dicoba lagi pada siklus berikutnya.
   }
 
   // e-POD turunan + membership grup + config events: dari parent.

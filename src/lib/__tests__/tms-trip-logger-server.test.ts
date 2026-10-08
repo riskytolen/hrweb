@@ -85,6 +85,8 @@ describe("syncTripVisitLogs", () => {
       visitLogs: 0,
       temperatures: 0,
       groups: 0,
+      sweepDeactivated: 0,
+      sweepDetached: 0,
     });
     evaluateSlaMock.mockResolvedValue({ tasksChecked: 1, assigned: 1, visitsUpdated: 1 });
 

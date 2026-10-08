@@ -1,5 +1,4 @@
 import { createAdminClient } from "@/lib/supabase-admin";
-import { stampGroupMembersClient } from "@/lib/tms-group-client";
 import {
   authorizeLiveTrackConfig,
   liveTrackConfigError,
@@ -178,6 +177,8 @@ export async function POST(request: Request) {
     return liveTrackConfigError("Pilih client untuk kelompok baru.", 400);
   }
 
+  // Rekonsiliasi mapping unit + data aktif berjalan di dalam RPC
+  // (satu transaksi dengan penyimpanan kelompok).
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("tms_live_track_config_save_group", {
     p_group: {
@@ -194,41 +195,12 @@ export async function POST(request: Request) {
     },
     p_members: toRpcMembers(input.members),
     p_actor_user: auth.context.userId,
+    p_client_id: clientToStamp,
   });
 
   if (error) {
     return liveTrackConfigError(error.message || "Gagal menyimpan kelompok.", 400);
   }
 
-  const savedGroupId =
-    data && typeof data === "object" && !Array.isArray(data)
-      ? ((data as { group_id?: unknown }).group_id ?? null)
-      : null;
-  if (typeof savedGroupId === "string" && savedGroupId && clientToStamp) {
-    const stampError = await stampGroupClient(admin, savedGroupId, clientToStamp, input.members);
-    if (stampError) {
-      return liveTrackConfigError(stampError, 502);
-    }
-  }
   return liveTrackConfigJson({ data }, 201);
-}
-
-/**
- * Cap client_id pada grup + unit anggotanya (hanya yang masih null agar
- * tidak menimpa mapping client lain) serta daftarkan mapping kanonik unit
- * agar snapshot dan e-POD ikut terpetakan pada sync berikutnya.
- */
-async function stampGroupClient(
-  admin: ReturnType<typeof createAdminClient>,
-  groupId: string,
-  clientId: string,
-  members: LiveTrackGroupMember[],
-): Promise<string | null> {
-  const { error: groupError } = await admin
-    .from("tms_live_track_groups")
-    .update({ client_id: clientId, updated_at: new Date().toISOString() })
-    .eq("id", groupId);
-  if (groupError) return `Gagal menandai client kelompok: ${groupError.message}`;
-
-  return stampGroupMembersClient(admin, groupId, clientId, members);
 }
