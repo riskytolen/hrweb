@@ -1,7 +1,10 @@
 /**
  * Helper untuk fitur Pajak Finance.
- * PPN 1,1% = pembulatan(subtotal * 1.1 / 100)
- * Omzet = SUM subtotal, Pengeluaran = SUM amount
+ * PPN 1,1% default = pembulatan(dasar_pajak * 1.1 / 100)
+ * Sejak invoice punya skema pajak + PPh, laporan memakai nilai TERSIMPAN
+ * per invoice (tax_base_amount, ppn_amount, pph_amount); hitung ulang dari
+ * subtotal hanya sebagai fallback untuk baris lama.
+ * Omzet = SUM subtotal (total biaya), Pengeluaran = SUM amount
  */
 
 export const PPN_11_RATE = 1.1;
@@ -38,15 +41,21 @@ export interface ClientPpnSummary {
   invoiceCount: number;
   totalTagihan: number;
   totalPpn: number;
+  totalPph: number;
 }
 
-export function summarizeClientPpn(rows: { clientLabel: string; subtotal: number }[]): ClientPpnSummary[] {
-  const map = new Map<string, { invoiceCount: number; totalTagihan: number }>();
+export function summarizeClientPpn(
+  rows: { clientLabel: string; subtotal: number; ppn_amount?: number | null; pph_amount?: number | null }[],
+): ClientPpnSummary[] {
+  const map = new Map<string, { invoiceCount: number; totalTagihan: number; totalPpn: number; totalPph: number }>();
   for (const r of rows) {
     const key = r.clientLabel || "Tanpa Client";
-    const cur = map.get(key) || { invoiceCount: 0, totalTagihan: 0 };
+    const cur = map.get(key) || { invoiceCount: 0, totalTagihan: 0, totalPpn: 0, totalPph: 0 };
     cur.invoiceCount += 1;
     cur.totalTagihan += r.subtotal || 0;
+    // Nilai tersimpan diutamakan; fallback hitung dari subtotal untuk baris lama.
+    cur.totalPpn += r.ppn_amount ?? computePpn11(r.subtotal);
+    cur.totalPph += r.pph_amount ?? 0;
     map.set(key, cur);
   }
   const result: ClientPpnSummary[] = [];
@@ -55,7 +64,8 @@ export function summarizeClientPpn(rows: { clientLabel: string; subtotal: number
       clientLabel,
       invoiceCount: v.invoiceCount,
       totalTagihan: v.totalTagihan,
-      totalPpn: computePpn11(v.totalTagihan),
+      totalPpn: v.totalPpn,
+      totalPph: v.totalPph,
     });
   }
   // Urutkan terbesar total PPN

@@ -34,6 +34,19 @@ describe("summarizeClientPpn", () => {
     const s = summarizeClientPpn(rows);
     expect(s[0].clientLabel).toBe("Tanpa Client");
   });
+  it("memakai PPN/PPh tersimpan sesuai skema pajak", () => {
+    const rows = [
+      // trip_only: dasar 10jt → PPN 110rb, PPh 200rb
+      { clientLabel: "A", subtotal: 11_000_000, ppn_amount: 110_000, pph_amount: 200_000 },
+      // all_components: dasar 11jt → PPN 121rb, PPh 220rb
+      { clientLabel: "A", subtotal: 11_000_000, ppn_amount: 121_000, pph_amount: 220_000 },
+    ];
+    const s = summarizeClientPpn(rows);
+    expect(s).toHaveLength(1);
+    expect(s[0].totalTagihan).toBe(22_000_000);
+    expect(s[0].totalPpn).toBe(231_000);
+    expect(s[0].totalPph).toBe(420_000);
+  });
 });
 
 describe("buildMonthlyPajak", () => {

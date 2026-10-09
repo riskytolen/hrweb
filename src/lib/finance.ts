@@ -43,6 +43,104 @@ export function computePpn(subtotal: number, ppnPercent: number): number {
   return Math.round((subtotal * ppnPercent) / 100);
 }
 
+/** Skema perhitungan pajak invoice. */
+export type InvoiceTaxScheme = "trip_only" | "all_components";
+
+export const INVOICE_TAX_SCHEMES: { value: InvoiceTaxScheme; label: string; hint: string }[] = [
+  {
+    value: "trip_only",
+    label: "Biaya Perjalanan Saja",
+    hint: "PPN & PPh dihitung dari Biaya Perjalanan",
+  },
+  {
+    value: "all_components",
+    label: "Seluruh Komponen Biaya",
+    hint: "PPN & PPh dihitung dari Perjalanan + Toll + Parkir + Biaya Lain",
+  },
+];
+
+export function invoiceTaxSchemeLabel(scheme: string | null | undefined): string {
+  return (
+    INVOICE_TAX_SCHEMES.find((s) => s.value === scheme)?.label ?? INVOICE_TAX_SCHEMES[0].label
+  );
+}
+
+/** Default tarif pajak invoice baru. */
+export const DEFAULT_PPN_PERCENT = 1.1;
+export const DEFAULT_PPH_PERCENT = 2;
+
+export interface InvoiceCostInput {
+  trip_amount?: number | null;
+  toll_amount?: number | null;
+  parking_amount?: number | null;
+  other_amount?: number | null;
+  tax_scheme?: InvoiceTaxScheme | string | null;
+  ppn_percent?: number | null;
+  pph_percent?: number | null;
+}
+
+export interface InvoiceTotals {
+  trip_amount: number;
+  toll_amount: number;
+  parking_amount: number;
+  other_amount: number;
+  /** Total biaya sebelum pajak (= subtotal, dipertahankan untuk kompatibilitas laporan). */
+  base_amount: number;
+  tax_scheme: InvoiceTaxScheme;
+  tax_base_amount: number;
+  ppn_percent: number;
+  ppn_amount: number;
+  pph_percent: number;
+  pph_amount: number;
+  /** Total tagihan = total biaya + PPN − PPh. */
+  total_amount: number;
+}
+
+function toNonNegative(n: number | null | undefined): number {
+  if (!Number.isFinite(n as number)) return 0;
+  return Math.max(0, Math.round(n as number));
+}
+
+/**
+ * Satu-satunya sumber rumus total invoice — dipakai form, save, dan export
+ * agar konsisten dengan trigger DB `finance_invoice_recalc_totals()`.
+ *
+ * - Total Biaya = Perjalanan + Toll + Parkir + Biaya Lain
+ * - Dasar Pajak = Perjalanan saja (trip_only) atau Total Biaya (all_components)
+ * - PPN 1,1% menambah tagihan, PPh 2% mengurangi tagihan
+ * - Total Tagihan = Total Biaya + PPN − PPh
+ */
+export function calculateInvoiceTotals(input: InvoiceCostInput): InvoiceTotals {
+  const trip_amount = toNonNegative(input.trip_amount);
+  const toll_amount = toNonNegative(input.toll_amount);
+  const parking_amount = toNonNegative(input.parking_amount);
+  const other_amount = toNonNegative(input.other_amount);
+  const tax_scheme: InvoiceTaxScheme =
+    input.tax_scheme === "all_components" ? "all_components" : "trip_only";
+  const ppn_percent = Number(input.ppn_percent) || 0;
+  const pph_percent = Number(input.pph_percent) || 0;
+
+  const base_amount = trip_amount + toll_amount + parking_amount + other_amount;
+  const tax_base_amount = tax_scheme === "all_components" ? base_amount : trip_amount;
+  const ppn_amount = tax_base_amount > 0 && ppn_percent > 0 ? computePpn(tax_base_amount, ppn_percent) : 0;
+  const pph_amount = tax_base_amount > 0 && pph_percent > 0 ? computePpn(tax_base_amount, pph_percent) : 0;
+
+  return {
+    trip_amount,
+    toll_amount,
+    parking_amount,
+    other_amount,
+    base_amount,
+    tax_scheme,
+    tax_base_amount,
+    ppn_percent,
+    ppn_amount,
+    pph_percent,
+    pph_amount,
+    total_amount: base_amount + ppn_amount - pph_amount,
+  };
+}
+
 export const PAYMENT_METHODS = ["Tunai", "Transfer Bank", "Giro", "Kartu Kredit", "Kartu Debit"];
 
 export const EXPENSE_METHODS = ["Tunai", "Transfer Bank", "Kartu Kredit", "Kartu Debit", "Kredit"];

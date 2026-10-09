@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ReceiptText, Plus, Search, Pencil, Trash2, X, RefreshCw, ChevronDown, Banknote,
-  Users, FileDown, AlertTriangle, Wallet,
+  Users, FileDown, AlertTriangle, Wallet, Eye,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -17,9 +17,11 @@ import type { DbFinanceInvoice, DbFinanceInvoicePayment, DbFinanceClient, DbFina
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import {
-  totalPaid, invoiceStatus, statusColor, generateInvoiceNo, computePpn, PAYMENT_METHODS,
-  downloadCsv, fmtDate,
+  totalPaid, invoiceStatus, statusColor, generateInvoiceNo, PAYMENT_METHODS,
+  downloadCsv, fmtDate, calculateInvoiceTotals, invoiceTaxSchemeLabel,
+  INVOICE_TAX_SCHEMES, DEFAULT_PPN_PERCENT, DEFAULT_PPH_PERCENT,
 } from "@/lib/finance";
+import type { InvoiceTaxScheme } from "@/lib/finance";
 import {
   filterInvoicesByDate, filterPaymentsByDate, summarizeInvoiceCohort, summarizePayments,
   exportRevenueInvoicesPdf, exportRevenuePaymentsPdf,
@@ -74,9 +76,23 @@ export default function FinancePendapatanPage() {
   // ─── Invoice form ───
   const [showInvForm, setShowInvForm] = useState(false);
   const [editingInv, setEditingInv] = useState<InvoiceRow | null>(null);
-  const [invForm, setInvForm] = useState({ invoice_no: "", invoice_date: localDateStr(), due_date: "", client_id: 0, description: "", subtotal: 0, ppn_percent: 0, notes: "" });
+  const [invForm, setInvForm] = useState({
+    invoice_no: "", invoice_date: localDateStr(), due_date: "", client_id: 0,
+    description: "", trip_amount: 0, toll_amount: 0, parking_amount: 0, other_amount: 0,
+    tax_scheme: "trip_only" as InvoiceTaxScheme, ppn_percent: 0, pph_percent: DEFAULT_PPH_PERCENT,
+    notes: "",
+  });
   const [invSaving, setInvSaving] = useState(false);
   const [invError, setInvError] = useState("");
+
+  // ─── Invoice detail modal ───
+  const [showInvDetail, setShowInvDetail] = useState(false);
+  const [detailInvoice, setDetailInvoice] = useState<InvoiceRow | null>(null);
+
+  const openInvDetail = (inv: InvoiceRow) => {
+    setDetailInvoice(inv);
+    setShowInvDetail(true);
+  };
 
   // ─── Payment modal ───
   const [showPayModal, setShowPayModal] = useState(false);
@@ -180,37 +196,64 @@ export default function FinancePendapatanPage() {
       .filter((n) => n.startsWith(`INV-${monthPrefix}`))
       .map((n) => parseInt(n.split("-").pop() || "0", 10))
       .reduce((a, b) => Math.max(a, b), 0);
-    setInvForm({ invoice_no: generateInvoiceNo(localDateStr(), last), invoice_date: localDateStr(), due_date: "", client_id: clients[0]?.id || 0, description: "", subtotal: 0, ppn_percent: ppnDefault, notes: "" });
+    setInvForm({
+      invoice_no: generateInvoiceNo(localDateStr(), last), invoice_date: localDateStr(),
+      due_date: "", client_id: clients[0]?.id || 0, description: "",
+      trip_amount: 0, toll_amount: 0, parking_amount: 0, other_amount: 0,
+      tax_scheme: "trip_only", ppn_percent: ppnDefault > 0 ? ppnDefault : DEFAULT_PPN_PERCENT,
+      pph_percent: DEFAULT_PPH_PERCENT, notes: "",
+    });
     setShowInvForm(true);
   };
 
   const openEditInvoice = (inv: InvoiceRow) => {
     setEditingInv(inv);
     setInvError("");
-    setInvForm({ invoice_no: inv.invoice_no, invoice_date: inv.invoice_date, due_date: inv.due_date || "", client_id: inv.client_id || 0, description: inv.description || "", subtotal: inv.subtotal, ppn_percent: Number(inv.ppn_percent), notes: inv.notes || "" });
+    setInvForm({
+      invoice_no: inv.invoice_no, invoice_date: inv.invoice_date, due_date: inv.due_date || "",
+      client_id: inv.client_id || 0, description: inv.description || "",
+      trip_amount: inv.trip_amount ?? inv.subtotal ?? 0,
+      toll_amount: inv.toll_amount ?? 0, parking_amount: inv.parking_amount ?? 0,
+      other_amount: inv.other_amount ?? 0,
+      tax_scheme: (inv.tax_scheme === "all_components" ? "all_components" : "trip_only") as InvoiceTaxScheme,
+      ppn_percent: Number(inv.ppn_percent ?? 0), pph_percent: Number(inv.pph_percent ?? 0),
+      notes: inv.notes || "",
+    });
     setShowInvForm(true);
   };
 
-  const ppnAmount = useMemo(() => computePpn(invForm.subtotal, invForm.ppn_percent), [invForm.subtotal, invForm.ppn_percent]);
-  const totalAmount = invForm.subtotal + ppnAmount;
+  const invTotals = useMemo(() => calculateInvoiceTotals({
+    trip_amount: invForm.trip_amount, toll_amount: invForm.toll_amount,
+    parking_amount: invForm.parking_amount, other_amount: invForm.other_amount,
+    tax_scheme: invForm.tax_scheme, ppn_percent: invForm.ppn_percent, pph_percent: invForm.pph_percent,
+  }), [invForm.trip_amount, invForm.toll_amount, invForm.parking_amount, invForm.other_amount, invForm.tax_scheme, invForm.ppn_percent, invForm.pph_percent]);
 
   const saveInvoice = async () => {
-    if (!invForm.invoice_no.trim() || !invForm.invoice_date || invForm.subtotal < 0) {
-      setInvError("Lengkapi field wajib (nomor, tanggal, nominal).");
+    if (!invForm.invoice_no.trim() || !invForm.invoice_date) {
+      setInvError("Lengkapi field wajib (nomor, tanggal).");
       return;
     }
     setInvSaving(true);
     setInvError("");
+    const t = invTotals;
     const payload = {
       invoice_no: invForm.invoice_no.trim(),
       invoice_date: invForm.invoice_date,
       due_date: invForm.due_date || null,
       client_id: invForm.client_id || null,
       description: invForm.description || null,
-      subtotal: invForm.subtotal,
-      ppn_percent: invForm.ppn_percent,
-      ppn_amount: ppnAmount,
-      total_amount: totalAmount,
+      subtotal: t.base_amount,
+      trip_amount: t.trip_amount,
+      toll_amount: t.toll_amount,
+      parking_amount: t.parking_amount,
+      other_amount: t.other_amount,
+      tax_scheme: t.tax_scheme,
+      tax_base_amount: t.tax_base_amount,
+      ppn_percent: t.ppn_percent,
+      ppn_amount: t.ppn_amount,
+      pph_percent: t.pph_percent,
+      pph_amount: t.pph_amount,
+      total_amount: t.total_amount,
       notes: invForm.notes || null,
     };
     try {
@@ -366,7 +409,7 @@ export default function FinancePendapatanPage() {
     [invoices, invoiceFrom, invoiceTo],
   );
   const invoiceCohort = useMemo(
-    () => summarizeInvoiceCohort(invoicePeriodInvoices.map((i) => ({ total_amount: i.total_amount, paid: i.paid ?? 0, status: i.status }))),
+    () => summarizeInvoiceCohort(invoicePeriodInvoices.map((i) => ({ total_amount: i.total_amount, paid: i.paid ?? 0, status: i.status, pph_amount: i.pph_amount ?? 0 }))),
     [invoicePeriodInvoices],
   );
   const filteredInvoices = useMemo(() => {
@@ -415,11 +458,14 @@ export default function FinancePendapatanPage() {
 
   const exportInvoicesCsv = () => {
     const rows: (string | number | null | undefined)[][] = [
-      ["No", "No. Invoice", "Tanggal", "Jatuh Tempo", "Klien", "Subtotal", "PPN %", "PPN", "Total", "Dibayar", "Status", "Deskripsi", "Catatan"],
+      ["No", "No. Invoice", "Tanggal", "Jatuh Tempo", "Klien", "Biaya Perjalanan", "Toll", "Parkir", "Biaya Lain", "Total Biaya", "Skema Pajak", "Dasar Pajak", "PPN %", "PPN", "PPh %", "PPh", "Total Tagihan", "Dibayar", "Status", "Deskripsi", "Catatan"],
       ...filteredInvoices.map((inv, i) => [
         i + 1, inv.invoice_no, inv.invoice_date, inv.due_date || "",
         inv.client ? (inv.client.company_name || inv.client.contact_name) : "",
-        inv.subtotal, inv.ppn_percent, inv.ppn_amount, inv.total_amount, inv.paid ?? 0, inv.status, inv.description || "", inv.notes || "",
+        inv.trip_amount ?? inv.subtotal, inv.toll_amount ?? 0, inv.parking_amount ?? 0, inv.other_amount ?? 0,
+        inv.subtotal, invoiceTaxSchemeLabel(inv.tax_scheme), inv.tax_base_amount ?? inv.subtotal,
+        inv.ppn_percent, inv.ppn_amount, Number(inv.pph_percent ?? 0), inv.pph_amount ?? 0,
+        inv.total_amount, inv.paid ?? 0, inv.status, inv.description || "", inv.notes || "",
       ]),
     ];
     downloadCsv("pendapatan-invoices.csv", rows);
@@ -447,14 +493,22 @@ export default function FinancePendapatanPage() {
         clientName: inv.client ? (inv.client.company_name || inv.client.contact_name) : "—",
         description: inv.description,
         subtotal: inv.subtotal,
+        trip_amount: inv.trip_amount ?? inv.subtotal,
+        toll_amount: inv.toll_amount ?? 0,
+        parking_amount: inv.parking_amount ?? 0,
+        other_amount: inv.other_amount ?? 0,
+        tax_scheme: inv.tax_scheme || "trip_only",
+        tax_base_amount: inv.tax_base_amount ?? inv.subtotal,
         ppn_percent: Number(inv.ppn_percent),
         ppn_amount: inv.ppn_amount,
+        pph_percent: Number(inv.pph_percent ?? 0),
+        pph_amount: inv.pph_amount ?? 0,
         total_amount: inv.total_amount,
         paid: inv.paid ?? 0,
         remaining: inv.total_amount - (inv.paid ?? 0),
         status: inv.status || "Belum Lunas",
       }));
-      const summary = summarizeInvoiceCohort(filteredInvoices.map((i) => ({ total_amount: i.total_amount, paid: i.paid ?? 0, status: i.status })));
+      const summary = summarizeInvoiceCohort(filteredInvoices.map((i) => ({ total_amount: i.total_amount, paid: i.paid ?? 0, status: i.status, pph_amount: i.pph_amount ?? 0 })));
       await exportRevenueInvoicesPdf({ rows, from: invoiceFrom, to: invoiceTo, statusFilter: filterStatus, search, company: companyInfo, summary });
       setShowExportMenu(false);
       addToast("success", "PDF Register Invoice diunduh.");
@@ -678,6 +732,14 @@ export default function FinancePendapatanPage() {
                         <td className="px-4 py-3">
                           <p className="font-semibold text-foreground">{inv.invoice_no}</p>
                           <p className="text-[11px] text-muted-foreground">{inv.description || "—"}</p>
+                          {(() => {
+                            const bits: string[] = [];
+                            if ((inv.toll_amount ?? 0) > 0) bits.push(`Toll ${formatCurrency(inv.toll_amount ?? 0)}`);
+                            if ((inv.parking_amount ?? 0) > 0) bits.push(`Parkir ${formatCurrency(inv.parking_amount ?? 0)}`);
+                            if ((inv.other_amount ?? 0) > 0) bits.push(`Lain ${formatCurrency(inv.other_amount ?? 0)}`);
+                            if ((inv.pph_amount ?? 0) > 0) bits.push(`PPh ${formatCurrency(inv.pph_amount ?? 0)}`);
+                            return bits.length > 0 ? <p className="text-[11px] text-muted-foreground">{bits.join(" • ")}</p> : null;
+                          })()}
                           {inv.notes && <p className="text-[11px] text-muted-foreground italic break-words">Catatan: {inv.notes}</p>}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
@@ -704,6 +766,9 @@ export default function FinancePendapatanPage() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => openInvDetail(inv)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Detail Invoice">
+                              <Eye className="w-4 h-4" />
+                            </button>
                             {canInput && (
                               <button onClick={() => openPaymentModal(inv)} className="p-2 rounded-lg hover:bg-muted text-success hover:text-success" title="Catat Pembayaran">
                                 <Banknote className="w-4 h-4" />
@@ -925,20 +990,77 @@ export default function FinancePendapatanPage() {
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Deskripsi</label>
                   <input type="text" value={invForm.description} onChange={(e) => setInvForm({ ...invForm, description: e.target.value })} placeholder="Mis. Sewa armada minggu ke-3" className={inputClass} />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Subtotal (Rp) <span className="text-danger">*</span></label>
-                    <CurrencyInput value={invForm.subtotal} onChange={(v) => setInvForm({ ...invForm, subtotal: v })} />
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Komponen Biaya (Rp)</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] text-muted-foreground mb-1 block">Biaya Perjalanan <span className="text-danger">*</span></label>
+                      <CurrencyInput value={invForm.trip_amount} onChange={(v) => setInvForm({ ...invForm, trip_amount: v })} />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground mb-1 block">Toll</label>
+                      <CurrencyInput value={invForm.toll_amount} onChange={(v) => setInvForm({ ...invForm, toll_amount: v })} />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground mb-1 block">Parkir</label>
+                      <CurrencyInput value={invForm.parking_amount} onChange={(v) => setInvForm({ ...invForm, parking_amount: v })} />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground mb-1 block">Biaya Lain</label>
+                      <CurrencyInput value={invForm.other_amount} onChange={(v) => setInvForm({ ...invForm, other_amount: v })} />
+                    </div>
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Skema Perhitungan Pajak</label>
+                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-muted rounded-xl">
+                    {INVOICE_TAX_SCHEMES.map((s) => (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => setInvForm({ ...invForm, tax_scheme: s.value })}
+                        title={s.hint}
+                        className={cn(
+                          "px-3 py-2 rounded-lg text-xs font-semibold transition-all",
+                          invForm.tax_scheme === s.value
+                            ? "bg-card text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    {invForm.tax_scheme === "all_components"
+                      ? "PPN & PPh dihitung dari Perjalanan + Toll + Parkir + Biaya Lain."
+                      : "PPN & PPh hanya dihitung dari Biaya Perjalanan."}
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-semibold text-foreground mb-1.5 block">PPN (%)</label>
                     <input type="number" min={0} max={100} step={0.01} value={invForm.ppn_percent} onChange={(e) => setInvForm({ ...invForm, ppn_percent: Number(e.target.value) })} className={inputClass} />
                   </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">PPh (%)</label>
+                    <input type="number" min={0} max={100} step={0.01} value={invForm.pph_percent} onChange={(e) => setInvForm({ ...invForm, pph_percent: Number(e.target.value) })} className={inputClass} />
+                  </div>
                 </div>
                 <div className="rounded-xl bg-muted/40 border border-border p-3.5 space-y-1.5 text-sm">
-                  <div className="flex justify-between text-muted-foreground"><span>Subtotal</span><span className="tabular-nums">{formatCurrency(invForm.subtotal)}</span></div>
-                  <div className="flex justify-between text-muted-foreground"><span>PPN ({invForm.ppn_percent}%)</span><span className="tabular-nums">{formatCurrency(ppnAmount)}</span></div>
-                  <div className="flex justify-between font-bold text-foreground pt-1.5 border-t border-border"><span>Total</span><span className="tabular-nums">{formatCurrency(totalAmount)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>Biaya Perjalanan</span><span className="tabular-nums">{formatCurrency(invTotals.trip_amount)}</span></div>
+                  {(invTotals.toll_amount > 0 || invTotals.parking_amount > 0 || invTotals.other_amount > 0) && (
+                    <>
+                      {invTotals.toll_amount > 0 && <div className="flex justify-between text-muted-foreground"><span className="pl-3">Toll</span><span className="tabular-nums">{formatCurrency(invTotals.toll_amount)}</span></div>}
+                      {invTotals.parking_amount > 0 && <div className="flex justify-between text-muted-foreground"><span className="pl-3">Parkir</span><span className="tabular-nums">{formatCurrency(invTotals.parking_amount)}</span></div>}
+                      {invTotals.other_amount > 0 && <div className="flex justify-between text-muted-foreground"><span className="pl-3">Biaya Lain</span><span className="tabular-nums">{formatCurrency(invTotals.other_amount)}</span></div>}
+                    </>
+                  )}
+                  <div className="flex justify-between text-muted-foreground font-medium"><span>Total Biaya</span><span className="tabular-nums">{formatCurrency(invTotals.base_amount)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>Dasar Pajak ({invoiceTaxSchemeLabel(invTotals.tax_scheme)})</span><span className="tabular-nums">{formatCurrency(invTotals.tax_base_amount)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>PPN ({invTotals.ppn_percent}%)</span><span className="tabular-nums text-success">+{formatCurrency(invTotals.ppn_amount)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>PPh ({invTotals.pph_percent}%)</span><span className="tabular-nums text-danger">−{formatCurrency(invTotals.pph_amount)}</span></div>
+                  <div className="flex justify-between font-bold text-foreground pt-1.5 border-t border-border"><span>Total Tagihan</span><span className="tabular-nums">{formatCurrency(invTotals.total_amount)}</span></div>
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan</label>
@@ -950,6 +1072,100 @@ export default function FinancePendapatanPage() {
                 <Button size="sm" onClick={saveInvoice} disabled={invSaving || !invForm.invoice_no || !invForm.invoice_date}>
                   {invSaving ? "Menyimpan..." : editingInv ? "Simpan" : "Buat Invoice"}
                 </Button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ─── MODAL: DETAIL INVOICE ─── */}
+      {showInvDetail && detailInvoice && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowInvDetail(false)} />
+            <div className="relative w-full max-w-lg bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+              <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent flex-shrink-0">
+                <button onClick={() => setShowInvDetail(false)} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg">
+                    <Eye className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-base font-bold text-foreground truncate">{detailInvoice.invoice_no}</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">Detail invoice & rincian tagihan</p>
+                  </div>
+                  <span className={cn("ml-auto px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0", statusColor(detailInvoice.status || "Belum Lunas"))}>
+                    {detailInvoice.status}
+                  </span>
+                </div>
+              </div>
+              <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-muted/40 border border-border p-3">
+                    <p className="text-[11px] font-semibold text-muted-foreground">Klien</p>
+                    <p className="font-semibold text-foreground mt-0.5">{detailInvoice.client ? (detailInvoice.client.company_name || detailInvoice.client.contact_name) : "—"}</p>
+                  </div>
+                  <div className="rounded-xl bg-muted/40 border border-border p-3">
+                    <p className="text-[11px] font-semibold text-muted-foreground">Tanggal</p>
+                    <p className="font-semibold text-foreground mt-0.5">{fmtDate(detailInvoice.invoice_date)}</p>
+                    {detailInvoice.due_date && <p className="text-[11px] text-muted-foreground">Jth tempo {fmtDate(detailInvoice.due_date)}</p>}
+                  </div>
+                </div>
+                {(detailInvoice.description || detailInvoice.notes) && (
+                  <div className="rounded-xl bg-muted/40 border border-border p-3">
+                    {detailInvoice.description && <p className="text-foreground">{detailInvoice.description}</p>}
+                    {detailInvoice.notes && <p className="text-xs text-muted-foreground italic mt-1">Catatan: {detailInvoice.notes}</p>}
+                  </div>
+                )}
+                <div className="rounded-xl bg-muted/40 border border-border p-3.5 space-y-1.5">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Rincian Tagihan</p>
+                  <div className="flex justify-between text-muted-foreground"><span>Biaya Perjalanan</span><span className="tabular-nums">{formatCurrency(detailInvoice.trip_amount ?? detailInvoice.subtotal)}</span></div>
+                  {(detailInvoice.toll_amount ?? 0) > 0 && <div className="flex justify-between text-muted-foreground"><span className="pl-3">Toll</span><span className="tabular-nums">{formatCurrency(detailInvoice.toll_amount ?? 0)}</span></div>}
+                  {(detailInvoice.parking_amount ?? 0) > 0 && <div className="flex justify-between text-muted-foreground"><span className="pl-3">Parkir</span><span className="tabular-nums">{formatCurrency(detailInvoice.parking_amount ?? 0)}</span></div>}
+                  {(detailInvoice.other_amount ?? 0) > 0 && <div className="flex justify-between text-muted-foreground"><span className="pl-3">Biaya Lain</span><span className="tabular-nums">{formatCurrency(detailInvoice.other_amount ?? 0)}</span></div>}
+                  <div className="flex justify-between text-muted-foreground font-medium"><span>Total Biaya</span><span className="tabular-nums">{formatCurrency(detailInvoice.subtotal)}</span></div>
+                  <div className="flex justify-between items-center text-muted-foreground">
+                    <span>Skema Pajak</span>
+                    <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-semibold">{invoiceTaxSchemeLabel(detailInvoice.tax_scheme)}</span>
+                  </div>
+                  <div className="flex justify-between text-muted-foreground"><span>Dasar Pajak</span><span className="tabular-nums">{formatCurrency(detailInvoice.tax_base_amount ?? detailInvoice.subtotal)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>PPN ({Number(detailInvoice.ppn_percent ?? 0)}%)</span><span className="tabular-nums text-success">+{formatCurrency(detailInvoice.ppn_amount ?? 0)}</span></div>
+                  <div className="flex justify-between text-muted-foreground"><span>PPh ({Number(detailInvoice.pph_percent ?? 0)}%)</span><span className="tabular-nums text-danger">−{formatCurrency(detailInvoice.pph_amount ?? 0)}</span></div>
+                  <div className="flex justify-between font-bold text-foreground pt-1.5 border-t border-border"><span>Total Tagihan</span><span className="tabular-nums">{formatCurrency(detailInvoice.total_amount)}</span></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex items-center justify-between rounded-xl bg-muted/40 border border-border p-3">
+                    <span className="text-muted-foreground text-xs">Dibayar</span>
+                    <span className="font-semibold text-success tabular-nums">{formatCurrency(detailInvoice.paid ?? 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl bg-muted/40 border border-border p-3">
+                    <span className="text-muted-foreground text-xs">Sisa</span>
+                    <span className="font-semibold text-warning tabular-nums">{formatCurrency(detailInvoice.total_amount - (detailInvoice.paid ?? 0))}</span>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Riwayat Pembayaran ({(detailInvoice.payments || []).length})</p>
+                  {(detailInvoice.payments?.length || 0) === 0 ? (
+                    <p className="text-xs text-muted-foreground">Belum ada pembayaran untuk invoice ini.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {(detailInvoice.payments || []).map((p) => (
+                        <div key={p.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/40 border border-border/50">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-foreground tabular-nums">{formatCurrency(p.amount)}</p>
+                            <p className="text-[11px] text-muted-foreground">{fmtDate(p.payment_date)} · {p.method || "—"}{p.notes ? ` · ${p.notes}` : ""}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
+                {canEdit && (
+                  <Button size="sm" onClick={() => { setShowInvDetail(false); openEditInvoice(detailInvoice); }}>Edit Invoice</Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => setShowInvDetail(false)}>Tutup</Button>
               </div>
             </div>
           </div>

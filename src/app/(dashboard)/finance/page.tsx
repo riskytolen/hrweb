@@ -28,6 +28,8 @@ interface InvoiceRow {
   subtotal: number;
   ppn_percent: number;
   ppn_amount: number;
+  pph_percent?: number | null;
+  pph_amount?: number | null;
   total_amount: number;
   notes: string | null;
   created_at: string;

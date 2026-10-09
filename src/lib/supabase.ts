@@ -961,9 +961,18 @@ export interface DbFinanceInvoice {
   due_date: string | null;
   client_id: number | null;
   description: string | null;
+  /** Total biaya sebelum pajak (Perjalanan + Toll + Parkir + Biaya Lain). */
   subtotal: number;
+  trip_amount: number;
+  toll_amount: number;
+  parking_amount: number;
+  other_amount: number;
+  tax_scheme: "trip_only" | "all_components";
+  tax_base_amount: number;
   ppn_percent: number;
   ppn_amount: number;
+  pph_percent: number;
+  pph_amount: number;
   total_amount: number;
   notes: string | null;
   created_at: string;

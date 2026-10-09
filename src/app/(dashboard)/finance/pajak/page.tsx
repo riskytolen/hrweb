@@ -20,6 +20,9 @@ interface InvoicePajak {
   invoice_no: string;
   invoice_date: string;
   subtotal: number;
+  tax_base_amount: number | null;
+  ppn_amount: number | null;
+  pph_amount: number | null;
   client: { company_name: string | null; contact_name: string } | null;
 }
 
@@ -57,7 +60,7 @@ export default function FinancePajakPage() {
     const end = `${year}-12-31`;
     const { data, error } = await supabase
       .from("finance_invoices")
-      .select("id, invoice_no, invoice_date, subtotal, client:finance_clients(company_name, contact_name)")
+      .select("id, invoice_no, invoice_date, subtotal, tax_base_amount, ppn_amount, pph_amount, client:finance_clients(company_name, contact_name)")
       .gte("invoice_date", start)
       .lte("invoice_date", end)
       .order("invoice_date", { ascending: false })
@@ -70,7 +73,7 @@ export default function FinancePajakPage() {
     const start = `${year}-01-01`;
     const end = `${year}-12-31`;
     const [{ data: invData, error: invErr }, { data: expData, error: expErr }] = await Promise.all([
-      supabase.from("finance_invoices").select("invoice_date, subtotal").gte("invoice_date", start).lte("invoice_date", end),
+      supabase.from("finance_invoices").select("invoice_date, subtotal, ppn_amount").gte("invoice_date", start).lte("invoice_date", end),
       supabase.from("finance_expenses").select("expense_date, amount").gte("expense_date", start).lte("expense_date", end),
     ]);
     if (invErr) throw invErr;
@@ -81,7 +84,7 @@ export default function FinancePajakPage() {
     // Solusi: simpan tahunanInvoices terpisah, tapi untuk MVP kita fetch ulang invoices tahunan sebagai invoices juga bila tab tahunan aktif
     // Kita akan handle di effect pemanggil
     setExpenses((expData as ExpensePajak[]) || []);
-    return (invData as { invoice_date: string; subtotal: number }[]) || [];
+    return (invData as { invoice_date: string; subtotal: number; ppn_amount: number | null }[]) || [];
   }, []);
 
   const fetchClients = useCallback(async () => {
@@ -136,7 +139,7 @@ export default function FinancePajakPage() {
         const start = `${tahunTahunan}-01-01`;
         const end = `${tahunTahunan}-12-31`;
         const [{ data: invData }, { data: expData }] = await Promise.all([
-          supabase.from("finance_invoices").select("id, invoice_no, invoice_date, subtotal, client:finance_clients(company_name, contact_name)").gte("invoice_date", start).lte("invoice_date", end).order("invoice_date", { ascending: false }),
+            supabase.from("finance_invoices").select("id, invoice_no, invoice_date, subtotal, tax_base_amount, ppn_amount, pph_amount, client:finance_clients(company_name, contact_name)").gte("invoice_date", start).lte("invoice_date", end).order("invoice_date", { ascending: false }),
           supabase.from("finance_expenses").select("expense_date, amount").gte("expense_date", start).lte("expense_date", end),
         ]);
         if (invData) setInvoices(invData as unknown as InvoicePajak[]);
@@ -160,7 +163,7 @@ export default function FinancePajakPage() {
           const start = `${tahunTahunan}-01-01`;
           const end = `${tahunTahunan}-12-31`;
           const [{ data: invData }, { data: expData }] = await Promise.all([
-            supabase.from("finance_invoices").select("id, invoice_no, invoice_date, subtotal, client:finance_clients(company_name, contact_name)").gte("invoice_date", start).lte("invoice_date", end).order("invoice_date", { ascending: false }),
+          supabase.from("finance_invoices").select("id, invoice_no, invoice_date, subtotal, tax_base_amount, ppn_amount, pph_amount, client:finance_clients(company_name, contact_name)").gte("invoice_date", start).lte("invoice_date", end).order("invoice_date", { ascending: false }),
             supabase.from("finance_expenses").select("expense_date, amount").gte("expense_date", start).lte("expense_date", end),
           ]);
           if (invData) setInvoices(invData as unknown as InvoicePajak[]);
@@ -178,6 +181,12 @@ export default function FinancePajakPage() {
     const c = inv.client;
     if (!c) return "Tanpa Client";
     return c.company_name?.trim() ? c.company_name.trim() : c.contact_name;
+  }, []);
+
+  /** PPN tersimpan per invoice; fallback hitung dari dasar pajak untuk baris lama. */
+  const storedPpn = useCallback((inv: InvoicePajak) => {
+    if (inv.ppn_amount != null) return inv.ppn_amount;
+    return computePpn11(inv.tax_base_amount ?? inv.subtotal);
   }, []);
 
   const filteredPpn = useMemo(() => {
@@ -199,30 +208,35 @@ export default function FinancePajakPage() {
 
   const ppnSummary = useMemo(() => {
     const totalTagihan = filteredPpn.reduce((s, i) => s + (i.subtotal || 0), 0);
-    const totalPpn = filteredPpn.reduce((s, i) => s + computePpn11(i.subtotal), 0);
+    const totalPpn = filteredPpn.reduce((s, i) => s + storedPpn(i), 0);
+    const totalPph = filteredPpn.reduce((s, i) => s + (i.pph_amount ?? 0), 0);
     const distinctClients = new Set(filteredPpn.map(clientLabel)).size;
-    return { totalTagihan, totalPpn, invoiceCount: filteredPpn.length, clientCount: distinctClients };
-  }, [filteredPpn, clientLabel]);
+    return { totalTagihan, totalPpn, totalPph, invoiceCount: filteredPpn.length, clientCount: distinctClients };
+  }, [filteredPpn, clientLabel, storedPpn]);
 
   const clientSummaries = useMemo(() => {
-    const rows = filteredPpn.map((inv) => ({ clientLabel: clientLabel(inv), subtotal: inv.subtotal }));
+    const rows = filteredPpn.map((inv) => ({ clientLabel: clientLabel(inv), subtotal: inv.subtotal, ppn_amount: inv.ppn_amount ?? storedPpn(inv), pph_amount: inv.pph_amount ?? 0 }));
     return summarizeClientPpn(rows);
-  }, [filteredPpn, clientLabel]);
+  }, [filteredPpn, clientLabel, storedPpn]);
 
   const clientTotal = useMemo(() => {
     const totalTagihan = clientSummaries.reduce((s, c) => s + c.totalTagihan, 0);
     const totalPpn = clientSummaries.reduce((s, c) => s + c.totalPpn, 0);
-    return { totalTagihan, totalPpn };
+    const totalPph = clientSummaries.reduce((s, c) => s + c.totalPph, 0);
+    return { totalTagihan, totalPpn, totalPph };
   }, [clientSummaries]);
 
   const tahunanData = useMemo(() => {
     // invoices sudah difilter tahun via fetch, jadi langsung pakai untuk tahunan
-    const invForYear = invoices.map((i) => ({ invoice_date: i.invoice_date, subtotal: i.subtotal }));
+    const invForYear = invoices.map((i) => ({ invoice_date: i.invoice_date, subtotal: i.subtotal, ppn_amount: i.ppn_amount }));
     const monthly = buildMonthlyPajak(invForYear, expenses, tahunTahunan);
     const omzet = monthly.reduce((s, m) => s + m.omzet, 0);
     const pengeluaran = monthly.reduce((s, m) => s + m.pengeluaran, 0);
     const hasil = omzet - pengeluaran;
-    const akumulasiPpn = computePpn11(omzet);
+    // Akumulasi dari PPN tersimpan per invoice sesuai skema pajak masing-masing.
+    const akumulasiPpn = invForYear
+      .filter((i) => i.invoice_date.startsWith(String(tahunTahunan)))
+      .reduce((s, i) => s + (i.ppn_amount ?? computePpn11(i.subtotal)), 0);
     const invoiceCount = monthly.reduce((s, m) => s + m.invoiceCount, 0);
     const expenseCount = monthly.reduce((s, m) => s + m.expenseCount, 0);
     return { monthly, omzet, pengeluaran, hasil, akumulasiPpn, invoiceCount, expenseCount };
@@ -234,11 +248,12 @@ export default function FinancePajakPage() {
     const rows: (string | number)[][] = [
       [`Daftar PPN 1,1% — Tahun ${tahunPpn}${bulanPpn !== "Semua" ? ` Bulan ${bulanPpn}` : ""}${clientFilter !== "Semua" ? ` — ${clientFilter}` : ""}`],
       [],
-      ["Tanggal", "Nomor Invoice", "Client", "Nilai Tagihan", "Tarif", "Nilai PPN"],
-      ...filteredPpn.map((inv) => [formatTanggal(inv.invoice_date), inv.invoice_no, clientLabel(inv), inv.subtotal, "1,1%", computePpn11(inv.subtotal)]),
+      ["Tanggal", "Nomor Invoice", "Client", "Nilai Tagihan", "Tarif", "Nilai PPN", "Nilai PPh"],
+      ...filteredPpn.map((inv) => [formatTanggal(inv.invoice_date), inv.invoice_no, clientLabel(inv), inv.subtotal, "1,1%", storedPpn(inv), inv.pph_amount ?? 0]),
       [],
       ["Total Tagihan", ppnSummary.totalTagihan],
-      ["Total PPN 1,1%", ppnSummary.totalPpn],
+      ["Total PPN", ppnSummary.totalPpn],
+      ["Total PPh", ppnSummary.totalPph],
       ["Jumlah Invoice", ppnSummary.invoiceCount],
     ];
     downloadCsv(`ppn-11-detail-${tahunPpn}${bulanPpn !== "Semua" ? `-${bulanPpn.padStart(2, "0")}` : ""}.csv`, rows);
@@ -248,10 +263,10 @@ export default function FinancePajakPage() {
     const rows: (string | number)[][] = [
       [`Ringkasan PPN per Client — Tahun ${tahunPpn}${bulanPpn !== "Semua" ? ` Bulan ${bulanPpn}` : ""}`],
       [],
-      ["Client", "Jumlah Invoice", "Total Tagihan", "Total PPN 1,1%"],
-      ...clientSummaries.map((c) => [c.clientLabel, c.invoiceCount, c.totalTagihan, c.totalPpn]),
+      ["Client", "Jumlah Invoice", "Total Tagihan", "Total PPN", "Total PPh"],
+      ...clientSummaries.map((c) => [c.clientLabel, c.invoiceCount, c.totalTagihan, c.totalPpn, c.totalPph]),
       [],
-      ["TOTAL", clientSummaries.reduce((s, c) => s + c.invoiceCount, 0), clientTotal.totalTagihan, clientTotal.totalPpn],
+      ["TOTAL", clientSummaries.reduce((s, c) => s + c.invoiceCount, 0), clientTotal.totalTagihan, clientTotal.totalPpn, clientTotal.totalPph],
     ];
     downloadCsv(`ppn-11-per-client-${tahunPpn}.csv`, rows);
   };
@@ -260,10 +275,10 @@ export default function FinancePajakPage() {
     const rows: (string | number)[][] = [
       [`Pajak Tahunan — Tahun ${tahunTahunan}`],
       [],
-      ["Omzet Kotor (subtotal)", tahunanData.omzet],
+      ["Omzet Kotor (total biaya)", tahunanData.omzet],
       ["Total Pengeluaran", tahunanData.pengeluaran],
       ["Hasil Bersih (Omzet - Pengeluaran)", tahunanData.hasil],
-      ["Akumulasi PPN 1,1% (dari omzet)", tahunanData.akumulasiPpn],
+      ["Akumulasi PPN (tersimpan per invoice)", tahunanData.akumulasiPpn],
       ["Jumlah Invoice", tahunanData.invoiceCount],
       ["Jumlah Transaksi Pengeluaran", tahunanData.expenseCount],
       [],
@@ -290,7 +305,7 @@ export default function FinancePajakPage() {
 
   return (
     <RouteGuard permission="finance">
-      <PageHeader title="Pajak" description="PPN 1,1% dari tagihan dan rekap pajak tahunan (omzet - pengeluaran)" icon={ReceiptText} />
+      <PageHeader title="Pajak" description="PPN & PPh tersimpan per invoice dan rekap pajak tahunan (omzet - pengeluaran)" icon={ReceiptText} />
 
       <div className="flex items-center gap-2 p-1 bg-muted rounded-xl w-fit mb-4">
         <button
@@ -335,13 +350,13 @@ export default function FinancePajakPage() {
               <p className="text-2xl font-bold text-foreground mt-1">{ppnSummary.clientCount}</p>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
-              <p className="text-xs font-semibold text-muted-foreground">Total Tagihan (subtotal)</p>
+              <p className="text-xs font-semibold text-muted-foreground">Total Biaya</p>
               <p className="text-xl font-bold text-foreground mt-1 tabular-nums">{formatRupiah(ppnSummary.totalTagihan)}</p>
             </div>
             <div className="bg-gradient-to-br from-teal-600 to-cyan-600 rounded-2xl p-4 shadow-sm text-white">
-              <p className="text-xs font-semibold text-white/80 flex items-center gap-1"><Calculator className="w-3 h-3" /> Total PPN 1,1%</p>
+              <p className="text-xs font-semibold text-white/80 flex items-center gap-1"><Calculator className="w-3 h-3" /> Total PPN</p>
               <p className="text-xl font-bold mt-1 tabular-nums">{formatRupiah(ppnSummary.totalPpn)}</p>
-              <p className="text-[11px] text-white/80 mt-1">1,1% × subtotal</p>
+              <p className="text-[11px] text-white/80 mt-1">tersimpan per invoice • PPh {formatRupiah(ppnSummary.totalPph)}</p>
             </div>
           </div>
 
@@ -349,7 +364,7 @@ export default function FinancePajakPage() {
             <div className="p-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-bold text-foreground">Daftar Pajak per Invoice</h2>
-                <p className="text-[11px] text-muted-foreground">Nilai PPN = pembulatan(subtotal × 1,1 / 100)</p>
+                <p className="text-[11px] text-muted-foreground">Nilai PPN/PPh tersimpan per invoice sesuai skema pajak</p>
               </div>
               <Button variant="outline" size="sm" icon={FileDown} onClick={exportPpnDetail}>Export CSV</Button>
             </div>
@@ -363,6 +378,7 @@ export default function FinancePajakPage() {
                     <th className="px-3 py-3 text-right">Nilai Tagihan</th>
                     <th className="px-3 py-3 text-center">Tarif</th>
                     <th className="px-3 py-3 text-right">Nilai PPN</th>
+                    <th className="px-3 py-3 text-right">Nilai PPh</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
@@ -378,7 +394,8 @@ export default function FinancePajakPage() {
                         <td className="px-3 py-2.5">{clientLabel(inv)}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums">{formatRupiah(inv.subtotal)}</td>
                         <td className="px-3 py-2.5 text-center"><span className="px-2 py-1 rounded-full bg-muted text-foreground font-semibold">1,1%</span></td>
-                        <td className="px-3 py-2.5 text-right font-bold tabular-nums">{formatRupiah(computePpn11(inv.subtotal))}</td>
+                        <td className="px-3 py-2.5 text-right font-bold tabular-nums">{formatRupiah(storedPpn(inv))}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{formatRupiah(inv.pph_amount ?? 0)}</td>
                       </tr>
                     ))
                   )}
@@ -389,14 +406,15 @@ export default function FinancePajakPage() {
                       <td colSpan={3} className="px-3 py-3 text-right">Total Halaman</td>
                       <td className="px-3 py-3 text-right tabular-nums">{formatRupiah(pagedPpn.reduce((s, i) => s + i.subtotal, 0))}</td>
                       <td></td>
-                      <td className="px-3 py-3 text-right tabular-nums">{formatRupiah(pagedPpn.reduce((s, i) => s + computePpn11(i.subtotal), 0))}</td>
+                      <td className="px-3 py-3 text-right tabular-nums">{formatRupiah(pagedPpn.reduce((s, i) => s + storedPpn(i), 0))}</td>
+                      <td className="px-3 py-3 text-right tabular-nums">{formatRupiah(pagedPpn.reduce((s, i) => s + (i.pph_amount ?? 0), 0))}</td>
                     </tr>
                   </tfoot>
                 )}
               </table>
             </div>
             <div className="px-4 py-3 bg-muted/20 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-              <span>{filteredPpn.length} invoice terfilter • Total {formatRupiah(ppnSummary.totalTagihan)} • PPN {formatRupiah(ppnSummary.totalPpn)}</span>
+              <span>{filteredPpn.length} invoice terfilter • Total {formatRupiah(ppnSummary.totalTagihan)} • PPN {formatRupiah(ppnSummary.totalPpn)} • PPh {formatRupiah(ppnSummary.totalPph)}</span>
             </div>
           </div>
           {filteredPpn.length > PAGE_SIZE && <Pagination currentPage={page} totalItems={filteredPpn.length} pageSize={PAGE_SIZE} onPageChange={setPage} />}
@@ -416,12 +434,13 @@ export default function FinancePajakPage() {
                     <th className="px-3 py-3 text-left">Client</th>
                     <th className="px-3 py-3 text-right">Jumlah Invoice</th>
                     <th className="px-3 py-3 text-right">Total Tagihan</th>
-                    <th className="px-3 py-3 text-right">Total PPN 1,1%</th>
+                    <th className="px-3 py-3 text-right">Total PPN</th>
+                    <th className="px-3 py-3 text-right">Total PPh</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/40">
                   {clientSummaries.length === 0 ? (
-                    <tr><td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">Tidak ada data.</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">Tidak ada data.</td></tr>
                   ) : (
                     clientSummaries.map((c) => (
                       <tr key={c.clientLabel} className="hover:bg-muted/20">
@@ -429,6 +448,7 @@ export default function FinancePajakPage() {
                         <td className="px-3 py-2.5 text-right">{c.invoiceCount}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums">{formatRupiah(c.totalTagihan)}</td>
                         <td className="px-3 py-2.5 text-right font-bold tabular-nums">{formatRupiah(c.totalPpn)}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">{formatRupiah(c.totalPph)}</td>
                       </tr>
                     ))
                   )}
@@ -439,6 +459,7 @@ export default function FinancePajakPage() {
                     <td className="px-3 py-3 text-right">{clientSummaries.reduce((s, c) => s + c.invoiceCount, 0)}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{formatRupiah(clientTotal.totalTagihan)}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{formatRupiah(clientTotal.totalPpn)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{formatRupiah(clientTotal.totalPph)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -449,7 +470,7 @@ export default function FinancePajakPage() {
               </div>
               <div>
                 <p className="text-xs font-semibold text-foreground">Catatan Perhitungan</p>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">Laporan internal — PPN dihitung 1,1% × subtotal tagihan, bukan pajak terutang resmi.</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">Laporan internal — PPN/PPh memakai nilai tersimpan per invoice sesuai skema pajak, bukan pajak terutang resmi.</p>
               </div>
             </div>
           </div>
@@ -470,7 +491,7 @@ export default function FinancePajakPage() {
             <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
               <p className="text-xs font-semibold text-muted-foreground">Omzet Kotor</p>
               <p className="text-xl font-bold text-foreground mt-1 tabular-nums">{formatRupiah(tahunanData.omzet)}</p>
-              <p className="text-[11px] text-muted-foreground mt-1">{tahunanData.invoiceCount} invoice • subtotal</p>
+              <p className="text-[11px] text-muted-foreground mt-1">{tahunanData.invoiceCount} invoice • total biaya</p>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
               <p className="text-xs font-semibold text-muted-foreground">Total Pengeluaran</p>
@@ -483,9 +504,9 @@ export default function FinancePajakPage() {
               <p className="text-[11px] text-muted-foreground mt-1">Omzet − Pengeluaran</p>
             </div>
             <div className="bg-gradient-to-br from-teal-600 to-cyan-600 rounded-2xl p-4 shadow-sm text-white">
-              <p className="text-xs font-semibold text-white/80">Akumulasi PPN 1,1%</p>
+              <p className="text-xs font-semibold text-white/80">Akumulasi PPN</p>
               <p className="text-xl font-bold mt-1 tabular-nums">{formatRupiah(tahunanData.akumulasiPpn)}</p>
-              <p className="text-[11px] text-white/80 mt-1">dari omzet kotor</p>
+              <p className="text-[11px] text-white/80 mt-1">tersimpan per invoice</p>
             </div>
           </div>
 
@@ -536,7 +557,7 @@ export default function FinancePajakPage() {
               </div>
               <div>
                 <p className="text-xs font-semibold text-foreground">Catatan Perhitungan</p>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">Laporan internal — Omzet kotor diambil dari subtotal tagihan (bukan total termasuk PPN) sesuai kesepakatan.</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">Laporan internal — Omzet kotor diambil dari total biaya tagihan (bukan total termasuk PPN) sesuai kesepakatan.</p>
               </div>
             </div>
           </div>

@@ -11,6 +11,7 @@
  */
 
 import { downscaleDataUrl } from "./pdf-logo";
+import { invoiceTaxSchemeLabel } from "./finance";
 
 export interface RevenueDateRange {
   from: string;
@@ -21,6 +22,7 @@ export interface InvoiceCohortItem {
   total_amount: number;
   paid?: number | null;
   status?: string | null;
+  pph_amount?: number | null;
 }
 
 export interface PaymentSummaryItem {
@@ -36,6 +38,7 @@ export interface InvoiceCohortSummary {
   lunas: number;
   sebagian: number;
   belum: number;
+  totalPph: number;
 }
 
 export interface PaymentPeriodSummary {
@@ -61,9 +64,18 @@ export interface RevenueInvoicePdfInput {
   due_date?: string | null;
   clientName: string;
   description?: string | null;
+  /** Total biaya sebelum pajak (Perjalanan + Toll + Parkir + Biaya Lain). */
   subtotal: number;
+  trip_amount?: number | null;
+  toll_amount?: number | null;
+  parking_amount?: number | null;
+  other_amount?: number | null;
+  tax_scheme?: string | null;
+  tax_base_amount?: number | null;
   ppn_percent: number | string;
   ppn_amount: number;
+  pph_percent?: number | string | null;
+  pph_amount?: number | null;
   total_amount: number;
   paid: number;
   remaining: number;
@@ -130,12 +142,14 @@ export function formatPeriodLabel(
 export function summarizeInvoiceCohort(invoices: InvoiceCohortItem[]): InvoiceCohortSummary {
   let totalInv = 0;
   let totalPaid = 0;
+  let totalPph = 0;
   let lunas = 0;
   let sebagian = 0;
   let belum = 0;
   for (const inv of invoices) {
     totalInv += inv.total_amount || 0;
     totalPaid += inv.paid ?? 0;
+    totalPph += inv.pph_amount ?? 0;
     if (inv.status === "Lunas") lunas += 1;
     else if (inv.status === "Sebagian") sebagian += 1;
     else belum += 1;
@@ -148,6 +162,7 @@ export function summarizeInvoiceCohort(invoices: InvoiceCohortItem[]): InvoiceCo
     lunas,
     sebagian,
     belum,
+    totalPph,
   };
 }
 
@@ -188,16 +203,24 @@ export function buildRevenueFilename(
 
 export function toInvoicePdfRow(inv: RevenueInvoicePdfInput, index: number): string[] {
   const desc = (inv.description || "").trim();
-  const first = desc ? `${inv.invoice_no}\n${desc}` : inv.invoice_no;
+  const compBits: string[] = [];
+  if ((inv.toll_amount ?? 0) > 0) compBits.push(`Toll ${formatRupiah(inv.toll_amount ?? 0)}`);
+  if ((inv.parking_amount ?? 0) > 0) compBits.push(`Parkir ${formatRupiah(inv.parking_amount ?? 0)}`);
+  if ((inv.other_amount ?? 0) > 0) compBits.push(`Lain ${formatRupiah(inv.other_amount ?? 0)}`);
+  const lines = [inv.invoice_no];
+  if (desc) lines.push(desc);
+  if (compBits.length > 0) lines.push(compBits.join(" • "));
+  if (inv.tax_scheme) lines.push(invoiceTaxSchemeLabel(inv.tax_scheme));
   return [
     String(index + 1),
-    first,
+    lines.join("\n"),
     inv.invoice_date,
     inv.due_date || "—",
     inv.clientName || "—",
     String(inv.subtotal),
     String(inv.ppn_percent),
     String(inv.ppn_amount),
+    String(inv.pph_amount ?? 0),
     String(inv.total_amount),
     String(inv.paid),
     String(inv.remaining),
@@ -435,23 +458,28 @@ export async function exportRevenueInvoicesPdf(args: {
     ["Jumlah Invoice", `${args.summary.count} invoice`],
     ["Total Tagihan", formatRupiah(args.summary.totalInv)],
     ["Terkumpul", formatRupiah(args.summary.totalPaid)],
+    ["Total PPh", formatRupiah(args.summary.totalPph)],
     ["Piutang", formatRupiah(args.summary.piutang)],
   ]);
 
-  const body = args.rows.map((r, i) => [
-    String(i + 1),
-    (r.description || "").trim() ? `${r.invoice_no}\n${(r.description || "").trim()}` : r.invoice_no,
-    formatTanggalId(r.invoice_date),
-    r.due_date ? formatTanggalId(r.due_date) : "—",
-    r.clientName || "—",
-    formatRupiah(r.subtotal),
-    String(r.ppn_percent),
-    formatRupiah(r.ppn_amount),
-    formatRupiah(r.total_amount),
-    formatRupiah(r.paid),
-    r.remaining > 0 ? formatRupiah(r.remaining) : "—",
-    r.status,
-  ]);
+  const body = args.rows.map((r, i) => {
+    const cells = toInvoicePdfRow(r, i);
+    return [
+      cells[0],
+      cells[1],
+      formatTanggalId(r.invoice_date),
+      r.due_date ? formatTanggalId(r.due_date) : "—",
+      r.clientName || "—",
+      formatRupiah(r.subtotal),
+      String(r.ppn_percent),
+      formatRupiah(r.ppn_amount),
+      formatRupiah(r.pph_amount ?? 0),
+      formatRupiah(r.total_amount),
+      formatRupiah(r.paid),
+      r.remaining > 0 ? formatRupiah(r.remaining) : "—",
+      r.status,
+    ];
+  });
   body.push([
     "",
     "",
@@ -460,7 +488,8 @@ export async function exportRevenueInvoicesPdf(args: {
     `${args.rows.length} invoice`,
     "",
     "",
-    "",
+    formatRupiah(args.rows.reduce((s, r) => s + r.ppn_amount, 0)),
+    formatRupiah(args.rows.reduce((s, r) => s + (r.pph_amount ?? 0), 0)),
     formatRupiah(args.rows.reduce((s, r) => s + r.total_amount, 0)),
     formatRupiah(args.rows.reduce((s, r) => s + r.paid, 0)),
     formatRupiah(args.rows.reduce((s, r) => s + r.remaining, 0)),
@@ -470,7 +499,7 @@ export async function exportRevenueInvoicesPdf(args: {
   autoTable(doc as never, {
     startY: y,
     head: [
-      ["No", "No. Invoice / Deskripsi", "Tanggal", "Jatuh Tempo", "Klien", "Subtotal", "PPN %", "PPN", "Total", "Dibayar", "Sisa", "Status"],
+      ["No", "No. Invoice / Deskripsi", "Tanggal", "Jatuh Tempo", "Klien", "Biaya", "PPN %", "PPN", "PPh", "Total", "Dibayar", "Sisa", "Status"],
     ],
     body,
     theme: "grid",
@@ -486,17 +515,18 @@ export async function exportRevenueInvoicesPdf(args: {
     alternateRowStyles: { fillColor: [248, 250, 252] },
     columnStyles: {
       0: { halign: "center", cellWidth: 9 },
-      1: { cellWidth: 40 },
-      2: { halign: "center", cellWidth: 20 },
-      3: { halign: "center", cellWidth: 20 },
-      4: { cellWidth: 32 },
-      5: { halign: "right", cellWidth: 24 },
-      6: { halign: "center", cellWidth: 12 },
-      7: { halign: "right", cellWidth: 24 },
-      8: { halign: "right", cellWidth: 26 },
+      1: { cellWidth: 36 },
+      2: { halign: "center", cellWidth: 19 },
+      3: { halign: "center", cellWidth: 19 },
+      4: { cellWidth: 28 },
+      5: { halign: "right", cellWidth: 22 },
+      6: { halign: "center", cellWidth: 11 },
+      7: { halign: "right", cellWidth: 22 },
+      8: { halign: "right", cellWidth: 22 },
       9: { halign: "right", cellWidth: 24 },
       10: { halign: "right", cellWidth: 22 },
-      11: { halign: "center", cellWidth: 16 },
+      11: { halign: "right", cellWidth: 20 },
+      12: { halign: "center", cellWidth: 15 },
     },
     margin: { left: margin, right: margin, bottom: 16 },
     showHead: "everyPage",
