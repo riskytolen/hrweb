@@ -988,7 +988,7 @@ export default function FinancePendapatanPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Deskripsi</label>
-                  <input type="text" value={invForm.description} onChange={(e) => setInvForm({ ...invForm, description: e.target.value })} placeholder="Mis. Sewa armada minggu ke-3" className={inputClass} />
+                  <input type="text" value={invForm.description} onChange={(e) => setInvForm({ ...invForm, description: e.target.value })} className={inputClass} />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Komponen Biaya (Rp)</label>
