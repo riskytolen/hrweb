@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
-import { PieChart, FileDown, TrendingUp, TrendingDown, PiggyBank, Percent, ChevronLeft, ChevronRight, ChevronDown, Scale, Wallet } from "lucide-react";
+import { PieChart, FileDown, TrendingUp, TrendingDown, PiggyBank, Percent, ChevronLeft, ChevronRight, ChevronDown, Scale, Wallet, Lock } from "lucide-react";
 import {
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
@@ -11,8 +11,9 @@ import RouteGuard from "@/components/RouteGuard";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import type { DbFinanceCompanySettings } from "@/lib/supabase";
-import { downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeCashOnHand, summarizeReceivables } from "@/lib/finance";
+import { downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeReceivables } from "@/lib/finance";
 import { exportProfitLossPdf } from "@/lib/finance-profit-loss-report";
+import { fetchMonthEvents, monthStartOf, type DbFinanceMonthEvent, type DbFinanceMonthStatus } from "@/lib/finance-closing";
 
 interface CategoryAgg { name: string; color: string; total: number }
 
@@ -35,6 +36,8 @@ export default function FinanceLabaRugiPage() {
   const [payments, setPayments] = useState<LabaRugiPayment[]>([]);
   const [expenses, setExpenses] = useState<{ expense_date: string; amount: number; category: { name: string; color: string } | null }[]>([]);
   const [company, setCompany] = useState<DbFinanceCompanySettings | null>(null);
+  const [closeStatuses, setCloseStatuses] = useState<DbFinanceMonthStatus[]>([]);
+  const [closeEvents, setCloseEvents] = useState<DbFinanceMonthEvent[]>([]);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -58,6 +61,17 @@ export default function FinanceLabaRugiPage() {
       if (payData) setPayments(payData as unknown as LabaRugiPayment[]);
       if (expData) setExpenses(expData as unknown as typeof expenses);
       if (settingsRes.data) setCompany(settingsRes.data as DbFinanceCompanySettings);
+      try {
+        const rpcClient = supabase as unknown as Parameters<typeof fetchMonthEvents>[0];
+        const [stRes, ev] = await Promise.all([
+          (supabase.from("finance_month_status" as never).select("*") as unknown as Promise<{ data: DbFinanceMonthStatus[] | null } >),
+          fetchMonthEvents(rpcClient).catch(() => [] as DbFinanceMonthEvent[]),
+        ]);
+        if (stRes.data) setCloseStatuses(stRes.data);
+        setCloseEvents(ev);
+      } catch {
+        /* status closing opsional; laporan tetap live bila gagal */
+      }
     } catch {
       showToast("error", "Gagal memuat data laba rugi.");
     } finally {
@@ -123,17 +137,40 @@ export default function FinanceLabaRugiPage() {
     return { prefix, pendapatan, pengeluaran, laba, margin, categories, topExpense, expenseShare, countInv: pInvoices.length, countExp: pExpenses.length, invoiceIds: new Set(pInvoices.map((i) => i.id)) };
   }, [invoices, expenses, viewYear, viewMonth]);
 
-  // Piutang murni per periode terpilih: hanya invoice yang terbit dalam periode,
-  // dikurangi seluruh pembayaran milik invoice periode tersebut. Tanpa membawa
-  // invoice bulan sebelumnya. Keterlambatan memakai akhir periode untuk periode
-  // lampau dan hari ini untuk periode berjalan.
+  // Semantik closing:
+  // - Laba On Hand berbasis tanggal kas aktual (payment_date), bukan bulan invoice.
+  // - Bulan closed membaca snapshot immutable dari Tutup Buku.
   const periodStart = useMemo(() => periodStartDate(viewYear, viewMonth), [viewYear, viewMonth]);
   const periodEnd = useMemo(() => periodEndDate(viewYear, viewMonth), [viewYear, viewMonth]);
-  const cashOnHand = useMemo(
-    () => summarizeCashOnHand(payments, expenses, periodStart, periodEnd, period.invoiceIds),
-    [payments, expenses, periodStart, periodEnd, period.invoiceIds]
-  );
-  const receivables = useMemo(() => summarizeReceivables(
+  const activeCloseEvent = useMemo(() => {
+    if (viewMonth === null) return null;
+    const key = monthStartOf(periodStart);
+    const st = closeStatuses.find((s) => s.period_start === key);
+    if (!st || st.state !== "close") return null;
+    const rows = closeEvents.filter((e) => e.period_start === key && e.event_type === "close").sort((a, b) => b.event_seq - a.event_seq);
+    return rows[0] ?? null;
+  }, [viewMonth, periodStart, closeStatuses, closeEvents]);
+  const isClosedPeriod = activeCloseEvent !== null;
+  const cashOnHandLive = useMemo(() => {
+    const received = payments
+      .filter((p) => p.payment_date >= periodStart && p.payment_date <= periodEnd)
+      .reduce((s, p) => s + (p.amount || 0), 0);
+    const periodExpenses = expenses
+      .filter((e) => e.expense_date >= periodStart && e.expense_date <= periodEnd)
+      .reduce((s, e) => s + (e.amount || 0), 0);
+    const profit = received - periodExpenses;
+    return { received, expenses: periodExpenses, profit, margin: received > 0 ? (profit / received) * 100 : 0 };
+  }, [payments, expenses, periodStart, periodEnd]);
+  const cashOnHand = useMemo(() => {
+    if (activeCloseEvent) {
+      const received = Number(activeCloseEvent.cash_in) || 0;
+      const exp = Number(activeCloseEvent.expense_total) || 0;
+      const profit = Number(activeCloseEvent.cash_on_hand_profit) || 0;
+      return { received, expenses: exp, profit, margin: received > 0 ? (profit / received) * 100 : 0 };
+    }
+    return cashOnHandLive;
+  }, [activeCloseEvent, cashOnHandLive]);
+  const receivablesLive = useMemo(() => summarizeReceivables(
     invoices.map((i) => ({
       id: i.id,
       invoice_no: i.invoice_no,
@@ -147,6 +184,38 @@ export default function FinanceLabaRugiPage() {
     periodEnd,
     receivableReferenceDate(localDateStr(), periodEnd),
   ), [invoices, payments, periodStart, periodEnd]);
+  const receivables = useMemo(() => {
+    if (!activeCloseEvent) return receivablesLive;
+    const snap = (activeCloseEvent.snapshot_data ?? {}) as Record<string, unknown>;
+    const list = (snap["receivables_as_of_end"] ?? []) as { invoice_no: string; client_contact?: string | null; client_company?: string | null; clientName?: string; invoice_date: string; due_date: string | null; total: number; paid: number; remaining: number; status_as_of_end?: string }[];
+    return {
+      totalInvoiced: Number(activeCloseEvent.new_invoices_total) || 0,
+      totalPaid: Number(activeCloseEvent.period_payments_total) || 0,
+      totalReceivable: Number(activeCloseEvent.closing_receivable) || 0,
+      unpaidCount: list.length || 0,
+      overdueCount: receivablesLive.overdueCount,
+      overdueAmount: receivablesLive.overdueAmount,
+      items: list.map((r, idx) => ({
+        id: idx,
+        invoice_no: r.invoice_no,
+        clientName: r.clientName || r.client_company || r.client_contact || "—",
+        invoice_date: r.invoice_date,
+        due_date: r.due_date,
+        total: Number(r.total) || 0,
+        paid: Number(r.paid) || 0,
+        remaining: Number(r.remaining) || 0,
+        overdueDays: 0,
+        bucket: (r.status_as_of_end || "Belum jatuh tempo") as "Belum jatuh tempo",
+      })),
+    };
+  }, [activeCloseEvent, receivablesLive]);
+  const displayPeriod = useMemo(() => {
+    if (!activeCloseEvent) return period;
+    const pendapatan = Number(activeCloseEvent.revenue_total) || 0;
+    const pengeluaran = Number(activeCloseEvent.expense_total) || 0;
+    const laba = Number(activeCloseEvent.net_profit) || 0;
+    return { ...period, pendapatan, pengeluaran, laba, margin: pendapatan > 0 ? (laba / pendapatan) * 100 : 0 };
+  }, [period, activeCloseEvent]);
 
   const periodLabel = viewMonth === null
     ? `Tahun ${viewYear}`
@@ -196,10 +265,10 @@ export default function FinanceLabaRugiPage() {
     const rows: (string | number | null | undefined)[][] = [
       [`Laporan Laba Rugi — ${periodLabel}`],
       [],
-      ["Pendapatan (invoice date)", formatCurrency(period.pendapatan)],
-      ["Pengeluaran (expense date)", formatCurrency(period.pengeluaran)],
-      ["Laba Bersih", formatCurrency(period.laba)],
-      ["Margin Laba", `${period.margin.toFixed(2)}%`],
+      [`Pendapatan (invoice date)${activeCloseEvent ? ` • Snapshot v${activeCloseEvent.event_seq}` : ""}`, formatCurrency(displayPeriod.pendapatan)],
+      ["Pengeluaran (expense date)", formatCurrency(displayPeriod.pengeluaran)],
+      ["Laba Bersih", formatCurrency(displayPeriod.laba)],
+      ["Margin Laba", `${displayPeriod.margin.toFixed(2)}%`],
       [],
       ["Laba On Hand (berbasis kas)"],
       ["Pembayaran invoice periode yang diterima", formatCurrency(cashOnHand.received)],
@@ -236,10 +305,10 @@ export default function FinanceLabaRugiPage() {
       await exportProfitLossPdf({
         periodLabel,
         periodPrefix: period.prefix,
-        pendapatan: period.pendapatan,
-        pengeluaran: period.pengeluaran,
-        laba: period.laba,
-        margin: period.margin,
+        pendapatan: displayPeriod.pendapatan,
+        pengeluaran: displayPeriod.pengeluaran,
+        laba: displayPeriod.laba,
+        margin: displayPeriod.margin,
         cashReceived: cashOnHand.received,
         cashExpenses: cashOnHand.expenses,
         cashProfit: cashOnHand.profit,
@@ -279,10 +348,10 @@ export default function FinanceLabaRugiPage() {
     }
   };
 
-  const profitTone = period.laba >= 0 ? "success" : "danger";
+  const profitTone = displayPeriod.laba >= 0 ? "success" : "danger";
   const cashProfitTone = cashOnHand.profit >= 0 ? "success" : "danger";
-  const deltaIncome = prevPeriod.pendapatan > 0 ? ((period.pendapatan - prevPeriod.pendapatan) / prevPeriod.pendapatan) * 100 : 0;
-  const deltaExpense = prevPeriod.pengeluaran > 0 ? ((period.pengeluaran - prevPeriod.pengeluaran) / prevPeriod.pengeluaran) * 100 : 0;
+  const deltaIncome = prevPeriod.pendapatan > 0 ? ((displayPeriod.pendapatan - prevPeriod.pendapatan) / prevPeriod.pendapatan) * 100 : 0;
+  const deltaExpense = prevPeriod.pengeluaran > 0 ? ((displayPeriod.pengeluaran - prevPeriod.pengeluaran) / prevPeriod.pengeluaran) * 100 : 0;
 
   return (
     <RouteGuard permission="finance">
@@ -339,6 +408,12 @@ export default function FinanceLabaRugiPage() {
           <button onClick={() => { setViewYear(new Date().getFullYear()); setViewMonth(new Date().getMonth()); }} className="px-3 py-2 rounded-xl text-xs font-semibold text-primary hover:bg-primary/5">
             Hari ini
           </button>
+          {viewMonth !== null && (
+            <span className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold", isClosedPeriod ? "bg-success-light text-success" : "bg-muted text-muted-foreground")}>
+              <Lock className="w-3.5 h-3.5" />
+              {isClosedPeriod ? `Ditutup • Snapshot v${activeCloseEvent?.event_seq}` : "Terbuka"}
+            </span>
+          )}
         </div>
       </div>
 
@@ -353,7 +428,7 @@ export default function FinanceLabaRugiPage() {
                 <p className="text-xs font-semibold text-muted-foreground">Pendapatan</p>
                 <div className="w-8 h-8 rounded-lg bg-success-light flex items-center justify-center"><TrendingUp className="w-4 h-4 text-success" /></div>
               </div>
-              <p className="text-xl sm:text-2xl font-bold text-success mt-1.5 tabular-nums">{formatCurrency(period.pendapatan)}</p>
+              <p className="text-xl sm:text-2xl font-bold text-success mt-1.5 tabular-nums">{formatCurrency(displayPeriod.pendapatan)}</p>
               <p className="text-[11px] text-muted-foreground mt-1">
                 {period.countInv} invoice
                 {prevPeriod.pendapatan > 0 && (
@@ -368,7 +443,7 @@ export default function FinanceLabaRugiPage() {
                 <p className="text-xs font-semibold text-muted-foreground">Pengeluaran</p>
                 <div className="w-8 h-8 rounded-lg bg-danger-light flex items-center justify-center"><TrendingDown className="w-4 h-4 text-danger" /></div>
               </div>
-              <p className="text-xl sm:text-2xl font-bold text-danger mt-1.5 tabular-nums">{formatCurrency(period.pengeluaran)}</p>
+              <p className="text-xl sm:text-2xl font-bold text-danger mt-1.5 tabular-nums">{formatCurrency(displayPeriod.pengeluaran)}</p>
               <p className="text-[11px] text-muted-foreground mt-1">
                 {period.countExp} transaksi
                 {prevPeriod.pengeluaran > 0 && (
@@ -383,8 +458,8 @@ export default function FinanceLabaRugiPage() {
                 <p className="text-xs font-semibold text-muted-foreground">Laba Bersih</p>
                 <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center"><PiggyBank className="w-4 h-4 text-primary" /></div>
               </div>
-              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", period.laba >= 0 ? "text-foreground" : "text-danger")}>
-                {formatCurrency(period.laba)}
+              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", displayPeriod.laba >= 0 ? "text-foreground" : "text-danger")}>
+                {formatCurrency(displayPeriod.laba)}
               </p>
               <p className="text-[11px] text-muted-foreground mt-1">Pendapatan − Pengeluaran</p>
             </div>
@@ -396,15 +471,15 @@ export default function FinanceLabaRugiPage() {
               <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", cashOnHand.profit >= 0 ? "text-success" : "text-danger")}>
                 {formatCurrency(cashOnHand.profit)}
               </p>
-              <p className="text-[11px] text-muted-foreground mt-1">Diterima invoice periode − Pengeluaran</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Kas diterima (payment_date) − Pengeluaran</p>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold text-muted-foreground">Margin Laba</p>
                 <div className="w-8 h-8 rounded-lg bg-warning-light flex items-center justify-center"><Percent className="w-4 h-4 text-warning" /></div>
               </div>
-              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", period.laba >= 0 ? "text-foreground" : "text-danger")}>
-                {period.margin.toFixed(1)}%
+              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", displayPeriod.laba >= 0 ? "text-foreground" : "text-danger")}>
+                {displayPeriod.margin.toFixed(1)}%
               </p>
               <p className="text-[11px] text-muted-foreground mt-1">Laba ÷ Pendapatan</p>
             </div>
@@ -556,18 +631,18 @@ export default function FinanceLabaRugiPage() {
             <div className="divide-y divide-border/50">
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">
                 <span className="text-muted-foreground flex items-center gap-2"><TrendingUp className="w-4 h-4 text-success" /> Pendapatan</span>
-                <span className="font-bold text-success tabular-nums">{formatCurrency(period.pendapatan)}</span>
+                <span className="font-bold text-success tabular-nums">{formatCurrency(displayPeriod.pendapatan)}</span>
               </div>
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">
                 <span className="text-muted-foreground flex items-center gap-2"><TrendingDown className="w-4 h-4 text-danger" /> Pengeluaran</span>
-                <span className="font-bold text-danger tabular-nums">{formatCurrency(period.pengeluaran)}</span>
+                <span className="font-bold text-danger tabular-nums">{formatCurrency(displayPeriod.pengeluaran)}</span>
               </div>
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">
-                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Pembayaran invoice periode (on hand)</span>
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Kas diterima periode (payment_date)</span>
                 <span className="font-bold text-success tabular-nums">{formatCurrency(cashOnHand.received)}</span>
               </div>
               <div className="flex items-center justify-between px-5 py-3.5 text-sm">
-                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-warning" /> Piutang periode ini (belum menjadi kas)</span>
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-warning" /> {isClosedPeriod ? "Piutang Per Closing (immutable)" : "Piutang periode ini (belum menjadi kas)"}</span>
                 <span className="font-bold text-warning tabular-nums">{formatCurrency(receivables.totalReceivable)}</span>
               </div>
               <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", cashProfitTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
@@ -583,7 +658,7 @@ export default function FinanceLabaRugiPage() {
                   <PiggyBank className="w-4 h-4" /> Laba Bersih
                 </span>
                 <span className={cn("tabular-nums text-base", profitTone === "success" ? "text-success" : "text-danger")}>
-                  {formatCurrency(period.laba)}
+                  {formatCurrency(displayPeriod.laba)}
                 </span>
               </div>
             </div>

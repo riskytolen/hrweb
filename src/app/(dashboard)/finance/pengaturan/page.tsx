@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabase";
 import type { DbFinanceCompanySettings } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
+import { parseFinanceDbError } from "@/lib/finance-closing";
 
 const LOGO_BUCKET = "finance-assets";
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -33,6 +34,8 @@ export default function FinancePengaturanPage() {
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [hasClosing, setHasClosing] = useState(false);
+  const [lastClosed, setLastClosed] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,7 +51,10 @@ export default function FinancePengaturanPage() {
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle();
+      const [{ data }, statusRes] = await Promise.all([
+        supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
+        (supabase.from("finance_month_status" as never).select("period_start, state") as unknown as Promise<{ data: { period_start: string; state: string }[] | null }>),
+      ]);
       if (data) {
         const s = data as DbFinanceCompanySettings;
         setSettings(s);
@@ -58,6 +64,12 @@ export default function FinancePengaturanPage() {
           initial_cash_balance: Number(s.initial_cash_balance),
         });
         setLogoPreview(s.logo_url);
+      }
+      const rows = (statusRes as unknown as { data: { period_start: string; state: string }[] | null }).data;
+      if (rows && rows.length > 0) {
+        const closed = rows.filter((r) => r.state === "close").sort((a, b) => (a.period_start < b.period_start ? -1 : 1));
+        setHasClosing(closed.length > 0);
+        setLastClosed(closed.length ? closed[closed.length - 1].period_start.slice(0, 7) : null);
       }
     } catch {
       showMsg("error", "Gagal memuat pengaturan.");
@@ -126,7 +138,7 @@ export default function FinancePengaturanPage() {
         updated_by: "web-admin",
       };
       const { error } = await supabase.from("finance_company_settings").update(payload).eq("id", 1);
-      if (error) throw error;
+      if (error) throw new Error(parseFinanceDbError(error));
       await logAudit({ supabase, action: "update", entityType: "finance_company_settings", entityId: 1, entityLabel: "Pengaturan Finance", newData: payload });
       showMsg("success", "Pengaturan berhasil disimpan.");
       setLogoFile(null);
@@ -215,8 +227,10 @@ export default function FinancePengaturanPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground mb-1.5 block flex items-center gap-1.5"><Wallet className="w-3 h-3" /> Saldo Awal Kas (Rp)</label>
-                  <CurrencyInput value={form.initial_cash_balance} onChange={(v) => setForm({ ...form, initial_cash_balance: v })} />
-                  <p className="text-[10px] text-muted-foreground mt-1">Dasar perhitungan saldo arus kas.</p>
+                  <CurrencyInput value={form.initial_cash_balance} onChange={(v) => setForm({ ...form, initial_cash_balance: v })} disabled={!canEdit || hasClosing} />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {hasClosing ? `Terkunci setelah closing pertama${lastClosed ? ` (terakhir ${lastClosed})` : ""}. Kelola di Tutup Buku.` : "Dasar perhitungan saldo arus kas."}
+                  </p>
                 </div>
               </div>
             </div>

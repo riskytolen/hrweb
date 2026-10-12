@@ -938,6 +938,8 @@ export interface DbFinanceCompanySettings {
   initial_cash_balance: number;
   logo_url: string | null;
   logo_path: string | null;
+  books_start_month: string | null;
+  finance_timezone: string | null;
   updated_at: string;
   updated_by: string | null;
 }
@@ -1026,4 +1028,74 @@ export interface DbFinanceCashAdjustment {
   notes: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface DbFinanceMonthEvent {
+  id: number;
+  period_start: string;
+  period_end: string;
+  event_seq: number;
+  event_type: "close" | "reopen";
+  calculation_version: string;
+  opening_prev_balance: number | null;
+  deficit_reset: number | null;
+  opening_cash_balance: number | null;
+  cash_in: number | null;
+  cash_out_expenses: number | null;
+  adjustment_in: number | null;
+  adjustment_out: number | null;
+  ending_cash_balance: number | null;
+  revenue_total: number | null;
+  revenue_subtotal: number | null;
+  ppn_amount: number | null;
+  pph_amount: number | null;
+  expense_total: number | null;
+  net_profit: number | null;
+  cash_on_hand_profit: number | null;
+  opening_receivable: number | null;
+  new_invoices_total: number | null;
+  period_payments_total: number | null;
+  closing_receivable: number | null;
+  invoice_count: number | null;
+  payment_count: number | null;
+  expense_count: number | null;
+  adjustment_count: number | null;
+  snapshot_data: Record<string, unknown> | null;
+  source_hash: string | null;
+  actor_user_id: string | null;
+  actor_email: string | null;
+  actor_name: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface DbFinanceMonthStatus {
+  period_start: string;
+  period_end: string;
+  latest_event_id: number;
+  latest_seq: number;
+  state: "close" | "reopen";
+  calculation_version: string | null;
+  opening_cash_balance: number | null;
+  cash_in: number | null;
+  cash_out_expenses: number | null;
+  adjustment_in: number | null;
+  adjustment_out: number | null;
+  ending_cash_balance: number | null;
+  revenue_total: number | null;
+  expense_total: number | null;
+  net_profit: number | null;
+  cash_on_hand_profit: number | null;
+  opening_receivable: number | null;
+  closing_receivable: number | null;
+  invoice_count: number | null;
+  payment_count: number | null;
+  expense_count: number | null;
+  adjustment_count: number | null;
+  source_hash: string | null;
+  actor_user_id: string | null;
+  actor_email: string | null;
+  actor_name: string | null;
+  reason: string | null;
+  created_at: string;
 }

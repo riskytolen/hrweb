@@ -76,6 +76,7 @@ export type AuditEntityType =
   | "finance_expense_categories"
   | "finance_expenses"
   | "finance_cash_adjustments"
+  | "finance_month_events"
   | "company_legal_categories"
   | "company_legal_documents"
   | "company_legal_document_versions"
@@ -262,6 +263,7 @@ export function entityLabel(entityType: string): string {
     finance_expense_categories: "Kategori Pengeluaran",
     finance_expenses: "Pengeluaran Finance",
     finance_cash_adjustments: "Penyesuaian Kas",
+    finance_month_events: "Tutup Buku Finance",
     company_legal_categories: "Kategori Legalitas",
     company_legal_documents: "Dokumen Legalitas",
     company_legal_document_versions: "Versi Dokumen Legalitas",

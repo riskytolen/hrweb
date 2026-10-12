@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ReceiptText, Plus, Search, Pencil, Trash2, X, RefreshCw, ChevronDown, Banknote,
-  Users, FileDown, AlertTriangle, Wallet, Eye,
+  Users, FileDown, AlertTriangle, Wallet, Eye, Lock,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -26,6 +26,7 @@ import {
   filterInvoicesByDate, filterPaymentsByDate, summarizeInvoiceCohort, summarizePayments,
   exportRevenueInvoicesPdf, exportRevenuePaymentsPdf,
 } from "@/lib/finance-revenue-report";
+import { monthStartOf, parseFinanceDbError } from "@/lib/finance-closing";
 
 type Tab = "invoices" | "payments" | "clients";
 type InvStatus = "Lunas" | "Sebagian" | "Belum Lunas";
@@ -64,6 +65,8 @@ export default function FinancePendapatanPage() {
   const [paymentFrom, setPaymentFrom] = useState("");
   const [paymentTo, setPaymentTo] = useState("");
   const [company, setCompany] = useState<DbFinanceCompanySettings | null>(null);
+  const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set());
+  const isClosedDate = useCallback((dateStr: string) => closedMonths.has(monthStartOf(dateStr)), [closedMonths]);
   const [exporting, setExporting] = useState<null | "invoice-pdf" | "payment-pdf">(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -175,6 +178,12 @@ export default function FinancePendapatanPage() {
         setPpnDefault(Number(settingsData.ppn_default) || 0);
         setCompany(settingsData);
       }
+      try {
+        const { data: stData } = await (supabase.from("finance_month_status" as never).select("period_start, state") as unknown as Promise<{ data: { period_start: string; state: string }[] | null }>);
+        if (stData) setClosedMonths(new Set(stData.filter((s) => s.state === "close").map((s) => s.period_start)));
+      } catch {
+        /* status closing opsional */
+      }
     } catch {
       addToast("error", "Gagal memuat data pendapatan.");
     } finally {
@@ -233,6 +242,10 @@ export default function FinancePendapatanPage() {
       setInvError("Lengkapi field wajib (nomor, tanggal).");
       return;
     }
+    if ((editingInv && isClosedDate(editingInv.invoice_date)) || isClosedDate(invForm.invoice_date)) {
+      setInvError(`Periode ${invForm.invoice_date.slice(0, 7)} sudah ditutup. Transaksi bertanggal periode tersebut dikunci.`);
+      return;
+    }
     setInvSaving(true);
     setInvError("");
     const t = invTotals;
@@ -271,7 +284,7 @@ export default function FinancePendapatanPage() {
       setShowInvForm(false);
       fetchAll();
     } catch (err) {
-      setInvError(err instanceof Error ? err.message : "Gagal menyimpan invoice.");
+      setInvError(parseFinanceDbError(err));
     } finally {
       setInvSaving(false);
     }
@@ -296,6 +309,10 @@ export default function FinancePendapatanPage() {
       setPayError("Tanggal dan nominal wajib diisi.");
       return;
     }
+    if (isClosedDate(payForm.payment_date)) {
+      setPayError(`Periode ${payForm.payment_date.slice(0, 7)} sudah ditutup. Pilih tanggal pada bulan terbuka.`);
+      return;
+    }
     setPaySaving(true);
     setPayError("");
     const remaining = payInvoice.total_amount - (payInvoice.paid ?? 0);
@@ -313,7 +330,7 @@ export default function FinancePendapatanPage() {
       setShowPayModal(false);
       fetchAll();
     } catch (err) {
-      setPayError(err instanceof Error ? err.message : "Gagal mencatat pembayaran.");
+      setPayError(parseFinanceDbError(err));
     } finally {
       setPaySaving(false);
     }
@@ -388,6 +405,12 @@ export default function FinancePendapatanPage() {
   };
 
   const deleteInvoice = async (id: number) => {
+    const target = invoices.find((i) => i.id === id);
+    if (target && isClosedDate(target.invoice_date)) {
+      addToast("error", `Periode ${target.invoice_date.slice(0, 7)} sudah ditutup.`);
+      setDeleteConfirm(null);
+      return;
+    }
     setDeleting(true);
     try {
       const { error } = await supabase.from("finance_invoices").delete().eq("id", id);
@@ -395,8 +418,8 @@ export default function FinancePendapatanPage() {
       await logAudit({ supabase, action: "delete", entityType: "finance_invoices", entityId: id, entityLabel: `Invoice #${id}` });
       addToast("success", "Invoice dihapus.");
       fetchAll();
-    } catch {
-      addToast("error", "Gagal menghapus invoice.");
+    } catch (err) {
+      addToast("error", parseFinanceDbError(err));
     } finally {
       setDeleting(false);
       setDeleteConfirm(null);
@@ -743,7 +766,10 @@ export default function FinancePendapatanPage() {
                           {inv.notes && <p className="text-[11px] text-muted-foreground italic break-words">Catatan: {inv.notes}</p>}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
-                          {fmtDate(inv.invoice_date)}
+                          <span className="inline-flex items-center gap-1.5">
+                            {fmtDate(inv.invoice_date)}
+                            {isClosedDate(inv.invoice_date) && <Lock className="w-3 h-3 text-success" />}
+                          </span>
                           {inv.due_date && <p className="text-[11px]">Jth tempo {fmtDate(inv.due_date)}</p>}
                         </td>
                         <td className="px-4 py-3">
@@ -777,7 +803,7 @@ export default function FinancePendapatanPage() {
                             <button onClick={() => openPayList(inv)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Riwayat Pembayaran">
                               <Wallet className="w-4 h-4" />
                             </button>
-                            {canEdit && (
+                            {canEdit && !isClosedDate(inv.invoice_date) && (
                               <>
                                 <button onClick={() => openEditInvoice(inv)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit">
                                   <Pencil className="w-4 h-4" />

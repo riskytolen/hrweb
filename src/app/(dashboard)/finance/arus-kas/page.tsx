@@ -20,6 +20,7 @@ import { downloadCsv, fmtDate } from "@/lib/finance";
 import {
   computeCashFlowPeriod, buildCashFlowFilename, exportCashFlowPdf, formatCashPeriodLabel,
 } from "@/lib/finance-cash-flow-report";
+import { monthStartOf, parseFinanceDbError } from "@/lib/finance-closing";
 
 interface Toast { id: number; type: "success" | "error"; msg: string }
 
@@ -61,6 +62,8 @@ export default function FinanceArusKasPage() {
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; label: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set());
+  const isClosedDate = (dateStr: string) => closedMonths.has(monthStartOf(dateStr));
 
   useEffect(() => {
     const handler = (e: MouseEvent) => { if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false); };
@@ -120,6 +123,12 @@ export default function FinanceArusKasPage() {
         category_name: e.category?.name ?? null,
       })));
       setAdjustments(adjRaw as unknown as DbFinanceCashAdjustment[]);
+      try {
+        const { data: stData } = await (supabase.from("finance_month_status" as never).select("period_start, state") as unknown as Promise<{ data: { period_start: string; state: string }[] | null }>);
+        if (stData) setClosedMonths(new Set(stData.filter((s) => s.state === "close").map((s) => s.period_start)));
+      } catch {
+        /* opsional */
+      }
     } catch {
       addToast("error", "Gagal memuat data arus kas.");
     } finally {
@@ -176,6 +185,10 @@ export default function FinanceArusKasPage() {
       setFormError("Lengkapi field wajib (tanggal, deskripsi, nominal > 0).");
       return;
     }
+    if ((editing && isClosedDate(editing.adjustment_date)) || isClosedDate(form.adjustment_date)) {
+      setFormError(`Periode ${form.adjustment_date.slice(0, 7)} sudah ditutup. Transaksi bertanggal periode tersebut dikunci.`);
+      return;
+    }
     setSaving(true);
     setFormError("");
     const payload = { adjustment_date: form.adjustment_date, type: form.type, amount: form.amount, description: form.description.trim(), notes: form.notes || null };
@@ -194,13 +207,19 @@ export default function FinanceArusKasPage() {
       setShowForm(false);
       fetchAll();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Gagal menyimpan penyesuaian.");
+      setFormError(parseFinanceDbError(err));
     } finally {
       setSaving(false);
     }
   };
 
   const del = async (id: number) => {
+    const target = adjustments.find((a) => a.id === id);
+    if (target && isClosedDate(target.adjustment_date)) {
+      addToast("error", `Periode ${target.adjustment_date.slice(0, 7)} sudah ditutup.`);
+      setDeleteConfirm(null);
+      return;
+    }
     setDeleting(true);
     try {
       const { error } = await supabase.from("finance_cash_adjustments").delete().eq("id", id);
@@ -208,8 +227,8 @@ export default function FinanceArusKasPage() {
       await logAudit({ supabase, action: "delete", entityType: "finance_cash_adjustments", entityId: id, entityLabel: "Penyesuaian kas" });
       addToast("success", "Penyesuaian dihapus.");
       fetchAll();
-    } catch {
-      addToast("error", "Gagal menghapus penyesuaian.");
+    } catch (err) {
+      addToast("error", parseFinanceDbError(err));
     } finally {
       setDeleting(false);
       setDeleteConfirm(null);
@@ -402,7 +421,7 @@ export default function FinanceArusKasPage() {
                     {canEdit && (
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          {e.type === "adjustment" && e.id != null && (
+                          {e.type === "adjustment" && e.id != null && !isClosedDate(e.tanggal) && (
                             <>
                               <button onClick={() => { const a = adjustments.find((x) => x.id === e.id); if (a) openEdit(a); }} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit"><Pencil className="w-4 h-4" /></button>
                               <button onClick={() => { const a = adjustments.find((x) => x.id === e.id); if (a) setDeleteConfirm({ id: a.id, label: a.description }); }} className="p-2 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger" title="Hapus"><Trash2 className="w-4 h-4" /></button>

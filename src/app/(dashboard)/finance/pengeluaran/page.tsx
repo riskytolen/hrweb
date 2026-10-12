@@ -17,6 +17,7 @@ import type { DbFinanceExpense, DbFinanceExpenseCategory } from "@/lib/supabase"
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import { EXPENSE_METHODS, downloadCsv, fmtDate } from "@/lib/finance";
+import { monthStartOf, parseFinanceDbError } from "@/lib/finance-closing";
 
 type Tab = "expenses" | "categories";
 
@@ -69,6 +70,8 @@ export default function FinancePengeluaranPage() {
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ kind: "expense" | "category"; id: number; label: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set());
+  const isClosedDate = (dateStr: string) => closedMonths.has(monthStartOf(dateStr));
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -79,6 +82,12 @@ export default function FinancePengeluaranPage() {
       ]);
       if (expData) setExpenses(expData as ExpenseRow[]);
       if (catData) setCategories(catData as DbFinanceExpenseCategory[]);
+      try {
+        const { data: stData } = await (supabase.from("finance_month_status" as never).select("period_start, state") as unknown as Promise<{ data: { period_start: string; state: string }[] | null }>);
+        if (stData) setClosedMonths(new Set(stData.filter((s) => s.state === "close").map((s) => s.period_start)));
+      } catch {
+        /* opsional */
+      }
     } catch {
       addToast("error", "Gagal memuat data pengeluaran.");
     } finally {
@@ -110,6 +119,10 @@ export default function FinancePengeluaranPage() {
       setFormError("Lengkapi field wajib (tanggal, deskripsi, nominal > 0).");
       return;
     }
+    if ((editing && isClosedDate(editing.expense_date)) || isClosedDate(form.expense_date)) {
+      setFormError(`Periode ${form.expense_date.slice(0, 7)} sudah ditutup. Transaksi bertanggal periode tersebut dikunci.`);
+      return;
+    }
     setSaving(true);
     setFormError("");
     const payload = {
@@ -136,13 +149,19 @@ export default function FinancePengeluaranPage() {
       setShowForm(false);
       fetchAll();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Gagal menyimpan pengeluaran.");
+      setFormError(parseFinanceDbError(err));
     } finally {
       setSaving(false);
     }
   };
 
   const deleteExpense = async (id: number) => {
+    const target = expenses.find((e) => e.id === id);
+    if (target && isClosedDate(target.expense_date)) {
+      addToast("error", `Periode ${target.expense_date.slice(0, 7)} sudah ditutup.`);
+      setDeleteConfirm(null);
+      return;
+    }
     setDeleting(true);
     try {
       const { error } = await supabase.from("finance_expenses").delete().eq("id", id);
@@ -150,8 +169,8 @@ export default function FinancePengeluaranPage() {
       await logAudit({ supabase, action: "delete", entityType: "finance_expenses", entityId: id, entityLabel: "Pengeluaran" });
       addToast("success", "Pengeluaran dihapus.");
       fetchAll();
-    } catch {
-      addToast("error", "Gagal menghapus pengeluaran.");
+    } catch (err) {
+      addToast("error", parseFinanceDbError(err));
     } finally {
       setDeleting(false);
       setDeleteConfirm(null);
@@ -340,7 +359,7 @@ export default function FinancePengeluaranPage() {
                       <td className="px-4 py-3 text-muted-foreground">{e.vendor || "—"}</td>
                       <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-full bg-muted text-xs font-medium">{e.method || "—"}</span></td>
                       <td className="px-4 py-3 text-right font-bold text-danger tabular-nums">{formatCurrency(e.amount)}</td>
-                      {canEdit && (
+                      {canEdit && !isClosedDate(e.expense_date) && (
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
                             <button onClick={() => openEdit(e)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit"><Pencil className="w-4 h-4" /></button>
