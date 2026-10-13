@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildInvoiceSummaryRows,
   buildInvoiceCostLines,
   buildInvoiceFilename,
+  buildPaymentInstructionRows,
   formatTerbilang,
   hasBankInstruction,
   invoiceClientName,
@@ -49,6 +51,44 @@ describe("finance invoice pdf helpers", () => {
     expect(hasBankInstruction({ company_name: "PT X", bank_account_number: "123" })).toBe(true);
     expect(hasBankInstruction({ company_name: "PT X", bank_name: "BCA" })).toBe(false);
     expect(hasBankInstruction({ company_name: "PT X", bank_account_number: "  " })).toBe(false);
+  });
+
+  it("instruksi pembayaran disusun per baris agar jelas", () => {
+    expect(buildPaymentInstructionRows({ company_name: "PT X" })).toEqual([]);
+    expect(buildPaymentInstructionRows({
+      company_name: "PT X",
+      bank_name: "BCA",
+      bank_account_number: "7152174317",
+      bank_account_name: "CV. Jami Berkah Transindo",
+    })).toEqual([
+      { label: "Bank", value: "BCA" },
+      { label: "Nomor Rekening", value: "7152174317" },
+      { label: "Atas Nama", value: "CV. Jami Berkah Transindo" },
+    ]);
+  });
+
+  it("ringkasan tagihan menampilkan PPh sebagai potongan", () => {
+    const rows = buildInvoiceSummaryRows({
+      ...baseInvoice,
+      tax_scheme: "trip_only",
+      tax_base_amount: 10_000_000,
+      ppn_percent: 1.1,
+      ppn_amount: 110_000,
+      pph_percent: 2,
+      pph_amount: 200_000,
+    });
+
+    expect(rows.map((r) => r.label)).toEqual([
+      "Total Biaya",
+      "Dasar Pengenaan Pajak (DPP)",
+      "PPN (1.1%)",
+      "Potongan PPh (2%)",
+      "TOTAL TAGIHAN",
+    ]);
+    expect(rows[1]).toMatchObject({ caption: "Biaya Perjalanan Saja" });
+    expect(rows[2].value).toBe("+Rp110.000");
+    expect(rows[3]).toMatchObject({ value: "-Rp200.000", emphasis: "deduction" });
+    expect(rows[4]).toMatchObject({ value: "Rp9.910.000", emphasis: "total" });
   });
 
   it("nama klien memakai perusahaan lalu kontak", () => {
