@@ -18,6 +18,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { parseFinanceDbError } from "@/lib/finance-closing";
 
 const LOGO_BUCKET = "finance-assets";
+const LOGO_MIME_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
 
 export default function FinancePengaturanPage() {
@@ -90,8 +91,8 @@ export default function FinancePengaturanPage() {
 
   const handleLogoFile = (file: File | null) => {
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      showMsg("error", "File harus berupa gambar.");
+    if (!LOGO_MIME_TYPES.includes(file.type)) {
+      showMsg("error", "Format logo harus JPG, PNG, atau WebP.");
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
@@ -117,6 +118,9 @@ export default function FinancePengaturanPage() {
       return;
     }
     setSaving(true);
+    // Path logo baru yang sudah ter-upload; dipakai untuk bersih-bersih
+    // bila update database gagal agar tidak ada file yatim di bucket.
+    let uploadedPath: string | null = null;
     try {
       let logoUrl = settings?.logo_url ?? null;
       let logoPath = settings?.logo_path ?? null;
@@ -124,9 +128,7 @@ export default function FinancePengaturanPage() {
       if (logoFile) {
         const uploaded = await uploadLogo();
         if (!uploaded) throw new Error("Gagal upload logo.");
-        if (settings?.logo_path) {
-          await supabase.storage.from(LOGO_BUCKET).remove([settings.logo_path]).catch(() => {});
-        }
+        uploadedPath = uploaded.path;
         logoUrl = uploaded.url;
         logoPath = uploaded.path;
       }
@@ -152,10 +154,19 @@ export default function FinancePengaturanPage() {
       const { error } = await supabase.from("finance_company_settings").update(payload).eq("id", 1);
       if (error) throw new Error(parseFinanceDbError(error));
       await logAudit({ supabase, action: "update", entityType: "finance_company_settings", entityId: 1, entityLabel: "Pengaturan Finance", newData: payload });
+      // Logo lama baru dihapus setelah database berhasil — logo yang tampil tidak pernah putus.
+      if (uploadedPath && settings?.logo_path && settings.logo_path !== uploadedPath) {
+        await supabase.storage.from(LOGO_BUCKET).remove([settings.logo_path]).catch(() => {});
+      }
+      uploadedPath = null;
       showMsg("success", "Pengaturan berhasil disimpan.");
       setLogoFile(null);
       fetchSettings();
     } catch (err) {
+      // Update gagal: hapus logo baru agar tidak menjadi file yatim.
+      if (uploadedPath) {
+        await supabase.storage.from(LOGO_BUCKET).remove([uploadedPath]).catch(() => {});
+      }
       showMsg("error", err instanceof Error ? err.message : "Gagal menyimpan pengaturan.");
     } finally {
       setSaving(false);
@@ -302,7 +313,7 @@ export default function FinancePengaturanPage() {
                 </div>
                 <div>
                   <h2 className="text-sm font-bold text-foreground">Logo</h2>
-                  <p className="text-[11px] text-muted-foreground">Maks 2 MB, format gambar</p>
+                  <p className="text-[11px] text-muted-foreground">Maks 2 MB, JPG/PNG/WebP</p>
                 </div>
               </div>
               <div className="p-5 space-y-4">
