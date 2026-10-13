@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   TrendingDown, Plus, Search, Pencil, Trash2, X, RefreshCw, ChevronDown, Tag,
   FileDown, AlertTriangle, ListPlus,
@@ -13,10 +13,14 @@ import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import RouteGuard from "@/components/RouteGuard";
 import { cn, formatCurrency, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
-import type { DbFinanceExpense, DbFinanceExpenseCategory } from "@/lib/supabase";
+import type { DbFinanceExpense, DbFinanceExpenseCategory, DbFinanceCompanySettings } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import { EXPENSE_METHODS, downloadCsv, fmtDate } from "@/lib/finance";
+import {
+  buildExpenseFilename, exportExpensesPdf, filterExpensesByDate, formatExpensePeriodLabel,
+  summarizeExpenses,
+} from "@/lib/finance-expense-report";
 import { monthStartOf, parseFinanceDbError } from "@/lib/finance-closing";
 
 type Tab = "expenses" | "categories";
@@ -45,9 +49,15 @@ export default function FinancePengeluaranPage() {
   const [loading, setLoading] = useState(true);
   const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
   const [categories, setCategories] = useState<DbFinanceExpenseCategory[]>([]);
+  const [company, setCompany] = useState<DbFinanceCompanySettings | null>(null);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("Semua");
+  const [expenseFrom, setExpenseFrom] = useState("");
+  const [expenseTo, setExpenseTo] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
 
   const addToast = useCallback((type: "success" | "error", msg: string) => {
     const id = Date.now();
@@ -73,15 +83,23 @@ export default function FinancePengeluaranPage() {
   const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set());
   const isClosedDate = (dateStr: string) => closedMonths.has(monthStartOf(dateStr));
 
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: expData }, { data: catData }] = await Promise.all([
+      const [{ data: expData }, { data: catData }, settingsRes] = await Promise.all([
         supabase.from("finance_expenses").select("*, category:finance_expense_categories(*)").order("expense_date", { ascending: false }).order("id", { ascending: false }),
         supabase.from("finance_expense_categories").select("*").order("sort_order", { ascending: true }).order("name", { ascending: true }),
+        supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
       ]);
       if (expData) setExpenses(expData as ExpenseRow[]);
       if (catData) setCategories(catData as DbFinanceExpenseCategory[]);
+      if (settingsRes.data) setCompany(settingsRes.data as DbFinanceCompanySettings);
       try {
         const { data: stData } = await (supabase.from("finance_month_status" as never).select("period_start, state") as unknown as Promise<{ data: { period_start: string; state: string }[] | null }>);
         if (stData) setClosedMonths(new Set(stData.filter((s) => s.state === "close").map((s) => s.period_start)));
@@ -217,30 +235,90 @@ export default function FinancePengeluaranPage() {
     }
   };
 
+  // Sumber kebenaran tunggal: tanggal → kategori → search.
+  // Tabel, ringkasan, CSV, dan PDF memakai himpunan yang sama agar rekonsiliasi.
+  const dateFilteredExpenses = useMemo(
+    () => filterExpensesByDate(expenses, expenseFrom, expenseTo),
+    [expenses, expenseFrom, expenseTo],
+  );
+
   const filteredExpenses = useMemo(() => {
     const s = search.toLowerCase();
-    return expenses.filter((e) => {
+    return dateFilteredExpenses.filter((e) => {
       const matchSearch = !s || e.description.toLowerCase().includes(s) || (e.vendor || "").toLowerCase().includes(s) || (e.category?.name || "").toLowerCase().includes(s);
       const matchCat = filterCategory === "Semua" || e.category_id === Number(filterCategory);
       return matchSearch && matchCat;
     });
-  }, [expenses, search, filterCategory]);
+  }, [dateFilteredExpenses, search, filterCategory]);
 
   const summary = useMemo(() => {
-    const total = expenses.reduce((s, e) => s + e.amount, 0);
+    const base = summarizeExpenses(filteredExpenses.map((e) => ({ amount: e.amount, category_name: e.category?.name ?? null })));
     const byCat = new Map<number, number>();
-    expenses.forEach((e) => {
+    filteredExpenses.forEach((e) => {
       if (e.category_id) byCat.set(e.category_id, (byCat.get(e.category_id) || 0) + e.amount);
     });
-    return { total, byCat };
-  }, [expenses]);
+    return { ...base, byCat };
+  }, [filteredExpenses]);
+
+  const periodLabel = useMemo(() => formatExpensePeriodLabel(expenseFrom, expenseTo), [expenseFrom, expenseTo]);
+  const categoryLabel = useMemo(
+    () => filterCategory === "Semua" ? "Semua" : (categories.find((c) => c.id === Number(filterCategory))?.name || "—"),
+    [filterCategory, categories],
+  );
+
+  const companyInfo = useMemo(() => ({
+    company_name: company?.company_name || "Perusahaan",
+    address: company?.address ?? null,
+    phone: company?.phone ?? null,
+    email: company?.email ?? null,
+    npwp: company?.npwp ?? null,
+    logo_url: company?.logo_url ?? null,
+  }), [company]);
 
   const exportCsv = () => {
     const rows: (string | number | null | undefined)[][] = [
+      [`Register Pengeluaran — ${periodLabel}`],
+      [`Kategori: ${categoryLabel}${search.trim() ? ` • Cari: ${search.trim()}` : ""}`],
+      [],
       ["No", "Tanggal", "Kategori", "Deskripsi", "Vendor", "Metode", "Nominal", "Catatan"],
       ...filteredExpenses.map((e, i) => [i + 1, e.expense_date, e.category?.name || "", e.description, e.vendor || "", e.method || "", e.amount, e.notes || ""]),
+      [],
+      [`Total (${filteredExpenses.length} transaksi)`, "", "", "", "", "", summary.total, ""],
     ];
-    downloadCsv("pengeluaran.csv", rows);
+    downloadCsv(buildExpenseFilename("csv", expenseFrom, expenseTo), rows);
+    setShowExportMenu(false);
+  };
+
+  const exportPdf = async () => {
+    if (filteredExpenses.length === 0) {
+      addToast("error", "Tidak ada pengeluaran pada filter aktif.");
+      return;
+    }
+    setExportingPdf(true);
+    try {
+      await exportExpensesPdf({
+        rows: filteredExpenses.map((e) => ({
+          expense_date: e.expense_date,
+          category_name: e.category?.name || "Tanpa kategori",
+          description: e.description,
+          vendor: e.vendor || "—",
+          method: e.method || "—",
+          amount: e.amount,
+        })),
+        from: expenseFrom,
+        to: expenseTo,
+        categoryFilter: categoryLabel,
+        search,
+        company: companyInfo,
+        summary,
+      });
+      setShowExportMenu(false);
+      addToast("success", "PDF Register Pengeluaran diunduh.");
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Gagal membuat PDF pengeluaran.");
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   return (
@@ -250,16 +328,32 @@ export default function FinancePengeluaranPage() {
         description="Kelola pengeluaran operasional dan kategori"
         icon={TrendingDown}
         actions={
-          <button onClick={exportCsv} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted">
-            <FileDown className="w-4 h-4" />
-            Export CSV
-          </button>
+          <div className="relative" ref={exportRef}>
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-border hover:bg-muted"
+            >
+              <FileDown className="w-4 h-4" />
+              Export
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-20">
+                <button onClick={exportCsv} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted">
+                  Export CSV
+                </button>
+                <button onClick={() => { void exportPdf(); }} disabled={exportingPdf} className="w-full text-left px-4 py-2.5 text-sm hover:bg-muted disabled:opacity-50">
+                  {exportingPdf ? "Membuat PDF..." : "Export PDF"}
+                </button>
+              </div>
+            )}
+          </div>
         }
       />
 
       <div className="flex items-center gap-1 p-1 bg-muted rounded-xl w-fit mb-4">
         {([
-          { key: "expenses" as Tab, label: "Pengeluaran", icon: TrendingDown, count: expenses.length },
+          { key: "expenses" as Tab, label: "Pengeluaran", icon: TrendingDown, count: filteredExpenses.length },
           { key: "categories" as Tab, label: "Kategori", icon: Tag, count: categories.length },
         ]).map((t) => (
           <button
@@ -284,7 +378,7 @@ export default function FinancePengeluaranPage() {
         <div className="bg-card rounded-2xl border border-border p-4 shadow-sm">
           <p className="text-xs font-semibold text-muted-foreground">Total Pengeluaran</p>
           <p className="text-lg font-bold text-danger mt-1 tabular-nums">{formatCurrency(summary.total)}</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">{expenses.length} transaksi</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">{summary.count} transaksi • {periodLabel}</p>
         </div>
         {Array.from(summary.byCat.entries())
           .sort((a, b) => b[1] - a[1])
@@ -315,6 +409,15 @@ export default function FinancePengeluaranPage() {
               <option value="Semua">Semua Kategori</option>
               {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <DatePicker value={expenseFrom} onChange={setExpenseFrom} placeholder="Dari tanggal" maxDate={expenseTo || undefined} className="w-full sm:w-44" />
+              <DatePicker value={expenseTo} onChange={setExpenseTo} placeholder="Sampai tanggal" minDate={expenseFrom || undefined} className="w-full sm:w-44" />
+              {(expenseFrom || expenseTo) && (
+                <button onClick={() => { setExpenseFrom(""); setExpenseTo(""); }} className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs font-semibold text-muted-foreground hover:bg-muted">
+                  <X className="w-3.5 h-3.5" /> Reset
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-2 sm:ml-auto">
               <button onClick={fetchAll} className="p-2 rounded-lg hover:bg-muted text-muted-foreground" title="Refresh"><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></button>
               {canInput && (
@@ -323,6 +426,11 @@ export default function FinancePengeluaranPage() {
                 </button>
               )}
             </div>
+          </div>
+          <div className="px-4 py-2 border-b border-border/50">
+            <p className="text-[11px] text-muted-foreground">
+              Periode: {periodLabel} • Kategori: {categoryLabel} • Menampilkan {filteredExpenses.length} dari {expenses.length} transaksi
+            </p>
           </div>
           <div className="overflow-x-auto">
             {loading ? (
