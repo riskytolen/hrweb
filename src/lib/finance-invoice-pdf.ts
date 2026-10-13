@@ -7,11 +7,12 @@
  * - Tabel rincian komponen biaya (komponen Rp0 disembunyikan)
  * - Total Biaya, Dasar Pengenaan Pajak (DPP), PPN, PPh, Total Tagihan
  * - Terbilang, catatan, instruksi transfer rekening utama
- * - Kolom tanda tangan manual (tanda tangan basah/stempel)
+ * - TTD digital (PNG transparan) bila diupload; fallback tanda tangan basah/stempel
  */
 
 import { loadDownscaledLogoDataUrl } from "./pdf-logo";
 import { invoiceTaxSchemeLabel } from "./finance";
+import { computeSignatureBox, SIGNATURE_MAX_H_MM, SIGNATURE_MAX_W_MM } from "./finance-signature";
 
 export interface InvoicePdfClient {
   company_name?: string | null;
@@ -34,6 +35,8 @@ export interface InvoicePdfCompany {
   signer_city?: string | null;
   signer_name?: string | null;
   signer_title?: string | null;
+  /** Signed URL sesaat file TTD digital (PNG transparan). Null = tanda tangan manual. */
+  signer_signature_url?: string | null;
 }
 
 export interface InvoicePdfInput {
@@ -239,10 +242,15 @@ function formatPercent(p: number | string | null | undefined): string {
 
 // ─── PDF rendering (client-side, dynamic import jspdf) ───
 
-interface PdfDoc {
-  internal: { pageSize: { getWidth(): number; getHeight(): number } };
+export interface PdfTextDoc {
   setFont(font: string, style: string): void;
   setFontSize(size: number): void;
+  getTextWidth(text: string): number;
+  splitTextToSize(text: string, width: number): string[];
+}
+
+interface PdfDoc extends PdfTextDoc {
+  internal: { pageSize: { getWidth(): number; getHeight(): number } };
   setTextColor(r: number, g?: number, b?: number): void;
   setFillColor(r: number, g: number, b: number): void;
   setDrawColor(r: number, g?: number, b?: number): void;
@@ -255,10 +263,35 @@ interface PdfDoc {
   addPage(): void;
   getNumberOfPages(): number;
   setPage(n: number): void;
-  getTextWidth(text: string): number;
-  splitTextToSize(text: string, width: number): string[];
   lastAutoTable: { finalY: number };
   save(filename: string): void;
+}
+
+/** Muat TTD digital dan hitung ukuran proporsional tanpa memperbesar (mm). */
+async function loadSignatureBox(
+  url: string | null | undefined,
+  maxW: number = SIGNATURE_MAX_W_MM,
+  maxH: number = SIGNATURE_MAX_H_MM,
+): Promise<{ dataUrl: string; w: number; h: number } | null> {
+  if (!url) return null;
+  try {
+    const dataUrl = await loadDownscaledLogoDataUrl(url);
+    if (!dataUrl) return null;
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("signature"));
+      img.src = dataUrl;
+    });
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return null;
+    const box = computeSignatureBox(iw, ih, maxW, maxH);
+    if (box.w <= 0 || box.h <= 0) return null;
+    return { dataUrl, w: box.w, h: box.h };
+  } catch {
+    return null;
+  }
 }
 
 /** Muat logo dan hitung ukuran proporsional dalam kotak maksimum (mm). */
@@ -307,12 +340,31 @@ function drawCapsLabel(pdf: PdfDoc, label: string, x: number, y: number, color: 
   pdf.text(label.toUpperCase(), x, y);
 }
 
-function splitLimited(pdf: PdfDoc, text: string, width: number, limit: number): string[] {
+function fitLineToWidth(pdf: PdfTextDoc, text: string, width: number): string {
+  if (pdf.getTextWidth(text) <= width) return text;
+
+  const ellipsis = "...";
+  let trimmed = text.trimEnd();
+  while (trimmed.length > 0 && pdf.getTextWidth(`${trimmed}${ellipsis}`) > width) {
+    trimmed = trimmed.slice(0, -1).trimEnd();
+  }
+  return trimmed ? `${trimmed}${ellipsis}` : ellipsis;
+}
+
+export function splitLimited(
+  pdf: PdfTextDoc,
+  text: string,
+  width: number,
+  limit: number,
+  font: { family?: string; style?: string; size?: number } = {},
+): string[] {
+  if (font.family || font.style) pdf.setFont(font.family || "helvetica", font.style || "normal");
+  if (font.size) pdf.setFontSize(font.size);
   const lines = pdf.splitTextToSize(text, width);
-  if (lines.length <= limit) return lines;
-  const out = lines.slice(0, limit);
+  const out = (lines.length <= limit ? lines : lines.slice(0, limit)).map((line) => fitLineToWidth(pdf, line, width));
+  if (lines.length <= limit) return out;
   const last = out[out.length - 1] || "";
-  out[out.length - 1] = last.length > 3 ? `${last.slice(0, -3)}...` : `${last}...`;
+  out[out.length - 1] = fitLineToWidth(pdf, last.endsWith("...") ? last : `${last}...`, width);
   return out;
 }
 
@@ -354,7 +406,10 @@ export async function exportInvoicePdf(args: {
   const footerSpace = 12;
 
   // ── Header modern: identitas perusahaan + panel invoice ──
-  const logo = await loadLogoBox(company.logo_url, 31, 15);
+  const [logo, signature] = await Promise.all([
+    loadLogoBox(company.logo_url, 31, 15),
+    loadSignatureBox(company.signer_signature_url),
+  ]);
   const headerY = 9;
   const headerH = 29;
   const metaW = 92;
@@ -424,13 +479,14 @@ export async function exportInvoicePdf(args: {
   const rightColX = margin + leftColW + gapCols;
   const rightColW = contentW - leftColW - gapCols;
   const clientName = invoiceClientName(client);
-  const clientNameLines = splitLimited(doc, clientName, leftColW - 10, 1);
+  const clientNameLines = splitLimited(doc, clientName, leftColW - 10, 1, { style: "bold", size: 9.7 });
   const clientBits = [client?.address, [client?.phone, client?.email].filter(Boolean).join(" • ")]
     .filter(Boolean)
     .join(" • ");
-  const clientLines = clientBits ? splitLimited(doc, clientBits, leftColW - 10, 2) : [];
+  const clientLines = clientBits ? splitLimited(doc, clientBits, leftColW - 10, 2, { size: 7.4 }) : [];
   const desc = invoice.description?.trim() || "—";
-  const dLines = splitLimited(doc, desc, rightColW - 10, 3);
+  const detailTextW = rightColW - 12;
+  const dLines = splitLimited(doc, desc, detailTextW, 3, { size: 8.2 });
   const cardH = 25;
   drawCard(doc, margin, y, leftColW, cardH, SOFT);
   drawCard(doc, rightColX, y, rightColW, cardH, [255, 255, 255]);
@@ -585,7 +641,16 @@ export async function exportInvoicePdf(args: {
   doc.setTextColor(INK[0], INK[1], INK[2]);
   doc.text(placeDate, signX + signW / 2, sy, { align: "center" });
   doc.text("Hormat kami,", signX + signW / 2, sy + 3.8, { align: "center" });
-  // Ruang tanda tangan basah/stempel manual.
+  // TTD digital (PNG transparan) di tengah celah; bila tidak ada/gagal,
+  // ruang dibiarkan kosong untuk tanda tangan basah/stempel manual.
+  if (signature) {
+    try {
+      const sx = signX + (signW - signature.w) / 2;
+      pdfSafeAddImage(doc, signature.dataUrl, sx, sy + 5, signature.w, signature.h);
+    } catch {
+      /* abaikan TTD rusak */
+    }
+  }
   sy += 18;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.7);

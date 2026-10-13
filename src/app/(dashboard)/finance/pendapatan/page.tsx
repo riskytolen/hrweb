@@ -27,6 +27,7 @@ import {
   exportRevenueInvoicesPdf, exportRevenuePaymentsPdf,
 } from "@/lib/finance-revenue-report";
 import { monthStartOf, parseFinanceDbError } from "@/lib/finance-closing";
+import { SIGNATURE_BUCKET } from "@/lib/finance-signature";
 
 type Tab = "invoices" | "payments" | "clients";
 type InvStatus = "Lunas" | "Sebagian" | "Belum Lunas";
@@ -582,6 +583,7 @@ export default function FinancePendapatanPage() {
     signer_city: company?.signer_city ?? null,
     signer_name: company?.signer_name ?? null,
     signer_title: company?.signer_title ?? null,
+    signer_signature_url: null as string | null,
   }), [company]);
 
   // PDF invoice fisik per invoice — tersedia untuk semua viewer Finance,
@@ -590,6 +592,17 @@ export default function FinancePendapatanPage() {
     setPrintingInvoiceId(inv.id);
     try {
       const { exportInvoicePdf } = await import("@/lib/finance-invoice-pdf");
+      // TTD digital dari bucket privat: buat signed URL berumur pendek khusus unduhan ini.
+      // Gagal memuat = fallback tanda tangan manual, bukan gagal cetak.
+      let signatureUrl: string | null = null;
+      if (company?.signer_signature_path) {
+        try {
+          const { data, error } = await supabase.storage.from(SIGNATURE_BUCKET).createSignedUrl(company.signer_signature_path, 180);
+          if (!error && data?.signedUrl) signatureUrl = data.signedUrl;
+        } catch {
+          signatureUrl = null;
+        }
+      }
       await exportInvoicePdf({
         invoice: {
           invoice_no: inv.invoice_no,
@@ -617,7 +630,7 @@ export default function FinancePendapatanPage() {
           phone: inv.client.phone,
           email: inv.client.email,
         } : null,
-        company: invoicePdfCompany,
+        company: { ...invoicePdfCompany, signer_signature_url: signatureUrl },
       });
       addToast("success", `PDF ${inv.invoice_no} diunduh.`);
     } catch (err) {

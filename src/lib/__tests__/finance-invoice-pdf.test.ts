@@ -8,6 +8,8 @@ import {
   hasBankInstruction,
   invoiceClientName,
   numberToWordsId,
+  splitLimited,
+  type PdfTextDoc,
 } from "../finance-invoice-pdf";
 
 const baseInvoice = {
@@ -16,6 +18,37 @@ const baseInvoice = {
   subtotal: 10_000_000,
   total_amount: 9_910_000,
 };
+
+class FakePdfTextDoc implements PdfTextDoc {
+  private fontSize = 8;
+
+  setFont(): void {}
+
+  setFontSize(size: number): void {
+    this.fontSize = size;
+  }
+
+  getTextWidth(text: string): number {
+    return text.length * this.fontSize * 0.35;
+  }
+
+  splitTextToSize(text: string, width: number): string[] {
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let current = "";
+    words.forEach((word) => {
+      const next = current ? `${current} ${word}` : word;
+      if (current && this.getTextWidth(next) > width) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = next;
+      }
+    });
+    if (current) lines.push(current);
+    return lines.length ? lines : [""];
+  }
+}
 
 describe("finance invoice pdf helpers", () => {
   it("nama file aman dari nomor invoice", () => {
@@ -123,5 +156,21 @@ describe("finance invoice pdf helpers", () => {
     );
     expect(formatTerbilang(0)).toBe("Nol rupiah");
     expect(formatTerbilang(500_000)).toBe("Lima ratus ribu rupiah");
+  });
+
+  it("detail tagihan panjang dipotong agar tetap muat di card", () => {
+    const pdf = new FakePdfTextDoc();
+    const width = 98;
+    const lines = splitLimited(
+      pdf,
+      "BIAYA PERJALANAN ALL IN DARI PT. MULIA TANGGUH PERSADA KE GLOBAL NUSANTARA SINERGI DENGAN KETERANGAN TAMBAHAN YANG SANGAT PANJANG",
+      width,
+      3,
+      { size: 8.2 },
+    );
+
+    expect(lines).toHaveLength(3);
+    expect(lines[2]).toMatch(/\.\.\.$/);
+    expect(lines.every((line) => pdf.getTextWidth(line) <= width)).toBe(true);
   });
 });

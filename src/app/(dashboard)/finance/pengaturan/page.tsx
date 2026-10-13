@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import {
   SlidersHorizontal, Save, RefreshCw, Upload, X, Building2, FileText, Mail, Phone,
-  Percent, Wallet, MapPin, AlertCircle, CheckCircle2, Landmark, PenLine,
+  Percent, Wallet, MapPin, AlertCircle, CheckCircle2, Landmark, PenLine, Trash2,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -16,6 +16,12 @@ import type { DbFinanceCompanySettings } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
 import { parseFinanceDbError } from "@/lib/finance-closing";
+import {
+  SIGNATURE_BUCKET,
+  hasTransparentPixels,
+  signatureFileError,
+  signatureFileName,
+} from "@/lib/finance-signature";
 
 const LOGO_BUCKET = "finance-assets";
 const LOGO_MIME_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
@@ -37,9 +43,16 @@ export default function FinancePengaturanPage() {
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
+  const [signatureChecking, setSignatureChecking] = useState(false);
+  const [removeSignature, setRemoveSignature] = useState(false);
   const [hasClosing, setHasClosing] = useState(false);
   const [lastClosed, setLastClosed] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const signatureFileRef = useRef<HTMLInputElement>(null);
+  const logoObjectUrlRef = useRef<string | null>(null);
+  const signatureObjectUrlRef = useRef<string | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -50,6 +63,52 @@ export default function FinancePengaturanPage() {
   }, []);
 
   useEffect(() => () => { if (msgTimer.current) clearTimeout(msgTimer.current); }, []);
+
+  // Bersihkan object URL preview agar tidak bocor saat halaman ditutup.
+  useEffect(() => () => {
+    if (logoObjectUrlRef.current) URL.revokeObjectURL(logoObjectUrlRef.current);
+    if (signatureObjectUrlRef.current) URL.revokeObjectURL(signatureObjectUrlRef.current);
+  }, []);
+
+  const setLogoObjectPreview = (file: File) => {
+    if (logoObjectUrlRef.current) URL.revokeObjectURL(logoObjectUrlRef.current);
+    const url = URL.createObjectURL(file);
+    logoObjectUrlRef.current = url;
+    setLogoPreview(url);
+  };
+
+  const setSignatureObjectPreview = (file: File) => {
+    if (signatureObjectUrlRef.current) URL.revokeObjectURL(signatureObjectUrlRef.current);
+    const url = URL.createObjectURL(file);
+    signatureObjectUrlRef.current = url;
+    setSignaturePreview(url);
+  };
+
+  const clearSignatureObjectPreview = () => {
+    if (signatureObjectUrlRef.current) {
+      URL.revokeObjectURL(signatureObjectUrlRef.current);
+      signatureObjectUrlRef.current = null;
+    }
+  };
+
+  // Muat preview TTD dari path privat via signed URL sementara.
+  const loadSignaturePreview = useCallback(async (path: string | null) => {
+    clearSignatureObjectPreview();
+    if (!path) {
+      setSignaturePreview(null);
+      return;
+    }
+    try {
+      const { data, error } = await supabase.storage.from(SIGNATURE_BUCKET).createSignedUrl(path, 3600);
+      if (error || !data?.signedUrl) {
+        setSignaturePreview(null);
+        return;
+      }
+      setSignaturePreview(data.signedUrl);
+    } catch {
+      setSignaturePreview(null);
+    }
+  }, []);
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
@@ -71,6 +130,9 @@ export default function FinancePengaturanPage() {
           signer_title: s.signer_title || "",
         });
         setLogoPreview(s.logo_url);
+        setSignatureFile(null);
+        setRemoveSignature(false);
+        await loadSignaturePreview(s.signer_signature_path ?? null);
       }
       const rows = (statusRes as unknown as { data: { period_start: string; state: string }[] | null }).data;
       if (rows && rows.length > 0) {
@@ -83,7 +145,7 @@ export default function FinancePengaturanPage() {
     } finally {
       setLoading(false);
     }
-  }, [showMsg]);
+  }, [showMsg, loadSignaturePreview]);
 
   useEffect(() => {
     (async () => { await fetchSettings(); })();
@@ -100,7 +162,7 @@ export default function FinancePengaturanPage() {
       return;
     }
     setLogoFile(file);
-    setLogoPreview(URL.createObjectURL(file));
+    setLogoObjectPreview(file);
   };
 
   const uploadLogo = async (): Promise<{ url: string; path: string } | null> => {
@@ -112,25 +174,112 @@ export default function FinancePengaturanPage() {
     return { url: data.publicUrl, path };
   };
 
+  // Decode PNG lokal dan pastikan ada piksel transparan (latar transparan asli).
+  const checkPngTransparency = async (file: File): Promise<boolean> => {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const img = new window.Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("signature-image"));
+        img.src = objectUrl;
+      });
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (!w || !h) return false;
+      const scale = Math.min(1, 800 / Math.max(w, h));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return false;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      return hasTransparentPixels(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+    } catch {
+      return false;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
+  const handleSignatureFile = async (file: File | null) => {
+    if (!file) return;
+    const invalid = signatureFileError(file);
+    if (invalid) {
+      showMsg("error", invalid === "Pilih file PNG terlebih dahulu." ? invalid : `${invalid} TTD harus PNG transparan maksimal 2 MB.`);
+      return;
+    }
+    setSignatureChecking(true);
+    try {
+      const transparent = await checkPngTransparency(file);
+      if (!transparent) {
+        showMsg("error", "TTD harus PNG dengan latar transparan (bukan JPG hasil convert / background putih).");
+        return;
+      }
+      setSignatureFile(file);
+      setRemoveSignature(false);
+      setSignatureObjectPreview(file);
+    } finally {
+      setSignatureChecking(false);
+    }
+  };
+
+  const cancelSignatureSelection = async () => {
+    setSignatureFile(null);
+    setRemoveSignature(false);
+    if (signatureFileRef.current) signatureFileRef.current.value = "";
+    await loadSignaturePreview(settings?.signer_signature_path ?? null);
+  };
+
+  const markSignatureForRemoval = () => {
+    setSignatureFile(null);
+    setRemoveSignature(true);
+    if (signatureFileRef.current) signatureFileRef.current.value = "";
+    clearSignatureObjectPreview();
+    setSignaturePreview(null);
+  };
+
+  const uploadSignature = async (): Promise<{ path: string } | null> => {
+    if (!signatureFile) return null;
+    const path = signatureFileName(signatureFile.name);
+    const { error } = await supabase.storage.from(SIGNATURE_BUCKET).upload(path, signatureFile, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: "image/png",
+    });
+    if (error) throw error;
+    return { path };
+  };
+
   const save = async () => {
     if (!form.company_name.trim()) {
       showMsg("error", "Nama perusahaan wajib diisi.");
       return;
     }
     setSaving(true);
-    // Path logo baru yang sudah ter-upload; dipakai untuk bersih-bersih
+    // File baru yang sudah ter-upload; dipakai untuk bersih-bersih
     // bila update database gagal agar tidak ada file yatim di bucket.
-    let uploadedPath: string | null = null;
+    const uploadedPaths: { bucket: string; path: string }[] = [];
     try {
       let logoUrl = settings?.logo_url ?? null;
       let logoPath = settings?.logo_path ?? null;
+      let signaturePath = settings?.signer_signature_path ?? null;
 
       if (logoFile) {
         const uploaded = await uploadLogo();
         if (!uploaded) throw new Error("Gagal upload logo.");
-        uploadedPath = uploaded.path;
+        uploadedPaths.push({ bucket: LOGO_BUCKET, path: uploaded.path });
         logoUrl = uploaded.url;
         logoPath = uploaded.path;
+      }
+
+      if (signatureFile) {
+        const uploaded = await uploadSignature();
+        if (!uploaded) throw new Error("Gagal upload TTD.");
+        uploadedPaths.push({ bucket: SIGNATURE_BUCKET, path: uploaded.path });
+        signaturePath = uploaded.path;
+      } else if (removeSignature) {
+        signaturePath = null;
       }
 
       const payload = {
@@ -147,6 +296,7 @@ export default function FinancePengaturanPage() {
         signer_city: form.signer_city || null,
         signer_name: form.signer_name || null,
         signer_title: form.signer_title || null,
+        signer_signature_path: signaturePath,
         logo_url: logoUrl,
         logo_path: logoPath,
         updated_by: "web-admin",
@@ -154,18 +304,25 @@ export default function FinancePengaturanPage() {
       const { error } = await supabase.from("finance_company_settings").update(payload).eq("id", 1);
       if (error) throw new Error(parseFinanceDbError(error));
       await logAudit({ supabase, action: "update", entityType: "finance_company_settings", entityId: 1, entityLabel: "Pengaturan Finance", newData: payload });
-      // Logo lama baru dihapus setelah database berhasil — logo yang tampil tidak pernah putus.
-      if (uploadedPath && settings?.logo_path && settings.logo_path !== uploadedPath) {
-        await supabase.storage.from(LOGO_BUCKET).remove([settings.logo_path]).catch(() => {});
+      // File lama baru dihapus setelah database berhasil — yang tampil tidak pernah putus.
+      const oldLogoPath = logoFile ? settings?.logo_path ?? null : null;
+      const oldSignaturePath = (signatureFile || removeSignature) ? settings?.signer_signature_path ?? null : null;
+      if (oldLogoPath && oldLogoPath !== logoPath) {
+        await supabase.storage.from(LOGO_BUCKET).remove([oldLogoPath]).catch(() => {});
       }
-      uploadedPath = null;
+      if (oldSignaturePath && oldSignaturePath !== signaturePath) {
+        await supabase.storage.from(SIGNATURE_BUCKET).remove([oldSignaturePath]).catch(() => {});
+      }
+      uploadedPaths.length = 0;
       showMsg("success", "Pengaturan berhasil disimpan.");
       setLogoFile(null);
+      setSignatureFile(null);
+      setRemoveSignature(false);
       fetchSettings();
     } catch (err) {
-      // Update gagal: hapus logo baru agar tidak menjadi file yatim.
-      if (uploadedPath) {
-        await supabase.storage.from(LOGO_BUCKET).remove([uploadedPath]).catch(() => {});
+      // Update gagal: hapus file baru agar tidak menjadi file yatim.
+      for (const item of uploadedPaths) {
+        await supabase.storage.from(item.bucket).remove([item.path]).catch(() => {});
       }
       showMsg("error", err instanceof Error ? err.message : "Gagal menyimpan pengaturan.");
     } finally {
@@ -177,11 +334,11 @@ export default function FinancePengaturanPage() {
     <RouteGuard permission="finance">
       <PageHeader
         title="Pengaturan Finance"
-        description="Profil perusahaan, PPN default, saldo awal, info invoice, dan logo"
+        description="Profil perusahaan, PPN default, saldo awal, info invoice, logo, dan TTD digital"
         icon={SlidersHorizontal}
         actions={
           canEdit ? (
-            <Button size="sm" icon={Save} onClick={save} disabled={saving || !form.company_name.trim()}>
+            <Button size="sm" icon={Save} onClick={save} disabled={saving || signatureChecking || !form.company_name.trim()}>
               {saving ? "Menyimpan..." : "Simpan Pengaturan"}
             </Button>
           ) : undefined
@@ -298,7 +455,7 @@ export default function FinancePengaturanPage() {
                   </div>
                 </div>
                 <p className="text-[10px] text-muted-foreground">
-                  Kolom tanda tangan pada PDF diisi manual (tanda tangan basah/stempel). Kosongkan bila belum ada datanya — PDF tetap dapat dicetak.
+                  Bila TTD digital diupload di bawah, PDF invoice menampilkan TTD tersebut. Bila belum ada, kolom tanda tangan diisi manual (tanda tangan basah/stempel).
                 </p>
               </div>
             </div>
@@ -337,7 +494,15 @@ export default function FinancePengaturanPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => { setLogoFile(null); setLogoPreview(settings?.logo_url ?? null); }}
+                          onClick={() => {
+                            setLogoFile(null);
+                            if (logoObjectUrlRef.current) {
+                              URL.revokeObjectURL(logoObjectUrlRef.current);
+                              logoObjectUrlRef.current = null;
+                            }
+                            if (fileRef.current) fileRef.current.value = "";
+                            setLogoPreview(settings?.logo_url ?? null);
+                          }}
                         >
                           <X className="w-3.5 h-3.5" /> Batal
                         </Button>
@@ -348,6 +513,71 @@ export default function FinancePengaturanPage() {
                 <div className="flex items-center gap-2 p-3 rounded-xl bg-muted/40 border border-border/50 text-[11px] text-muted-foreground">
                   <RefreshCw className="w-3.5 h-3.5 flex-shrink-0" />
                   Logo disimpan di bucket <code className="font-mono bg-muted px-1 py-0.5 rounded">finance-assets</code> dan dipakai di halaman dashboard finance.
+                </div>
+              </div>
+            </div>
+
+            {/* Tanda tangan digital */}
+            <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-border flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                  <PenLine className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-foreground">Tanda Tangan Digital</h2>
+                  <p className="text-[11px] text-muted-foreground">PNG transparan, maks 2 MB</p>
+                </div>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="flex items-center justify-center">
+                  <div
+                    className="w-36 h-36 rounded-2xl border-2 border-dashed border-border overflow-hidden flex items-center justify-center"
+                    style={{
+                      backgroundColor: "#ffffff",
+                      backgroundImage: "linear-gradient(45deg,#e2e8f0 25%,transparent 25%,transparent 75%,#e2e8f0 75%),linear-gradient(45deg,#e2e8f0 25%,transparent 25%,transparent 75%,#e2e8f0 75%)",
+                      backgroundSize: "16px 16px",
+                      backgroundPosition: "0 0, 8px 8px",
+                    }}
+                  >
+                    {signaturePreview ? (
+                      <Image src={signaturePreview} alt="Tanda tangan" width={144} height={144} className="object-contain w-full h-full" unoptimized />
+                    ) : (
+                      <PenLine className="w-10 h-10 text-muted-foreground/40" />
+                    )}
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground text-center">
+                  {signatureFile ? "TTD baru dipilih — klik Simpan untuk mengaktifkan."
+                    : removeSignature ? "TTD akan dihapus saat disimpan."
+                    : signaturePreview ? "TTD aktif — tampil di PDF invoice fisik."
+                    : "Belum ada TTD — PDF memakai tanda tangan manual."}
+                </p>
+                {canEdit && (
+                  <>
+                    <input ref={signatureFileRef} type="file" accept="image/png,.png" className="hidden" onChange={(e) => handleSignatureFile(e.target.files?.[0] || null)} />
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1" onClick={() => signatureFileRef.current?.click()} disabled={signatureChecking || saving}>
+                        <Upload className="w-3.5 h-3.5" /> {signatureChecking ? "Memeriksa..." : "Pilih PNG"}
+                      </Button>
+                      {(signatureFile || signaturePreview) && (
+                        <Button variant="ghost" size="sm" onClick={cancelSignatureSelection} disabled={signatureChecking || saving}>
+                          <X className="w-3.5 h-3.5" /> Batal
+                        </Button>
+                      )}
+                      {(settings?.signer_signature_path || signatureFile) && !removeSignature && (
+                        <Button variant="ghost" size="sm" onClick={markSignatureForRemoval} disabled={signatureChecking || saving}>
+                          <Trash2 className="w-3.5 h-3.5" /> Hapus
+                        </Button>
+                      )}
+                    </div>
+                  </>
+                )}
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/40 border border-border/50 text-[11px] text-muted-foreground">
+                  <RefreshCw className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  <span>
+                    TTD disimpan privat di bucket <code className="font-mono bg-muted px-1 py-0.5 rounded">finance-signatures</code> dan
+                    otomatis tampil di PDF invoice fisik.
+                  </span>
                 </div>
               </div>
             </div>

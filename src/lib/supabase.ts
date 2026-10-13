@@ -946,6 +946,8 @@ export interface DbFinanceCompanySettings {
   signer_city: string | null;
   signer_name: string | null;
   signer_title: string | null;
+  /** Path file TTD digital (PNG transparan) di bucket privat finance-signatures. */
+  signer_signature_path: string | null;
   books_start_month: string | null;
   finance_timezone: string | null;
   updated_at: string;
