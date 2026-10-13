@@ -14,6 +14,10 @@ export const SIGNATURE_MAX_W_MM = 72;
 export const SIGNATURE_MAX_H_MM = 28;
 /** Alpha di bawah ini dianggap transparan (toleransi anti-aliasing tepi). */
 export const SIGNATURE_TRANSPARENT_ALPHA_THRESHOLD = 250;
+/** Alpha minimum yang masih dianggap bagian visual TTD saat crop. */
+export const SIGNATURE_VISIBLE_ALPHA_THRESHOLD = 8;
+/** Padding transparan hasil crop agar ujung stroke tidak terpotong di PDF. */
+export const SIGNATURE_CROP_PADDING_PX = 18;
 /** Jumlah piksel transparan minimum agar PNG dianggap berlatar transparan. */
 export const SIGNATURE_MIN_TRANSPARENT_PIXELS = 8;
 
@@ -64,7 +68,7 @@ export function findVisibleAlphaBounds(
   data: ArrayLike<number> | null | undefined,
   width: number,
   height: number,
-  threshold: number = SIGNATURE_TRANSPARENT_ALPHA_THRESHOLD,
+  threshold: number = SIGNATURE_VISIBLE_ALPHA_THRESHOLD,
 ): SignatureBounds | null {
   if (!data || width <= 0 || height <= 0 || data.length < width * height * 4) return null;
   let minX = width;

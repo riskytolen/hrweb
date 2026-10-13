@@ -15,6 +15,7 @@ import { invoiceTaxSchemeLabel } from "./finance";
 import {
   computeSignatureBox,
   findVisibleAlphaBounds,
+  SIGNATURE_CROP_PADDING_PX,
   SIGNATURE_MAX_H_MM,
   SIGNATURE_MAX_W_MM,
 } from "./finance-signature";
@@ -302,15 +303,22 @@ async function loadSignatureBox(
     let visibleW = iw;
     let visibleH = ih;
     if (bounds) {
+      const pad = SIGNATURE_CROP_PADDING_PX;
+      const cropX = Math.max(0, bounds.x - pad);
+      const cropY = Math.max(0, bounds.y - pad);
+      const cropRight = Math.min(iw, bounds.x + bounds.width + pad);
+      const cropBottom = Math.min(ih, bounds.y + bounds.height + pad);
+      const cropW = cropRight - cropX;
+      const cropH = cropBottom - cropY;
       const crop = document.createElement("canvas");
-      crop.width = bounds.width;
-      crop.height = bounds.height;
+      crop.width = cropW;
+      crop.height = cropH;
       const cropCtx = crop.getContext("2d");
       if (cropCtx) {
-        cropCtx.drawImage(canvas, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height);
+        cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
         signatureDataUrl = crop.toDataURL("image/png");
-        visibleW = bounds.width;
-        visibleH = bounds.height;
+        visibleW = cropW;
+        visibleH = cropH;
       }
     }
     const box = computeSignatureBox(visibleW, visibleH, maxW, maxH);

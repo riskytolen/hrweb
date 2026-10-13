@@ -49,6 +49,16 @@ describe("finance signature helpers", () => {
     expect(findVisibleAlphaBounds(data.map((value, index) => (index % 4 === 3 ? 0 : value)), width, height)).toBeNull();
   });
 
+  it("crop TTD tetap menghitung tepi anti-alias yang semi-transparan", () => {
+    const width = 4;
+    const height = 4;
+    const data = opaquePixels(width * height).map((value, index) => (index % 4 === 3 ? 0 : value));
+    data[(0 * width + 1) * 4 + 3] = 12;
+    data[(3 * width + 2) * 4 + 3] = 18;
+
+    expect(findVisibleAlphaBounds(data, width, height)).toEqual({ x: 1, y: 0, width: 2, height: 4 });
+  });
+
   it("gambar proporsional dan tidak melebihi kotak tanda tangan", () => {
     const landscape = computeSignatureBox(1200, 300);
     expect(landscape.w).toBeLessThanOrEqual(SIGNATURE_MAX_W_MM);
