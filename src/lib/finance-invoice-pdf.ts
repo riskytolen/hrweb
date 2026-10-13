@@ -309,29 +309,11 @@ function drawCapsLabel(pdf: PdfDoc, label: string, x: number, y: number, color: 
 
 function splitLimited(pdf: PdfDoc, text: string, width: number, limit: number): string[] {
   const lines = pdf.splitTextToSize(text, width);
-  return lines.slice(0, limit);
-}
-
-function ensureSpace(pdf: PdfDoc, y: number, needed: number, margin: number, footerSpace: number): number {
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  if (y + needed <= pageHeight - margin - footerSpace) return y;
-  pdf.addPage();
-  return margin;
-}
-
-function drawCompactContinuationHeader(pdf: PdfDoc, companyName: string, invoiceNo: string, margin: number): number {
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const right = pageWidth - margin;
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(10);
-  setColor(pdf, NAVY, "text");
-  pdf.text(companyName || "Perusahaan", margin, margin);
-  pdf.setFontSize(9);
-  setColor(pdf, BLUE, "text");
-  pdf.text(`Invoice ${invoiceNo}`, right, margin, { align: "right" });
-  setColor(pdf, BORDER, "draw");
-  pdf.line(margin, margin + 4, right, margin + 4);
-  return margin + 10;
+  if (lines.length <= limit) return lines;
+  const out = lines.slice(0, limit);
+  const last = out[out.length - 1] || "";
+  out[out.length - 1] = last.length > 3 ? `${last.slice(0, -3)}...` : `${last}...`;
+  return out;
 }
 
 function addInvoiceFooter(pdf: PdfDoc, companyName: string, invoiceNo: string): void {
@@ -369,12 +351,12 @@ export async function exportInvoicePdf(args: {
   const margin = 13;
   const right = pageWidth - margin;
   const contentW = pageWidth - margin * 2;
-  const footerSpace = 13;
+  const footerSpace = 12;
 
   // ── Header modern: identitas perusahaan + panel invoice ──
-  const logo = await loadLogoBox(company.logo_url, 34, 18);
-  const headerY = 10;
-  const headerH = 34;
+  const logo = await loadLogoBox(company.logo_url, 31, 15);
+  const headerY = 9;
+  const headerH = 29;
   const metaW = 92;
   const brandW = contentW - metaW - 7;
   drawCard(doc, margin, headerY, contentW, headerH, [255, 255, 255]);
@@ -386,30 +368,30 @@ export async function exportInvoicePdf(args: {
 
   if (logo) {
     try {
-      pdfSafeAddImage(doc, logo.dataUrl, margin + 5, headerY + 8, logo.w, logo.h);
+      pdfSafeAddImage(doc, logo.dataUrl, margin + 5, headerY + 7, logo.w, logo.h);
     } catch {
       /* abaikan logo rusak */
     }
   }
   const textLeft = margin + 5 + (logo ? logo.w + 6 : 0);
   const leftTextW = brandW - (textLeft - margin) - 6;
-  let ly = headerY + 10;
+  let ly = headerY + 8.8;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13.8);
+  doc.setFontSize(13.2);
   doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
   const nameLines = splitLimited(doc, company.company_name || "Perusahaan", Math.max(45, leftTextW), 1);
   doc.text(nameLines.slice(0, 2), textLeft, ly);
-  ly += 5.2;
+  ly += 4.9;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.6);
+  doc.setFontSize(7.1);
   doc.setTextColor(MUTED[0], MUTED[1], MUTED[2]);
   const contactBits = [company.address, [company.phone, company.email].filter(Boolean).join(" • ")]
     .filter(Boolean)
     .join(" • ");
   if (contactBits) {
-    const cl = splitLimited(doc, contactBits, Math.max(45, leftTextW), 3);
-    doc.text(cl.slice(0, 3), textLeft, ly);
-    ly += cl.slice(0, 3).length * 3.6;
+    const cl = splitLimited(doc, contactBits, Math.max(45, leftTextW), 2);
+    doc.text(cl, textLeft, ly);
+    ly += cl.length * 3.3;
   }
   if (company.npwp) {
     doc.text(`NPWP: ${company.npwp}`, textLeft, ly);
@@ -419,62 +401,62 @@ export async function exportInvoicePdf(args: {
   const metaX = right - metaW + 8;
   const metaRight = right - 8;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
+  doc.setFontSize(16);
   setColor(doc, NAVY, "text");
-  doc.text("INVOICE", metaRight, headerY + 11, { align: "right" });
-  doc.setFontSize(10.5);
+  doc.text("INVOICE", metaRight, headerY + 10, { align: "right" });
+  doc.setFontSize(10);
   setColor(doc, BLUE, "text");
-  doc.text(invoice.invoice_no, metaRight, headerY + 17, { align: "right" });
+  doc.text(invoice.invoice_no, metaRight, headerY + 15.6, { align: "right" });
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.7);
+  doc.setFontSize(7.3);
   setColor(doc, MUTED, "text");
-  doc.text("Tanggal", metaX, headerY + 24);
-  doc.text(formatTanggalId(invoice.invoice_date), metaRight, headerY + 24, { align: "right" });
+  doc.text("Tanggal", metaX, headerY + 22.3);
+  doc.text(formatTanggalId(invoice.invoice_date), metaRight, headerY + 22.3, { align: "right" });
   doc.setFont("helvetica", "bold");
   setColor(doc, DANGER, "text");
-  doc.text("Jatuh Tempo", metaX, headerY + 29);
-  doc.text(formatTanggalId(invoice.due_date), metaRight, headerY + 29, { align: "right" });
+  doc.text("Jatuh Tempo", metaX, headerY + 26.8);
+  doc.text(formatTanggalId(invoice.due_date), metaRight, headerY + 26.8, { align: "right" });
 
   // ── Info utama: kartu klien dan detail tagihan ──
-  let y = headerY + headerH + 6;
+  let y = headerY + headerH + 4;
   const gapCols = 6;
   const leftColW = Math.round(contentW * 0.45);
   const rightColX = margin + leftColW + gapCols;
   const rightColW = contentW - leftColW - gapCols;
   const clientName = invoiceClientName(client);
-  const clientNameLines = splitLimited(doc, clientName, leftColW - 10, 2);
+  const clientNameLines = splitLimited(doc, clientName, leftColW - 10, 1);
   const clientBits = [client?.address, [client?.phone, client?.email].filter(Boolean).join(" • ")]
     .filter(Boolean)
     .join(" • ");
-  const clientLines = clientBits ? splitLimited(doc, clientBits, leftColW - 10, 4) : [];
+  const clientLines = clientBits ? splitLimited(doc, clientBits, leftColW - 10, 2) : [];
   const desc = invoice.description?.trim() || "—";
-  const dLines = splitLimited(doc, desc, rightColW - 10, 4);
-  const cardH = Math.max(29, 10 + clientNameLines.length * 4.5 + clientLines.length * 3.7, 10 + dLines.length * 4);
+  const dLines = splitLimited(doc, desc, rightColW - 10, 3);
+  const cardH = 25;
   drawCard(doc, margin, y, leftColW, cardH, SOFT);
   drawCard(doc, rightColX, y, rightColW, cardH, [255, 255, 255]);
   drawCapsLabel(doc, "Ditagihkan Kepada", margin + 5, y + 6);
   drawCapsLabel(doc, "Detail Tagihan", rightColX + 5, y + 6);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(10.2);
+  doc.setFontSize(9.7);
   setColor(doc, INK, "text");
   doc.text(clientNameLines, margin + 5, y + 12);
   if (client?.company_name && client.contact_name) {
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     setColor(doc, MUTED, "text");
     doc.text(client.contact_name, margin + 5, y + 12 + clientNameLines.length * 4.5);
   }
   if (clientLines.length > 0) {
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.1);
+    doc.setFontSize(7.4);
     setColor(doc, MUTED, "text");
-    doc.text(clientLines, margin + 5, y + 18 + clientNameLines.length * 2.5);
+    doc.text(clientLines, margin + 5, y + 17);
   }
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.8);
+  doc.setFontSize(8.2);
   setColor(doc, INK, "text");
   doc.text(dLines, rightColX + 5, y + 12);
-  y += cardH + 5;
+  y += cardH + 4;
 
   // ── Tabel rincian biaya ──
   const lines = buildInvoiceCostLines(invoice);
@@ -485,21 +467,21 @@ export async function exportInvoicePdf(args: {
     body,
     theme: "grid",
     styles: {
-      fontSize: 8.8,
-      cellPadding: 2.5,
+      fontSize: 8.2,
+      cellPadding: 1.7,
       lineColor: BORDER,
       lineWidth: 0.1,
       valign: "middle",
       overflow: "linebreak",
     },
-    headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", halign: "center", minCellHeight: 8 },
+    headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", halign: "center", minCellHeight: 6.4 },
     alternateRowStyles: { fillColor: SOFT },
     columnStyles: {
       0: { halign: "center", cellWidth: 13 },
       1: { cellWidth: "auto" },
       2: { halign: "right", cellWidth: 58 },
     },
-    margin: { left: margin, right: margin, bottom: footerSpace + 4 },
+    margin: { left: margin, right: margin, bottom: footerSpace + 3 },
     showHead: "everyPage",
     rowPageBreak: "avoid",
   });
@@ -508,73 +490,66 @@ export async function exportInvoicePdf(args: {
   const leftBottomW = Math.round(contentW * 0.57);
   const totalW = contentW - leftBottomW - gapCols;
   const totalX = margin + leftBottomW + gapCols;
-  let lowerY = doc.lastAutoTable.finalY + 5;
-  const notesLines = invoice.notes?.trim() ? doc.splitTextToSize(invoice.notes.trim(), leftBottomW - 10) : [];
+  const lowerY = doc.lastAutoTable.finalY + 4;
+  const notesLines = invoice.notes?.trim() ? splitLimited(doc, invoice.notes.trim(), leftBottomW - 10, 3) : [];
   const paymentRows = buildPaymentInstructionRows(company);
-  const leftNeeded = 28 + (notesLines.length ? 9 + Math.min(notesLines.length, 7) * 3.6 : 0) + (paymentRows.length ? 34 : 0);
-  const rightNeeded = 83;
-  const lowerNeeded = Math.max(leftNeeded, rightNeeded);
-  lowerY = ensureSpace(doc, lowerY, lowerNeeded, margin, footerSpace + 3);
-  if (lowerY === margin) {
-    lowerY = drawCompactContinuationHeader(doc, company.company_name || "Perusahaan", invoice.invoice_no, margin);
-  }
-
-  const leftCardH = Math.min(pageHeight - lowerY - footerSpace - 4, Math.max(72, leftNeeded));
-  const rightCardH = Math.min(pageHeight - lowerY - footerSpace - 4, Math.max(72, rightNeeded));
+  const lowerH = Math.max(52, pageHeight - lowerY - footerSpace - 5);
+  const leftCardH = lowerH;
+  const rightCardH = lowerH;
   drawCard(doc, margin, lowerY, leftBottomW, leftCardH, [255, 255, 255]);
   drawCard(doc, totalX, lowerY, totalW, rightCardH, [255, 255, 255]);
 
   let by = lowerY + 7;
   drawCapsLabel(doc, "Terbilang", margin + 5, by);
-  by += 5;
+  by += 4.5;
   setColor(doc, SKY, "fill");
   setColor(doc, BORDER, "draw");
-  doc.roundedRect(margin + 5, by - 3, leftBottomW - 10, 13, 2, 2, "FD");
+  doc.roundedRect(margin + 5, by - 3, leftBottomW - 10, 11.5, 2, 2, "FD");
   doc.setFont("helvetica", "italic");
-  doc.setFontSize(8.6);
+  doc.setFontSize(8);
   setColor(doc, INK, "text");
   const words = splitLimited(doc, `"${formatTerbilang(toAmount(invoice.total_amount))}"`, leftBottomW - 17, 2);
   doc.text(words, margin + 8, by + 2);
-  by += 15;
+  by += 12.5;
 
   if (notesLines.length > 0) {
     drawCapsLabel(doc, "Catatan", margin + 5, by);
-    by += 4.5;
+    by += 4;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.1);
+    doc.setFontSize(7.6);
     setColor(doc, MUTED, "text");
-    doc.text(notesLines.slice(0, 7), margin + 5, by);
-    by += Math.min(notesLines.length, 7) * 3.6 + 3;
+    doc.text(notesLines, margin + 5, by);
+    by += notesLines.length * 3.2 + 2;
   }
 
   if (paymentRows.length > 0) {
     drawCapsLabel(doc, "Informasi Pembayaran", margin + 5, by, BLUE);
-    by += 5;
+    by += 4.3;
     paymentRows.forEach((row, idx) => {
-      const yy = by + idx * 6.2;
+      const yy = by + idx * 5.3;
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
+      doc.setFontSize(7.4);
       setColor(doc, MUTED, "text");
       doc.text(row.label, margin + 5, yy);
       doc.setFont("helvetica", row.label === "Nomor Rekening" ? "bold" : "normal");
-      doc.setFontSize(row.label === "Nomor Rekening" ? 9.3 : 8.4);
+      doc.setFontSize(row.label === "Nomor Rekening" ? 8.6 : 7.8);
       setColor(doc, INK, "text");
       doc.text(row.value, margin + 45, yy);
     });
-    by += paymentRows.length * 6.2 + 2;
+    by += paymentRows.length * 5.3 + 1.5;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
+    doc.setFontSize(6.9);
     setColor(doc, MUTED, "text");
-    doc.text(`Mohon cantumkan nomor invoice ${invoice.invoice_no} pada berita transfer.`, margin + 5, by);
+    doc.text(splitLimited(doc, `Mohon cantumkan nomor invoice ${invoice.invoice_no} pada berita transfer.`, leftBottomW - 10, 1), margin + 5, by);
   }
 
   // Ringkasan pembayaran dan pajak.
   let ty = lowerY + 7;
   drawCapsLabel(doc, "Ringkasan Tagihan", totalX + 5, ty, BLUE);
-  ty += 5;
+  ty += 4.4;
   buildInvoiceSummaryRows(invoice).forEach((row) => {
     const isTotal = row.emphasis === "total";
-    const rh = isTotal ? 11 : row.caption ? 8 : 6.3;
+    const rh = isTotal ? 9.5 : row.caption ? 7 : 5.6;
     if (isTotal) {
       setColor(doc, LIGHT_BLUE, "fill");
       setColor(doc, BLUE, "draw");
@@ -584,36 +559,36 @@ export async function exportInvoicePdf(args: {
       doc.line(totalX + 5, ty + rh, totalX + totalW - 5, ty + rh);
     }
     doc.setFont("helvetica", isTotal ? "bold" : "normal");
-    doc.setFontSize(isTotal ? 10 : 8.4);
+    doc.setFontSize(isTotal ? 9.4 : 7.7);
     setColor(doc, row.emphasis === "deduction" ? DANGER : INK, "text");
-    doc.text(row.label, totalX + 6.5, ty + (isTotal ? 6.8 : 4.1));
+    doc.text(row.label, totalX + 6.5, ty + (isTotal ? 6.1 : 3.7));
     doc.setFont("helvetica", isTotal ? "bold" : "normal");
-    doc.setFontSize(isTotal ? 10.4 : 8.4);
-    doc.text(row.value, totalX + totalW - 7, ty + (isTotal ? 6.8 : 4.1), { align: "right" });
+    doc.setFontSize(isTotal ? 9.7 : 7.7);
+    doc.text(row.value, totalX + totalW - 7, ty + (isTotal ? 6.1 : 3.7), { align: "right" });
     if (row.caption) {
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(6.9);
+      doc.setFontSize(6.3);
       setColor(doc, MUTED, "text");
-      doc.text(row.caption, totalX + 6.5, ty + 7.1);
+      doc.text(splitLimited(doc, row.caption, totalW - 50, 1), totalX + 6.5, ty + 6.2);
     }
     ty += rh;
   });
 
   // Tanda tangan tetap di kartu kanan bawah, dekat ringkasan tagihan.
-  let sy = Math.max(ty + 9, lowerY + rightCardH - 31);
+  let sy = Math.max(ty + 5, lowerY + rightCardH - 25);
   const signW = totalW - 10;
   const signX = totalX + 5;
   const city = company.signer_city?.trim();
   const placeDate = city ? `${city}, ${formatTanggalId(invoice.invoice_date)}` : formatTanggalId(invoice.invoice_date);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(7.4);
   doc.setTextColor(INK[0], INK[1], INK[2]);
   doc.text(placeDate, signX + signW / 2, sy, { align: "center" });
-  doc.text("Hormat kami,", signX + signW / 2, sy + 4.2, { align: "center" });
+  doc.text("Hormat kami,", signX + signW / 2, sy + 3.8, { align: "center" });
   // Ruang tanda tangan basah/stempel manual.
-  sy += 22;
+  sy += 18;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.2);
+  doc.setFontSize(8.7);
   const signerName = company.signer_name?.trim() || "( .............................. )";
   doc.text(signerName, signX + signW / 2, sy, { align: "center" });
   if (company.signer_name?.trim()) {
@@ -622,7 +597,7 @@ export async function exportInvoicePdf(args: {
     doc.line(signX + signW / 2 - nw / 2, sy + 1.5, signX + signW / 2 + nw / 2, sy + 1.5);
   }
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(7.3);
   doc.setTextColor(MUTED[0], MUTED[1], MUTED[2]);
   doc.text(company.signer_title?.trim() || "Penandatangan", signX + signW / 2, sy + 6, { align: "center" });
 
