@@ -12,7 +12,12 @@
 
 import { loadDownscaledLogoDataUrl } from "./pdf-logo";
 import { invoiceTaxSchemeLabel } from "./finance";
-import { computeSignatureBox, SIGNATURE_MAX_H_MM, SIGNATURE_MAX_W_MM } from "./finance-signature";
+import {
+  computeSignatureBox,
+  findVisibleAlphaBounds,
+  SIGNATURE_MAX_H_MM,
+  SIGNATURE_MAX_W_MM,
+} from "./finance-signature";
 
 export interface InvoicePdfClient {
   company_name?: string | null;
@@ -286,9 +291,31 @@ async function loadSignatureBox(
     const iw = img.naturalWidth || img.width;
     const ih = img.naturalHeight || img.height;
     if (!iw || !ih) return null;
-    const box = computeSignatureBox(iw, ih, maxW, maxH);
+    const canvas = document.createElement("canvas");
+    canvas.width = iw;
+    canvas.height = ih;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0, iw, ih);
+    const bounds = findVisibleAlphaBounds(ctx.getImageData(0, 0, iw, ih).data, iw, ih);
+    let signatureDataUrl = dataUrl;
+    let visibleW = iw;
+    let visibleH = ih;
+    if (bounds) {
+      const crop = document.createElement("canvas");
+      crop.width = bounds.width;
+      crop.height = bounds.height;
+      const cropCtx = crop.getContext("2d");
+      if (cropCtx) {
+        cropCtx.drawImage(canvas, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height);
+        signatureDataUrl = crop.toDataURL("image/png");
+        visibleW = bounds.width;
+        visibleH = bounds.height;
+      }
+    }
+    const box = computeSignatureBox(visibleW, visibleH, maxW, maxH);
     if (box.w <= 0 || box.h <= 0) return null;
-    return { dataUrl, w: box.w, h: box.h };
+    return { dataUrl: signatureDataUrl, w: box.w, h: box.h };
   } catch {
     return null;
   }
@@ -631,7 +658,7 @@ export async function exportInvoicePdf(args: {
   });
 
   // Tanda tangan tetap di kartu kanan bawah, dekat ringkasan tagihan.
-  let sy = Math.max(ty + 5, lowerY + rightCardH - 25);
+  let sy = Math.max(ty + 4, lowerY + rightCardH - 32);
   const signW = totalW - 10;
   const signX = totalX + 5;
   const city = company.signer_city?.trim();
@@ -641,12 +668,12 @@ export async function exportInvoicePdf(args: {
   doc.setTextColor(INK[0], INK[1], INK[2]);
   doc.text(placeDate, signX + signW / 2, sy, { align: "center" });
   doc.text("Hormat kami,", signX + signW / 2, sy + 3.8, { align: "center" });
-  // TTD digital (PNG transparan) di tengah celah; bila tidak ada/gagal,
-  // ruang dibiarkan kosong untuk tanda tangan basah/stempel manual.
+  // TTD digital sengaja dibuat besar dan boleh menimpa teks/nama agar terasa seperti TTD/cap asli.
   if (signature) {
     try {
       const sx = signX + (signW - signature.w) / 2;
-      pdfSafeAddImage(doc, signature.dataUrl, sx, sy + 5, signature.w, signature.h);
+      const signatureY = sy + 6.2;
+      pdfSafeAddImage(doc, signature.dataUrl, sx, signatureY, signature.w, signature.h);
     } catch {
       /* abaikan TTD rusak */
     }

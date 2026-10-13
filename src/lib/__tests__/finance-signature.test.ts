@@ -4,6 +4,7 @@ import {
   SIGNATURE_MAX_H_MM,
   SIGNATURE_MAX_W_MM,
   computeSignatureBox,
+  findVisibleAlphaBounds,
   hasTransparentPixels,
   signatureFileError,
   signatureFileName,
@@ -33,6 +34,21 @@ describe("finance signature helpers", () => {
     expect(hasTransparentPixels(withTransparent)).toBe(true);
   });
 
+  it("mencari crop area TTD dari piksel non-transparan", () => {
+    const width = 6;
+    const height = 5;
+    const data = opaquePixels(width * height).map((value, index) => (index % 4 === 3 ? 0 : value));
+    // Area terlihat: x 2..4, y 1..3.
+    for (let y = 1; y <= 3; y += 1) {
+      for (let x = 2; x <= 4; x += 1) {
+        data[(y * width + x) * 4 + 3] = 255;
+      }
+    }
+
+    expect(findVisibleAlphaBounds(data, width, height)).toEqual({ x: 2, y: 1, width: 3, height: 3 });
+    expect(findVisibleAlphaBounds(data.map((value, index) => (index % 4 === 3 ? 0 : value)), width, height)).toBeNull();
+  });
+
   it("gambar proporsional dan tidak melebihi kotak tanda tangan", () => {
     const landscape = computeSignatureBox(1200, 300);
     expect(landscape.w).toBeLessThanOrEqual(SIGNATURE_MAX_W_MM);
@@ -44,7 +60,10 @@ describe("finance signature helpers", () => {
     expect(portrait.h).toBeLessThanOrEqual(SIGNATURE_MAX_H_MM);
     expect(portrait.h).toBeCloseTo(SIGNATURE_MAX_H_MM, 5);
 
-    // Gambar kecil tidak diperbesar agar tidak pecah.
+    expect(SIGNATURE_MAX_W_MM).toBeGreaterThanOrEqual(70);
+    expect(SIGNATURE_MAX_H_MM).toBeGreaterThanOrEqual(28);
+
+    // Gambar kecil tidak diperbesar; pembesaran utama berasal dari crop area transparan.
     expect(computeSignatureBox(20, 5)).toEqual({ w: 20, h: 5 });
     expect(computeSignatureBox(0, 10)).toEqual({ w: 0, h: 0 });
     expect(computeSignatureBox(NaN, 10)).toEqual({ w: 0, h: 0 });

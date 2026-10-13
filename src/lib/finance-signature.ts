@@ -9,9 +9,9 @@
 export const SIGNATURE_BUCKET = "finance-signatures";
 export const SIGNATURE_MIME = "image/png";
 export const SIGNATURE_MAX_BYTES = 2 * 1024 * 1024;
-/** Batas gambar TTD di area tanda tangan PDF (mm) — muat di celah nama. */
-export const SIGNATURE_MAX_W_MM = 42;
-export const SIGNATURE_MAX_H_MM = 11;
+/** Batas gambar TTD di area tanda tangan PDF (mm). Sengaja besar agar terasa seperti TTD/cap asli. */
+export const SIGNATURE_MAX_W_MM = 72;
+export const SIGNATURE_MAX_H_MM = 28;
 /** Alpha di bawah ini dianggap transparan (toleransi anti-aliasing tepi). */
 export const SIGNATURE_TRANSPARENT_ALPHA_THRESHOLD = 250;
 /** Jumlah piksel transparan minimum agar PNG dianggap berlatar transparan. */
@@ -20,6 +20,13 @@ export const SIGNATURE_MIN_TRANSPARENT_PIXELS = 8;
 export interface SignatureBox {
   w: number;
   h: number;
+}
+
+export interface SignatureBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /** Validasi file TTD: harus PNG dan maksimal 2 MB. Mengembalikan pesan error atau null. Pure. */
@@ -50,6 +57,35 @@ export function hasTransparentPixels(
     }
   }
   return false;
+}
+
+/** Cari bounding box piksel yang terlihat dari data RGBA. Pure. */
+export function findVisibleAlphaBounds(
+  data: ArrayLike<number> | null | undefined,
+  width: number,
+  height: number,
+  threshold: number = SIGNATURE_TRANSPARENT_ALPHA_THRESHOLD,
+): SignatureBounds | null {
+  if (!data || width <= 0 || height <= 0 || data.length < width * height * 4) return null;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = data[(y * width + x) * 4 + 3];
+      if (alpha >= threshold) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
 /**
