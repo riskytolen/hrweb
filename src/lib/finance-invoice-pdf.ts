@@ -675,7 +675,7 @@ export async function exportInvoicePdf(args: {
   if (signature) {
     try {
       const sx = signX + (signW - signature.w) / 2;
-      const signatureY = (regardsY + nameY) / 2 - signature.h / 2;
+      const signatureY = (regardsY + nameY) / 2 - signature.h / 2 - 5;
       pdfSafeAddImage(doc, signature.dataUrl, sx, signatureY, signature.w, signature.h);
     } catch {
       /* abaikan TTD rusak */
