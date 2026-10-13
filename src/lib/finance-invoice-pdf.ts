@@ -666,19 +666,22 @@ export async function exportInvoicePdf(args: {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.4);
   doc.setTextColor(INK[0], INK[1], INK[2]);
-  doc.text(placeDate, signX + signW / 2, sy, { align: "center" });
-  doc.text("Hormat kami,", signX + signW / 2, sy + 3.8, { align: "center" });
+  const dateY = sy;
+  const regardsY = sy + 3.8;
+  const nameY = sy + 18;
+  doc.text(placeDate, signX + signW / 2, dateY, { align: "center" });
+  doc.text("Hormat kami,", signX + signW / 2, regardsY, { align: "center" });
   // TTD digital sengaja dibuat besar dan boleh menimpa teks/nama agar terasa seperti TTD/cap asli.
   if (signature) {
     try {
       const sx = signX + (signW - signature.w) / 2;
-      const signatureY = sy + 6.2;
+      const signatureY = (regardsY + nameY) / 2 - signature.h / 2;
       pdfSafeAddImage(doc, signature.dataUrl, sx, signatureY, signature.w, signature.h);
     } catch {
       /* abaikan TTD rusak */
     }
   }
-  sy += 18;
+  sy = nameY;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.7);
   const signerName = company.signer_name?.trim() || "( .............................. )";
