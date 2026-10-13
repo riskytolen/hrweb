@@ -938,6 +938,14 @@ export interface DbFinanceCompanySettings {
   initial_cash_balance: number;
   logo_url: string | null;
   logo_path: string | null;
+  /** Rekening utama untuk instruksi pembayaran pada invoice fisik. */
+  bank_name: string | null;
+  bank_account_number: string | null;
+  bank_account_name: string | null;
+  /** Identitas penandatangan pada invoice fisik (kolom tanda tangan manual). */
+  signer_city: string | null;
+  signer_name: string | null;
+  signer_title: string | null;
   books_start_month: string | null;
   finance_timezone: string | null;
   updated_at: string;

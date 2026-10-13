@@ -68,6 +68,7 @@ export default function FinancePendapatanPage() {
   const [closedMonths, setClosedMonths] = useState<Set<string>>(new Set());
   const isClosedDate = useCallback((dateStr: string) => closedMonths.has(monthStartOf(dateStr)), [closedMonths]);
   const [exporting, setExporting] = useState<null | "invoice-pdf" | "payment-pdf">(null);
+  const [printingInvoiceId, setPrintingInvoiceId] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = useCallback((type: "success" | "error", msg: string) => {
@@ -568,6 +569,64 @@ export default function FinancePendapatanPage() {
     }
   };
 
+  const invoicePdfCompany = useMemo(() => ({
+    company_name: company?.company_name || "Perusahaan",
+    address: company?.address ?? null,
+    phone: company?.phone ?? null,
+    email: company?.email ?? null,
+    npwp: company?.npwp ?? null,
+    logo_url: company?.logo_url ?? null,
+    bank_name: company?.bank_name ?? null,
+    bank_account_number: company?.bank_account_number ?? null,
+    bank_account_name: company?.bank_account_name ?? null,
+    signer_city: company?.signer_city ?? null,
+    signer_name: company?.signer_name ?? null,
+    signer_title: company?.signer_title ?? null,
+  }), [company]);
+
+  // PDF invoice fisik per invoice — tersedia untuk semua viewer Finance,
+  // mengikuti izin export register yang sudah ada.
+  const downloadInvoicePdf = async (inv: InvoiceRow) => {
+    setPrintingInvoiceId(inv.id);
+    try {
+      const { exportInvoicePdf } = await import("@/lib/finance-invoice-pdf");
+      await exportInvoicePdf({
+        invoice: {
+          invoice_no: inv.invoice_no,
+          invoice_date: inv.invoice_date,
+          due_date: inv.due_date,
+          description: inv.description,
+          trip_amount: inv.trip_amount,
+          toll_amount: inv.toll_amount,
+          parking_amount: inv.parking_amount,
+          other_amount: inv.other_amount,
+          subtotal: inv.subtotal,
+          tax_scheme: inv.tax_scheme,
+          tax_base_amount: inv.tax_base_amount,
+          ppn_percent: inv.ppn_percent,
+          ppn_amount: inv.ppn_amount,
+          pph_percent: inv.pph_percent,
+          pph_amount: inv.pph_amount,
+          total_amount: inv.total_amount,
+          notes: inv.notes,
+        },
+        client: inv.client ? {
+          company_name: inv.client.company_name,
+          contact_name: inv.client.contact_name,
+          address: inv.client.address,
+          phone: inv.client.phone,
+          email: inv.client.email,
+        } : null,
+        company: invoicePdfCompany,
+      });
+      addToast("success", `PDF ${inv.invoice_no} diunduh.`);
+    } catch (err) {
+      addToast("error", err instanceof Error ? err.message : "Gagal membuat PDF invoice.");
+    } finally {
+      setPrintingInvoiceId(null);
+    }
+  };
+
   return (
     <RouteGuard permission="finance">
       <PageHeader
@@ -802,6 +861,9 @@ export default function FinancePendapatanPage() {
                             )}
                             <button onClick={() => openPayList(inv)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Riwayat Pembayaran">
                               <Wallet className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => { void downloadInvoicePdf(inv); }} disabled={printingInvoiceId === inv.id} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50" title="Download PDF Invoice">
+                              <FileDown className="w-4 h-4" />
                             </button>
                             {canEdit && !isClosedDate(inv.invoice_date) && (
                               <>
@@ -1188,6 +1250,9 @@ export default function FinancePendapatanPage() {
                 </div>
               </div>
               <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
+                <Button variant="outline" size="sm" onClick={() => { void downloadInvoicePdf(detailInvoice); }} disabled={printingInvoiceId === detailInvoice.id}>
+                  {printingInvoiceId === detailInvoice.id ? "Membuat PDF..." : "Download PDF"}
+                </Button>
                 {canEdit && (
                   <Button size="sm" onClick={() => { setShowInvDetail(false); openEditInvoice(detailInvoice); }}>Edit Invoice</Button>
                 )}

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import {
   SlidersHorizontal, Save, RefreshCw, Upload, X, Building2, FileText, Mail, Phone,
-  Percent, Wallet, MapPin, AlertCircle, CheckCircle2,
+  Percent, Wallet, MapPin, AlertCircle, CheckCircle2, Landmark, PenLine,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -31,6 +31,8 @@ export default function FinancePengaturanPage() {
   const [form, setForm] = useState({
     company_name: "", address: "", npwp: "", phone: "", email: "",
     ppn_default: 0, initial_cash_balance: 0,
+    bank_name: "", bank_account_number: "", bank_account_name: "",
+    signer_city: "", signer_name: "", signer_title: "",
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -62,6 +64,10 @@ export default function FinancePengaturanPage() {
           company_name: s.company_name, address: s.address || "", npwp: s.npwp || "",
           phone: s.phone || "", email: s.email || "", ppn_default: Number(s.ppn_default),
           initial_cash_balance: Number(s.initial_cash_balance),
+          bank_name: s.bank_name || "", bank_account_number: s.bank_account_number || "",
+          bank_account_name: s.bank_account_name || "",
+          signer_city: s.signer_city || "", signer_name: s.signer_name || "",
+          signer_title: s.signer_title || "",
         });
         setLogoPreview(s.logo_url);
       }
@@ -133,6 +139,12 @@ export default function FinancePengaturanPage() {
         email: form.email || null,
         ppn_default: form.ppn_default,
         initial_cash_balance: form.initial_cash_balance,
+        bank_name: form.bank_name || null,
+        bank_account_number: form.bank_account_number || null,
+        bank_account_name: form.bank_account_name || null,
+        signer_city: form.signer_city || null,
+        signer_name: form.signer_name || null,
+        signer_title: form.signer_title || null,
         logo_url: logoUrl,
         logo_path: logoPath,
         updated_by: "web-admin",
@@ -154,7 +166,7 @@ export default function FinancePengaturanPage() {
     <RouteGuard permission="finance">
       <PageHeader
         title="Pengaturan Finance"
-        description="Profil perusahaan, PPN default, saldo awal, dan logo"
+        description="Profil perusahaan, PPN default, saldo awal, info invoice, dan logo"
         icon={SlidersHorizontal}
         actions={
           canEdit ? (
@@ -232,6 +244,51 @@ export default function FinancePengaturanPage() {
                     {hasClosing ? `Terkunci setelah closing pertama${lastClosed ? ` (terakhir ${lastClosed})` : ""}. Kelola di Tutup Buku.` : "Dasar perhitungan saldo arus kas."}
                   </p>
                 </div>
+              </div>
+            </div>
+
+            <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-border flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+                  <Landmark className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-foreground">Informasi Invoice & Pembayaran</h2>
+                  <p className="text-[11px] text-muted-foreground">Tampil di PDF invoice fisik: rekening tujuan & penandatangan</p>
+                </div>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Bank</label>
+                    <input type="text" value={form.bank_name} onChange={(e) => setForm({ ...form, bank_name: e.target.value })} disabled={!canEdit} placeholder="cth. BCA" className={cn(inputClass, !canEdit && "opacity-60")} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Nomor Rekening</label>
+                    <input type="text" value={form.bank_account_number} onChange={(e) => setForm({ ...form, bank_account_number: e.target.value })} disabled={!canEdit} placeholder="cth. 1234567890" className={cn(inputClass, !canEdit && "opacity-60")} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Atas Nama</label>
+                    <input type="text" value={form.bank_account_name} onChange={(e) => setForm({ ...form, bank_account_name: e.target.value })} disabled={!canEdit} placeholder="Nama pemilik rekening" className={cn(inputClass, !canEdit && "opacity-60")} />
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block flex items-center gap-1.5"><PenLine className="w-3 h-3" /> Kota Penandatanganan</label>
+                    <input type="text" value={form.signer_city} onChange={(e) => setForm({ ...form, signer_city: e.target.value })} disabled={!canEdit} placeholder="cth. Jakarta" className={cn(inputClass, !canEdit && "opacity-60")} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Nama Penandatangan</label>
+                    <input type="text" value={form.signer_name} onChange={(e) => setForm({ ...form, signer_name: e.target.value })} disabled={!canEdit} placeholder="Nama terang" className={cn(inputClass, !canEdit && "opacity-60")} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1.5 block">Jabatan</label>
+                    <input type="text" value={form.signer_title} onChange={(e) => setForm({ ...form, signer_title: e.target.value })} disabled={!canEdit} placeholder="cth. Direktur" className={cn(inputClass, !canEdit && "opacity-60")} />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Kolom tanda tangan pada PDF diisi manual (tanda tangan basah/stempel). Kosongkan bila belum ada datanya — PDF tetap dapat dicetak.
+                </p>
               </div>
             </div>
           </div>
