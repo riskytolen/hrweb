@@ -110,6 +110,12 @@ export default function FinancePendapatanPage() {
   const [showPayList, setShowPayList] = useState(false);
   const [payListInvoice, setPayListInvoice] = useState<InvoiceRow | null>(null);
 
+  // ─── Edit payment date ───
+  const [editingPayment, setEditingPayment] = useState<PaymentRow | null>(null);
+  const [editPayDate, setEditPayDate] = useState("");
+  const [editPaySaving, setEditPaySaving] = useState(false);
+  const [editPayError, setEditPayError] = useState("");
+
   // ─── Client form ───
   const [showClientForm, setShowClientForm] = useState(false);
   const [editingClient, setEditingClient] = useState<DbFinanceClient | null>(null);
@@ -335,6 +341,55 @@ export default function FinancePendapatanPage() {
       setPayError(parseFinanceDbError(err));
     } finally {
       setPaySaving(false);
+    }
+  };
+
+  const openEditPayment = (p: PaymentRow) => {
+    setEditingPayment(p);
+    setEditPayDate(p.payment_date);
+    setEditPayError("");
+  };
+
+  const savePaymentDate = async () => {
+    if (!editingPayment || !editPayDate) {
+      setEditPayError("Tanggal wajib diisi.");
+      return;
+    }
+    if (editPayDate === editingPayment.payment_date) {
+      setEditingPayment(null);
+      return;
+    }
+    if (isClosedDate(editingPayment.payment_date)) {
+      setEditPayError(`Periode ${editingPayment.payment_date.slice(0, 7)} sudah ditutup.`);
+      return;
+    }
+    if (isClosedDate(editPayDate)) {
+      setEditPayError(`Periode ${editPayDate.slice(0, 7)} sudah ditutup. Pilih tanggal pada bulan terbuka.`);
+      return;
+    }
+    const inv = invoices.find((i) => i.id === editingPayment.invoice_id);
+    if (inv && editPayDate < inv.invoice_date) {
+      setEditPayError(`Tanggal tidak boleh sebelum tanggal invoice (${fmtDate(inv.invoice_date)}).`);
+      return;
+    }
+    setEditPaySaving(true);
+    setEditPayError("");
+    const target = editingPayment;
+    try {
+      const { error } = await supabase.from("finance_invoice_payments").update({ payment_date: editPayDate }).eq("id", target.id);
+      if (error) throw error;
+      await logAudit({ supabase, action: "update", entityType: "finance_invoice_payments", entityId: target.id, entityLabel: `${target.invoice?.invoice_no || `Invoice #${target.invoice_id}`} — ${fmtDate(target.payment_date)} → ${fmtDate(editPayDate)}`, oldData: { payment_date: target.payment_date }, newData: { payment_date: editPayDate } });
+      if (payListInvoice && payListInvoice.id === target.invoice_id) {
+        const newDate = editPayDate;
+        setPayListInvoice({ ...payListInvoice, payments: (payListInvoice.payments || []).map((x) => (x.id === target.id ? { ...x, payment_date: newDate } : x)) });
+      }
+      addToast("success", `Tanggal pembayaran diubah ke ${fmtDate(editPayDate)}.`);
+      setEditingPayment(null);
+      fetchAll();
+    } catch (err) {
+      setEditPayError(parseFinanceDbError(err));
+    } finally {
+      setEditPaySaving(false);
     }
   };
 
@@ -953,6 +1008,9 @@ export default function FinancePendapatanPage() {
                       <td className="px-4 py-3 text-muted-foreground text-xs">{p.notes || "—"}</td>
                       {canEdit && (
                         <td className="px-4 py-3 text-right">
+                          <button onClick={() => openEditPayment(p)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit tanggal">
+                            <Pencil className="w-4 h-4" />
+                          </button>
                           <button onClick={() => setDeleteConfirm({ kind: "payment", id: p.id, label: `Pembayaran ${formatCurrency(p.amount)}` })} className="p-2 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger" title="Hapus">
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1370,6 +1428,9 @@ export default function FinancePendapatanPage() {
                           {payListInvoice.payments && totalPaid(payListInvoice.payments.slice(0, (payListInvoice.payments || []).indexOf(p) + 1)) >= payListInvoice.total_amount ? "Lunas" : "Parsial"}
                         </span>
                         {canEdit && (
+                          <button onClick={() => openEditPayment(p)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit tanggal"><Pencil className="w-3.5 h-3.5" /></button>
+                        )}
+                        {canEdit && (
                           <button onClick={() => setDeleteConfirm({ kind: "payment", id: p.id, label: `Pembayaran ${formatCurrency(p.amount)}` })} className="p-1.5 rounded-lg hover:bg-danger-light text-muted-foreground hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
                         )}
                       </div>
@@ -1380,6 +1441,43 @@ export default function FinancePendapatanPage() {
                   <span className="text-muted-foreground">Total dibayar</span>
                   <span className="font-bold text-success tabular-nums">{formatCurrency(totalPaid(payListInvoice.payments || []))}</span>
                 </div>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* ─── MODAL: EDIT TANGGAL PEMBAYARAN ─── */}
+      {editingPayment && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !editPaySaving && setEditingPayment(null)} />
+            <div className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
+              <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent flex-shrink-0">
+                <button onClick={() => !editPaySaving && setEditingPayment(null)} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground"><X className="w-4 h-4" /></button>
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shadow-lg shadow-primary/20">
+                    <Pencil className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Edit Tanggal Pembayaran</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">{editingPayment.invoice?.invoice_no || `Invoice #${editingPayment.invoice_id}`} · {formatCurrency(editingPayment.amount)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto">
+                {editPayError && <div className="p-3 rounded-xl bg-danger-light text-danger text-xs font-medium">{editPayError}</div>}
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Pembayaran <span className="text-danger">*</span></label>
+                  <DatePicker value={editPayDate} onChange={setEditPayDate} className="w-full" />
+                  <p className="text-[10px] text-muted-foreground mt-1">Tanggal lama: {fmtDate(editingPayment.payment_date)}. Periode yang sudah ditutup tidak bisa dipakai.</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
+                <Button variant="outline" size="sm" onClick={() => setEditingPayment(null)} disabled={editPaySaving}>Batal</Button>
+                <Button size="sm" onClick={savePaymentDate} disabled={editPaySaving || !editPayDate}>
+                  {editPaySaving ? "Menyimpan..." : "Simpan Tanggal"}
+                </Button>
               </div>
             </div>
           </div>
