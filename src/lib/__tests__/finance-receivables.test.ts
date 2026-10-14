@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cashOnHandForClosedPeriod,
   periodEndDate,
   periodStartDate,
   receivableBucket,
@@ -169,5 +170,29 @@ describe("finance receivables helpers", () => {
     );
     expect(summary.received).toBe(4_000_000);
     expect(summary.profit).toBe(1_500_000);
+  });
+
+  it("laba on hand kohort menghitung pembayaran setelah periode berakhir", () => {
+    // Skenario Sep 2026: invoice terbit September, sebagian dibayar Oktober.
+    const summary = summarizeCashOnHand(
+      [
+        { invoice_id: 1, payment_date: "2026-09-20", amount: 500_000_000 },
+        { invoice_id: 2, payment_date: "2026-10-05", amount: 416_922_011 },
+      ],
+      [{ expense_date: "2026-09-15", amount: 788_455_567 }],
+      "2026-09-01",
+      "2026-09-30",
+      new Set([1, 2]),
+    );
+    expect(summary.received).toBe(916_922_011);
+    expect(summary.profit).toBe(128_466_444);
+  });
+
+  it("periode closed memakai kas kohort terbaru dan beban snapshot", () => {
+    const summary = cashOnHandForClosedPeriod(916_922_011, 788_455_567);
+    expect(summary.received).toBe(916_922_011);
+    expect(summary.expenses).toBe(788_455_567);
+    expect(summary.profit).toBe(128_466_444);
+    expect(summary.margin).toBeCloseTo(14.0106, 4);
   });
 });

@@ -273,6 +273,15 @@ export interface CashOnHandSummary {
   margin: number;
 }
 
+/** Laba On Hand Laba Rugi untuk periode yang sudah closing: kas mengikuti pembayaran terbaru
+ * kohort invoice periode, sedangkan beban memakai snapshot Tutup Buku yang immutable. */
+export function cashOnHandForClosedPeriod(received: number, snapshotExpenses: number): CashOnHandSummary {
+  const exp = Math.max(0, Math.round(snapshotExpenses) || 0);
+  const got = Math.max(0, Math.round(received) || 0);
+  const profit = got - exp;
+  return { received: got, expenses: exp, profit, margin: got > 0 ? (profit / got) * 100 : 0 };
+}
+
 /** Laba berbasis kas: pembayaran yang sudah diterima untuk invoice periode dikurangi pengeluaran periode. */
 export function summarizeCashOnHand(
   payments: { invoice_id?: number; payment_date: string; amount: number }[],
