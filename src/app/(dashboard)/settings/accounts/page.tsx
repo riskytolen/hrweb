@@ -144,6 +144,10 @@ const PERMISSION_SECTIONS: PermissionSection[] = [
   },
   { title: "Finance", options: [{ key: "finance", label: "Finance" }] },
   {
+    title: "Purchase",
+    options: [{ key: "purchase", label: "Purchase (opsional; akses utama via jabatan)" }],
+  },
+  {
     title: "Lainnya",
     options: [
       { key: "legalitas", label: "Legalitas" },

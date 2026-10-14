@@ -177,6 +177,15 @@ const allSections: MenuSection[] = [
         permission: "legalitas",
       },
       {
+        // Purchase memakai kewenangan berbasis jabatan pegawai (diperiksa di
+        // halaman + API), sehingga menu tampil untuk seluruh akun internal.
+        kind: "link",
+        key: "purchase",
+        label: "Purchase",
+        href: "/purchase",
+        icon: Package,
+      },
+      {
         kind: "group",
         key: "tms",
         label: "TMS",
@@ -239,6 +248,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
           if (entry.kind === "link") {
             // Standalone link
             if (isLoading || !profile) return null;
+            if (entry.key === "purchase") return profile.account_type === "internal" ? entry : null;
             if (entry.alwaysVisible) return entry;
             if (entry.href === "/settings/accounts") return isSuperAdmin ? entry : null;
             if (entry.href === "/settings/audit-logs") return isSuperAdmin ? entry : null;

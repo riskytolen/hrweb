@@ -80,7 +80,11 @@ export type AuditEntityType =
   | "company_legal_categories"
   | "company_legal_documents"
   | "company_legal_document_versions"
-  | "company_legal_document_files";
+  | "company_legal_document_files"
+  | "purchase_orders"
+  | "purchase_order_payments"
+  | "purchase_order_attachments"
+  | "purchase_jabatan_rules";
 
 export interface AuditLogParams {
   supabase: SupabaseClient;
@@ -268,6 +272,10 @@ export function entityLabel(entityType: string): string {
     company_legal_documents: "Dokumen Legalitas",
     company_legal_document_versions: "Versi Dokumen Legalitas",
     company_legal_document_files: "Berkas Legalitas",
+    purchase_orders: "PO Purchase",
+    purchase_order_payments: "Pembayaran PO",
+    purchase_order_attachments: "Lampiran PO",
+    purchase_jabatan_rules: "Akses Jabatan Purchase",
   };
   return labels[entityType] ?? entityType;
 }
