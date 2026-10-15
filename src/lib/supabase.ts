@@ -987,6 +987,8 @@ export interface DbFinanceInvoice {
   pph_amount: number;
   total_amount: number;
   notes: string | null;
+  /** True = PDF memakai TTD sistem; false = area TTD dikosongkan (manual). */
+  use_system_signature: boolean;
   created_at: string;
   updated_at: string;
   // joined

@@ -85,7 +85,7 @@ export default function FinancePendapatanPage() {
     invoice_no: "", invoice_date: localDateStr(), due_date: "", client_id: 0,
     description: "", trip_amount: 0, toll_amount: 0, parking_amount: 0, other_amount: 0,
     tax_scheme: "trip_only" as InvoiceTaxScheme, ppn_percent: 0, pph_percent: DEFAULT_PPH_PERCENT,
-    notes: "",
+    notes: "", use_signature: true,
   });
   const [invSaving, setInvSaving] = useState(false);
   const [invError, setInvError] = useState("");
@@ -218,7 +218,7 @@ export default function FinancePendapatanPage() {
       due_date: "", client_id: clients[0]?.id || 0, description: "",
       trip_amount: 0, toll_amount: 0, parking_amount: 0, other_amount: 0,
       tax_scheme: "trip_only", ppn_percent: ppnDefault > 0 ? ppnDefault : DEFAULT_PPN_PERCENT,
-      pph_percent: DEFAULT_PPH_PERCENT, notes: "",
+      pph_percent: DEFAULT_PPH_PERCENT, notes: "", use_signature: true,
     });
     setShowInvForm(true);
   };
@@ -234,7 +234,7 @@ export default function FinancePendapatanPage() {
       other_amount: inv.other_amount ?? 0,
       tax_scheme: (inv.tax_scheme === "all_components" ? "all_components" : "trip_only") as InvoiceTaxScheme,
       ppn_percent: Number(inv.ppn_percent ?? 0), pph_percent: Number(inv.pph_percent ?? 0),
-      notes: inv.notes || "",
+      notes: inv.notes || "", use_signature: inv.use_system_signature ?? true,
     });
     setShowInvForm(true);
   };
@@ -276,6 +276,7 @@ export default function FinancePendapatanPage() {
       pph_amount: t.pph_amount,
       total_amount: t.total_amount,
       notes: invForm.notes || null,
+      use_system_signature: invForm.use_signature,
     };
     try {
       if (editingInv) {
@@ -648,9 +649,10 @@ export default function FinancePendapatanPage() {
     try {
       const { exportInvoicePdf } = await import("@/lib/finance-invoice-pdf");
       // TTD digital dari bucket privat: buat signed URL berumur pendek khusus unduhan ini.
-      // Gagal memuat = fallback tanda tangan manual, bukan gagal cetak.
+      // Hanya bila invoice memilih TTD sistem. Gagal memuat = fallback
+      // tanda tangan manual, bukan gagal cetak.
       let signatureUrl: string | null = null;
-      if (company?.signer_signature_path) {
+      if (inv.use_system_signature !== false && company?.signer_signature_path) {
         try {
           const { data, error } = await supabase.storage.from(SIGNATURE_BUCKET).createSignedUrl(company.signer_signature_path, 180);
           if (!error && data?.signedUrl) signatureUrl = data.signedUrl;
@@ -1225,6 +1227,38 @@ export default function FinancePendapatanPage() {
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Catatan</label>
                   <textarea value={invForm.notes} onChange={(e) => setInvForm({ ...invForm, notes: e.target.value })} rows={2} className={inputClass} />
                 </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanda Tangan pada PDF</label>
+                  <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Tanda tangan pada PDF">
+                    {([
+                      { value: true, title: "TTD Sistem", desc: "Pakai TTD dari Pengaturan" },
+                      { value: false, title: "Dikosongkan", desc: "Tanda tangan manual" },
+                    ] as const).map((opt) => (
+                      <button
+                        key={opt.title}
+                        type="button"
+                        role="radio"
+                        aria-checked={invForm.use_signature === opt.value}
+                        onClick={() => setInvForm({ ...invForm, use_signature: opt.value })}
+                        className={cn(
+                          "rounded-xl border p-3 text-left transition-all",
+                          invForm.use_signature === opt.value
+                            ? "border-primary/40 bg-primary/5"
+                            : "border-border hover:bg-muted/40",
+                        )}
+                      >
+                        <p className="text-xs font-bold text-foreground">{opt.title}</p>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">{opt.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                  {invForm.use_signature && !company?.signer_signature_path && (
+                    <p className="text-[10px] text-warning mt-1">
+                      TTD sistem belum diunggah — PDF akan memakai area kosong. Atur di{" "}
+                      <a href="/finance/pengaturan" className="underline font-semibold">Pengaturan Finance</a>.
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
                 <Button variant="outline" size="sm" onClick={() => setShowInvForm(false)} disabled={invSaving}>Batal</Button>
@@ -1301,6 +1335,10 @@ export default function FinancePendapatanPage() {
                     <span className="text-muted-foreground text-xs">Sisa</span>
                     <span className="font-semibold text-warning tabular-nums">{formatCurrency(detailInvoice.total_amount - (detailInvoice.paid ?? 0))}</span>
                   </div>
+                </div>
+                <div className="flex items-center justify-between rounded-xl bg-muted/40 border border-border p-3">
+                  <span className="text-muted-foreground text-xs">Tanda tangan PDF</span>
+                  <span className="text-xs font-semibold text-foreground">{detailInvoice.use_system_signature !== false ? "TTD sistem" : "Dikosongkan (manual)"}</span>
                 </div>
                 <div>
                   <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Riwayat Pembayaran ({(detailInvoice.payments || []).length})</p>
