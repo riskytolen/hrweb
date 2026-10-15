@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ShoppingCart, Plus, Search, Pencil, Trash2, X, RefreshCw, Eye, Paperclip,
   Wallet, Banknote, FileText, CheckCircle2, AlertCircle, SlidersHorizontal,
-  CalendarDays, User, Building2, Landmark, Clock,
+  CalendarDays, User, Building2, Landmark, Clock, Loader2,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -895,6 +895,9 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [globalError, setGlobalError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savePhase, setSavePhase] = useState<"sending" | "uploading">("sending");
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
+  const [createdInfo, setCreatedInfo] = useState<{ id: number; po_no: string } | null>(null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [uploadError, setUploadError] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -913,8 +916,12 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
   };
 
   const attemptClose = () => {
-    if ((dirty || staged.length > 0) && !saving) setConfirmDiscard(true);
-    else onClose();
+    if (saving) return;
+    if (createdInfo || (!dirty && staged.length === 0)) {
+      onClose();
+      return;
+    }
+    setConfirmDiscard(true);
   };
 
   useEffect(() => {
@@ -950,8 +957,10 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
 
   const uploadStaged = async (orderId: number): Promise<string[]> => {
     const failures: string[] = [];
-    for (const s of staged) {
-      if (s.status === "done") continue;
+    const pending = staged.filter((s) => s.status !== "done");
+    setUploadProgress({ done: 0, total: pending.length });
+    let done = 0;
+    for (const s of pending) {
       setStaged((prev) => prev.map((x) => (x.key === s.key ? { ...x, status: "uploading" as const, error: undefined } : x)));
       try {
         const fd = new FormData();
@@ -964,8 +973,25 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
         failures.push(`${s.file.name}: ${msg}`);
         setStaged((prev) => prev.map((x) => (x.key === s.key ? { ...x, status: "error" as const, error: msg } : x)));
       }
+      done += 1;
+      setUploadProgress({ done, total: pending.length });
     }
     return failures;
+  };
+
+  const retryUploads = async () => {
+    if (!createdInfo || saving) return;
+    setSaving(true);
+    setSavePhase("uploading");
+    setGlobalError("");
+    const failures = await uploadStaged(createdInfo.id);
+    setSaving(false);
+    if (failures.length === 0) {
+      addToast("success", `Seluruh lampiran PO ${createdInfo.po_no} berhasil diunggah.`);
+      onSaved();
+    } else {
+      setGlobalError(`${failures.length} lampiran masih gagal diunggah. Periksa koneksi lalu coba lagi.`);
+    }
   };
 
   const save = async () => {
@@ -978,6 +1004,7 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
       return;
     }
     setSaving(true);
+    setSavePhase("sending");
     setGlobalError("");
     try {
       if (editing) {
@@ -986,20 +1013,30 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
           body: JSON.stringify({ action: "edit", ...form }),
         });
         addToast("success", `PO ${editing.po_no} diperbarui.`);
-      } else {
-        const res = await api<{ item: { id: number; po_no: string }; duplicate?: boolean }>(
-          "/api/purchase/orders",
-          { method: "POST", body: JSON.stringify({ ...form, idempotency_key: idemKey }) },
-        );
-        const orderId = res.item.id;
-        if (staged.length > 0) {
-          const failures = await uploadStaged(orderId);
-          if (failures.length > 0) {
-            addToast("error", `${failures.length} lampiran gagal diunggah. Buka detail PO untuk mencoba lagi.`);
-          }
-        }
-        addToast("success", res.duplicate ? `PO ${res.item.po_no} sudah pernah dibuat.` : `PO ${res.item.po_no} berhasil diajukan.`);
+        onSaved();
+        return;
       }
+      const res = await api<{ item: { id: number; po_no: string }; duplicate?: boolean }>(
+        "/api/purchase/orders",
+        { method: "POST", body: JSON.stringify({ ...form, idempotency_key: idemKey }) },
+      );
+      const orderId = res.item.id;
+      const pendingUploads = staged.filter((s) => s.status !== "done");
+      if (pendingUploads.length > 0) {
+        setSavePhase("uploading");
+        const failures = await uploadStaged(orderId);
+        if (failures.length > 0) {
+          // PO sudah tercatat — tahan modal agar lampiran bisa dicoba lagi
+          // tanpa membuat PO baru.
+          setCreatedInfo({ id: orderId, po_no: res.item.po_no });
+          setGlobalError(
+            `PO ${res.item.po_no} berhasil dibuat, tetapi ${failures.length} lampiran gagal diunggah. Periksa koneksi lalu tekan "Coba lagi".`,
+          );
+          setSaving(false);
+          return;
+        }
+      }
+      addToast("success", res.duplicate ? `PO ${res.item.po_no} sudah pernah dibuat.` : `PO ${res.item.po_no} berhasil diajukan.`);
       onSaved();
     } catch (err) {
       const withFields = err as { fieldErrors?: Record<string, string> };
@@ -1026,7 +1063,7 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
         <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={attemptClose} />
         <div className="relative w-full max-w-2xl bg-card rounded-2xl shadow-2xl animate-scale-in overflow-hidden flex flex-col" style={{ maxHeight: "calc(100vh - 2rem)" }}>
           <div className="relative px-6 pt-6 pb-4 bg-gradient-to-br from-primary/[0.08] via-transparent to-transparent flex-shrink-0">
-            <button onClick={attemptClose} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground" aria-label="Tutup"><X className="w-4 h-4" /></button>
+            <button onClick={attemptClose} disabled={saving} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-40" aria-label="Tutup"><X className="w-4 h-4" /></button>
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shadow-lg shadow-primary/20">
                 <ShoppingCart className="w-5 h-5 text-white" />
@@ -1038,7 +1075,26 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
             </div>
           </div>
 
-          <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto">
+          <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto" inert={saving}>
+            {saving && (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20" role="status" aria-live="polite">
+                <Loader2 className="w-5 h-5 text-primary animate-spin flex-shrink-0" aria-hidden />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-foreground">
+                    {savePhase === "uploading"
+                      ? `Mengunggah lampiran ${Math.min(uploadProgress.done + 1, uploadProgress.total)} dari ${uploadProgress.total}…`
+                      : editing ? "Menyimpan perubahan…" : "Mengirim pengajuan…"}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">Mohon tunggu, pengajuan sedang diproses. Jangan tutup halaman ini.</p>
+                </div>
+              </div>
+            )}
+            {createdInfo && !saving && (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 rounded-xl bg-warning-light text-warning text-xs font-medium" role="alert">
+                <span className="flex-1">PO {createdInfo.po_no} sudah tercatat. Lampiran yang gagal bisa dicoba lagi tanpa membuat PO baru.</span>
+                <Button size="sm" variant="outline" onClick={() => void retryUploads()}>Coba lagi</Button>
+              </div>
+            )}
             {globalError && <div className="p-3 rounded-xl bg-danger-light text-danger text-xs font-medium" role="alert">{globalError}</div>}
 
             <div className="space-y-1">
@@ -1125,10 +1181,13 @@ function PoFormModal({ ctx, editing, addToast, onClose, onSaved }: {
           </div>
 
           <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
-            <Button variant="outline" size="sm" onClick={attemptClose} disabled={saving}>Batal</Button>
-            <Button size="sm" onClick={() => void save()} disabled={saving}>
-              {saving ? "Menyimpan…" : editing ? "Simpan Perubahan" : "Kirim Pengajuan"}
-            </Button>
+            <Button variant="outline" size="sm" onClick={attemptClose} disabled={saving}>{createdInfo ? "Tutup" : "Batal"}</Button>
+            {!createdInfo && (
+              <Button size="sm" onClick={() => void save()} disabled={saving}>
+                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />}
+                {saving ? (savePhase === "uploading" ? "Mengunggah…" : "Mengirim…") : editing ? "Simpan Perubahan" : "Kirim Pengajuan"}
+              </Button>
+            )}
           </div>
         </div>
       </div>
