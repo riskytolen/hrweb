@@ -135,6 +135,48 @@ export function invoiceClientName(client: InvoicePdfClient | null | undefined): 
   return client.company_name?.trim() || client.contact_name?.trim() || "—";
 }
 
+// Jarak vertikal blok "Ditagihkan Kepada" (mm) — dipakai bersama renderer & uji layout.
+export const CLIENT_NAME_GAP_MM = 4.6;
+export const CLIENT_CONTACT_GAP_MM = 3.4;
+export const CLIENT_ADDR_LINE_GAP_MM = 3.2;
+export const CLIENT_CARD_PAD_BOTTOM_MM = 4.2;
+export const CLIENT_CARD_MIN_H_MM = 25;
+
+export interface InvoiceClientBlockLayout {
+  /** Baseline nama klien (perusahaan/kontak utama). */
+  nameY: number;
+  /** Baseline nama kontak terpisah (Bpk./Ibu ...), null bila tidak ada. */
+  contactY: number | null;
+  /** Baseline baris alamat pertama. */
+  addrY: number;
+  /** Jarak antarbaris alamat/kontak. */
+  addrLineGap: number;
+  /** Tinggi kartu klien: mengikuti konten, minimal CLIENT_CARD_MIN_H_MM. */
+  cardH: number;
+}
+
+/**
+ * Hitung posisi vertikal blok "Ditagihkan Kepada" secara berurutan:
+ * nama → kontak → alamat. Pure agar mudah diuji dan dipastikan tidak ada
+ * baris yang bertumpuk di dalam kartu.
+ */
+export function computeClientBlockLayout(
+  cardTop: number,
+  input: { hasContact: boolean; addrLines: number },
+): InvoiceClientBlockLayout {
+  const nameY = cardTop + 12;
+  let cursor = nameY + CLIENT_NAME_GAP_MM;
+  const contactY = input.hasContact ? cursor : null;
+  if (input.hasContact) cursor += CLIENT_CONTACT_GAP_MM;
+  const addrY = cursor;
+  const lastBaseline =
+    input.addrLines > 0
+      ? addrY + (input.addrLines - 1) * CLIENT_ADDR_LINE_GAP_MM
+      : contactY ?? nameY;
+  const cardH = Math.max(CLIENT_CARD_MIN_H_MM, lastBaseline - cardTop + CLIENT_CARD_PAD_BOTTOM_MM);
+  return { nameY, contactY, addrY, addrLineGap: CLIENT_ADDR_LINE_GAP_MM, cardH };
+}
+
 /** Ringkasan pajak yang eksplisit: PPN menambah, PPh mengurangi total tagihan. */
 export function buildInvoiceSummaryRows(inv: InvoicePdfInput): InvoiceSummaryRow[] {
   return [
@@ -522,7 +564,13 @@ export async function exportInvoicePdf(args: {
   const desc = invoice.description?.trim() || "—";
   const detailTextW = rightColW - 12;
   const dLines = splitLimited(doc, desc, detailTextW, 3, { size: 8.2 });
-  const cardH = 25;
+  // Posisi baris klien dihitung berurutan (bukan offset statis) agar nama,
+  // kontak, dan alamat tidak pernah bertumpuk di dalam kartu.
+  const clientLayout = computeClientBlockLayout(y, {
+    hasContact: Boolean(client?.company_name && client.contact_name),
+    addrLines: clientLines.length,
+  });
+  const cardH = clientLayout.cardH;
   drawCard(doc, margin, y, leftColW, cardH, SOFT);
   drawCard(doc, rightColX, y, rightColW, cardH, [255, 255, 255]);
   drawCapsLabel(doc, "Ditagihkan Kepada", margin + 5, y + 6);
@@ -530,18 +578,20 @@ export async function exportInvoicePdf(args: {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9.7);
   setColor(doc, INK, "text");
-  doc.text(clientNameLines, margin + 5, y + 12);
-  if (client?.company_name && client.contact_name) {
+  doc.text(clientNameLines, margin + 5, clientLayout.nameY);
+  if (clientLayout.contactY !== null && client?.contact_name) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     setColor(doc, MUTED, "text");
-    doc.text(client.contact_name, margin + 5, y + 12 + clientNameLines.length * 4.5);
+    doc.text(client.contact_name, margin + 5, clientLayout.contactY);
   }
   if (clientLines.length > 0) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.4);
     setColor(doc, MUTED, "text");
-    doc.text(clientLines, margin + 5, y + 17);
+    clientLines.forEach((line, i) =>
+      doc.text(line, margin + 5, clientLayout.addrY + i * clientLayout.addrLineGap),
+    );
   }
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.2);

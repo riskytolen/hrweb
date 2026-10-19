@@ -4,6 +4,7 @@ import {
   buildInvoiceCostLines,
   buildInvoiceFilename,
   buildPaymentInstructionRows,
+  computeClientBlockLayout,
   formatTerbilang,
   hasBankInstruction,
   invoiceClientName,
@@ -129,6 +130,25 @@ describe("finance invoice pdf helpers", () => {
     expect(invoiceClientName(undefined)).toBe("—");
     expect(invoiceClientName({ contact_name: "Budi" })).toBe("Budi");
     expect(invoiceClientName({ company_name: "PT Maju", contact_name: "Budi" })).toBe("PT Maju");
+  });
+
+  it("blok client: nama, kontak, dan alamat tidak bertumpuk", () => {
+    const top = 100;
+    const layout = computeClientBlockLayout(top, { hasContact: true, addrLines: 2 });
+    expect(layout.nameY).toBe(top + 12);
+    // Kontak selalu berjarak aman di bawah nama (regresi teks bertumpuk di PDF).
+    expect((layout.contactY ?? 0) - layout.nameY).toBeGreaterThanOrEqual(4.5);
+    expect(layout.addrY).toBeGreaterThan(layout.contactY ?? 0);
+    const lastBaseline = layout.addrY + layout.addrLineGap; // baris alamat ke-2
+    expect(lastBaseline).toBeLessThan(top + layout.cardH);
+    expect(layout.cardH).toBeCloseTo(27.4);
+  });
+
+  it("blok client tanpa kontak/alamat tetap memakai tinggi kartu minimum", () => {
+    const layout = computeClientBlockLayout(42, { hasContact: false, addrLines: 0 });
+    expect(layout.contactY).toBeNull();
+    expect(layout.addrY).toBe(42 + 12 + 4.6);
+    expect(layout.cardH).toBe(25);
   });
 
   it("terbilang angka Indonesia", () => {
