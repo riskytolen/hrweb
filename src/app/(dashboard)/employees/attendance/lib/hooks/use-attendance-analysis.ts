@@ -3,7 +3,12 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { SUMMARY_FETCH_PAGE_SIZE } from "../attendance-constants";
-import { getSummaryPeriodRange, getSummaryCurrentPeriodKey, isCountableManualRecord } from "../attendance-helpers";
+import {
+  getSummaryPeriodRange,
+  getSummaryCurrentPeriodKey,
+  isCountableManualRecord,
+  pickDominantDivisionLabel,
+} from "../attendance-helpers";
 import type { EmployeeLite, AnalysisMetrics, AnalysisDivisiItem, AnalysisIndividuItem, DailyTrend } from "../attendance-types";
 
 function shiftPeriodKey(key: string, dir: -1 | 1): string {
@@ -159,18 +164,29 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
   );
 
   const individuals: AnalysisIndividuItem[] = useMemo(
-    () => Array.from(curr.individuals.entries()).map(([eid, m]) => {
-      const emp = empMap.get(eid);
-      const rec = currRecords.find((r) => r.employee_id === eid);
-      const div = rec ? getDiv(rec) : null;
-      return {
-        ...m,
-        employee_id: eid,
-        nama: emp?.nama || eid,
-        divisionNama: div?.nama || "-",
-        divisionColor: div?.color || "#6b7280",
-      };
-    }).sort((a, b) => a.nama.localeCompare(b.nama)),
+    () => {
+      // Label divisi = divisi tempat pegawai paling sering absen pada periode ini.
+      // Murni identitas — angka absensi tetap gabungan semua divisi.
+      const recordsByEmp = new Map<string, { division_id: number; tanggal: string; nama: string | null; color: string | null }[]>();
+      for (const r of currRecords) {
+        const div = getDiv(r);
+        const lean = { division_id: r.division_id, tanggal: r.tanggal, nama: div?.nama ?? null, color: div?.color ?? null };
+        const list = recordsByEmp.get(r.employee_id);
+        if (list) list.push(lean);
+        else recordsByEmp.set(r.employee_id, [lean]);
+      }
+      return Array.from(curr.individuals.entries()).map(([eid, m]) => {
+        const emp = empMap.get(eid);
+        const dominant = pickDominantDivisionLabel(recordsByEmp.get(eid) ?? []);
+        return {
+          ...m,
+          employee_id: eid,
+          nama: emp?.nama || eid,
+          divisionNama: dominant?.nama || "-",
+          divisionColor: dominant?.color || "#6b7280",
+        };
+      }).sort((a, b) => a.nama.localeCompare(b.nama));
+    },
     [curr.individuals, empMap, currRecords],
   );
 

@@ -109,6 +109,56 @@ export function isCountableManualRecord(
   return isManual && !isBackOfficeDivision(divisionNama);
 }
 
+export interface DominantDivisionInput {
+  division_id: number;
+  tanggal: string;
+  nama: string | null;
+  color: string | null;
+}
+
+export interface DominantDivisionLabel {
+  id: number;
+  nama: string | null;
+  color: string | null;
+}
+
+/**
+ * Pilih divisi sebagai **label identitas** pegawai pada analisa perorangan:
+ * divisi dengan record absen terbanyak pada periode; jika seri diputuskan
+ * lewat tanggal absen terbaru; masih seri lewat division_id terkecil.
+ * Label ini murni identitas — angka absensi tetap gabungan semua divisi.
+ */
+export function pickDominantDivisionLabel(
+  records: DominantDivisionInput[],
+): DominantDivisionLabel | null {
+  type DivStat = { count: number; last: string; nama: string | null; color: string | null };
+  const byDiv = new Map<number, DivStat>();
+  for (const r of records) {
+    const stat = byDiv.get(r.division_id) ?? { count: 0, last: "", nama: null, color: null };
+    stat.count++;
+    if (r.tanggal > stat.last) stat.last = r.tanggal;
+    if (stat.nama === null && r.nama) stat.nama = r.nama;
+    if (stat.color === null && r.color) stat.color = r.color;
+    byDiv.set(r.division_id, stat);
+  }
+  const entries = Array.from(byDiv.entries());
+  if (entries.length === 0) return null;
+  entries.sort(([, a], [, b]) => {
+    if (b.count !== a.count) return b.count - a.count;
+    // Tanggal terbaru menang (string YYYY-MM-DD aman dibandingkan urut).
+    if (b.last !== a.last) return b.last < a.last ? -1 : 1;
+    return 0; // diakhiri perbandingan id pada loop penentu
+  });
+  let winner = entries[0];
+  for (const entry of entries) {
+    const [idA, sA] = winner;
+    const [idB, sB] = entry;
+    if (sB.count === sA.count && sB.last === sA.last && idB < idA) winner = entry;
+  }
+  const [id, label] = winner;
+  return { id, nama: label.nama, color: label.color };
+}
+
 /**
  * Get local date string YYYY-MM-DD (timezone safe — pakai local time, bukan UTC).
  * Penting untuk konsistensi antara client timezone dan server-side date filter.

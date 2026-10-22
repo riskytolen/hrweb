@@ -17,6 +17,7 @@ import {
   isEmployeeActiveOnDate,
   isEmployeeActiveInPeriod,
   isCountableManualRecord,
+  pickDominantDivisionLabel,
 } from "../lib/attendance-helpers";
 import { MIN_DATE, SUMMARY_CUT_OFF_DAY } from "../lib/attendance-constants";
 
@@ -479,6 +480,61 @@ describe("attendance-helpers", () => {
     it("record bukan manual tidak dihitung", () => {
       expect(isCountableManualRecord(false, "Lapangan")).toBe(false);
       expect(isCountableManualRecord(false, "Back Office")).toBe(false);
+    });
+  });
+
+  describe("pickDominantDivisionLabel", () => {
+    const rec = (division_id: number, tanggal: string, nama: string | null = `Div-${division_id}`, color: string | null = "#123456") =>
+      ({ division_id, tanggal, nama, color });
+
+    it("divisi dengan record terbanyak menjadi label pegawai", () => {
+      const result = pickDominantDivisionLabel([
+        rec(1, "2026-10-01", "Lapangan", "#0ea5e9"),
+        rec(1, "2026-10-02", "Lapangan", "#0ea5e9"),
+        rec(1, "2026-10-03", "Lapangan", "#0ea5e9"),
+        rec(2, "2026-10-05", "Gudang", "#f59e0b"),
+        rec(2, "2026-10-06", "Gudang", "#f59e0b"),
+      ]);
+      expect(result).toEqual({ id: 1, nama: "Lapangan", color: "#0ea5e9" });
+    });
+
+    it("seri 1–1 → divisi dengan tanggal absen terbaru menjadi label", () => {
+      const result = pickDominantDivisionLabel([
+        rec(1, "2026-10-01"),
+        rec(2, "2026-10-02"),
+      ]);
+      expect(result?.id).toBe(2); // jumlah sama → tanggal terbaru menang
+      // Pemanggil (hook) tetap menggabungkan seluruh record ke metrik pegawai.
+    });
+
+    it("seri jumlah → divisi dengan tanggal absen terbaru menang", () => {
+      const result = pickDominantDivisionLabel([
+        rec(1, "2026-10-02", "Lama"),
+        rec(2, "2026-10-08", "Baru"),
+      ]);
+      expect(result).toEqual({ id: 2, nama: "Baru", color: "#123456" });
+    });
+
+    it("seri jumlah & tanggal saban → division_id terkecil untuk hasil stabil", () => {
+      const result = pickDominantDivisionLabel([
+        rec(5, "2026-10-01", "E"),
+        rec(2, "2026-10-01", "B"),
+      ]);
+      expect(result?.id).toBe(2);
+      expect(result?.nama).toBe("B");
+    });
+
+    it("label dari divisi menang meski baris pertama milik divisi lain", () => {
+      const result = pickDominantDivisionLabel([
+        rec(3, "2026-10-01", "C"),
+        rec(4, "2026-10-02", "D"),
+        rec(4, "2026-10-03", "D"),
+      ]);
+      expect(result?.nama).toBe("D");
+    });
+
+    it("kosong → null (dipakai fallback '-' oleh pemanggil)", () => {
+      expect(pickDominantDivisionLabel([])).toBeNull();
     });
   });
 });
