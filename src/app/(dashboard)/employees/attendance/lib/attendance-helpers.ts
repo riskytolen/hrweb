@@ -1,4 +1,4 @@
-import { MIN_DATE, SUMMARY_CUT_OFF_DAY } from "./attendance-constants";
+import { MIN_DATE, MONTH_SHORT_ID, SUMMARY_CUT_OFF_DAY } from "./attendance-constants";
 import type { NonActivePeriod } from "@/lib/supabase";
 
 export type PenaltyLite = {
@@ -202,13 +202,11 @@ export function computeAvgJamMasuk(
   return minutesToHHMM(sum / count);
 }
 
-/** Komparator aturan peringkat: kehadiran tertinggi → manual tersedikit → rata-rata jam masuk paling awal → nama A-Z. */
-export function compareRankingEntries(
-  a: { hadirEfektifPct: number; manual: number; avgJam: string | null; nama: string },
-  b: { hadirEfektifPct: number; manual: number; avgJam: string | null; nama: string },
+/** Pembanding rata-rata jam masuk: paling awal menang; yang tanpa jam (null) di belakang; seri → nama A-Z. */
+export function compareJamMasukThenNama(
+  a: { avgJam: string | null; nama: string },
+  b: { avgJam: string | null; nama: string },
 ): number {
-  if (b.hadirEfektifPct !== a.hadirEfektifPct) return b.hadirEfektifPct - a.hadirEfektifPct;
-  if (a.manual !== b.manual) return a.manual - b.manual;
   const jamA = timeToMinutesOrNull(a.avgJam);
   const jamB = timeToMinutesOrNull(b.avgJam);
   if (jamA !== jamB) {
@@ -218,6 +216,16 @@ export function compareRankingEntries(
     return jamA - jamB;
   }
   return a.nama.localeCompare(b.nama);
+}
+
+/** Komparator aturan peringkat: kehadiran tertinggi → manual tersedikit → rata-rata jam masuk paling awal → nama A-Z. */
+export function compareRankingEntries(
+  a: { hadirEfektifPct: number; manual: number; avgJam: string | null; nama: string },
+  b: { hadirEfektifPct: number; manual: number; avgJam: string | null; nama: string },
+): number {
+  if (b.hadirEfektifPct !== a.hadirEfektifPct) return b.hadirEfektifPct - a.hadirEfektifPct;
+  if (a.manual !== b.manual) return a.manual - b.manual;
+  return compareJamMasukThenNama(a, b);
 }
 
 /**
@@ -410,4 +418,262 @@ export function isEmployeeActiveOnDate(date: string, employee: EmployeeActivityL
 export function isEmployeeActiveInPeriod(period: { start: string; end: string }, employee: EmployeeActivityLite): boolean {
   if (!period.start || !period.end) return false;
   return hasActiveDayInPeriodCentral(employee, period.start, period.end);
+}
+
+// ─── Challenge Mingguan (divisi CP Suka) ─────────────────────────────
+// Ranking mingguan dengan aturan gugur di Analisa → Perorangan.
+// Semua fungsi murni — record absensi di-fetch oleh hook analisa.
+
+/** Alasan ketidakhadiran pada hari wajib challenge. */
+export type ChallengeDayReason = "Izin" | "Sakit" | "Cuti" | "Alpha" | "Tanpa absen";
+
+/** Klasifikasi satu hari peserta challenge. */
+export type ChallengeDayResult = {
+  tanggal: string;
+  /** Libur terjadwal → hari netral, tidak masuk hitungan wajib. */
+  libur: boolean;
+  /** Record Hadir/Terlambat ada pada hari ini. */
+  hadir: boolean;
+  /** Alasan tidak hadir; null bila hadir atau hari libur. */
+  alasan: ChallengeDayReason | null;
+};
+
+/** Baris peserta Challenge Mingguan CP Suka pada Analisa → Perorangan. */
+export type ChallengeEmployeeResult = {
+  employee_id: string;
+  nama: string;
+  divisionNama: string;
+  divisionColor: string;
+  /** Hari wajib yang dihadiri (mis. 6). */
+  hadirWajib: number;
+  /** Total hari wajib minggu ini — libur terjadwal & hari mendatang dikecualikan. */
+  totalWajib: number;
+  /** Jumlah absen manual pegawai pada minggu ini. */
+  manual: number;
+  /** Rata-rata jam masuk di divisi CP Suka; null bila tak ada record berjam. */
+  avgJamMasuk: string | null;
+  /** True bila lolos aturan (full hadir & manual ≤ CHALLENGE_MAX_MANUAL). */
+  lolos: boolean;
+  /** Daftar alasan gugur (kosong bila lolos). */
+  alasanGugur: string[];
+  /** Peringkat hanya untuk peserta lolos; gugur bernilai null. */
+  rank: number | null;
+  /** Klasifikasi per hari Senin–Minggu (terpotong hari ini pada minggu berjalan). */
+  days: ChallengeDayResult[];
+};
+
+/** Satu minggu challenge pada periode analisa. */
+export type ChallengeWeek = {
+  /** Senin minggu (YYYY-MM-DD). */
+  weekStart: string;
+  /** Minggu minggu (YYYY-MM-DD). */
+  weekEnd: string;
+  /** Label pendek, mis. "1 – 7 Sep 2026". */
+  label: string;
+  /** Minggu memuat hari ini — status masih sementara. */
+  isRunning: boolean;
+  /** Semua hari masih mendatang — belum dinilai. */
+  isFuture: boolean;
+  /** Peserta: lolos berurutan (rank 1..n) lalu gugur di paling bawah. */
+  items: ChallengeEmployeeResult[];
+};
+
+export type ChallengeRecordInput = {
+  employee_id: string;
+  division_id: number | null;
+  status: string;
+  tanggal: string;
+  is_manual: boolean;
+  jam_masuk: string | null;
+  divisionNama: string | null;
+  divisionColor: string | null;
+};
+
+/** Batas absen manual peserta challenge: 1 masih lolos, lebih dari 1 gugur. */
+export const CHALLENGE_MAX_MANUAL = 1;
+
+/** Divisi peserta challenge. Sama pola dengan isBackOfficeDivision (perbandingan nama). */
+export function isCpSukaDivision(nama: string | null | undefined): boolean {
+  return (nama || "").trim().toLowerCase() === "cp suka";
+}
+
+/** Tanggal hari ini (YYYY-MM-DD) menurut zona waktu Asia/Jakarta. */
+export function getJakartaToday(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+}
+
+/** Tambah/hapus hari pada YYYY-MM-DD dengan aritmetika UTC (tanpa clamp MIN_DATE). */
+function addDaysUtc(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+/** Senin pada minggu yang memuat dateStr (getUTCDay 0 Minggu – 6 Sabtu). */
+export function mondayOfWeek(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return addDaysUtc(dateStr, -((dow + 6) % 7));
+}
+
+/** Semua minggu Senin–Minggu yang memotong rentang [start..end]. */
+export function listPeriodWeeks(start: string, end: string): { weekStart: string; weekEnd: string }[] {
+  const out: { weekStart: string; weekEnd: string }[] = [];
+  if (!start || !end || start > end) return out;
+  let monday = mondayOfWeek(start);
+  while (monday <= end) {
+    out.push({ weekStart: monday, weekEnd: addDaysUtc(monday, 6) });
+    monday = addDaysUtc(monday, 7);
+  }
+  return out;
+}
+
+/** "5 Sep" (tanpa tahun) untuk pesan alasan gugur. */
+function idShortDay(dateStr: string): string {
+  const [, m, d] = dateStr.split("-").map(Number);
+  return `${d} ${MONTH_SHORT_ID[m - 1]}`;
+}
+
+/** Label minggu pendek: "1 – 7 Sep 2026" atau lintas bulan "29 Sep – 5 Okt 2026". */
+export function formatWeekLabel(weekStart: string, weekEnd: string): string {
+  const [sy, sm, sd] = weekStart.split("-").map(Number);
+  const [ey, em, ed] = weekEnd.split("-").map(Number);
+  if (sy !== ey || sm !== em) return `${sd} ${MONTH_SHORT_ID[sm - 1]} – ${ed} ${MONTH_SHORT_ID[em - 1]} ${ey}`;
+  return `${sd} – ${ed} ${MONTH_SHORT_ID[sm - 1]} ${sy}`;
+}
+
+/** Komparator peserta lolos: manual tersedikit → jam masuk paling awal → nama A-Z. */
+export function compareChallengeLolos(
+  a: { manual: number; avgJam: string | null; nama: string },
+  b: { manual: number; avgJam: string | null; nama: string },
+): number {
+  if (a.manual !== b.manual) return a.manual - b.manual;
+  return compareJamMasukThenNama(a, b);
+}
+
+/**
+ * Hitung Challenge Mingguan CP Suka untuk satu minggu Senin–Minggu (murni).
+ *
+ * Aturan:
+ * - Peserta = pegawai yang divisi dominannya pada minggu ini adalah CP Suka.
+ *   Record otomatis tanpa divisi (Libur/Alpha) tidak ikut menentukan dominan.
+ * - Hari wajib = hari minggu yang sudah lewat (≤ todayStr) minus hari Libur —
+ *   libur terjadwal bersifat netral. Hari mendatang belum dinilai.
+ * - Gugur bila pada salah satu hari wajib pegawai tidak hadir
+ *   (Izin/Sakit/Cuti/Alpha/tanpa absen), ATAU absen manual > CHALLENGE_MAX_MANUAL.
+ * - Peringkat lolos: manual tersedikit → rata-rata jam masuk paling awal
+ *   (record Hadir/Terlambat di divisi CP Suka) → nama A-Z. Gugur rank null.
+ */
+export function computeWeeklyChallenge(
+  records: ChallengeRecordInput[],
+  weekStart: string,
+  todayStr: string,
+  empNames?: Map<string, string>,
+): ChallengeWeek {
+  const weekEnd = addDaysUtc(weekStart, 6);
+  const isRunning = weekStart <= todayStr && todayStr <= weekEnd;
+  const isFuture = weekStart > todayStr;
+  const week: ChallengeWeek = {
+    weekStart,
+    weekEnd,
+    label: formatWeekLabel(weekStart, weekEnd),
+    isRunning,
+    isFuture,
+    items: [],
+  };
+  // Minggu belum dimulai — tidak ada yang bisa dinilai.
+  if (isFuture) return week;
+
+  // Horizon: minggu dipotong hari ini — hari mendatang belum dinilai.
+  const last = todayStr < weekEnd ? todayStr : weekEnd;
+  const horizon: string[] = [];
+  for (let cur = weekStart; cur <= last; cur = addDaysUtc(cur, 1)) horizon.push(cur);
+
+  // Kelompokkan record minggu ini per pegawai per tanggal.
+  const allByEmp = new Map<string, ChallengeRecordInput[]>();
+  const byDateByEmp = new Map<string, Map<string, ChallengeRecordInput[]>>();
+  for (const r of records) {
+    if (r.tanggal < weekStart || r.tanggal > weekEnd) continue;
+    let byDate = byDateByEmp.get(r.employee_id);
+    if (!byDate) {
+      byDate = new Map();
+      byDateByEmp.set(r.employee_id, byDate);
+      allByEmp.set(r.employee_id, []);
+    }
+    const dayList = byDate.get(r.tanggal);
+    if (dayList) dayList.push(r);
+    else byDate.set(r.tanggal, [r]);
+    allByEmp.get(r.employee_id)!.push(r);
+  }
+
+  const drafts: ChallengeEmployeeResult[] = [];
+  for (const [eid, byDate] of byDateByEmp) {
+    const all = allByEmp.get(eid) ?? [];
+
+    // Divisi dominan hanya dari record yang punya divisi (auto Libur/Alpha tanpa divisi).
+    const dominant = pickDominantDivisionLabel(
+      all.flatMap((r) =>
+        r.divisionNama
+          ? [{ division_id: r.division_id as number, tanggal: r.tanggal, nama: r.divisionNama, color: r.divisionColor }]
+          : [],
+      ),
+    );
+    if (!dominant || !isCpSukaDivision(dominant.nama)) continue;
+
+    const manual = all.filter((r) => r.is_manual).length;
+    const avgJamMasuk = computeAvgJamMasuk(
+      all.map((r) => ({ division_id: r.division_id as number, status: r.status, jam_masuk: r.jam_masuk })),
+      dominant.id,
+    );
+
+    const days: ChallengeDayResult[] = horizon.map((tanggal) => {
+      const dayRecs = byDate.get(tanggal) ?? [];
+      const hadir = dayRecs.some((r) => r.status === "Hadir" || r.status === "Terlambat");
+      if (hadir) return { tanggal, libur: false, hadir: true, alasan: null };
+      const absent = dayRecs.find(
+        (r) => r.status !== "Hadir" && r.status !== "Terlambat" && r.status !== "Libur",
+      );
+      if (absent) return { tanggal, libur: false, hadir: false, alasan: absent.status as ChallengeDayReason };
+      if (dayRecs.some((r) => r.status === "Libur")) return { tanggal, libur: true, hadir: false, alasan: null };
+      return { tanggal, libur: false, hadir: false, alasan: "Tanpa absen" };
+    });
+    const wajib = days.filter((d) => !d.libur);
+    const hadirWajib = wajib.filter((d) => d.hadir).length;
+
+    const alasanGugur: string[] = [];
+    for (const d of wajib) {
+      if (!d.hadir && d.alasan) alasanGugur.push(`${d.alasan} pada ${idShortDay(d.tanggal)}`);
+    }
+    if (manual > CHALLENGE_MAX_MANUAL) {
+      alasanGugur.push(`${manual} absen manual (maks ${CHALLENGE_MAX_MANUAL})`);
+    }
+
+    drafts.push({
+      employee_id: eid,
+      nama: empNames?.get(eid) || eid,
+      divisionNama: dominant.nama || "Cp Suka",
+      divisionColor: dominant.color || "#6b7280",
+      hadirWajib,
+      totalWajib: wajib.length,
+      manual,
+      avgJamMasuk,
+      lolos: alasanGugur.length === 0,
+      alasanGugur,
+      rank: null,
+      days,
+    });
+  }
+
+  const lolos = drafts
+    .filter((d) => d.lolos)
+    .sort((a, b) =>
+      compareChallengeLolos(
+        { manual: a.manual, avgJam: a.avgJamMasuk, nama: a.nama },
+        { manual: b.manual, avgJam: b.avgJamMasuk, nama: b.nama },
+      ),
+    );
+  lolos.forEach((d, i) => { d.rank = i + 1; });
+  const gugur = drafts.filter((d) => !d.lolos).sort((a, b) => a.nama.localeCompare(b.nama));
+  week.items = [...lolos, ...gugur];
+  return week;
 }

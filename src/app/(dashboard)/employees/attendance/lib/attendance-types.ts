@@ -135,3 +135,11 @@ export type FilteredRecords = {
 };
 
 export type { PenaltyLite };
+
+/** Tipe-tipe Challenge Mingguan didefinisikan murni di attendance-helpers; di-re-export untuk UI. */
+export type {
+  ChallengeWeek,
+  ChallengeEmployeeResult,
+  ChallengeDayResult,
+  ChallengeDayReason,
+} from "./attendance-helpers";

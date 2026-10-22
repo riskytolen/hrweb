@@ -47,6 +47,9 @@ export const DAY_NAMES = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat",
 /** Nama hari singkat. */
 export const DAY_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"] as const;
 
+/** Nama bulan singkat (Jan–Des) untuk label minggu challenge. */
+export const MONTH_SHORT_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"] as const;
+
 /**
  * Format catatan untuk record yang di-generate oleh sistem (bukan admin manual).
  * Penting: string di sini digunakan sebagai marker untuk deteksi record auto-generated

@@ -10,8 +10,20 @@ import {
   pickDominantDivisionLabel,
   computeAvgJamMasuk,
   compareRankingEntries,
+  computeWeeklyChallenge,
+  getJakartaToday,
+  listPeriodWeeks,
 } from "../attendance-helpers";
-import type { EmployeeLite, AnalysisMetrics, AnalysisDivisiItem, AnalysisIndividuItem, AnalysisRankingItem, DailyTrend } from "../attendance-types";
+import type { ChallengeRecordInput } from "../attendance-helpers";
+import type {
+  EmployeeLite,
+  AnalysisMetrics,
+  AnalysisDivisiItem,
+  AnalysisIndividuItem,
+  AnalysisRankingItem,
+  DailyTrend,
+  ChallengeWeek,
+} from "../attendance-types";
 
 function shiftPeriodKey(key: string, dir: -1 | 1): string {
   const [y, m] = key.split("-").map(Number);
@@ -75,8 +87,17 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
   const currPeriod = useMemo(() => getSummaryPeriodRange(periodKey), [periodKey]);
   const prevPeriod = useMemo(() => getSummaryPeriodRange(shiftPeriodKey(periodKey, -1)), [periodKey]);
 
+  // Rentang data challenge: minggu-minggu Senin–Minggu yang memotong periode
+  // (bisa melewati batas periode payroll 8–7, mis. minggu terakhir sampai hari Minggu).
+  const challengeRange = useMemo(() => {
+    const weeks = listPeriodWeeks(currPeriod.start, currPeriod.end);
+    if (weeks.length === 0) return null;
+    return { start: weeks[0].weekStart, end: weeks[weeks.length - 1].weekEnd };
+  }, [currPeriod]);
+
   const [currRecords, setCurrRecords] = useState<ReturnType<typeof fetchPeriodRecords> extends Promise<infer T> ? T : never>([]);
   const [prevRecords, setPrevRecords] = useState<ReturnType<typeof fetchPeriodRecords> extends Promise<infer T> ? T : never>([]);
+  const [challengeRecords, setChallengeRecords] = useState<ChallengeRecordInput[]>([]);
 
   const empMap = useMemo(() => {
     const m = new Map<string, EmployeeLite>();
@@ -86,14 +107,26 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [curr, prev] = await Promise.all([
+    const [curr, prev, chalRaw] = await Promise.all([
       fetchPeriodRecords(currPeriod.start, currPeriod.end),
       fetchPeriodRecords(prevPeriod.start, prevPeriod.end),
+      challengeRange ? fetchPeriodRecords(challengeRange.start, challengeRange.end) : Promise.resolve([]),
     ]);
     setCurrRecords(curr);
     setPrevRecords(prev);
+    // Challenge minta bentuk input murni: nama divisi ditempel dari join divisions.
+    setChallengeRecords(chalRaw.map((row) => ({
+      employee_id: row.employee_id,
+      division_id: row.division_id,
+      status: row.status,
+      tanggal: row.tanggal,
+      is_manual: row.is_manual,
+      jam_masuk: row.jam_masuk,
+      divisionNama: getDiv(row)?.nama ?? null,
+      divisionColor: getDiv(row)?.color ?? null,
+    })));
     setLoading(false);
-  }, [currPeriod, prevPeriod]);
+  }, [currPeriod, prevPeriod, challengeRange]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -253,6 +286,19 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
     [curr.daily],
   );
 
+  /**
+   * Challenge Mingguan CP Suka per minggu Senin–Minggu melintasi periode.
+   * Hari mendatang pada minggu berjalan belum dinilai (status sementara).
+   */
+  const jakartaToday = useMemo(() => getJakartaToday(), []);
+  const empNamaMap = useMemo(() => new Map(employees.map((e) => [e.id, e.nama])), [employees]);
+  const challengeWeeks: ChallengeWeek[] = useMemo(
+    () => listPeriodWeeks(currPeriod.start, currPeriod.end).map((w) =>
+      computeWeeklyChallenge(challengeRecords, w.weekStart, jakartaToday, empNamaMap),
+    ),
+    [currPeriod, challengeRecords, jakartaToday, empNamaMap],
+  );
+
   return {
     loading,
     periodKey,
@@ -265,6 +311,7 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
     individuals,
     ranking,
     dailyTrend,
+    challengeWeeks,
     divisionList,
   };
 }

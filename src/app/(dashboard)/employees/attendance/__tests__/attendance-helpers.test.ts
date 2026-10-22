@@ -22,6 +22,10 @@ import {
   minutesToHHMM,
   computeAvgJamMasuk,
   compareRankingEntries,
+  computeWeeklyChallenge,
+  mondayOfWeek,
+  listPeriodWeeks,
+  formatWeekLabel,
 } from "../lib/attendance-helpers";
 import { MIN_DATE, SUMMARY_CUT_OFF_DAY } from "../lib/attendance-constants";
 
@@ -615,6 +619,196 @@ describe("attendance-helpers", () => {
     it("semua seri → nama A-Z hanya urutan render (setara)", () => {
       expect(compareRankingEntries(e(95, 1, "08:00", "Andi"), e(95, 1, "08:00", "Budi"))).toBeLessThan(0);
       expect(compareRankingEntries(e(95, 1, "08:00", "Andi"), e(95, 1, "08:00", "Andi"))).toBe(0);
+    });
+  });
+
+  describe("Challenge Mingguan CP Suka — enumerasi minggu", () => {
+    it("mondayOfWeek: Senin pada minggu yang memuat tanggal", () => {
+      expect(mondayOfWeek("2026-10-23")).toBe("2026-10-19"); // Jumat → Senin 19
+      expect(mondayOfWeek("2026-10-19")).toBe("2026-10-19"); // sudah Senin
+      expect(mondayOfWeek("2026-10-18")).toBe("2026-10-12"); // Minggu → mundur 6 hari
+    });
+
+    it("listPeriodWeeks: semua minggu Senin–Minggu yang memotong rentang", () => {
+      // Periode payroll 8 Sep – 7 Okt 2026.
+      const weeks = listPeriodWeeks("2026-09-08", "2026-10-07");
+      expect(weeks[0]).toEqual({ weekStart: "2026-09-07", weekEnd: "2026-09-13" });
+      expect(weeks[weeks.length - 1]).toEqual({ weekStart: "2026-10-05", weekEnd: "2026-10-11" });
+      // Setiap minggu berurutan nada 7 hari, lintas bulan aman.
+      expect(weeks.length).toBe(5);
+      expect(weeks[1]).toEqual({ weekStart: "2026-09-14", weekEnd: "2026-09-20" });
+    });
+
+    it("listPeriodWeeks: rentang tidak valid → kosong", () => {
+      expect(listPeriodWeeks("2026-09-10", "2026-09-08")).toEqual([]);
+      expect(listPeriodWeeks("", "")).toEqual([]);
+    });
+
+    it("formatWeekLabel: satu bulan & lintas bulan", () => {
+      expect(formatWeekLabel("2026-09-07", "2026-09-13")).toBe("7 – 13 Sep 2026");
+      expect(formatWeekLabel("2026-09-28", "2026-10-04")).toBe("28 Sep – 4 Okt 2026");
+    });
+  });
+
+  describe("Challenge Mingguan CP Suka — computeWeeklyChallenge", () => {
+    // Minggu uji: Senin 7 Sep – Minggu 13 Sep 2026 (semua hari sudah lewat).
+    const WS = "2026-09-07";
+    const SATU = "1", DUA = "2"; // employee id
+    const TODAY = "2026-09-15"; // sudah lewat minggu uji
+    const D = [
+      "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10",
+      "2026-09-11", "2026-09-12", "2026-09-13",
+    ];
+
+    const CP = { id: 9, nama: "Cp Suka", color: "#0ea5e9" };
+    const LAIN = { id: 3, nama: "Divisi Lain", color: "#111111" };
+
+    /** Record absensi: default divisi CP Suka status Hadir pagi. */
+    const rec = (
+      eid: string,
+      tanggal: string,
+      status = "Hadir",
+      opts: { div?: { id: number; nama: string; color: string }; isManual?: boolean; jam?: string | null } = {},
+    ) => ({
+      employee_id: eid,
+      division_id: (opts.div ?? CP).id,
+      status,
+      tanggal,
+      is_manual: opts.isManual ?? false,
+      jam_masuk: opts.jam ?? null,
+      divisionNama: (opts.div ?? CP).nama,
+      divisionColor: (opts.div ?? CP).color,
+    });
+
+    /** Semua hari wajib hadir (7 hari, tanpa libur). */
+    const fullHadir = (eid: string) => D.map((t) => rec(eid, t));
+
+    const names = new Map<string, string>([[SATU, "Andi"], [DUA, "Budi"]]);
+
+    it("full hadir 7/7 tanpa manual → lolos rank 1", () => {
+      const w = computeWeeklyChallenge(fullHadir(SATU), WS, TODAY, names);
+      expect(w.isRunning).toBe(false);
+      expect(w.items).toHaveLength(1);
+      const p = w.items[0];
+      expect(p.lolos).toBe(true);
+      expect(p.rank).toBe(1);
+      expect(p.hadirWajib).toBe(7);
+      expect(p.totalWajib).toBe(7);
+      expect(p.manual).toBe(0);
+      expect(p.alasanGugur).toEqual([]);
+    });
+
+    it("1 manual masih lolos; 0 manual di atasnya; >1 manual gugur", () => {
+      const duaDenganSatuManual = [
+        ...fullHadir(DUA).map((r, i) => (i === 2 ? { ...r, is_manual: true } : r)),
+      ];
+      const w = computeWeeklyChallenge([...fullHadir(SATU), ...duaDenganSatuManual], WS, TODAY, names);
+      expect(w.items.map((i) => `${i.nama}:${i.rank}`)).toEqual(["Andi:1", "Budi:2"]);
+      expect(w.items[1].lolos).toBe(true);
+      expect(w.items[1].manual).toBe(1);
+
+      // Tambah 1 manual lagi untuk Budi → gugur karena manual > 1.
+      const duaDenganDuaManual = duaDenganSatuManual.map((r) =>
+        r.tanggal === D[3] ? { ...r, is_manual: true } : r,
+      );
+      const w2 = computeWeeklyChallenge([...fullHadir(SATU), ...duaDenganDuaManual], WS, TODAY, names);
+      const budi = w2.items.find((i) => i.employee_id === DUA)!;
+      expect(budi.lolos).toBe(false);
+      expect(budi.rank).toBeNull();
+      expect(budi.alasanGugur).toEqual(["2 absen manual (maks 1)"]);
+      // Gugur tetap tampil di bawah peserta lolos.
+      expect(w2.items[w2.items.length - 1].employee_id).toBe(DUA);
+    });
+
+    it("hari Libur terjadwal bersifat netral — tidak dihitung wajib", () => {
+      const denganLibur = fullHadir(SATU).map((r, i) =>
+        i === 3 ? rec(SATU, r.tanggal, "Libur") : r,
+      );
+      const w = computeWeeklyChallenge(denganLibur, WS, TODAY, names);
+      expect(w.items[0].totalWajib).toBe(6);
+      expect(w.items[0].hadirWajib).toBe(6);
+      expect(w.items[0].lolos).toBe(true);
+    });
+
+    it("Izin/Sakit/Cuti/Alpha pada hari wajib → gugur beserta alasan hari", () => {
+      const recs = fullHadir(SATU).map((r, i) => {
+        if (i === 1) return rec(SATU, r.tanggal, "Izin");
+        if (i === 5) return rec(SATU, r.tanggal, "Alpha");
+        return r;
+      });
+      const w = computeWeeklyChallenge(recs, WS, TODAY, names);
+      const p = w.items[0];
+      expect(p.lolos).toBe(false);
+      expect(p.rank).toBeNull();
+      expect(p.hadirWajib).toBe(5);
+      expect(p.totalWajib).toBe(7);
+      expect(p.alasanGugur).toEqual(["Izin pada 8 Sep", "Alpha pada 12 Sep"]);
+      expect(p.days.filter((d) => d.libur)).toEqual([]);
+    });
+
+    it("hari wajib tanpa record sama sekali → gugur 'Tanpa absen'", () => {
+      const tanpaKamis = fullHadir(SATU).filter((r) => r.tanggal !== D[3]);
+      const w = computeWeeklyChallenge(tanpaKamis, WS, TODAY, names);
+      expect(w.items[0].hadirWajib).toBe(6);
+      expect(w.items[0].alasanGugur).toEqual(["Tanpa absen pada 10 Sep"]);
+    });
+
+    it("minggu berjalan: hari mendatang belum dinilai, kosong bukan gugur", () => {
+      const todayMid = D[3]; // Kamis — minggu berjalan
+      // Andi hadir Senin–Kamis; Jumat–Minggu masih mendatang.
+      const w = computeWeeklyChallenge(fullHadir(SATU).filter((r) => r.tanggal <= todayMid), WS, todayMid, names);
+      expect(w.isRunning).toBe(true);
+      expect(w.items[0].totalWajib).toBe(4);
+      expect(w.items[0].hadirWajib).toBe(4);
+      expect(w.items[0].lolos).toBe(true);
+    });
+
+    it("minggu mendatang: isFuture, tanpa peserta", () => {
+      const w = computeWeeklyChallenge(fullHadir(SATU), "2026-10-19", "2026-10-15", names);
+      expect(w.isFuture).toBe(true);
+      expect(w.items).toEqual([]);
+      expect(w.isRunning).toBe(false);
+    });
+
+    it("peserta hanya divisi dominan CP Suka; pegawai divisi lain diabaikan", () => {
+      // Andi dominan CP Suka (5 vs 1); Budi semua di divisi lain → tidak jadi peserta.
+      const recs = [
+        ...fullHadir(SATU),
+        rec(SATU, D[0], "Hadir", { div: LAIN }),
+        ...fullHadir(DUA).map((r) => ({ ...r, division_id: LAIN.id, divisionNama: LAIN.nama, divisionColor: LAIN.color })),
+      ];
+      const w = computeWeeklyChallenge(recs, WS, TODAY, names);
+      expect(w.items.map((i) => i.employee_id)).toEqual([SATU]);
+      expect(w.items[0].divisionNama).toBe("Cp Suka");
+    });
+
+    it("record otomatis tanpa divisi (Libur/Alpha) tidak menentukan divisi dominan", () => {
+      // 5 hari Libur tanpa divisi + 2 hari hadir CP Suka → dominan tetap CP Suka.
+      const recs = fullHadir(SATU).map((r, i) =>
+        i < 5 ? { ...r, division_id: null, divisionNama: null, divisionColor: null, status: "Libur" } : r,
+      );
+      const w = computeWeeklyChallenge(recs, WS, TODAY, names);
+      expect(w.items).toHaveLength(1);
+      // Libur netral → hanya 2 hari wajib, keduanya hadir.
+      expect(w.items[0].totalWajib).toBe(2);
+      expect(w.items[0].lolos).toBe(true);
+    });
+
+    it("rata-rata jam hanya dari record CP Suka; seri manual diputuskan jam paling awal", () => {
+      const recs = [
+        ...fullHadir(SATU).map((r) => rec(SATU, r.tanggal, "Hadir", { jam: "07:00" })),
+        ...fullHadir(DUA).map((r) => rec(DUA, r.tanggal, "Hadir", { jam: "06:55" })),
+        // Record pada divisi lain tidak ikut rata-rata (jadwal antar-divisi tidak setara).
+        rec(DUA, D[0], "Hadir", { div: LAIN, jam: "01:00" }),
+      ];
+      const w = computeWeeklyChallenge(recs, WS, TODAY, names);
+      expect(w.items.find((i) => i.employee_id === SATU)!.avgJamMasuk).toBe("07:00");
+      // Rata-rata Budi tetap dari record CP Suka saja — record divisi lain (jam 01:00) diabaikan.
+      const budi = w.items.find((i) => i.employee_id === DUA)!;
+      expect(budi.avgJamMasuk).toBe("06:55");
+      // Keduanya 0 manual & full hadir → Budi dengan rata-rata jam lebih awal rank 1.
+      expect(w.items[0].employee_id).toBe(DUA);
+      expect(w.items[1].employee_id).toBe(SATU);
     });
   });
 });
