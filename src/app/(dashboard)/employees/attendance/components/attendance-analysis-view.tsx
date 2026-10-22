@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   ChevronLeft, ChevronRight, Users, Clock, TrendingUp, TrendingDown, AlertTriangle,
-  BarChart3, PieChart, Activity, Search, Trophy,
+  BarChart3, PieChart, Activity, Search, Trophy, FileDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -11,6 +11,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import { useAttendanceAnalysis } from "../lib/hooks/use-attendance-analysis";
+import { exportChallengeWeekPdf } from "../lib/attendance-challenge-pdf";
 import type { EmployeeLite, ChallengeWeek } from "../lib/attendance-types";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -108,6 +109,8 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
   const [search, setSearch] = useState("");
   /** Pilihan minggu challenge manual; null = ikuti default (minggu terbaru yang sudah dimulai). */
   const [weekOverride, setWeekOverride] = useState<string | null>(null);
+  /** True saat PDF challenge sedang dibuat. */
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const totalCurr = global.total;
   const totalPrev = globalPrev.total;
@@ -181,6 +184,24 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
     const q = search.toLowerCase();
     return selectedWeek.items.filter((i) => i.nama.toLowerCase().includes(q));
   }, [selectedWeek, search]);
+
+  // Export PDF laporan challenge untuk minggu terpilih (ikut pencarian aktif).
+  const handleExportChallengePdf = async () => {
+    if (!selectedWeek || selectedItems.length === 0) return;
+    setExportingPdf(true);
+    try {
+      await exportChallengeWeekPdf({
+        week: selectedWeek,
+        items: selectedItems,
+        periodLabel: currPeriod.label,
+        search,
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Gagal membuat PDF.");
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -449,6 +470,21 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                   <span className="text-[10px] text-muted-foreground ml-auto">
                     {selectedItems.filter((i) => i.lolos).length} lolos • {selectedItems.filter((i) => !i.lolos).length} gugur
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleExportChallengePdf}
+                    disabled={selectedWeek.isFuture || selectedItems.length === 0 || exportingPdf}
+                    title={selectedWeek.isFuture ? "Minggu belum dimulai" : "Unduh laporan PDF minggu ini"}
+                    className="flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1.5 rounded-xl bg-primary/10 text-primary hover:bg-primary/15 transition-colors disabled:opacity-40 disabled:pointer-events-none">
+                    {exportingPdf ? (
+                      "Menyimpan..."
+                    ) : (
+                      <>
+                        <FileDown className="w-3.5 h-3.5" />
+                        Export PDF
+                      </>
+                    )}
+                  </button>
                 </div>
                 {selectedWeek.isFuture ? (
                   <div className="px-5 py-8 text-center text-xs text-muted-foreground">Minggu belum dimulai — belum ada yang dinilai.</div>
