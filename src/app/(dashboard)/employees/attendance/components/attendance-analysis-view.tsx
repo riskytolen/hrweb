@@ -447,7 +447,7 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                                   <th key={col.key} className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2.5 py-3" title={`Jumlah hari ${col.label.toLowerCase()} pada minggu ini`}>{col.label}</th>
                                 ))}
                                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Jumlah input absen manual oleh admin">Manual</th>
-                                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Rata-rata jam masuk pada divisi CP Suka (record hadir & terlambat)">Rata-rata Jam</th>
+                                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Rata-rata jam masuk pada divisi CP Suka (record hadir & terlambat, presisi detik)">Rata-rata Jam</th>
                                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Status</th>
                               </tr>
                             </thead>

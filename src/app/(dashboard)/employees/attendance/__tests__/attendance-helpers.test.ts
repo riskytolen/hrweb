@@ -816,13 +816,48 @@ describe("attendance-helpers", () => {
         rec(DUA, D[0], "Hadir", { div: LAIN, jam: "01:00" }),
       ];
       const w = computeWeeklyChallenge(recs, WS, TODAY, names);
-      expect(w.items.find((i) => i.employee_id === SATU)!.avgJamMasuk).toBe("07:00");
+      const andi = w.items.find((i) => i.employee_id === SATU)!;
+      expect(andi.avgJamMasuk).toBe("07:00:00");
+      expect(andi.avgJamDetik).toBe(25200); // 07:00:00 = 25200 detik
       // Rata-rata Budi tetap dari record CP Suka saja — record divisi lain (jam 01:00) diabaikan.
       const budi = w.items.find((i) => i.employee_id === DUA)!;
-      expect(budi.avgJamMasuk).toBe("06:55");
+      expect(budi.avgJamMasuk).toBe("06:55:00");
+      expect(budi.avgJamDetik).toBe(24900);
       // Keduanya 0 manual & full hadir → Budi dengan rata-rata jam lebih awal rank 1.
       expect(w.items[0].employee_id).toBe(DUA);
       expect(w.items[1].employee_id).toBe(SATU);
+    });
+
+    it("selisih detik menentukan pemenang walaupun pembulatan menit sama", () => {
+      // Andi rata-rata 07:00:30 (4230), Wani rata-rata 07:00:29 (4229).
+      const recs = [
+        ...fullHadir(SATU).map((r) => rec(SATU, r.tanggal, "Hadir", { jam: "07:00:30" })),
+        ...fullHadir(DUA).map((r) => rec(DUA, r.tanggal, "Hadir", { jam: "07:00:29" })),
+      ];
+      const w = computeWeeklyChallenge(recs, WS, TODAY, names);
+      expect(w.items[0].employee_id).toBe(DUA);
+      expect(w.items[0].avgJamMasuk).toBe("07:00:29");
+      expect(w.items[1].avgJamMasuk).toBe("07:00:30");
+    });
+
+    it("rata-rata detik persis sama → peringkat bersama, nama tidak menentukan", () => {
+      const namesPlus = new Map(names);
+      namesPlus.set("3", "Cici");
+      // Andi dan Budi rata-ratanya sama persis 29610/7 detik — beda distribusi jam.
+      const recs = [
+        ...fullHadir(SATU).map((r, i) => rec(SATU, r.tanggal, "Hadir", { jam: i === 6 ? "07:02:30" : "07:00:10" })),
+        ...fullHadir(DUA).map((r, i) => rec(DUA, r.tanggal, "Hadir", { jam: i === 6 ? "07:03:30" : "07:00:00" })),
+        // Cici rata-rata lebih telat → dapat nomor berikutnya yang melompat ke 3.
+        ...fullHadir("3").map((r) => rec("3", r.tanggal, "Hadir", { jam: "08:00:00" })),
+      ];
+      const w = computeWeeklyChallenge(recs, WS, TODAY, namesPlus);
+      const andi = w.items.find((i) => i.employee_id === SATU)!;
+      const budi = w.items.find((i) => i.employee_id === DUA)!;
+      const cici = w.items.find((i) => i.employee_id === "3")!;
+      expect(andi.avgJamDetik).toBe(budi.avgJamDetik);
+      expect(andi.rank).toBe(1);
+      expect(budi.rank).toBe(1); // seri → nomor sama
+      expect(cici.rank).toBe(3); // melompat, bukan 2
     });
   });
 });

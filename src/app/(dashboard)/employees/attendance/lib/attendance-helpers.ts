@@ -170,12 +170,33 @@ export function timeToMinutesOrNull(time: string | null | undefined): number | n
   return h * 60 + min;
 }
 
+/** "07:00:30" atau "07:00" → detik sejak tengah malam; null jika tidak valid. */
+export function timeToSecondsOrNull(time: string | null | undefined): number | null {
+  if (!time) return null;
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(time.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  const s = m[3] ? Number(m[3]) : 0;
+  if (!Number.isFinite(h) || !Number.isFinite(min) || !Number.isFinite(s) || h > 47 || min > 59 || s > 59) return null;
+  return h * 3600 + min * 60 + s;
+}
+
 /** Menit sejak tengah malam → "HH:MM". */
 export function minutesToHHMM(minutes: number): string {
   const safe = Math.max(0, Math.round(minutes));
   const h = Math.floor(safe / 60) % 48;
   const m = safe % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Detik sejak tengah malam (boleh pecahan) → "HH:MM:SS" dibulatkan ke detik. */
+export function secondsToHHMMSS(seconds: number): string {
+  const safe = Math.max(0, Math.round(seconds));
+  const h = Math.floor(safe / 3600) % 48;
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 /**
@@ -200,6 +221,30 @@ export function computeAvgJamMasuk(
   }
   if (count === 0) return null;
   return minutesToHHMM(sum / count);
+}
+
+/**
+ * Rata-rata jam masuk dengan presisi detik (tanpa pembulatan menit) pada divisi
+ * tertentu — hanya record Hadir/Terlambat dengan jam masuk valid yang dihitung.
+ * Detik asli penting sebagai pemecah seri Challenge Mingguan: dua pegawai yang
+ * rata-rata menitnya sama tetap bisa dipisahkan lewat detik.
+ */
+export function computeAvgJamMasukSeconds(
+  records: { division_id: number; status: string; jam_masuk: string | null }[],
+  divisionId: number,
+): number | null {
+  let sum = 0;
+  let count = 0;
+  for (const r of records) {
+    if (r.division_id !== divisionId) continue;
+    if (r.status !== "Hadir" && r.status !== "Terlambat") continue;
+    const secs = timeToSecondsOrNull(r.jam_masuk);
+    if (secs === null) continue;
+    sum += secs;
+    count++;
+  }
+  if (count === 0) return null;
+  return sum / count;
 }
 
 /** Pembanding rata-rata jam masuk: paling awal menang; yang tanpa jam (null) di belakang; seri → nama A-Z. */
@@ -463,8 +508,10 @@ export type ChallengeEmployeeResult = {
   totalWajib: number;
   /** Jumlah absen manual pegawai pada minggu ini. */
   manual: number;
-  /** Rata-rata jam masuk di divisi CP Suka; null bila tak ada record berjam. */
+  /** Rata-rata jam masuk di divisi CP Suka "HH:MM:SS"; null bila tak ada record berjam. */
   avgJamMasuk: string | null;
+  /** Rata-rata jam masuk mentah dalam detik (tanpa pembulatan menit) untuk pemecah seri. */
+  avgJamDetik: number | null;
   /** True bila lolos aturan (full hadir & manual ≤ CHALLENGE_MAX_MANUAL). */
   lolos: boolean;
   /** Daftar alasan gugur (kosong bila lolos). */
@@ -557,13 +604,21 @@ export function formatWeekLabel(weekStart: string, weekEnd: string): string {
   return `${sd} – ${ed} ${MONTH_SHORT_ID[sm - 1]} ${sy}`;
 }
 
-/** Komparator peserta lolos: manual tersedikit → jam masuk paling awal → nama A-Z. */
+/**
+ * Komparator peserta lolos: manual tersedikit → rata-rata jam masuk paling awal
+ * (detik asli tanpa pembulatan). Bila keduanya persis sama, hasilnya seri —
+ * nama TIDAK dipakai menentukan pemenang (peringkat bersama di hitung terpisah).
+ */
 export function compareChallengeLolos(
-  a: { manual: number; avgJam: string | null; nama: string },
-  b: { manual: number; avgJam: string | null; nama: string },
+  a: { manual: number; avgJamDetik: number | null; nama: string },
+  b: { manual: number; avgJamDetik: number | null; nama: string },
 ): number {
   if (a.manual !== b.manual) return a.manual - b.manual;
-  return compareJamMasukThenNama(a, b);
+  if (a.avgJamDetik === null || b.avgJamDetik === null) {
+    if (a.avgJamDetik === b.avgJamDetik) return 0;
+    return a.avgJamDetik === null ? 1 : -1;
+  }
+  return a.avgJamDetik - b.avgJamDetik;
 }
 
 /**
@@ -577,7 +632,9 @@ export function compareChallengeLolos(
  * - Gugur bila pada salah satu hari wajib pegawai tidak hadir
  *   (Izin/Sakit/Cuti/Alpha/tanpa absen), ATAU absen manual > CHALLENGE_MAX_MANUAL.
  * - Peringkat lolos: manual tersedikit → rata-rata jam masuk paling awal
- *   (record Hadir/Terlambat di divisi CP Suka) → nama A-Z. Gugur rank null.
+ *   dalam presisi detik (record Hadir/Terlambat di divisi CP Suka). Dua peserta
+ *   yang manualnya dan rata-rata detiknya persis sama dianggap seri dan
+ *   mendapat peringkat bersama (1, 1, 3, ...). Gugur selalu di bawah, rank null.
  */
 export function computeWeeklyChallenge(
   records: ChallengeRecordInput[],
@@ -636,10 +693,11 @@ export function computeWeeklyChallenge(
     if (!dominant || !isCpSukaDivision(dominant.nama)) continue;
 
     const manual = all.filter((r) => r.is_manual).length;
-    const avgJamMasuk = computeAvgJamMasuk(
+    const avgJamDetik = computeAvgJamMasukSeconds(
       all.map((r) => ({ division_id: r.division_id as number, status: r.status, jam_masuk: r.jam_masuk })),
       dominant.id,
     );
+    const avgJamMasuk = avgJamDetik === null ? null : secondsToHHMMSS(avgJamDetik);
 
     const days: ChallengeDayResult[] = horizon.map((tanggal) => {
       const dayRecs = byDate.get(tanggal) ?? [];
@@ -688,6 +746,7 @@ export function computeWeeklyChallenge(
       totalWajib: wajib.length,
       manual,
       avgJamMasuk,
+      avgJamDetik,
       lolos: alasanGugur.length === 0,
       alasanGugur,
       rank: null,
@@ -700,11 +759,20 @@ export function computeWeeklyChallenge(
     .filter((d) => d.lolos)
     .sort((a, b) =>
       compareChallengeLolos(
-        { manual: a.manual, avgJam: a.avgJamMasuk, nama: a.nama },
-        { manual: b.manual, avgJam: b.avgJamMasuk, nama: b.nama },
+        { manual: a.manual, avgJamDetik: a.avgJamDetik, nama: a.nama },
+        { manual: b.manual, avgJamDetik: b.avgJamDetik, nama: b.nama },
       ),
     );
-  lolos.forEach((d, i) => { d.rank = i + 1; });
+  // Peringkat bersama: peserta dengan manual & rata-rata detik persis sama
+  // mendapat nomor sama; peserta berikutnya melompat (1, 1, 3, ...).
+  lolos.forEach((d, i) => {
+    const prev = lolos[i - 1];
+    const seri = !!prev && compareChallengeLolos(
+      { manual: prev.manual, avgJamDetik: prev.avgJamDetik, nama: prev.nama },
+      { manual: d.manual, avgJamDetik: d.avgJamDetik, nama: d.nama },
+    ) === 0;
+    d.rank = seri ? prev.rank : i + 1;
+  });
   const gugur = drafts.filter((d) => !d.lolos).sort((a, b) => a.nama.localeCompare(b.nama));
   week.items = [...lolos, ...gugur];
   return week;
