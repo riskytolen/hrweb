@@ -1,7 +1,7 @@
 /**
  * Export PDF Laporan Challenge Mingguan CP Suka (Absensi → Analisa → Perorangan).
  *
- * Desain: A4 landscape, tema navy–emas — kop perusahaan dengan logo,
+ * Desain: A4 landscape, tema biru — kop perusahaan dengan logo,
  * kartu ringkasan peserta/lolos/gugur, tabel peringkat lengkap dengan
  * medali emas/perak/perunggu untuk rank 1–3, Lalu footer aturan challenge.
  *
@@ -53,6 +53,8 @@ export function buildChallengePdfRows(items: ChallengeEmployeeResult[]): string[
 // ─── PDF rendering (client-side, dynamic import jspdf) ───
 
 const NAVY: RGB = [15, 23, 42];
+const BLUE: RGB = [37, 99, 235];
+const BLUE_SOFT: RGB = [219, 234, 254];
 const GOLD: RGB = [217, 119, 6];
 const GOLD_SOFT: RGB = [254, 243, 199];
 const GOLD_BRIGHT: RGB = [146, 64, 14];
@@ -132,8 +134,8 @@ function drawReportHeader(
   const { pageWidth, margin, company, logoDataUrl, weekLabel, periodLabel, search, isRunning } = opts;
   const right = pageWidth - margin;
 
-  // Aksen emas di atas halaman.
-  pdf.setFillColor(GOLD[0], GOLD[1], GOLD[2]);
+  // Aksen biru di atas halaman.
+  pdf.setFillColor(BLUE[0], BLUE[1], BLUE[2]);
   pdf.rect(margin, 6, pageWidth - margin * 2, 1.6, "F");
 
   let y = 14;
@@ -161,7 +163,7 @@ function drawReportHeader(
 
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(13);
-  pdf.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
+  pdf.setTextColor(BLUE[0], BLUE[1], BLUE[2]);
   pdf.text("CHALLENGE MINGGUAN CP SUKA", right, 14, { align: "right" });
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(8);
@@ -178,7 +180,7 @@ function drawReportHeader(
     align: "right",
   });
 
-  pdf.setDrawColor(GOLD[0], GOLD[1], GOLD[2]);
+  pdf.setDrawColor(BLUE[0], BLUE[1], BLUE[2]);
   pdf.setLineWidth(0.8);
   pdf.line(margin, 37, right, 37);
   pdf.setLineWidth(0.2);
@@ -222,7 +224,7 @@ function drawSummaryCards(
     } else if (card.kind === "danger") {
       pdf.setFillColor(RED_SOFT[0], RED_SOFT[1], RED_SOFT[2]);
     } else {
-      pdf.setFillColor(LIGHT[0], LIGHT[1], LIGHT[2]);
+      pdf.setFillColor(BLUE_SOFT[0], BLUE_SOFT[1], BLUE_SOFT[2]);
     }
     pdf.setDrawColor(BORDER[0], BORDER[1], BORDER[2]);
     pdf.roundedRect(x, y, w, 14, 2, 2, "FD");
@@ -237,7 +239,7 @@ function drawSummaryCards(
     } else if (card.kind === "danger") {
       pdf.setTextColor(RED[0], RED[1], RED[2]);
     } else {
-      pdf.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
+      pdf.setTextColor(BLUE[0], BLUE[1], BLUE[2]);
     }
     pdf.text(card.value, x + 3, y + 10.5);
   });
@@ -320,7 +322,7 @@ export async function exportChallengeWeekPdf(args: {
       valign: "middle",
       overflow: "linebreak",
     },
-    headStyles: { fillColor: NAVY, textColor: 255, fontStyle: "bold", halign: "center", fontSize: 7.5 },
+    headStyles: { fillColor: BLUE, textColor: 255, fontStyle: "bold", halign: "center", fontSize: 7.5 },
     alternateRowStyles: { fillColor: LIGHT },
     columnStyles: {
       0: { halign: "center", cellWidth: 11 },
