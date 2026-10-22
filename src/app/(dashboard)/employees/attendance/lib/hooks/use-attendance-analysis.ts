@@ -8,8 +8,10 @@ import {
   getSummaryCurrentPeriodKey,
   isCountableManualRecord,
   pickDominantDivisionLabel,
+  computeAvgJamMasuk,
+  compareRankingEntries,
 } from "../attendance-helpers";
-import type { EmployeeLite, AnalysisMetrics, AnalysisDivisiItem, AnalysisIndividuItem, DailyTrend } from "../attendance-types";
+import type { EmployeeLite, AnalysisMetrics, AnalysisDivisiItem, AnalysisIndividuItem, AnalysisRankingItem, DailyTrend } from "../attendance-types";
 
 function shiftPeriodKey(key: string, dir: -1 | 1): string {
   const [y, m] = key.split("-").map(Number);
@@ -28,6 +30,7 @@ async function fetchPeriodRecords(start: string, end: string) {
     status: string;
     tanggal: string;
     is_manual: boolean;
+    jam_masuk: string;
     divisions: { nama: string; color: string } | { nama: string; color: string }[] | null;
   };
   let all: RawRow[] = [];
@@ -36,7 +39,7 @@ async function fetchPeriodRecords(start: string, end: string) {
   while (more) {
     const { data, error } = await supabase
       .from("attendance_records")
-      .select("employee_id, division_id, status, tanggal, is_manual, divisions(nama, color)")
+      .select("employee_id, division_id, status, tanggal, is_manual, jam_masuk, divisions(nama, color)")
       .gte("tanggal", start)
       .lte("tanggal", end)
       .range(from, from + SUMMARY_FETCH_PAGE_SIZE - 1);
@@ -190,6 +193,59 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
     [curr.individuals, empMap, currRecords],
   );
 
+  /**
+   * Peringkat perorangan per divisi dominan (Top 1 → bawah):
+   * 1. Hadir efektif tertinggi (angka gabungan semua divisi).
+   * 2. Absen manual tersedikit (angka gabungan, di luar Back Office).
+   * 3. Rata-rata jam masuk paling awal pada divisi dominan.
+   * Tie-break terakhir nama A-Z hanya untuk urutan render — dua pegawai
+   * dengan nilai identik tetap nominalnya setara.
+   */
+  const ranking: AnalysisRankingItem[] = useMemo(
+    () => {
+      const recordsByEmp = new Map<string, typeof currRecords>();
+      for (const r of currRecords) {
+        const list = recordsByEmp.get(r.employee_id);
+        if (list) list.push(r);
+        else recordsByEmp.set(r.employee_id, [r]);
+      }
+      const perDiv = new Map<number, AnalysisRankingItem[]>();
+      for (const row of individuals) {
+        const recs = recordsByEmp.get(row.employee_id) ?? [];
+        const dominantDiv = pickDominantDivisionLabel(
+          recs.map((r) => {
+            const div = getDiv(r);
+            return { division_id: r.division_id, tanggal: r.tanggal, nama: div?.nama ?? null, color: div?.color ?? null };
+          }),
+        );
+        const total = row.total;
+        const hadirEfektifPct = total > 0 ? ((row.hadir + row.terlambat) / total) * 100 : 0;
+        const divisionId = dominantDiv?.id ?? 0;
+        const item: AnalysisRankingItem = {
+          ...row,
+          hadirEfektifPct,
+          avgJamMasuk: computeAvgJamMasuk(recs, divisionId),
+          rank: 0,
+        };
+        const list = perDiv.get(divisionId);
+        if (list) list.push(item);
+        else perDiv.set(divisionId, [item]);
+      }
+      const out: AnalysisRankingItem[] = [];
+      for (const list of perDiv.values()) {
+        list.sort((a, b) => compareRankingEntries(
+          { hadirEfektifPct: a.hadirEfektifPct, manual: a.manual, avgJam: a.avgJamMasuk, nama: a.nama },
+          { hadirEfektifPct: b.hadirEfektifPct, manual: b.manual, avgJam: b.avgJamMasuk, nama: b.nama },
+        ));
+        list.forEach((item, i) => { item.rank = i + 1; });
+        out.push(...list);
+      }
+      // Grup divisi berurut alfabetis untuk tampilan per divisi.
+      return out.sort((a, b) => a.divisionNama.localeCompare(b.divisionNama) || a.rank - b.rank);
+    },
+    [individuals, currRecords],
+  );
+
   const dailyTrend: DailyTrend[] = useMemo(
     () => Array.from(curr.daily.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, m]) => ({
       date, ...m,
@@ -207,6 +263,7 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
     globalPrev,
     divisions,
     individuals,
+    ranking,
     dailyTrend,
     divisionList,
   };

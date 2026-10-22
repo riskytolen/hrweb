@@ -98,6 +98,21 @@ export type AnalysisIndividuItem = AnalysisMetrics & {
   divisionColor: string;
 };
 
+/** Baris peringkat perorangan per divisi pada Analisa → Perorangan. */
+export type AnalysisRankingItem = AnalysisMetrics & {
+  employee_id: string;
+  nama: string;
+  /** Divisi dominan tempat pegawai dirankingkan. */
+  divisionNama: string;
+  divisionColor: string;
+  /** Persentase kehadiran efektif (hadir + terlambat) dari seluruh record gabungan. */
+  hadirEfektifPct: number;
+  /** Rata-rata jam masuk "HH:MM" dari record hadir/terlambat pada divisi dominan; null jika tidak ada. */
+  avgJamMasuk: string | null;
+  /** Peringkat 1-based di divisi tersebut. */
+  rank: number;
+};
+
 export type DailyTrend = {
   date: string;
   hadir: number;

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   ChevronLeft, ChevronRight, Users, Clock, TrendingUp, TrendingDown, AlertTriangle,
-  BarChart3, PieChart, Activity, Search,
+  BarChart3, PieChart, Activity, Search, Trophy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -84,7 +84,7 @@ function KpiCard({
 export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
   const {
     loading, periodKey, setPeriodKey, currPeriod, global, globalPrev,
-    divisions, individuals, dailyTrend, divisionList,
+    divisions, individuals, ranking, dailyTrend, divisionList,
   } = useAttendanceAnalysis(employees);
 
   const [divisionFilter, setDivisionFilter] = useState("semua");
@@ -138,6 +138,28 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
     if (search) list = list.filter((i) => i.nama.toLowerCase().includes(search.toLowerCase()));
     return list.sort((a, b) => (b.alpha + b.terlambat) - (a.alpha + a.terlambat));
   }, [individuals, divisionFilter, divisions, search]);
+
+  // Peringkat per divisi mengikuti filter divisi & pencarian yang sama dengan rekap.
+  const filteredRanking = useMemo(() => {
+    let list = ranking;
+    if (divisionFilter !== "semua") {
+      const nama = divisions.find((d) => d.divisionId === Number(divisionFilter))?.divisionNama;
+      list = list.filter((i) => i.divisionNama === nama);
+    }
+    if (search) list = list.filter((i) => i.nama.toLowerCase().includes(search.toLowerCase()));
+    return list;
+  }, [ranking, divisionFilter, divisions, search]);
+
+  // Grup per divisi (urutan hook sudah: divisi A-Z → rank 1..n).
+  const rankingGroups = useMemo(() => {
+    const map = new Map<string, { nama: string; color: string; items: typeof filteredRanking }>();
+    for (const row of filteredRanking) {
+      const g = map.get(row.divisionNama);
+      if (g) g.items.push(row);
+      else map.set(row.divisionNama, { nama: row.divisionNama, color: row.divisionColor, items: [row] });
+    }
+    return Array.from(map.values());
+  }, [filteredRanking]);
 
   return (
     <div className="space-y-4">
@@ -362,7 +384,84 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
           )}
 
           {scope === "individual" && (
+            <>
+            {/* ─── Peringkat per Divisi (Top 1 → bawah) ─── */}
+            <div className="space-y-3">
+              {rankingGroups.length === 0 ? (
+                <div className="bg-card rounded-2xl border border-border py-12 text-center text-sm text-muted-foreground">
+                  Tidak ada pegawai untuk peringkat ini
+                </div>
+              ) : rankingGroups.map((group) => (
+                <div key={group.nama} className="bg-card rounded-2xl border border-border overflow-hidden">
+                  <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: group.color }} />
+                    <h3 className="text-sm font-bold text-foreground">{group.nama}</h3>
+                    <span className="text-[10px] text-muted-foreground">({group.items.length} pegawai)</span>
+                    <Trophy className="w-3.5 h-3.5 text-amber-500 ml-auto" />
+                    <span className="text-[10px] text-muted-foreground">
+                      Kehadiran ↓ • Manual ↑ • Jam masuk paling awal ↑
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/50">
+                          <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Rank</th>
+                          <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Pegawai</th>
+                          <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Hadir Efektif</th>
+                          <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Jumlah input absen manual oleh admin (di luar Back Office)">Manual</th>
+                          <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Rata-rata jam masuk pada divisi ini (record hadir & terlambat)">Rata-rata Jam</th>
+                          <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {group.items.map((row) => (
+                          <tr key={row.employee_id} className={cn("hover:bg-muted/30", row.rank === 1 && "bg-amber-500/5")}>
+                            <td className="px-4 py-3 text-center">
+                              {row.rank <= 3 ? (
+                                <span className={cn("inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold text-white",
+                                  row.rank === 1 ? "bg-amber-500" : row.rank === 2 ? "bg-slate-400" : "bg-amber-700")}>
+                                  {row.rank}
+                                </span>
+                              ) : (
+                                <span className="text-xs font-semibold text-muted-foreground">{row.rank}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="text-sm font-semibold text-foreground">{row.nama}</p>
+                            </td>
+                            <td className="px-4 py-3 text-center text-sm font-bold text-success tabular-nums">{row.hadirEfektifPct.toFixed(1)}%</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={cn("text-xs font-bold px-2 py-1 rounded-md",
+                                row.manual > 0 ? "bg-warning/10 text-warning" : "bg-success/10 text-success")}>
+                                {row.manual}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center text-sm font-semibold text-foreground tabular-nums">
+                              {row.avgJamMasuk ?? "—"}
+                            </td>
+                            <td className="px-4 py-3 text-center text-sm font-bold text-foreground tabular-nums">{row.total}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-5 py-2.5 border-t border-border bg-muted/20">
+                    <p className="text-[10px] text-muted-foreground">
+                      Hadir efektif & manual = gabungan seluruh record pegawai pada periode ini.
+                      Rata-rata jam dihitung dari record hadir/terlambat pada divisi ini.
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* ─── Rekap gabungan (tabel lama) ─── */}
             <div className="bg-card rounded-2xl border border-border overflow-hidden">
+              <div className="px-5 py-3 border-b border-border">
+                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Rekap Gabungan</h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Seluruh record pegawai tanpa pengecualian divisi (kecuali kolom Manual)</p>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
@@ -436,6 +535,7 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                 </div>
               )}
             </div>
+            </>
           )}
         </>
       )}

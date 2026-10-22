@@ -159,6 +159,67 @@ export function pickDominantDivisionLabel(
   return { id, nama: label.nama, color: label.color };
 }
 
+/** "2026-09-24T08:15" → "08:15" (menit sejak tengah malam); null jika tidak valid. */
+export function timeToMinutesOrNull(time: string | null | undefined): number | null {
+  if (!time) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(time.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min) || h > 47 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/** Menit sejak tengah malam → "HH:MM". */
+export function minutesToHHMM(minutes: number): string {
+  const safe = Math.max(0, Math.round(minutes));
+  const h = Math.floor(safe / 60) % 48;
+  const m = safe % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * Rata-rata jam masuk pegawai pada divisi tertentu — hanya record Hadir/Terlambat
+ * dengan jam masuk valid yang dihitung (record tanpa jam dikonfirmasi pemilik).
+ * Dipakai sebagai penentu seri pada peringkat perorangan: semua pegawai dibandingkan
+ * dalam divisi yang sama agar jadwal jam masuknya setara.
+ */
+export function computeAvgJamMasuk(
+  records: { division_id: number; status: string; jam_masuk: string | null }[],
+  divisionId: number,
+): string | null {
+  let sum = 0;
+  let count = 0;
+  for (const r of records) {
+    if (r.division_id !== divisionId) continue;
+    if (r.status !== "Hadir" && r.status !== "Terlambat") continue;
+    const mins = timeToMinutesOrNull(r.jam_masuk);
+    if (mins === null) continue;
+    sum += mins;
+    count++;
+  }
+  if (count === 0) return null;
+  return minutesToHHMM(sum / count);
+}
+
+/** Komparator aturan peringkat: kehadiran tertinggi → manual tersedikit → rata-rata jam masuk paling awal → nama A-Z. */
+export function compareRankingEntries(
+  a: { hadirEfektifPct: number; manual: number; avgJam: string | null; nama: string },
+  b: { hadirEfektifPct: number; manual: number; avgJam: string | null; nama: string },
+): number {
+  if (b.hadirEfektifPct !== a.hadirEfektifPct) return b.hadirEfektifPct - a.hadirEfektifPct;
+  if (a.manual !== b.manual) return a.manual - b.manual;
+  const jamA = timeToMinutesOrNull(a.avgJam);
+  const jamB = timeToMinutesOrNull(b.avgJam);
+  if (jamA !== jamB) {
+    // Pegawai dengan rata-rata jam lebih awal menang; yang tak punya jam (null) di belakang.
+    if (jamA === null) return 1;
+    if (jamB === null) return -1;
+    return jamA - jamB;
+  }
+  return a.nama.localeCompare(b.nama);
+}
+
 /**
  * Get local date string YYYY-MM-DD (timezone safe — pakai local time, bukan UTC).
  * Penting untuk konsistensi antara client timezone dan server-side date filter.

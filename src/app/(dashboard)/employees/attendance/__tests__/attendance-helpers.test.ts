@@ -18,6 +18,10 @@ import {
   isEmployeeActiveInPeriod,
   isCountableManualRecord,
   pickDominantDivisionLabel,
+  timeToMinutesOrNull,
+  minutesToHHMM,
+  computeAvgJamMasuk,
+  compareRankingEntries,
 } from "../lib/attendance-helpers";
 import { MIN_DATE, SUMMARY_CUT_OFF_DAY } from "../lib/attendance-constants";
 
@@ -535,6 +539,82 @@ describe("attendance-helpers", () => {
 
     it("kosong → null (dipakai fallback '-' oleh pemanggil)", () => {
       expect(pickDominantDivisionLabel([])).toBeNull();
+    });
+  });
+
+  describe("timeToMinutesOrNull & minutesToHHMM", () => {
+    it("konversi HH:MM → menit dan kembali", () => {
+      expect(timeToMinutesOrNull("07:35")).toBe(455);
+      expect(minutesToHHMM(455)).toBe("07:35");
+      expect(minutesToHHMM(0)).toBe("00:00");
+    });
+
+    it("input tidak valid → null", () => {
+      expect(timeToMinutesOrNull("")).toBeNull();
+      expect(timeToMinutesOrNull("ab:cd")).toBeNull();
+      expect(timeToMinutesOrNull(null)).toBeNull();
+      expect(timeToMinutesOrNull(undefined)).toBeNull();
+      expect(timeToMinutesOrNull("2026-09-24")).toBeNull();
+    });
+
+    it("jam 00:00 tetap valid (bukan null)", () => {
+      expect(timeToMinutesOrNull("00:00")).toBe(0);
+    });
+  });
+
+  describe("computeAvgJamMasuk", () => {
+    const rec = (division_id: number, status: string, jam_masuk: string | null) =>
+      ({ division_id, status, jam_masuk });
+
+    it("rata-rata hanya record hadir/terlambat pada divisi target", () => {
+      const result = computeAvgJamMasuk([
+        rec(1, "Hadir", "07:00"),
+        rec(1, "Terlambat", "09:00"),
+        rec(1, "Izin", null),
+        rec(1, "Alpha", null),
+        rec(2, "Hadir", "05:00"), // divisi lain diabaikan
+      ], 1);
+      expect(result).toBe("08:00"); // (420 + 540) / 2 = 480
+    });
+
+    it("record tanpa jam masuk valid dilewati", () => {
+      const result = computeAvgJamMasuk([
+        rec(1, "Hadir", "08:00"),
+        rec(1, "Hadir", null),
+        rec(1, "Hadir", "bukan-jam"),
+      ], 1);
+      expect(result).toBe("08:00");
+    });
+
+    it("tidak ada record hadir → null (ditampilkan '-')", () => {
+      expect(computeAvgJamMasuk([rec(1, "Izin", null)], 1)).toBeNull();
+      expect(computeAvgJamMasuk([], 1)).toBeNull();
+    });
+  });
+
+  describe("compareRankingEntries", () => {
+    const e = (hadirEfektifPct: number, manual: number, avgJam: string | null, nama: string) =>
+      ({ hadirEfektifPct, manual, avgJam, nama });
+
+    it("kehadiran tertinggi di atas", () => {
+      expect(compareRankingEntries(e(100, 0, "07:00", "B"), e(90, 0, "06:00", "A"))).toBeLessThan(0);
+    });
+
+    it("seri kehadiran → manual tersedikit menang", () => {
+      expect(compareRankingEntries(e(100, 0, "09:00", "Z"), e(100, 3, "07:00", "A"))).toBeLessThan(0);
+    });
+
+    it("seri kehadiran & manual → rata-rata jam paling awal menang", () => {
+      expect(compareRankingEntries(e(95, 0, "07:15", "A"), e(95, 0, "07:45", "B"))).toBeLessThan(0);
+    });
+
+    it("pegawai tanpa jam masuk (null) berada di bawah yang punya jam", () => {
+      expect(compareRankingEntries(e(95, 0, null, "A"), e(95, 0, "07:00", "B"))).toBeGreaterThan(0);
+    });
+
+    it("semua seri → nama A-Z hanya urutan render (setara)", () => {
+      expect(compareRankingEntries(e(95, 1, "08:00", "Andi"), e(95, 1, "08:00", "Budi"))).toBeLessThan(0);
+      expect(compareRankingEntries(e(95, 1, "08:00", "Andi"), e(95, 1, "08:00", "Andi"))).toBe(0);
     });
   });
 });
