@@ -80,6 +80,8 @@ export type AnalysisMetrics = {
   alpha: number;
   libur: number;
   cuti: number;
+  /** Jumlah absen yang diinput manual admin (is_manual), bukan dari aplikasi. */
+  manual: number;
   total: number;
 };
 

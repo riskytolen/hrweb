@@ -16,6 +16,7 @@ import {
   isInNonActivePeriod,
   isEmployeeActiveOnDate,
   isEmployeeActiveInPeriod,
+  isCountableManualRecord,
 } from "../lib/attendance-helpers";
 import { MIN_DATE, SUMMARY_CUT_OFF_DAY } from "../lib/attendance-constants";
 
@@ -454,6 +455,30 @@ describe("attendance-helpers", () => {
         employees,
       );
       expect(result).toEqual([]);
+    });
+  });
+
+  describe("isCountableManualRecord", () => {
+    it("record manual di luar Back Office ikut dihitung", () => {
+      expect(isCountableManualRecord(true, "Lapangan")).toBe(true);
+      expect(isCountableManualRecord(true, null)).toBe(true);
+      expect(isCountableManualRecord(true, undefined)).toBe(true);
+    });
+
+    it("record manual divisi Back Office tidak dihitung (konsisten Report Manual)", () => {
+      expect(isCountableManualRecord(true, "Back Office")).toBe(false);
+      expect(isCountableManualRecord(true, "back office")).toBe(false);
+      expect(isCountableManualRecord(true, "  BACK OFFICE  ")).toBe(false);
+    });
+
+    it("nama divisi serupa tapi beda tetap dihitung", () => {
+      expect(isCountableManualRecord(true, "back-office")).toBe(true);
+      expect(isCountableManualRecord(true, "Backoffice")).toBe(true);
+    });
+
+    it("record bukan manual tidak dihitung", () => {
+      expect(isCountableManualRecord(false, "Lapangan")).toBe(false);
+      expect(isCountableManualRecord(false, "Back Office")).toBe(false);
     });
   });
 });

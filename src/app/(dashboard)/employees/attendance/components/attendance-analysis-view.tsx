@@ -377,13 +377,14 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                       <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Alpha</th>
                       <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Cuti</th>
                       <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Libur</th>
+                      <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5" title="Jumlah absen yang diinput manual oleh admin">Manual</th>
                       <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Total</th>
                       <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Alpha Rate</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/50">
                     {filteredIndividuals.length === 0 ? (
-                      <tr><td colSpan={12} className="text-center py-12 text-sm text-muted-foreground">Tidak ada pegawai</td></tr>
+                      <tr><td colSpan={13} className="text-center py-12 text-sm text-muted-foreground">Tidak ada pegawai</td></tr>
                     ) : filteredIndividuals.slice(0, 50).map((row, idx) => {
                       const hadirPct = row.total > 0 ? ((row.hadir + row.terlambat) / row.total * 100) : 0;
                       const alphaPct = row.total > 0 ? (row.alpha / row.total * 100) : 0;
@@ -407,6 +408,15 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                           <td className="px-5 py-3 text-center text-sm font-bold text-danger">{row.alpha}</td>
                           <td className="px-5 py-3 text-center text-sm font-semibold text-cyan-500">{row.cuti}</td>
                           <td className="px-5 py-3 text-center text-sm font-semibold text-muted-foreground">{row.libur}</td>
+                          <td className="px-5 py-3 text-center">
+                            <span
+                              className={cn("text-xs font-bold px-2 py-1 rounded-md",
+                                row.manual > 0 ? "bg-warning/10 text-warning" : "text-muted-foreground")}
+                              title="Absen yang diinput manual oleh admin (di luar divisi Back Office)"
+                            >
+                              {row.manual}
+                            </span>
+                          </td>
                           <td className="px-5 py-3 text-center text-sm font-bold text-foreground">{row.total}</td>
                           <td className="px-5 py-3 text-center">
                             <span className={cn("text-xs font-bold px-2 py-1 rounded-md",

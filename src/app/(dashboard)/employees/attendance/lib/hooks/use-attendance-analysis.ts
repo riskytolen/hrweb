@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { SUMMARY_FETCH_PAGE_SIZE } from "../attendance-constants";
-import { getSummaryPeriodRange, getSummaryCurrentPeriodKey } from "../attendance-helpers";
+import { getSummaryPeriodRange, getSummaryCurrentPeriodKey, isCountableManualRecord } from "../attendance-helpers";
 import type { EmployeeLite, AnalysisMetrics, AnalysisDivisiItem, AnalysisIndividuItem, DailyTrend } from "../attendance-types";
 
 function shiftPeriodKey(key: string, dir: -1 | 1): string {
@@ -13,7 +13,7 @@ function shiftPeriodKey(key: string, dir: -1 | 1): string {
 }
 
 function emptyMetrics(): AnalysisMetrics {
-  return { hadir: 0, terlambat: 0, izin: 0, sakit: 0, alpha: 0, libur: 0, cuti: 0, total: 0 };
+  return { hadir: 0, terlambat: 0, izin: 0, sakit: 0, alpha: 0, libur: 0, cuti: 0, manual: 0, total: 0 };
 }
 
 async function fetchPeriodRecords(start: string, end: string) {
@@ -22,6 +22,7 @@ async function fetchPeriodRecords(start: string, end: string) {
     division_id: number;
     status: string;
     tanggal: string;
+    is_manual: boolean;
     divisions: { nama: string; color: string } | { nama: string; color: string }[] | null;
   };
   let all: RawRow[] = [];
@@ -30,7 +31,7 @@ async function fetchPeriodRecords(start: string, end: string) {
   while (more) {
     const { data, error } = await supabase
       .from("attendance_records")
-      .select("employee_id, division_id, status, tanggal, divisions(nama, color)")
+      .select("employee_id, division_id, status, tanggal, is_manual, divisions(nama, color)")
       .gte("tanggal", start)
       .lte("tanggal", end)
       .range(from, from + SUMMARY_FETCH_PAGE_SIZE - 1);
@@ -101,8 +102,18 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
     return out.sort((a, b) => a.nama.localeCompare(b.nama));
   }, [currRecords, prevRecords]);
 
+  /** Divisi yang absen manualnya tidak dihitung (Back Office), konsisten dengan Report Manual. */
+  const manualDivIds = useMemo(() => {
+    const ids = new Set<number>();
+    [...currRecords, ...prevRecords].forEach((r) => {
+      if (!r.is_manual || ids.has(r.division_id)) return;
+      if (!isCountableManualRecord(r.is_manual, getDiv(r)?.nama)) ids.add(r.division_id);
+    });
+    return ids;
+  }, [currRecords, prevRecords]);
+
   const buildMetrics = useCallback(
-    (records: typeof currRecords): { global: AnalysisMetrics; divisions: Map<number, AnalysisMetrics>; individuals: Map<string, AnalysisMetrics>; daily: Map<string, AnalysisMetrics> } => {
+    (records: typeof currRecords, manualDivIds: Set<number>): { global: AnalysisMetrics; divisions: Map<number, AnalysisMetrics>; individuals: Map<string, AnalysisMetrics>; daily: Map<string, AnalysisMetrics> } => {
       const global = emptyMetrics();
       const divisions = new Map<number, AnalysisMetrics>();
       const individuals = new Map<string, AnalysisMetrics>();
@@ -119,6 +130,13 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
 
         if (!daily.has(r.tanggal)) daily.set(r.tanggal, emptyMetrics());
         combineMetrics(daily.get(r.tanggal)!, r.status);
+
+        // Absen manual admin dihitung terpisah, tidak menambah total/status.
+        if (r.is_manual && !manualDivIds.has(r.division_id)) {
+          global.manual++;
+          divisions.get(r.division_id)!.manual++;
+          individuals.get(r.employee_id)!.manual++;
+        }
       });
 
       return { global, divisions, individuals, daily };
@@ -126,8 +144,8 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
     [],
   );
 
-  const curr = useMemo(() => buildMetrics(currRecords), [currRecords, buildMetrics]);
-  const prev = useMemo(() => buildMetrics(prevRecords), [prevRecords, buildMetrics]);
+  const curr = useMemo(() => buildMetrics(currRecords, manualDivIds), [currRecords, manualDivIds, buildMetrics]);
+  const prev = useMemo(() => buildMetrics(prevRecords, manualDivIds), [prevRecords, manualDivIds, buildMetrics]);
 
   const global = useMemo(() => curr.global, [curr]);
   const globalPrev = useMemo(() => prev.global, [prev]);

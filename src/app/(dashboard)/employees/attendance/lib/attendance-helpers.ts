@@ -99,6 +99,17 @@ export function isBackOfficeDivision(name: string | null | undefined): boolean {
 }
 
 /**
+ * True bila record absen manual ikut dihitung pada analisa.
+ * Sama seperti Report Manual: divisi Back Office tidak masuk hitungan.
+ */
+export function isCountableManualRecord(
+  isManual: boolean,
+  divisionNama: string | null | undefined,
+): boolean {
+  return isManual && !isBackOfficeDivision(divisionNama);
+}
+
+/**
  * Get local date string YYYY-MM-DD (timezone safe — pakai local time, bukan UTC).
  * Penting untuk konsistensi antara client timezone dan server-side date filter.
  */
