@@ -27,6 +27,22 @@ type AnalysisViewProps = {
   employees: EmployeeLite[];
 };
 
+/** Kolom detail jumlah hari per status pada tabel Challenge Mingguan. */
+const CHALLENGE_STATUS_COLUMNS: {
+  key: keyof import("../lib/attendance-helpers").ChallengeStatusCounts;
+  label: string;
+  /** Kelas warna teks saat nilai > 0. */
+  activeClass: string;
+}[] = [
+  { key: "hadir", label: "Hadir", activeClass: "text-success" },
+  { key: "terlambat", label: "Terlambat", activeClass: "text-warning" },
+  { key: "izin", label: "Izin", activeClass: "text-blue-500" },
+  { key: "sakit", label: "Sakit", activeClass: "text-purple-500" },
+  { key: "cuti", label: "Cuti", activeClass: "text-cyan-500" },
+  { key: "alpha", label: "Alpha", activeClass: "text-destructive" },
+  { key: "libur", label: "Libur", activeClass: "text-muted-foreground" },
+];
+
 function pctStr(val: number, total: number): string {
   if (total === 0) return "0%";
   return ((val / total) * 100).toFixed(1) + "%";
@@ -427,6 +443,9 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Rank</th>
                                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Pegawai</th>
                                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Kehadiran Wajib</th>
+                                {CHALLENGE_STATUS_COLUMNS.map((col) => (
+                                  <th key={col.key} className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2.5 py-3" title={`Jumlah hari ${col.label.toLowerCase()} pada minggu ini`}>{col.label}</th>
+                                ))}
                                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Jumlah input absen manual oleh admin">Manual</th>
                                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Rata-rata jam masuk pada divisi CP Suka (record hadir & terlambat)">Rata-rata Jam</th>
                                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Status</th>
@@ -456,6 +475,17 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                                       {row.hadirWajib}/{row.totalWajib}
                                     </span>
                                   </td>
+                                  {CHALLENGE_STATUS_COLUMNS.map((col) => {
+                                    const val = row.statusCounts[col.key];
+                                    return (
+                                      <td key={col.key} className="px-2.5 py-3 text-center">
+                                        <span className={cn("text-sm tabular-nums",
+                                          val > 0 ? cn("font-bold", col.activeClass) : "font-semibold text-muted-foreground/50")}>
+                                          {val}
+                                        </span>
+                                      </td>
+                                    );
+                                  })}
                                   <td className="px-4 py-3 text-center">
                                     <span className={cn("text-xs font-bold px-2 py-1 rounded-md",
                                       row.manual > 1 ? "bg-destructive/10 text-destructive" : row.manual > 0 ? "bg-warning/10 text-warning" : "bg-success/10 text-success")}>

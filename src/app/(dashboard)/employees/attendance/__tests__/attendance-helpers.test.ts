@@ -696,6 +696,7 @@ describe("attendance-helpers", () => {
       expect(p.totalWajib).toBe(7);
       expect(p.manual).toBe(0);
       expect(p.alasanGugur).toEqual([]);
+      expect(p.statusCounts).toEqual({ hadir: 7, terlambat: 0, izin: 0, sakit: 0, cuti: 0, alpha: 0, libur: 0 });
     });
 
     it("1 manual masih lolos; 0 manual di atasnya; >1 manual gugur", () => {
@@ -728,6 +729,18 @@ describe("attendance-helpers", () => {
       expect(w.items[0].totalWajib).toBe(6);
       expect(w.items[0].hadirWajib).toBe(6);
       expect(w.items[0].lolos).toBe(true);
+      expect(w.items[0].statusCounts).toEqual({ hadir: 6, terlambat: 0, izin: 0, sakit: 0, cuti: 0, alpha: 0, libur: 1 });
+    });
+
+    it("Terlambat terhitung hari masuk & direkap kolomnya sendiri", () => {
+      const denganTelat = fullHadir(SATU).map((r, i) =>
+        i === 2 || i === 4 ? rec(SATU, r.tanggal, "Terlambat") : r,
+      );
+      const w = computeWeeklyChallenge(denganTelat, WS, TODAY, names);
+      const p = w.items[0];
+      expect(p.lolos).toBe(true);
+      expect(p.hadirWajib).toBe(7);
+      expect(p.statusCounts).toEqual({ hadir: 5, terlambat: 2, izin: 0, sakit: 0, cuti: 0, alpha: 0, libur: 0 });
     });
 
     it("Izin/Sakit/Cuti/Alpha pada hari wajib → gugur beserta alasan hari", () => {
@@ -744,6 +757,7 @@ describe("attendance-helpers", () => {
       expect(p.totalWajib).toBe(7);
       expect(p.alasanGugur).toEqual(["Izin pada 8 Sep", "Alpha pada 12 Sep"]);
       expect(p.days.filter((d) => d.libur)).toEqual([]);
+      expect(p.statusCounts).toEqual({ hadir: 5, terlambat: 0, izin: 1, sakit: 0, cuti: 0, alpha: 1, libur: 0 });
     });
 
     it("hari wajib tanpa record sama sekali → gugur 'Tanpa absen'", () => {

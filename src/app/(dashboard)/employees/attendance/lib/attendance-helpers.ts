@@ -434,8 +434,21 @@ export type ChallengeDayResult = {
   libur: boolean;
   /** Record Hadir/Terlambat ada pada hari ini. */
   hadir: boolean;
+  /** Status kehadiran hari ini ("Hadir"/"Terlambat"); null bila tidak hadir. */
+  statusMasuk: "Hadir" | "Terlambat" | null;
   /** Alasan tidak hadir; null bila hadir atau hari libur. */
   alasan: ChallengeDayReason | null;
+};
+
+/** Rekap jumlah hari per status pada satu minggu (kolom detail challenge). */
+export type ChallengeStatusCounts = {
+  hadir: number;
+  terlambat: number;
+  izin: number;
+  sakit: number;
+  cuti: number;
+  alpha: number;
+  libur: number;
 };
 
 /** Baris peserta Challenge Mingguan CP Suka pada Analisa → Perorangan. */
@@ -458,6 +471,8 @@ export type ChallengeEmployeeResult = {
   alasanGugur: string[];
   /** Peringkat hanya untuk peserta lolos; gugur bernilai null. */
   rank: number | null;
+  /** Rekap jumlah hari per status minggu ini (kolom detail di tabel). */
+  statusCounts: ChallengeStatusCounts;
   /** Klasifikasi per hari Senin–Minggu (terpotong hari ini pada minggu berjalan). */
   days: ChallengeDayResult[];
 };
@@ -628,17 +643,33 @@ export function computeWeeklyChallenge(
 
     const days: ChallengeDayResult[] = horizon.map((tanggal) => {
       const dayRecs = byDate.get(tanggal) ?? [];
-      const hadir = dayRecs.some((r) => r.status === "Hadir" || r.status === "Terlambat");
-      if (hadir) return { tanggal, libur: false, hadir: true, alasan: null };
+      const presenceDay = dayRecs.find((r) => r.status === "Hadir" || r.status === "Terlambat");
+      if (presenceDay) {
+        return { tanggal, libur: false, hadir: true, statusMasuk: presenceDay.status as "Hadir" | "Terlambat", alasan: null };
+      }
       const absent = dayRecs.find(
         (r) => r.status !== "Hadir" && r.status !== "Terlambat" && r.status !== "Libur",
       );
-      if (absent) return { tanggal, libur: false, hadir: false, alasan: absent.status as ChallengeDayReason };
-      if (dayRecs.some((r) => r.status === "Libur")) return { tanggal, libur: true, hadir: false, alasan: null };
-      return { tanggal, libur: false, hadir: false, alasan: "Tanpa absen" };
+      if (absent) return { tanggal, libur: false, hadir: false, statusMasuk: null, alasan: absent.status as ChallengeDayReason };
+      if (dayRecs.some((r) => r.status === "Libur")) {
+        return { tanggal, libur: true, hadir: false, statusMasuk: null, alasan: null };
+      }
+      return { tanggal, libur: false, hadir: false, statusMasuk: null, alasan: "Tanpa absen" };
     });
     const wajib = days.filter((d) => !d.libur);
     const hadirWajib = wajib.filter((d) => d.hadir).length;
+
+    // Rekap jumlah hari per status (kolom detail): hadir, terlambat, izin, dll.
+    const statusCounts: ChallengeStatusCounts = { hadir: 0, terlambat: 0, izin: 0, sakit: 0, cuti: 0, alpha: 0, libur: 0 };
+    for (const d of days) {
+      if (d.libur) statusCounts.libur++;
+      else if (d.hadir && d.statusMasuk === "Terlambat") statusCounts.terlambat++;
+      else if (d.hadir) statusCounts.hadir++;
+      else if (d.alasan === "Izin") statusCounts.izin++;
+      else if (d.alasan === "Sakit") statusCounts.sakit++;
+      else if (d.alasan === "Cuti") statusCounts.cuti++;
+      else if (d.alasan === "Alpha") statusCounts.alpha++;
+    }
 
     const alasanGugur: string[] = [];
     for (const d of wajib) {
@@ -660,6 +691,7 @@ export function computeWeeklyChallenge(
       lolos: alasanGugur.length === 0,
       alasanGugur,
       rank: null,
+      statusCounts,
       days,
     });
   }

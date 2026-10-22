@@ -142,4 +142,5 @@ export type {
   ChallengeEmployeeResult,
   ChallengeDayResult,
   ChallengeDayReason,
+  ChallengeStatusCounts,
 } from "./attendance-helpers";
