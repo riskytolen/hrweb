@@ -410,27 +410,6 @@ function ExpensePanel({
   );
 }
 
-function SummaryLine({
-  label,
-  value,
-  tone = "default",
-  strong = false,
-}: {
-  label: string;
-  value: number;
-  tone?: keyof typeof toneClass;
-  strong?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-      <span className={cn("text-xs", strong ? "font-bold text-foreground" : "text-muted-foreground")}>{label}</span>
-      <span className={cn("text-xs tabular-nums", strong ? "font-extrabold" : "font-semibold", toneClass[tone])}>
-        {formatCurrency(value)}
-      </span>
-    </div>
-  );
-}
-
 function RecapRow({
   label,
   value,
@@ -1329,55 +1308,7 @@ export default function FinanceForecastPage() {
             </div>
           </div>
 
-          {/* Ringkasan bulan */}
-          <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/20">
-              <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
-                <CalendarRange className="w-4 h-4 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-foreground">Ringkasan Bulan</p>
-                <p className="text-[11px] text-muted-foreground">{forecastMonthLabel(periodKey)}</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 md:divide-x divide-y md:divide-y-0 divide-border">
-              <div className="divide-y divide-border">
-                <SummaryLine label="Saldo Awal Bulan" value={summary.openingBalance} />
-                <SummaryLine label="Total Pemasukan" value={summary.totalIncome} tone="success" />
-                <SummaryLine label="Total Dana Tersedia" value={summary.totalAvailable} strong />
-                <SummaryLine label="Total Pengeluaran" value={summary.totalNominalOut} tone="danger" />
-              </div>
-              <div className="divide-y divide-border">
-                <SummaryLine label="Total Pembayaran" value={summary.totalPayment} />
-                <SummaryLine label="Sisa Kewajiban" value={summary.totalSisa} tone="warning" />
-                <SummaryLine label="Total Admin" value={summary.totalAdmin} />
-                <SummaryLine
-                  label="Saldo Akhir Forecast"
-                  value={summary.closingBalance}
-                  tone={summary.closingBalance < 0 ? "danger" : "primary"}
-                  strong
-                />
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3.5 bg-primary-light border-t border-primary/20">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-primary">Saldo Akhir Forecast</p>
-                <p className="text-[11px] text-muted-foreground">
-                  Saldo awal + pemasukan − pengeluaran − admin
-                </p>
-              </div>
-              <p
-                className={cn(
-                  "text-2xl font-extrabold tabular-nums",
-                  summary.closingBalance < 0 ? "text-danger" : "text-primary",
-                )}
-              >
-                {formatCurrency(summary.closingBalance)}
-              </p>
-            </div>
-          </div>
-
-          {/* Rekap format laporan PDF */}
+          {/* Rekap bulanan format laporan PDF */}
           <MonthlyRecap
             periodLabel={forecastMonthLabel(periodKey)}
             summary={summary}
