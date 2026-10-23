@@ -17,9 +17,11 @@ import {
   buildForecastFilename,
   buildForecastWeeks,
   computeForecast,
+  computeForecastExpenseCategoryTotals,
   forecastMonthLabel,
   type ForecastExpenseLike,
   type ForecastIncomeLike,
+  type ForecastSummary,
   type ForecastWeek,
   type ForecastWeekSummary,
 } from "./finance-forecast";
@@ -42,6 +44,7 @@ export interface ForecastIncomeExportRow extends ForecastIncomeLike {
 export interface ForecastExpenseExportRow extends ForecastExpenseLike {
   description: string;
   planned_date: string;
+  category?: string | null;
 }
 
 export interface ForecastExportInput {
@@ -205,6 +208,10 @@ function drawPdfSummaryCards(
   return y + 18;
 }
 
+function lastAutoTableY(pdf: PdfDoc, fallback: number): number {
+  return (pdf as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? fallback;
+}
+
 function drawPdfFooter(pdf: PdfDoc, companyName: string, periodLabel: string): void {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -288,6 +295,38 @@ function weekBodyRows(
   ]);
 
   return rows;
+}
+
+interface ForecastRecapItems {
+  left: [string, number][];
+  right: [string, number][];
+  totalSaldo: number;
+  totalPengeluaran: number;
+  margin: number;
+}
+
+/** Susunan rekap bulanan yang sama untuk PDF dan Excel. */
+function buildRecapItems(
+  summary: ForecastSummary,
+  expenses: ForecastExpenseExportRow[],
+): ForecastRecapItems {
+  const left: [string, number][] = [["Saldo Awal", summary.openingBalance]];
+  for (const week of summary.weeks) {
+    left.push([`Minggu ${week.weekNo}`, week.income]);
+  }
+  left.push(["Lainnya", 0]);
+
+  const right: [string, number][] = computeForecastExpenseCategoryTotals(expenses).map(
+    (item) => [item.category, item.amount],
+  );
+
+  return {
+    left,
+    right,
+    totalSaldo: summary.totalAvailable,
+    totalPengeluaran: summary.totalNominalOut,
+    margin: summary.totalAvailable - summary.totalNominalOut,
+  };
 }
 
 export async function exportForecastPdf(args: ForecastExportInput): Promise<string> {
@@ -397,6 +436,128 @@ export async function exportForecastPdf(args: ForecastExportInput): Promise<stri
     rowPageBreak: "avoid",
   });
 
+  // Rekap bulanan bergaya lembar PDF: saldo di kiri, kategori di kanan.
+  const recap = buildRecapItems(summary, args.expenses);
+  const pageHeight = doc.internal.pageSize.getHeight();
+  let recapY = lastAutoTableY(doc, y) + 8;
+  if (recapY + 40 > pageHeight - 16) {
+    doc.addPage();
+    recapY = 18;
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(NAVY[0], NAVY[1], NAVY[2]);
+  doc.text("REKAP BULANAN — SALDO & PENGELUARAN PER KATEGORI", margin, recapY);
+  recapY += 3;
+
+  const recapRowCount = Math.max(recap.left.length, recap.right.length);
+  const recapBody: unknown[] = [];
+  for (let i = 0; i < recapRowCount; i += 1) {
+    const left = recap.left[i];
+    const right = recap.right[i];
+    recapBody.push([
+      left?.[0] ?? "",
+      left ? rp(left[1]) : "",
+      right?.[0] ?? "",
+      right ? rp(right[1]) : "",
+    ]);
+  }
+  recapBody.push([
+    {
+      content: "TOTAL SALDO",
+      styles: { fontStyle: "bold", fillColor: [219, 234, 254], textColor: BLUE },
+    },
+    {
+      content: rp(recap.totalSaldo),
+      styles: { halign: "right", fontStyle: "bold", fillColor: [219, 234, 254], textColor: BLUE },
+    },
+    {
+      content: "TOTAL PENGELUARAN",
+      styles: { fontStyle: "bold", fillColor: [254, 226, 226], textColor: RED },
+    },
+    {
+      content: rp(recap.totalPengeluaran),
+      styles: { halign: "right", fontStyle: "bold", fillColor: [254, 226, 226], textColor: RED },
+    },
+  ]);
+
+  autoTable(doc as never, {
+    startY: recapY,
+    head: [
+      [
+        { content: "SALDO", colSpan: 2, styles: { halign: "center", fillColor: NAVY, textColor: 255 } },
+        { content: "PENGELUARAN", colSpan: 2, styles: { halign: "center", fillColor: NAVY, textColor: 255 } },
+      ],
+    ],
+    body: recapBody as never,
+    theme: "grid",
+    styles: {
+      fontSize: 7.2,
+      cellPadding: 1.6,
+      lineColor: BORDER,
+      lineWidth: 0.1,
+      textColor: INK,
+      valign: "middle",
+    },
+    headStyles: { fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 70 },
+      1: { cellWidth: 40, halign: "right" },
+      2: { cellWidth: 100 },
+      3: { cellWidth: 59, halign: "right" },
+    },
+    margin: { left: margin, right: margin, bottom: 16 },
+    rowPageBreak: "avoid",
+  });
+
+  let marginY = lastAutoTableY(doc, recapY) + 6;
+  if (marginY + 34 > pageHeight - 16) {
+    doc.addPage();
+    marginY = 18;
+  }
+
+  doc.setFillColor(RED[0], RED[1], RED[2]);
+  doc.roundedRect(margin, marginY, pageWidth - margin * 2, 11, 1.5, 1.5, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(255, 255, 255);
+  doc.text("MARGIN BERSIH", margin + 4, marginY + 7);
+  doc.text(rp(recap.margin), pageWidth - margin - 4, marginY + 7, { align: "right" });
+
+  autoTable(doc as never, {
+    startY: marginY + 14,
+    body: [
+      [
+        { content: "Admin", styles: { fontStyle: "bold" } },
+        { content: rp(summary.totalAdmin), styles: { halign: "right" } },
+        {
+          content: "Saldo Akhir setelah Admin",
+          styles: { fontStyle: "bold", fillColor: [219, 234, 254], textColor: BLUE },
+        },
+        {
+          content: rp(summary.closingBalance),
+          styles: { halign: "right", fontStyle: "bold", fillColor: [219, 234, 254], textColor: BLUE },
+        },
+      ],
+    ],
+    theme: "grid",
+    styles: {
+      fontSize: 7.2,
+      cellPadding: 2,
+      lineColor: BORDER,
+      lineWidth: 0.1,
+      textColor: INK,
+    },
+    columnStyles: {
+      0: { cellWidth: 70 },
+      1: { cellWidth: 40, halign: "right" },
+      2: { cellWidth: 100 },
+      3: { cellWidth: 59, halign: "right" },
+    },
+    margin: { left: margin, right: margin, bottom: 16 },
+  });
+
   drawPdfFooter(doc, args.company.company_name || "Perusahaan", periodLabel);
   const filename = buildForecastFilename("pdf", args.periodKey);
   doc.save(filename);
@@ -494,6 +655,46 @@ export async function exportForecastXlsx(args: ForecastExportInput): Promise<str
   rows.push(["Sisa Kewajiban", summary.totalSisa]);
   rows.push(["Total Admin", summary.totalAdmin]);
   rows.push(["Saldo Akhir Forecast", summary.closingBalance]);
+
+  rows.push([]);
+  mergeRows.push(rows.length);
+  rows.push(["REKAP BULANAN — SALDO & PENGELUARAN PER KATEGORI"]);
+  rows.push(["SALDO", "", "", "", "", "PENGELUARAN", "", "", "", ""]);
+
+  const recap = buildRecapItems(summary, args.expenses);
+  const recapRowCount = Math.max(recap.left.length, recap.right.length);
+  for (let i = 0; i < recapRowCount; i += 1) {
+    const left = recap.left[i];
+    const right = recap.right[i];
+    rows.push([
+      left?.[0] ?? "",
+      left?.[1] ?? "",
+      "",
+      "",
+      "",
+      right?.[0] ?? "",
+      right?.[1] ?? "",
+      "",
+      "",
+      "",
+    ]);
+  }
+  rows.push([
+    "TOTAL SALDO",
+    recap.totalSaldo,
+    "",
+    "",
+    "",
+    "TOTAL PENGELUARAN",
+    recap.totalPengeluaran,
+    "",
+    "",
+    "",
+  ]);
+  rows.push([]);
+  rows.push(["MARGIN BERSIH", recap.margin]);
+  rows.push(["Admin", summary.totalAdmin]);
+  rows.push(["Saldo Akhir setelah Admin", summary.closingBalance]);
 
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   sheet["!merges"] = mergeRows.map((r) => ({

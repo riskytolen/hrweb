@@ -4,9 +4,13 @@ import {
   buildForecastWeeks,
   clampDateToWeek,
   computeForecast,
+  computeForecastExpenseCategoryTotals,
   daysInForecastMonth,
+  DEFAULT_FORECAST_EXPENSE_CATEGORY,
+  FORECAST_EXPENSE_CATEGORIES,
   forecastMonthLabel,
   forecastMonthStart,
+  normalizeForecastExpenseCategory,
   rowsForWeek,
   shiftForecastPeriodKey,
   validateForecastDraft,
@@ -150,6 +154,38 @@ describe("computeForecast", () => {
     ]);
     expect(summary.closingBalance).toBe(-150_000);
     expect(summary.weeks[0].closing).toBe(-150_000);
+  });
+});
+
+describe("kategori pengeluaran forecast", () => {
+  it("menormalkan kategori valid dan fallback ke PENGELUARAN LAINNYA", () => {
+    expect(normalizeForecastExpenseCategory("gaji karyawan")).toBe("GAJI KARYAWAN");
+    expect(normalizeForecastExpenseCategory("  Sewa Mobil  ")).toBe("SEWA MOBIL");
+    expect(normalizeForecastExpenseCategory("tidak ada")).toBe(DEFAULT_FORECAST_EXPENSE_CATEGORY);
+    expect(normalizeForecastExpenseCategory(null)).toBe(DEFAULT_FORECAST_EXPENSE_CATEGORY);
+    expect(normalizeForecastExpenseCategory(undefined)).toBe(DEFAULT_FORECAST_EXPENSE_CATEGORY);
+  });
+
+  it("menghitung total per kategori, lengkap 14 baris, dan menjumlah ke total", () => {
+    const totals = computeForecastExpenseCategoryTotals([
+      { category: "GAJI KARYAWAN", amount: 100_000 },
+      { category: "gaji karyawan", amount: 50_000 },
+      { category: "BOP KIKI", amount: 10_000 },
+      { category: "TIDAK ADA", amount: 25_000 },
+      { category: null, amount: 5_000 },
+    ]);
+
+    expect(totals).toHaveLength(FORECAST_EXPENSE_CATEGORIES.length);
+    expect(totals.find((row) => row.category === "GAJI KARYAWAN")?.amount).toBe(150_000);
+    expect(totals.find((row) => row.category === "BOP KIKI")?.amount).toBe(10_000);
+    expect(totals.find((row) => row.category === "PENGELUARAN LAINNYA")?.amount).toBe(30_000);
+    expect(totals.reduce((sum, row) => sum + row.amount, 0)).toBe(190_000);
+  });
+
+  it("mengembalikan semua kategori bernilai nol untuk daftar kosong", () => {
+    const totals = computeForecastExpenseCategoryTotals([]);
+    expect(totals.every((row) => row.amount === 0)).toBe(true);
+    expect(totals.map((row) => row.category)).toEqual([...FORECAST_EXPENSE_CATEGORIES]);
   });
 });
 

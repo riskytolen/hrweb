@@ -1077,6 +1077,7 @@ export interface DbFinanceForecastExpense {
   amount: number;
   payment: number;
   admin: number;
+  category: string;
   sort_order: number;
   created_at: string;
   updated_at: string;

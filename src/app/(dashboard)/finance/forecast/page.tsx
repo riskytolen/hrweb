@@ -25,10 +25,16 @@ import {
   buildForecastWeeks,
   clampDateToWeek,
   computeForecast,
+  computeForecastExpenseCategoryTotals,
+  DEFAULT_FORECAST_EXPENSE_CATEGORY,
+  FORECAST_EXPENSE_CATEGORIES,
   forecastMonthLabel,
   forecastMonthStart,
+  normalizeForecastExpenseCategory,
   shiftForecastPeriodKey,
   validateForecastDraft,
+  type ForecastExpenseCategoryTotal,
+  type ForecastSummary,
   type ForecastWeek,
   type ForecastWeekNo,
 } from "@/lib/finance-forecast";
@@ -53,6 +59,7 @@ interface DraftExpense {
   amount: number;
   payment: number;
   admin: number;
+  category: string;
 }
 
 interface InvoiceQueryRow {
@@ -93,6 +100,7 @@ function draftSnapshot(openingBalance: number, incomes: DraftIncome[], expenses:
       amount: r.amount,
       payment: r.payment,
       admin: r.admin,
+      category: r.category,
     })),
   });
 }
@@ -324,6 +332,20 @@ function ExpensePanel({
                       placeholder="Contoh: Gaji driver, BBM, tol ..."
                       className="w-full bg-transparent px-1.5 py-1.5 text-xs outline-none rounded-lg focus:bg-muted/40 text-foreground placeholder:text-muted-foreground/50 disabled:cursor-default"
                     />
+                    <select
+                      value={row.category}
+                      onChange={(e) => onChange(row.key, { category: e.target.value })}
+                      disabled={!canInput}
+                      aria-label="Kategori pengeluaran"
+                      title="Kategori rekap bulanan"
+                      className="mt-1 w-full rounded-md border border-border/60 bg-muted/40 px-1.5 py-1 text-[10px] font-medium text-foreground/80 outline-none focus:border-primary disabled:cursor-default disabled:opacity-70"
+                    >
+                      {FORECAST_EXPENSE_CATEGORIES.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="px-2 py-1">
                     <CurrencyInput
@@ -409,6 +431,134 @@ function SummaryLine({
   );
 }
 
+function RecapRow({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  tone?: keyof typeof toneClass;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-1.5">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className={cn("text-[11px] font-semibold tabular-nums", toneClass[tone])}>
+        {formatCurrency(value)}
+      </span>
+    </div>
+  );
+}
+
+function MonthlyRecap({
+  periodLabel,
+  summary,
+  categoryTotals,
+}: {
+  periodLabel: string;
+  summary: ForecastSummary;
+  categoryTotals: ForecastExpenseCategoryTotal[];
+}) {
+  const margin = summary.totalAvailable - summary.totalNominalOut;
+
+  return (
+    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/20">
+        <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center">
+          <Wallet className="w-4 h-4 text-primary" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-foreground">Rekap Bulanan</p>
+          <p className="text-[11px] text-muted-foreground">
+            {periodLabel} • saldo, pemasukan mingguan, dan pengeluaran per kategori
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-border">
+        <div className="bg-card flex flex-col">
+          <div className="flex items-center justify-between bg-foreground px-3 py-2 text-background">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em]">Total</p>
+            <p className="text-[10px] font-bold uppercase tracking-wide">Saldo</p>
+          </div>
+          <div className="divide-y divide-border/60">
+            <RecapRow label="Saldo Awal" value={summary.openingBalance} />
+            {summary.weeks.map((week) => (
+              <RecapRow
+                key={week.weekNo}
+                label={`Minggu ${week.weekNo}`}
+                value={week.income}
+                tone="success"
+              />
+            ))}
+            <RecapRow label="Lainnya" value={0} />
+          </div>
+          <div className="mt-auto flex items-center justify-between gap-3 border-t border-primary/20 bg-primary-light/60 px-3 py-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wide text-primary">
+              Total Saldo
+            </span>
+            <span className="text-sm font-extrabold text-primary tabular-nums">
+              {formatCurrency(summary.totalAvailable)}
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-card flex flex-col">
+          <div className="flex items-center justify-between bg-foreground px-3 py-2 text-background">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.16em]">Pengeluaran</p>
+            <p className="text-[10px] font-bold uppercase tracking-wide">Kategori</p>
+          </div>
+          <div className="divide-y divide-border/60">
+            {categoryTotals.map((item) => (
+              <RecapRow key={item.category} label={item.category} value={item.amount} tone="danger" />
+            ))}
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-danger/20 bg-danger-light/50 px-3 py-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wide text-danger">
+              Total Pengeluaran
+            </span>
+            <span className="text-sm font-extrabold text-danger tabular-nums">
+              {formatCurrency(summary.totalNominalOut)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1 border-t border-danger/20 bg-danger px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.16em]">Margin Bersih</p>
+          <p className="text-[10px] text-white/75">
+            Saldo awal + pemasukan − pengeluaran (sebelum admin)
+          </p>
+        </div>
+        <p className="text-xl font-extrabold tabular-nums sm:text-2xl">{formatCurrency(margin)}</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2">
+        <div className="flex items-center justify-between gap-3 bg-card px-4 py-2.5">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Admin</span>
+          <span className="text-xs font-bold text-foreground tabular-nums">
+            {formatCurrency(summary.totalAdmin)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-3 bg-primary-light/50 px-4 py-2.5">
+          <span className="text-[10px] font-extrabold uppercase tracking-wide text-primary">
+            Saldo Akhir setelah Admin
+          </span>
+          <span
+            className={cn(
+              "text-sm font-extrabold tabular-nums",
+              summary.closingBalance < 0 ? "text-danger" : "text-primary",
+            )}
+          >
+            {formatCurrency(summary.closingBalance)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function FinanceForecastPage() {
   const { getPermissionLevel } = useAuth();
   const permLevel = getPermissionLevel("finance");
@@ -463,6 +613,11 @@ export default function FinanceForecastPage() {
         })),
       ),
     [openingBalance, incomes, expenses],
+  );
+
+  const categoryTotals = useMemo(
+    () => computeForecastExpenseCategoryTotals(expenses),
+    [expenses],
   );
 
   const currentSnapshot = useMemo(
@@ -528,6 +683,7 @@ export default function FinanceForecastPage() {
             amount: Number(r.amount) || 0,
             payment: Number(r.payment) || 0,
             admin: Number(r.admin) || 0,
+            category: normalizeForecastExpenseCategory(r.category),
           }));
         }
 
@@ -610,6 +766,7 @@ export default function FinanceForecastPage() {
         amount: 0,
         payment: 0,
         admin: 0,
+        category: DEFAULT_FORECAST_EXPENSE_CATEGORY,
       },
     ]);
   };
@@ -732,6 +889,7 @@ export default function FinanceForecastPage() {
       amount: Math.round(r.amount) || 0,
       payment: Math.round(r.payment) || 0,
       admin: Math.round(r.admin) || 0,
+      category: normalizeForecastExpenseCategory(r.category),
       sort_order: i,
     }));
 
@@ -752,6 +910,7 @@ export default function FinanceForecastPage() {
         amount: Math.round(r.amount) || 0,
         payment: Math.round(r.payment) || 0,
         admin: Math.round(r.admin) || 0,
+        category: normalizeForecastExpenseCategory(r.category),
       })),
     });
     if (errors.length > 0) {
@@ -825,6 +984,7 @@ export default function FinanceForecastPage() {
           amount: Math.round(r.amount) || 0,
           payment: Math.round(r.payment) || 0,
           admin: Math.round(r.admin) || 0,
+          category: normalizeForecastExpenseCategory(r.category),
         })),
         company: {
           company_name: company?.company_name || "Perusahaan",
@@ -1216,6 +1376,13 @@ export default function FinanceForecastPage() {
               </p>
             </div>
           </div>
+
+          {/* Rekap format laporan PDF */}
+          <MonthlyRecap
+            periodLabel={forecastMonthLabel(periodKey)}
+            summary={summary}
+            categoryTotals={categoryTotals}
+          />
         </div>
       )}
 

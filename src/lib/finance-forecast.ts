@@ -234,6 +234,71 @@ export function computeForecast(
   };
 }
 
+// ─── Kategori pengeluaran ───
+
+/**
+ * Daftar kategori rekap pengeluaran, mengikuti susunan laporan PDF
+ * "Data Keluar Masuk Keuangan". Disimpan sebagai teks per baris agar
+ * laporan bulanan tidak menebak kategori dari keterangan.
+ */
+export const FORECAST_EXPENSE_CATEGORIES = [
+  "BBM & E-MONEY",
+  "MAINTENANCE & PURCHASE",
+  "BPJS KESEHATAN",
+  "PPN KELUARAN",
+  "BPJS KETENAGAKERJAAN",
+  "GAJI KARYAWAN",
+  "MC EASY TMS",
+  "MC EASY APLIKASI",
+  "MC EASY LAINNYA",
+  "SEWA MOBIL",
+  "PENGELUARAN LAINNYA",
+  "BOP KIKI",
+  "TABUNGAN PERUSAHAAN",
+  "ANGSURAN",
+] as const;
+
+export type ForecastExpenseCategory = (typeof FORECAST_EXPENSE_CATEGORIES)[number];
+
+export const DEFAULT_FORECAST_EXPENSE_CATEGORY: ForecastExpenseCategory = "PENGELUARAN LAINNYA";
+
+const FORECAST_EXPENSE_CATEGORY_SET = new Set<string>(FORECAST_EXPENSE_CATEGORIES);
+
+/** Kategori valid (case-insensitive); nilai kosong/asing → PENGELUARAN LAINNYA. */
+export function normalizeForecastExpenseCategory(
+  value: string | null | undefined,
+): ForecastExpenseCategory {
+  const normalized = (value ?? "").trim().toUpperCase();
+  return FORECAST_EXPENSE_CATEGORY_SET.has(normalized)
+    ? (normalized as ForecastExpenseCategory)
+    : DEFAULT_FORECAST_EXPENSE_CATEGORY;
+}
+
+export interface ForecastExpenseCategoryTotal {
+  category: ForecastExpenseCategory;
+  amount: number;
+}
+
+/**
+ * Total nominal pengeluaran per kategori, selalu lengkap 14 kategori
+ * (termasuk yang bernilai 0) dan mengikuti urutan laporan.
+ */
+export function computeForecastExpenseCategoryTotals(
+  expenses: { category?: string | null; amount: number }[],
+): ForecastExpenseCategoryTotal[] {
+  const totals = new Map<ForecastExpenseCategory, number>(
+    FORECAST_EXPENSE_CATEGORIES.map((category) => [category, 0]),
+  );
+  for (const row of expenses) {
+    const category = normalizeForecastExpenseCategory(row.category);
+    totals.set(category, (totals.get(category) ?? 0) + toRupiah(row.amount));
+  }
+  return FORECAST_EXPENSE_CATEGORIES.map((category) => ({
+    category,
+    amount: totals.get(category) ?? 0,
+  }));
+}
+
 // ─── Validasi draft ───
 
 export interface ForecastIncomeDraft extends ForecastIncomeLike {
@@ -245,6 +310,7 @@ export interface ForecastIncomeDraft extends ForecastIncomeLike {
 export interface ForecastExpenseDraft extends ForecastExpenseLike {
   description: string;
   planned_date: string;
+  category?: string | null;
 }
 
 export interface ForecastDraftInput {
