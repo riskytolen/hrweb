@@ -1042,6 +1042,46 @@ export interface DbFinanceCashAdjustment {
   updated_at: string;
 }
 
+// ─── Finance Forecast (rencana kas mingguan) ───
+
+export interface DbFinanceForecastMonth {
+  id: number;
+  period_start: string;
+  opening_balance: number;
+  notes: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+export interface DbFinanceForecastIncome {
+  id: number;
+  month_id: number;
+  week_no: number;
+  planned_date: string;
+  description: string;
+  amount: number;
+  invoice_id: number | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbFinanceForecastExpense {
+  id: number;
+  month_id: number;
+  week_no: number;
+  planned_date: string;
+  description: string;
+  amount: number;
+  payment: number;
+  admin: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DbFinanceMonthEvent {
   id: number;
   period_start: string;

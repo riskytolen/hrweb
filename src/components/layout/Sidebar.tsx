@@ -50,6 +50,7 @@ import {
   Settings2,
   AlarmClockCheck,
   Car,
+  CalendarRange,
   type LucideIcon,
 } from "lucide-react";
 import { getDefaultRouteForPermissions } from "@/lib/navigation";
@@ -162,6 +163,7 @@ const allSections: MenuSection[] = [
           { name: "Pendapatan", href: "/finance/pendapatan", icon: ReceiptText, permission: "finance" },
           { name: "Pengeluaran", href: "/finance/pengeluaran", icon: TrendingUpDown, permission: "finance" },
           { name: "Arus Kas", href: "/finance/arus-kas", icon: Landmark, permission: "finance" },
+          { name: "Forecast Finance", href: "/finance/forecast", icon: CalendarRange, permission: "finance" },
           { name: "Laba Rugi", href: "/finance/laba-rugi", icon: PieChart, permission: "finance" },
           { name: "Tutup Buku", href: "/finance/tutup-buku", icon: Lock, permission: "finance" },
           { name: "Pajak", href: "/finance/pajak", icon: ReceiptText, permission: "finance" },
