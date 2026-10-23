@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarRange, Plus, Trash2, Save, FileDown, ChevronDown, ChevronLeft, ChevronRight,
-  Search, Loader2, CheckCircle2, Maximize2, Minimize2, ReceiptText, X, RefreshCw, Info, Wallet,
+  Search, Loader2, CheckCircle2, Maximize2, Minimize2, ReceiptText, X, RefreshCw, Info, Wallet, Tag,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -299,113 +299,87 @@ function ExpensePanel({
         <table className="w-full min-w-[760px]">
           <thead>
             <tr className="bg-muted/30 text-[9px] uppercase tracking-wide text-muted-foreground">
-              <th className="text-left font-semibold px-2 py-1.5 w-[104px]">Tanggal</th>
-              <th className="text-left font-semibold px-2 py-1.5 min-w-[200px]">Keterangan</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-[120px]">Nominal</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-[120px]">Pembayaran</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-[104px]">Admin</th>
-              <th className="text-right font-semibold px-2 py-1.5 w-[112px]">Sisa</th>
-              <th className="w-[32px]" />
+              <th className="text-left font-semibold px-2 py-1.5 w-[110px]">Tanggal</th>
+              <th className="text-left font-semibold px-2 py-1.5">Keterangan</th>
+              <th className="text-right font-semibold px-2 py-1.5 w-[128px]">Nominal</th>
+              <th className="text-right font-semibold px-2 py-1.5 w-[128px]">Pembayaran</th>
+              <th className="text-right font-semibold px-2 py-1.5 w-[110px]">Admin</th>
+              <th className="text-right font-semibold px-2 py-1.5 w-[118px]">Sisa</th>
+              <th className="w-[36px]" />
             </tr>
           </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => {
+          <tbody className="divide-y divide-border/50">
+            {rows.map((row) => {
               const sisa = row.amount - row.payment;
-              const isLastRow = rowIndex === rows.length - 1;
               return (
-                <Fragment key={row.key}>
-                  <tr className="hover:bg-muted/20">
-                    <td rowSpan={2} className="px-2 pt-1 align-top">
-                      <input
-                        type="date"
-                        value={row.plannedDate}
-                        min={week.start}
-                        max={week.end}
-                        onChange={(e) => onChange(row.key, { plannedDate: e.target.value })}
-                        disabled={!canInput}
-                        className="w-full bg-transparent px-1 py-2 text-[11px] outline-none rounded-lg focus:bg-muted/40 text-foreground disabled:cursor-default"
-                      />
-                    </td>
-                    <td className="px-2 pt-1 align-top">
-                      <input
-                        value={row.description}
-                        onChange={(e) => onChange(row.key, { description: e.target.value })}
-                        disabled={!canInput}
-                        placeholder="Contoh: Gaji driver, BBM, tol ..."
-                        className="w-full bg-transparent px-1.5 py-2 text-xs outline-none rounded-lg focus:bg-muted/40 text-foreground placeholder:text-muted-foreground/50 disabled:cursor-default"
-                      />
-                    </td>
-                    <td className="px-2 pt-1 align-top">
-                      <CurrencyInput
-                        size="sm"
-                        value={row.amount}
-                        onChange={(v) => onChange(row.key, { amount: v })}
-                        disabled={!canInput}
-                      />
-                    </td>
-                    <td className="px-2 pt-1 align-top">
-                      <CurrencyInput
-                        size="sm"
-                        value={row.payment}
-                        onChange={(v) => onChange(row.key, { payment: v })}
-                        disabled={!canInput}
-                      />
-                    </td>
-                    <td className="px-2 pt-1 align-top">
-                      <CurrencyInput
-                        size="sm"
-                        value={row.admin}
-                        onChange={(v) => onChange(row.key, { admin: v })}
-                        disabled={!canInput}
-                      />
-                    </td>
-                    <td className="px-2 pt-1 text-right align-top">
-                      <span
-                        className={cn(
-                          "text-[11px] font-semibold tabular-nums",
-                          sisa < 0 ? "text-danger" : sisa > 0 ? "text-warning" : "text-muted-foreground",
-                        )}
-                      >
-                        {formatCurrency(sisa)}
-                      </span>
-                    </td>
-                    <td className="px-1 pt-1 text-center align-top">
-                      {canInput && (
-                        <button
-                          type="button"
-                          onClick={() => onRemove(row.key)}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-danger hover:bg-danger-light transition-colors"
-                          title="Hapus baris"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                <tr key={row.key} className="hover:bg-muted/20">
+                  <td className="px-2 py-1">
+                    <input
+                      type="date"
+                      value={row.plannedDate}
+                      min={week.start}
+                      max={week.end}
+                      onChange={(e) => onChange(row.key, { plannedDate: e.target.value })}
+                      disabled={!canInput}
+                      className="w-full bg-transparent px-1 py-1.5 text-[11px] outline-none rounded-lg focus:bg-muted/40 text-foreground disabled:cursor-default"
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      value={row.description}
+                      onChange={(e) => onChange(row.key, { description: e.target.value })}
+                      disabled={!canInput}
+                      placeholder="Contoh: Gaji driver, BBM, tol ..."
+                      className="w-full bg-transparent px-1.5 py-1.5 text-xs outline-none rounded-lg focus:bg-muted/40 text-foreground placeholder:text-muted-foreground/50 disabled:cursor-default"
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <CurrencyInput
+                      size="sm"
+                      value={row.amount}
+                      onChange={(v) => onChange(row.key, { amount: v })}
+                      disabled={!canInput}
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <CurrencyInput
+                      size="sm"
+                      value={row.payment}
+                      onChange={(v) => onChange(row.key, { payment: v })}
+                      disabled={!canInput}
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <CurrencyInput
+                      size="sm"
+                      value={row.admin}
+                      onChange={(v) => onChange(row.key, { admin: v })}
+                      disabled={!canInput}
+                    />
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <span
+                      className={cn(
+                        "text-[11px] font-semibold tabular-nums",
+                        sisa < 0 ? "text-danger" : sisa > 0 ? "text-warning" : "text-muted-foreground",
                       )}
-                    </td>
-                  </tr>
-                  <tr className={cn("hover:bg-muted/20", !isLastRow && "border-b border-border/50")}>
-                    <td colSpan={6} className="px-2 pb-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Kategori
-                        </span>
-                        <select
-                          value={row.category}
-                          onChange={(e) => onChange(row.key, { category: e.target.value })}
-                          disabled={!canInput}
-                          aria-label="Kategori pengeluaran"
-                          title="Kategori rekap bulanan"
-                          className="min-w-0 flex-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-1 text-[10px] font-medium text-foreground/80 outline-none focus:border-primary disabled:cursor-default disabled:opacity-70"
-                        >
-                          {FORECAST_EXPENSE_CATEGORIES.map((category) => (
-                            <option key={category} value={category}>
-                              {category}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </td>
-                  </tr>
-                </Fragment>
+                    >
+                      {formatCurrency(sisa)}
+                    </span>
+                  </td>
+                  <td className="px-1 py-1 text-center">
+                    {canInput && (
+                      <button
+                        type="button"
+                        onClick={() => onRemove(row.key)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-danger hover:bg-danger-light transition-colors"
+                        title="Hapus baris"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
               );
             })}
             {rows.length === 0 && (
@@ -577,6 +551,7 @@ export default function FinanceForecastPage() {
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
   const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
 
   const addToast = useCallback((type: "success" | "error", msg: string) => {
     const id = Date.now() + Math.random();
@@ -1179,6 +1154,15 @@ export default function FinanceForecastPage() {
                     className="w-32 border-0 bg-transparent font-bold"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setCategoryOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors"
+                  title="Atur kategori rekap pengeluaran"
+                >
+                  <Tag className="w-3.5 h-3.5 text-danger" />
+                  Atur Kategori
+                </button>
                 {dirty && (
                   <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-warning bg-warning-light px-2.5 py-1 rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
@@ -1232,7 +1216,7 @@ export default function FinanceForecastPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 xl:grid-cols-[2fr_3fr] gap-3 p-3 xl:items-start">
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 p-3">
                     <IncomePanel
                       week={week}
                       rows={weekIncomes}
@@ -1315,7 +1299,9 @@ export default function FinanceForecastPage() {
               <Info className="w-3.5 h-3.5 shrink-0" />
               <span>
                 Tombol <span className="font-semibold text-foreground">Invoice</span> pada panel pemasukan mengambil
-                sisa tagihan. Invoice yang sama hanya boleh dipakai sekali per bulan.
+                sisa tagihan. Invoice yang sama hanya boleh dipakai sekali per bulan. Kategori pengeluaran diatur
+                lewat <span className="font-semibold text-foreground">Atur Kategori</span> dan hanya memengaruhi
+                rekap bulanan.
               </span>
             </div>
           </div>
@@ -1326,6 +1312,110 @@ export default function FinanceForecastPage() {
             summary={summary}
             categoryTotals={categoryTotals}
           />
+        </div>
+      )}
+
+      {/* Atur kategori pengeluaran */}
+      {categoryOpen && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setCategoryOpen(false);
+          }}
+        >
+          <div className="bg-card w-full max-w-2xl rounded-2xl border border-border shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-start justify-between gap-3 p-4 border-b border-border">
+              <div>
+                <p className="text-sm font-bold text-foreground">Atur Kategori Pengeluaran</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {forecastMonthLabel(periodKey)} • kategori hanya memengaruhi rekap bulanan, tidak mengubah saldo.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCategoryOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto">
+              {expenses.length === 0 ? (
+                <div className="py-16 text-center text-sm text-muted-foreground">
+                  Belum ada rencana pengeluaran pada bulan ini.
+                </div>
+              ) : (
+                weeks.map((week) => {
+                  const weekExpenses = expenses.filter((r) => r.weekNo === week.weekNo);
+                  if (weekExpenses.length === 0) return null;
+                  return (
+                    <div key={week.weekNo} className="border-b border-border/60 last:border-b-0">
+                      <div className="flex items-center gap-2 px-4 py-2 bg-muted/30">
+                        <span className="inline-flex items-center justify-center min-w-7 h-6 px-1.5 rounded-md bg-primary text-white text-[9px] font-extrabold">
+                          M{week.weekNo}
+                        </span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {week.rangeLabel}
+                        </span>
+                      </div>
+                      <div className="divide-y divide-border/40">
+                        {weekExpenses.map((row) => (
+                          <div
+                            key={row.key}
+                            className="flex flex-col gap-2 px-4 py-2 sm:flex-row sm:items-center sm:gap-3"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p
+                                className={cn(
+                                  "truncate text-xs font-medium",
+                                  row.description.trim()
+                                    ? "text-foreground"
+                                    : "text-muted-foreground/60 italic",
+                                )}
+                              >
+                                {row.description.trim() || "Tanpa keterangan"}
+                              </p>
+                              <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+                                {fmtDate(row.plannedDate)} • {formatCurrency(row.amount)}
+                              </p>
+                            </div>
+                            <select
+                              value={row.category}
+                              onChange={(e) => updateExpense(row.key, { category: e.target.value })}
+                              disabled={!canInput}
+                              aria-label={`Kategori ${row.description || "pengeluaran"}`}
+                              className="w-full shrink-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-[11px] font-medium text-foreground/80 outline-none focus:border-primary disabled:cursor-default disabled:opacity-70 sm:w-[210px]"
+                            >
+                              {FORECAST_EXPENSE_CATEGORIES.map((category) => (
+                                <option key={category} value={category}>
+                                  {category}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border bg-muted/20">
+              <p className="text-[11px] text-muted-foreground">
+                Perubahan kategori ikut tersimpan lewat tombol{" "}
+                <span className="font-semibold text-foreground">Simpan</span>.
+              </p>
+              <button
+                type="button"
+                onClick={() => setCategoryOpen(false)}
+                className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-semibold hover:bg-muted"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
