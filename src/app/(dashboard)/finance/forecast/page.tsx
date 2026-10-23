@@ -109,15 +109,30 @@ function StatCell({
   label,
   value,
   tone = "default",
+  strong = false,
+  hint,
 }: {
   label: string;
   value: string;
   tone?: keyof typeof toneClass;
+  strong?: boolean;
+  hint?: string;
 }) {
   return (
-    <div className="bg-card px-3 py-2">
+    <div className="bg-card px-2 py-2 sm:px-3">
       <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={cn("text-[11px] sm:text-xs font-bold tabular-nums mt-0.5", toneClass[tone])}>{value}</p>
+      <p
+        className={cn(
+          "tabular-nums mt-0.5",
+          strong ? "text-[10px] sm:text-sm font-extrabold" : "text-[10px] sm:text-xs font-bold",
+          toneClass[tone],
+        )}
+      >
+        {value}
+      </p>
+      {hint && (
+        <p className="text-[8px] sm:text-[9px] leading-tight text-muted-foreground mt-0.5">{hint}</p>
+      )}
     </div>
   );
 }
@@ -1086,17 +1101,60 @@ export default function FinanceForecastPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px bg-border border-t border-border">
-                    <StatCell label="Saldo Awal" value={formatCurrency(weekSummary.opening)} />
-                    <StatCell label="Pemasukan" value={formatCurrency(weekSummary.income)} tone="success" />
-                    <StatCell label="Pengeluaran" value={formatCurrency(weekSummary.nominalOut)} tone="danger" />
-                    <StatCell label="Dibayar" value={formatCurrency(weekSummary.payment)} />
-                    <StatCell label="Admin" value={formatCurrency(weekSummary.admin)} />
-                    <StatCell
-                      label="Saldo Akhir"
-                      value={formatCurrency(weekSummary.closing)}
-                      tone={weekSummary.closing < 0 ? "danger" : "primary"}
-                    />
+                  <div className="border-t border-border">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border">
+                      <div className="bg-card flex flex-col">
+                        <div className="flex items-center gap-1.5 px-2.5 pt-2 pb-1 sm:px-3">
+                          <span className="w-1.5 h-1.5 rounded-full bg-success" />
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-success">
+                            Saldo & Pemasukan
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-px bg-border flex-1">
+                          <StatCell label="Saldo Awal" value={formatCurrency(weekSummary.opening)} />
+                          <StatCell label="Pemasukan" value={formatCurrency(weekSummary.income)} tone="success" />
+                          <StatCell
+                            label="Dana Tersedia"
+                            value={formatCurrency(weekSummary.available)}
+                            tone="primary"
+                            strong
+                            hint="Saldo awal + pemasukan"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="bg-card flex flex-col">
+                        <div className="flex items-center gap-1.5 px-2.5 pt-2 pb-1 sm:px-3">
+                          <span className="w-1.5 h-1.5 rounded-full bg-danger" />
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-danger">
+                            Pengeluaran & Pembayaran
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-px bg-border flex-1">
+                          <StatCell label="Pengeluaran" value={formatCurrency(weekSummary.nominalOut)} tone="danger" />
+                          <StatCell
+                            label="Dibayar"
+                            value={formatCurrency(weekSummary.payment)}
+                            hint="Hanya pelacakan"
+                          />
+                          <StatCell label="Admin" value={formatCurrency(weekSummary.admin)} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-border bg-primary-light/50 px-4 py-3 text-center">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-primary/80">
+                        Saldo Akhir Pekan
+                      </p>
+                      <p
+                        className={cn(
+                          "mt-0.5 text-lg sm:text-xl font-extrabold tabular-nums",
+                          weekSummary.closing < 0 ? "text-danger" : "text-primary",
+                        )}
+                      >
+                        {formatCurrency(weekSummary.closing)}
+                      </p>
+                    </div>
                   </div>
                 </section>
               );
