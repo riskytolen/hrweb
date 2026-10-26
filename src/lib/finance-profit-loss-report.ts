@@ -552,6 +552,12 @@ export async function exportProfitLossPdf(args: ProfitLossPdfArgs): Promise<stri
     ["Laba Bersih", formatRupiah(args.laba)],
     ["Margin Laba", formatPercent(args.margin)],
     ["Kas Masuk Periode (semua invoice)", formatRupiah(args.cashReceived)],
+    ...(args.priorReceivablePaid > 0
+      ? ([
+          ["— Pembayaran invoice periode ini", formatRupiah(Math.max(0, args.cashReceived - args.priorReceivablePaid))],
+          ["— Pembayaran invoice periode sebelumnya", formatRupiah(args.priorReceivablePaid)],
+        ] as [string, string][])
+      : []),
     ["Pengeluaran Kas Periode", formatRupiah(args.cashExpenses)],
     ["Kas Bersih", formatRupiah(args.cashNet)],
     ["Saldo Kas Awal Periode", formatRupiah(args.cashOpening)],

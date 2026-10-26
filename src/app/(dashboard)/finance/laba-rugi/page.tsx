@@ -324,6 +324,10 @@ export default function FinanceLabaRugiPage() {
       [],
       ["Kas (berdasar payment_date, semua invoice; piutang tidak dihitung sebagai kas)"],
       ["Kas masuk periode", formatCurrency(cashPeriod.received)],
+      ["— Pembayaran invoice periode ini", formatCurrency(cashFromPeriodInvoices)],
+      ...(cashFromPriorInvoices > 0
+        ? [["— Pembayaran invoice periode sebelumnya", formatCurrency(cashFromPriorInvoices)]]
+        : []),
       ["Pengeluaran kas periode", formatCurrency(cashPeriod.expenses)],
       ["Penyesuaian masuk", formatCurrency(cashPeriod.adjustmentIn)],
       ["Penyesuaian keluar", formatCurrency(cashPeriod.adjustmentOut)],
@@ -417,6 +421,9 @@ export default function FinanceLabaRugiPage() {
   const profitTone = displayPeriod.laba >= 0 ? "success" : "danger";
   const cashNetTone = cashPeriod.netCash >= 0 ? "success" : "danger";
   const cashEndingTone = cashPeriod.endingBalance >= 0 ? "success" : "danger";
+  // Asal kas masuk: pembayaran invoice periode ini vs pelunasan invoice periode sebelumnya.
+  const cashFromPriorInvoices = Math.max(0, Math.min(cashPeriod.received, priorReceivables.paid));
+  const cashFromPeriodInvoices = Math.max(0, cashPeriod.received - cashFromPriorInvoices);
   const deltaIncome = prevPeriod.pendapatan > 0 ? ((displayPeriod.pendapatan - prevPeriod.pendapatan) / prevPeriod.pendapatan) * 100 : 0;
   const deltaExpense = prevPeriod.pengeluaran > 0 ? ((displayPeriod.pengeluaran - prevPeriod.pengeluaran) / prevPeriod.pengeluaran) * 100 : 0;
 
@@ -547,6 +554,16 @@ export default function FinanceLabaRugiPage() {
                   <span className="text-muted-foreground">Kas masuk</span>
                   <span className="font-medium text-success tabular-nums">{cashPeriod.received > 0 ? "+" : ""}{formatCurrency(cashPeriod.received)}</span>
                 </div>
+                <div className="flex items-center justify-between gap-2 pl-2 text-[10px]">
+                  <span className="text-muted-foreground/80">• Invoice periode ini</span>
+                  <span className="font-medium text-success/80 tabular-nums">{formatCurrency(cashFromPeriodInvoices)}</span>
+                </div>
+                {cashFromPriorInvoices > 0 && (
+                  <div className="flex items-center justify-between gap-2 pl-2 text-[10px]">
+                    <span className="text-muted-foreground/80">• {viewMonth === null ? "Invoice tahun sebelumnya" : "Invoice bulan sebelumnya"}</span>
+                    <span className="font-medium text-success/80 tabular-nums">{formatCurrency(cashFromPriorInvoices)}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-muted-foreground">Pengeluaran</span>
                   <span className="font-medium text-danger tabular-nums">{cashPeriod.expenses > 0 ? "−" : ""}{formatCurrency(cashPeriod.expenses)}</span>
