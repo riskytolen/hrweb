@@ -7,6 +7,8 @@ import {
   receivableOverdueDays,
   receivableReferenceDate,
   summarizeCashPeriod,
+  summarizePriorReceivables,
+  summarizePriorReceivablesFromSnapshot,
   summarizeReceivables,
 } from "../finance";
 
@@ -132,6 +134,58 @@ describe("finance receivables helpers", () => {
     expect(summary.overdueCount).toBe(1);
     expect(summary.overdueAmount).toBe(3_000_000);
     expect(summary.items[0].invoice_no).toBe("INV-1");
+  });
+
+  it("piutang bulan sebelumnya memisahkan pembayaran sebelum, selama, dan sesudah periode", () => {
+    const summary = summarizePriorReceivables(
+      [
+        { id: 1, invoice_no: "INV-SEP", invoice_date: "2026-09-20", due_date: "2026-09-30", total_amount: 10_000_000 },
+        { id: 2, invoice_no: "INV-OKT", invoice_date: "2026-10-05", due_date: "2026-11-05", total_amount: 3_000_000 },
+      ],
+      [
+        { invoice_id: 1, payment_date: "2026-09-25", amount: 2_000_000 },
+        { invoice_id: 1, payment_date: "2026-10-10", amount: 3_000_000 },
+        { invoice_id: 1, payment_date: "2026-11-02", amount: 1_000_000 },
+        { invoice_id: 2, payment_date: "2026-10-20", amount: 1_000_000 },
+      ],
+      "2026-10-01",
+      "2026-10-31",
+    );
+    expect(summary.opening).toBe(8_000_000);
+    expect(summary.paid).toBe(3_000_000);
+    expect(summary.remaining).toBe(5_000_000);
+    expect(summary.count).toBe(1);
+  });
+
+  it("invoice lama yang lunas tidak dihitung sebagai sisa piutang", () => {
+    const summary = summarizePriorReceivables(
+      [{ id: 1, invoice_no: "INV-SEP", invoice_date: "2026-09-01", due_date: null, total_amount: 4_000_000 }],
+      [
+        { invoice_id: 1, payment_date: "2026-09-10", amount: 1_500_000 },
+        { invoice_id: 1, payment_date: "2026-10-05", amount: 2_500_000 },
+      ],
+      "2026-10-01",
+      "2026-10-31",
+    );
+    expect(summary.opening).toBe(2_500_000);
+    expect(summary.paid).toBe(2_500_000);
+    expect(summary.remaining).toBe(0);
+    expect(summary.count).toBe(0);
+  });
+
+  it("snapshot Tutup Buku memisahkan piutang lama dari piutang periode berjalan", () => {
+    const summary = summarizePriorReceivablesFromSnapshot(
+      66_863_360,
+      [
+        { invoice_date: "2026-09-10", remaining: 12_018_163 },
+        { invoice_date: "2026-10-05", remaining: 20_000_000 },
+      ],
+      "2026-10-01",
+    );
+    expect(summary.opening).toBe(66_863_360);
+    expect(summary.paid).toBe(54_845_197);
+    expect(summary.remaining).toBe(12_018_163);
+    expect(summary.count).toBe(1);
   });
 
   it("kas periode memakai payment_date, bukan tanggal invoice", () => {

@@ -514,6 +514,92 @@ export function summarizeReceivables(
   };
 }
 
+export interface PriorReceivableSummary {
+  /** Piutang dari invoice sebelum periode, posisi awal periode. */
+  opening: number;
+  /** Pembayaran selama periode untuk invoice sebelum periode. */
+  paid: number;
+  /** Sisa piutang invoice sebelum periode pada akhir periode. */
+  remaining: number;
+  /** Jumlah invoice lama yang belum lunas. */
+  count: number;
+}
+
+/**
+ * Piutang dari invoice bulan/tahun sebelumnya (di luar periode terpilih):
+ * - `opening` = sisa invoice lama tepat sebelum periodStart.
+ * - `paid` = pembayaran pada periode ini yang melunasi invoice lama.
+ * - `remaining` = sisa invoice lama pada akhir periode.
+ * Pembayaran ini sudah termasuk kas masuk periode; bukan pendapatan baru.
+ */
+export function summarizePriorReceivables(
+  invoices: ReceivableInvoiceInput[],
+  payments: ReceivablePaymentInput[],
+  periodStart: string,
+  periodEnd: string,
+): PriorReceivableSummary {
+  const priorInvoices = invoices.filter((inv) => inv.invoice_date && inv.invoice_date < periodStart);
+  const priorIds = new Set(priorInvoices.map((inv) => inv.id));
+  const paidBefore = new Map<number, number>();
+  const paidInPeriod = new Map<number, number>();
+
+  for (const p of payments) {
+    if (!priorIds.has(p.invoice_id)) continue;
+    if (p.payment_date < periodStart) {
+      paidBefore.set(p.invoice_id, (paidBefore.get(p.invoice_id) ?? 0) + (p.amount || 0));
+    } else if (p.payment_date <= periodEnd) {
+      paidInPeriod.set(p.invoice_id, (paidInPeriod.get(p.invoice_id) ?? 0) + (p.amount || 0));
+    }
+  }
+
+  let opening = 0;
+  let paid = 0;
+  let remaining = 0;
+  let count = 0;
+
+  for (const inv of priorInvoices) {
+    const total = inv.total_amount || 0;
+    const before = paidBefore.get(inv.id) ?? 0;
+    const during = paidInPeriod.get(inv.id) ?? 0;
+    const openingForInvoice = Math.max(0, total - before);
+    const remainingForInvoice = Math.max(0, total - before - during);
+    opening += openingForInvoice;
+    paid += Math.min(during, openingForInvoice);
+    remaining += remainingForInvoice;
+    if (remainingForInvoice > 0) count += 1;
+  }
+
+  return { opening, paid, remaining, count };
+}
+
+export interface PriorReceivableSnapshotRow {
+  invoice_date: string;
+  remaining: number;
+}
+
+/**
+ * Versi immutable untuk periode yang sudah Tutup Buku:
+ * `receivables_as_of_end` hanya memuat invoice yang masih bersisa saat closing,
+ * sehingga sisa invoice lama = penjumlahan baris sebelum periodStart.
+ */
+export function summarizePriorReceivablesFromSnapshot(
+  openingReceivable: number,
+  rows: PriorReceivableSnapshotRow[],
+  periodStart: string,
+): PriorReceivableSummary {
+  const priorRows = rows.filter(
+    (r) => r.invoice_date && r.invoice_date < periodStart && (Number(r.remaining) || 0) > 0,
+  );
+  const remaining = priorRows.reduce((s, r) => s + (Number(r.remaining) || 0), 0);
+  const opening = Math.max(0, Number(openingReceivable) || 0);
+  return {
+    opening,
+    paid: Math.max(0, opening - remaining),
+    remaining,
+    count: priorRows.length,
+  };
+}
+
 export function csvEscape(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const s = String(value);

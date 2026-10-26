@@ -66,6 +66,10 @@ export interface ProfitLossPdfArgs {
   unpaidCount: number;
   overdueCount: number;
   overdueAmount: number;
+  priorReceivableOpening: number;
+  priorReceivablePaid: number;
+  priorReceivableRemaining: number;
+  priorReceivableCount: number;
   categories: ProfitLossCategoryInput[];
   incomes: ProfitLossIncomeRowInput[];
   receivables: ProfitLossReceivableRowInput[];
@@ -556,6 +560,13 @@ export async function exportProfitLossPdf(args: ProfitLossPdfArgs): Promise<stri
     ["Diterima invoice periode", formatRupiah(args.totalPaid)],
     ["Piutang periode ini", formatRupiah(args.totalReceivable)],
     [`Piutang jatuh tempo (${args.overdueCount} invoice)`, formatRupiah(args.overdueAmount)],
+    ...(args.priorReceivableOpening > 0
+      ? ([
+          ["Piutang periode sebelumnya (awal)", formatRupiah(args.priorReceivableOpening)],
+          ["Dibayar periode ini (invoice lama)", formatRupiah(args.priorReceivablePaid)],
+          [`Sisa piutang periode sebelumnya (${args.priorReceivableCount} invoice)`, formatRupiah(args.priorReceivableRemaining)],
+        ] as [string, string][])
+      : []),
   ];
   autoTable(doc as never, {
     startY: y,

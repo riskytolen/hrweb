@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
-import { PieChart, FileDown, TrendingUp, TrendingDown, PiggyBank, Percent, ChevronLeft, ChevronRight, ChevronDown, Scale, Wallet, Lock } from "lucide-react";
+import { PieChart, FileDown, TrendingUp, TrendingDown, PiggyBank, Percent, ChevronLeft, ChevronRight, ChevronDown, Scale, Wallet, Lock, History } from "lucide-react";
 import {
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
@@ -11,7 +11,7 @@ import RouteGuard from "@/components/RouteGuard";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import type { DbFinanceCompanySettings } from "@/lib/supabase";
-import { cashPeriodFromClosingSnapshot, downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeCashPeriod, summarizeReceivables } from "@/lib/finance";
+import { cashPeriodFromClosingSnapshot, downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeCashPeriod, summarizePriorReceivables, summarizePriorReceivablesFromSnapshot, summarizeReceivables, type PriorReceivableSnapshotRow } from "@/lib/finance";
 import { exportProfitLossPdf } from "@/lib/finance-profit-loss-report";
 import { fetchMonthEvents, monthStartOf, type DbFinanceMonthEvent, type DbFinanceMonthStatus } from "@/lib/finance-closing";
 
@@ -244,6 +244,23 @@ export default function FinanceLabaRugiPage() {
       })),
     };
   }, [activeCloseEvent, receivablesLive]);
+  // Piutang dari invoice sebelum periode terpilih. Bulan closed memakai snapshot
+  // Tutup Buku; periode berjalan dihitung dari pembayaran yang sudah tercatat.
+  const priorReceivables = useMemo(() => {
+    if (activeCloseEvent) {
+      const snap = (activeCloseEvent.snapshot_data ?? {}) as Record<string, unknown>;
+      const raw = snap["receivables_as_of_end"];
+      if (Array.isArray(raw)) {
+        return summarizePriorReceivablesFromSnapshot(
+          Number(activeCloseEvent.opening_receivable) || 0,
+          raw as PriorReceivableSnapshotRow[],
+          periodStart,
+        );
+      }
+    }
+    return summarizePriorReceivables(invoices, payments, periodStart, periodEnd);
+  }, [activeCloseEvent, invoices, payments, periodStart, periodEnd]);
+  const hasPriorReceivables = priorReceivables.opening > 0 || priorReceivables.paid > 0 || priorReceivables.remaining > 0;
   const displayPeriod = useMemo(() => {
     if (!activeCloseEvent) return period;
     const pendapatan = Number(activeCloseEvent.revenue_total) || 0;
@@ -321,6 +338,12 @@ export default function FinanceLabaRugiPage() {
       ["Invoice belum lunas", receivables.unpaidCount],
       ["Piutang jatuh tempo", `${receivables.overdueCount} invoice • ${formatCurrency(receivables.overdueAmount)}`],
       [],
+      [`Piutang periode sebelumnya (invoice sebelum ${periodLabel})`],
+      ["Piutang awal periode", formatCurrency(priorReceivables.opening)],
+      ["Dibayar periode ini (invoice lama)", formatCurrency(priorReceivables.paid)],
+      ["Sisa piutang periode sebelumnya", formatCurrency(priorReceivables.remaining)],
+      ["Invoice lama belum lunas", priorReceivables.count],
+      [],
       ["Rincian Piutang Belum Lunas"],
       ["No", "No. Invoice", "Klien", "Jatuh Tempo", "Total", "Dibayar", "Sisa", "Status"],
       ...receivables.items.map((r, idx) => [idx + 1, r.invoice_no, r.clientName, r.due_date || "—", r.total, r.paid, r.remaining, r.bucket]),
@@ -358,6 +381,10 @@ export default function FinanceLabaRugiPage() {
         unpaidCount: receivables.unpaidCount,
         overdueCount: receivables.overdueCount,
         overdueAmount: receivables.overdueAmount,
+        priorReceivableOpening: priorReceivables.opening,
+        priorReceivablePaid: priorReceivables.paid,
+        priorReceivableRemaining: priorReceivables.remaining,
+        priorReceivableCount: priorReceivables.count,
         categories: period.expenseShare.map((c) => ({ name: c.name, total: c.total, pct: c.pct })),
         incomes: invoices
           .filter((i) => i.invoice_date.startsWith(period.prefix))
@@ -621,6 +648,44 @@ export default function FinanceLabaRugiPage() {
               </div>
             )}
           </div>
+
+          {hasPriorReceivables && (
+            <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden mb-4">
+              <div className="flex items-center gap-2 p-4 border-b border-border">
+                <div className="w-8 h-8 rounded-lg bg-warning-light flex items-center justify-center">
+                  <History className="w-4 h-4 text-warning" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-foreground">
+                    {viewMonth === null ? "Piutang Tahun Sebelumnya" : "Piutang Bulan Sebelumnya"}
+                  </h2>
+                  <p className="text-[11px] text-muted-foreground">
+                    Invoice sebelum {periodLabel} • {isClosedPeriod ? "posisi tutup buku" : "posisi akhir periode"}
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 p-4">
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground">Piutang awal periode</p>
+                  <p className="text-lg font-bold text-foreground mt-1 tabular-nums">{formatCurrency(priorReceivables.opening)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Sisa invoice lama sebelum periode</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground">Dibayar periode ini</p>
+                  <p className="text-lg font-bold text-success mt-1 tabular-nums">{formatCurrency(priorReceivables.paid)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Sudah termasuk kas masuk</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground">Sisa piutang</p>
+                  <p className="text-lg font-bold text-warning mt-1 tabular-nums">{formatCurrency(priorReceivables.remaining)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">{priorReceivables.count} invoice belum lunas</p>
+                </div>
+              </div>
+              <p className="px-4 pb-4 text-[11px] text-muted-foreground">
+                Pembayaran di atas tidak dihitung sebagai pendapatan periode ini dan sisa piutang belum menjadi kas.
+              </p>
+            </div>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Pie pengeluaran per kategori */}
