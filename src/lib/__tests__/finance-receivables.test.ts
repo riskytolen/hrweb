@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  cashOnHandForClosedPeriod,
+  cashPeriodFromClosingSnapshot,
   periodEndDate,
   periodStartDate,
   receivableBucket,
   receivableOverdueDays,
   receivableReferenceDate,
-  summarizeCashOnHand,
+  summarizeCashPeriod,
   summarizeReceivables,
 } from "../finance";
 
@@ -134,65 +134,102 @@ describe("finance receivables helpers", () => {
     expect(summary.items[0].invoice_no).toBe("INV-1");
   });
 
-  it("laba on hand memakai seluruh pembayaran invoice periode dan pengeluaran periode", () => {
-    const summary = summarizeCashOnHand(
-      [
-        { invoice_id: 1, payment_date: "2026-09-30", amount: 1_000_000 },
-        { invoice_id: 1, payment_date: "2026-10-02", amount: 4_000_000 },
-        { invoice_id: 2, payment_date: "2026-10-20", amount: 3_000_000 },
-        { invoice_id: 1, payment_date: "2026-11-01", amount: 9_000_000 },
+  it("kas periode memakai payment_date, bukan tanggal invoice", () => {
+    const summary = summarizeCashPeriod({
+      initialBalance: 0,
+      payments: [
+        { payment_date: "2026-09-30", amount: 1_000_000 },
+        { payment_date: "2026-10-02", amount: 4_000_000 },
+        { payment_date: "2026-10-20", amount: 3_000_000 },
+        { payment_date: "2026-11-01", amount: 9_000_000 },
       ],
-      [
+      expenses: [
         { expense_date: "2026-10-05", amount: 2_000_000 },
         { expense_date: "2026-10-10", amount: 500_000 },
         { expense_date: "2026-11-02", amount: 7_000_000 },
       ],
-      "2026-10-01",
-      "2026-10-31",
-      new Set([1, 2]),
-    );
-    expect(summary.received).toBe(17_000_000);
+      adjustments: [],
+      periodStart: "2026-10-01",
+      periodEnd: "2026-10-31",
+    });
+    expect(summary.openingBalance).toBe(1_000_000);
+    expect(summary.received).toBe(7_000_000);
     expect(summary.expenses).toBe(2_500_000);
-    expect(summary.profit).toBe(14_500_000);
-    expect(summary.margin).toBeCloseTo(85.2941, 4);
+    expect(summary.netCash).toBe(4_500_000);
+    expect(summary.endingBalance).toBe(5_500_000);
   });
 
-  it("laba on hand mengabaikan pembayaran invoice luar periode", () => {
-    const summary = summarizeCashOnHand(
-      [
-        { invoice_id: 1, payment_date: "2026-10-02", amount: 4_000_000 },
-        { invoice_id: 9, payment_date: "2026-10-20", amount: 12_000_000 },
+  it("saldo awal membawa mutasi sebelum periode dan penyesuaian kas", () => {
+    const summary = summarizeCashPeriod({
+      initialBalance: 10_000_000,
+      payments: [
+        { payment_date: "2026-09-10", amount: 5_000_000 },
+        { payment_date: "2026-10-10", amount: 8_000_000 },
       ],
-      [{ expense_date: "2026-10-05", amount: 2_500_000 }],
-      "2026-10-01",
-      "2026-10-31",
-      new Set([1]),
-    );
-    expect(summary.received).toBe(4_000_000);
-    expect(summary.profit).toBe(1_500_000);
-  });
-
-  it("laba on hand kohort menghitung pembayaran setelah periode berakhir", () => {
-    // Skenario Sep 2026: invoice terbit September, sebagian dibayar Oktober.
-    const summary = summarizeCashOnHand(
-      [
-        { invoice_id: 1, payment_date: "2026-09-20", amount: 500_000_000 },
-        { invoice_id: 2, payment_date: "2026-10-05", amount: 416_922_011 },
+      expenses: [
+        { expense_date: "2026-09-20", amount: 2_000_000 },
+        { expense_date: "2026-10-15", amount: 1_000_000 },
       ],
-      [{ expense_date: "2026-09-15", amount: 788_455_567 }],
-      "2026-09-01",
-      "2026-09-30",
-      new Set([1, 2]),
-    );
-    expect(summary.received).toBe(916_922_011);
-    expect(summary.profit).toBe(128_466_444);
+      adjustments: [
+        { adjustment_date: "2026-09-25", type: "Masuk", amount: 500_000 },
+        { adjustment_date: "2026-10-20", type: "Masuk", amount: 2_000_000 },
+        { adjustment_date: "2026-10-21", type: "Keluar", amount: 300_000 },
+      ],
+      periodStart: "2026-10-01",
+      periodEnd: "2026-10-31",
+    });
+    expect(summary.openingBalance).toBe(13_500_000);
+    expect(summary.adjustmentIn).toBe(2_000_000);
+    expect(summary.adjustmentOut).toBe(300_000);
+    expect(summary.netCash).toBe(8_700_000);
+    expect(summary.endingBalance).toBe(22_200_000);
   });
 
-  it("periode closed memakai kas kohort terbaru dan beban snapshot", () => {
-    const summary = cashOnHandForClosedPeriod(916_922_011, 788_455_567);
-    expect(summary.received).toBe(916_922_011);
+  it("invoice September dibayar Oktober menjadi kas Oktober, bukan pendapatan baru", () => {
+    const payments = [
+      { payment_date: "2026-09-20", amount: 500_000_000 },
+      { payment_date: "2026-10-05", amount: 416_922_011 },
+    ];
+    const expenses = [{ expense_date: "2026-09-15", amount: 788_455_567 }];
+
+    const september = summarizeCashPeriod({
+      initialBalance: 0,
+      payments,
+      expenses,
+      adjustments: [],
+      periodStart: "2026-09-01",
+      periodEnd: "2026-09-30",
+    });
+    expect(september.received).toBe(500_000_000);
+    expect(september.netCash).toBe(-288_455_567);
+
+    const october = summarizeCashPeriod({
+      initialBalance: 0,
+      payments,
+      expenses,
+      adjustments: [],
+      periodStart: "2026-10-01",
+      periodEnd: "2026-10-31",
+    });
+    expect(october.openingBalance).toBe(-288_455_567);
+    expect(october.received).toBe(416_922_011);
+    expect(october.netCash).toBe(416_922_011);
+    expect(october.endingBalance).toBe(128_466_444);
+  });
+
+  it("periode closed memakai snapshot Tutup Buku yang immutable", () => {
+    const summary = cashPeriodFromClosingSnapshot({
+      opening_cash_balance: 0,
+      cash_in: 880_494_317,
+      cash_out_expenses: 788_455_567,
+      adjustment_in: 0,
+      adjustment_out: 0,
+      ending_cash_balance: 92_038_750,
+    });
+    expect(summary.openingBalance).toBe(0);
+    expect(summary.received).toBe(880_494_317);
     expect(summary.expenses).toBe(788_455_567);
-    expect(summary.profit).toBe(128_466_444);
-    expect(summary.margin).toBeCloseTo(14.0106, 4);
+    expect(summary.netCash).toBe(92_038_750);
+    expect(summary.endingBalance).toBe(92_038_750);
   });
 });

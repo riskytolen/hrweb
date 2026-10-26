@@ -3,12 +3,13 @@
  *
  * Semantik akuntansi yang dikunci (konsisten dengan halaman):
  * - Periode ditentukan oleh `invoice_date` untuk pendapatan dan
- *   `expense_date` untuk pengeluaran.
+ *   `expense_date` untuk pengeluaran (basis akrual).
  * - Invoice bulan lain tidak ikut periode.
- * - Pembayaran memakai SELURUH pembayaran milik invoice periode tersebut,
- *   tanpa dibatasi `payment_date`.
- * - Laba On Hand = pembayaran yang sudah diterima untuk invoice periode
- *   dikurangi pengeluaran periode.
+ * - Kas memakai basis kas: pembayaran pada periode (payment_date) untuk SEMUA
+ *   invoice, termasuk pelunasan invoice bulan sebelumnya; piutang tidak dihitung
+ *   sebagai kas dan tidak boleh dobel dengan pendapatan.
+ * - Kas Bersih = kas masuk periode + penyesuaian masuk − pengeluaran kas −
+ *   penyesuaian keluar. Saldo kas akhir = saldo awal + kas bersih.
  * - Piutang periode = total invoice periode dikurangi seluruh pembayaran
  *   milik invoice periode (tanpa saldo bulan sebelumnya).
  */
@@ -56,8 +57,9 @@ export interface ProfitLossPdfArgs {
   margin: number;
   cashReceived: number;
   cashExpenses: number;
-  cashProfit: number;
-  cashMargin: number;
+  cashNet: number;
+  cashOpening: number;
+  cashEnding: number;
   totalInvoiced: number;
   totalPaid: number;
   totalReceivable: number;
@@ -335,10 +337,10 @@ export async function exportProfitLossPdf(args: ProfitLossPdfArgs): Promise<stri
     ["Margin Laba", formatPercent(args.margin)],
   ]);
   y = drawSummaryCards(doc, margin, pageWidth, y, [
-    ["Diterima Invoice Periode", formatRupiah(args.cashReceived)],
-    ["Laba On Hand", formatRupiah(args.cashProfit)],
+    ["Kas Masuk Periode", formatRupiah(args.cashReceived)],
+    ["Kas Bersih", formatRupiah(args.cashNet)],
     [`Piutang (${args.unpaidCount} inv)`, formatRupiah(args.totalReceivable)],
-    [`Jatuh Tempo (${args.overdueCount} inv)`, formatRupiah(args.overdueAmount)],
+    ["Saldo Kas Akhir", formatRupiah(args.cashEnding)],
   ]);
 
   doc.setFont("helvetica", "normal");
@@ -346,8 +348,8 @@ export async function exportProfitLossPdf(args: ProfitLossPdfArgs): Promise<stri
   doc.setTextColor(MUTED[0], MUTED[1], MUTED[2]);
   const basisNote =
     "Basis: pendapatan = invoice_date periode • pengeluaran = expense_date periode • " +
-    "Laba On Hand = seluruh pembayaran milik invoice periode − pengeluaran periode • " +
-    "piutang murni periode tanpa saldo bulan sebelumnya.";
+    "kas masuk = pembayaran periode (payment_date) untuk semua invoice, termasuk pelunasan invoice bulan sebelumnya • " +
+    "piutang tidak dihitung sebagai kas • saldo kas akhir = saldo awal + kas bersih.";
   const noteLines = doc.splitTextToSize(basisNote, pageWidth - margin * 2);
   doc.text(noteLines.slice(0, 3), margin, y);
   y += noteLines.slice(0, 3).length * 3.4 + 3;
@@ -545,13 +547,15 @@ export async function exportProfitLossPdf(args: ProfitLossPdfArgs): Promise<stri
     ["Pengeluaran (expense date)", formatRupiah(args.pengeluaran)],
     ["Laba Bersih", formatRupiah(args.laba)],
     ["Margin Laba", formatPercent(args.margin)],
-    ["Pembayaran invoice periode yang diterima", formatRupiah(args.cashReceived)],
-    ["Pengeluaran periode (kas)", formatRupiah(args.cashExpenses)],
-    ["Laba On Hand", formatRupiah(args.cashProfit)],
-    ["Margin On Hand", formatPercent(args.cashMargin)],
+    ["Kas Masuk Periode (semua invoice)", formatRupiah(args.cashReceived)],
+    ["Pengeluaran Kas Periode", formatRupiah(args.cashExpenses)],
+    ["Kas Bersih", formatRupiah(args.cashNet)],
+    ["Saldo Kas Awal Periode", formatRupiah(args.cashOpening)],
+    ["Saldo Kas Akhir Periode", formatRupiah(args.cashEnding)],
     ["Invoice periode ini", formatRupiah(args.totalInvoiced)],
     ["Diterima invoice periode", formatRupiah(args.totalPaid)],
     ["Piutang periode ini", formatRupiah(args.totalReceivable)],
+    [`Piutang jatuh tempo (${args.overdueCount} invoice)`, formatRupiah(args.overdueAmount)],
   ];
   autoTable(doc as never, {
     startY: y,

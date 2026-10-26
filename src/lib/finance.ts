@@ -266,42 +266,112 @@ export function receivableReferenceDate(today: string, periodEnd: string): strin
   return today < periodEnd ? today : periodEnd;
 }
 
-export interface CashOnHandSummary {
+export interface CashPeriodTotals {
+  /** Saldo kas awal periode = saldo dasar + seluruh mutasi sebelum periode. */
+  openingBalance: number;
+  /** Pembayaran invoice yang masuk pada periode (semua invoice, berdasar payment_date). */
   received: number;
+  /** Pengeluaran kas pada periode. */
   expenses: number;
-  profit: number;
-  margin: number;
+  adjustmentIn: number;
+  adjustmentOut: number;
+  /** Kas bersih periode = penerimaan + penyesuaian masuk − pengeluaran − penyesuaian keluar. */
+  netCash: number;
+  /** Saldo kas akhir periode = saldo awal + kas bersih. */
+  endingBalance: number;
+  incomeCount: number;
+  expenseCount: number;
 }
 
-/** Laba On Hand Laba Rugi untuk periode yang sudah closing: kas mengikuti pembayaran terbaru
- * kohort invoice periode, sedangkan beban memakai snapshot Tutup Buku yang immutable. */
-export function cashOnHandForClosedPeriod(received: number, snapshotExpenses: number): CashOnHandSummary {
-  const exp = Math.max(0, Math.round(snapshotExpenses) || 0);
-  const got = Math.max(0, Math.round(received) || 0);
-  const profit = got - exp;
-  return { received: got, expenses: exp, profit, margin: got > 0 ? (profit / got) * 100 : 0 };
-}
+/**
+ * Rekap kas murni per periode (basis kas):
+ * - Penerimaan memakai payment_date, termasuk pelunasan invoice bulan sebelumnya.
+ * - Pengeluaran memakai expense_date.
+ * - Saldo awal membawa saldo dasar dan seluruh mutasi sebelum periodStart.
+ * Piutang TIDAK dihitung sebagai kas; lihat summarizeReceivables.
+ */
+export function summarizeCashPeriod(args: {
+  initialBalance: number;
+  payments: { payment_date: string; amount: number }[];
+  expenses: { expense_date: string; amount: number }[];
+  adjustments: { adjustment_date: string; type: "Masuk" | "Keluar"; amount: number }[];
+  periodStart: string;
+  periodEnd: string;
+}): CashPeriodTotals {
+  const initial = Math.round(args.initialBalance) || 0;
+  let openingBalance = initial;
+  for (const p of args.payments) {
+    if (p.payment_date < args.periodStart) openingBalance += p.amount || 0;
+  }
+  for (const e of args.expenses) {
+    if (e.expense_date < args.periodStart) openingBalance -= e.amount || 0;
+  }
+  for (const a of args.adjustments) {
+    if (a.adjustment_date < args.periodStart) {
+      openingBalance += a.type === "Masuk" ? a.amount || 0 : -(a.amount || 0);
+    }
+  }
 
-/** Laba berbasis kas: pembayaran yang sudah diterima untuk invoice periode dikurangi pengeluaran periode. */
-export function summarizeCashOnHand(
-  payments: { invoice_id?: number; payment_date: string; amount: number }[],
-  expenses: { expense_date: string; amount: number }[],
-  periodStart: string,
-  periodEnd: string,
-  invoiceIds?: Set<number>,
-): CashOnHandSummary {
-  const received = payments
-    .filter((p) => invoiceIds ? p.invoice_id !== undefined && invoiceIds.has(p.invoice_id) : p.payment_date >= periodStart && p.payment_date <= periodEnd)
-    .reduce((s, p) => s + (p.amount || 0), 0);
-  const periodExpenses = expenses
-    .filter((e) => e.expense_date >= periodStart && e.expense_date <= periodEnd)
-    .reduce((s, e) => s + (e.amount || 0), 0);
-  const profit = received - periodExpenses;
+  const periodPayments = args.payments.filter(
+    (p) => p.payment_date >= args.periodStart && p.payment_date <= args.periodEnd,
+  );
+  const periodExpenses = args.expenses.filter(
+    (e) => e.expense_date >= args.periodStart && e.expense_date <= args.periodEnd,
+  );
+  const periodAdjustments = args.adjustments.filter(
+    (a) => a.adjustment_date >= args.periodStart && a.adjustment_date <= args.periodEnd,
+  );
+
+  const received = periodPayments.reduce((s, p) => s + (p.amount || 0), 0);
+  const expenses = periodExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+  const adjustmentIn = periodAdjustments
+    .filter((a) => a.type === "Masuk")
+    .reduce((s, a) => s + (a.amount || 0), 0);
+  const adjustmentOut = periodAdjustments
+    .filter((a) => a.type === "Keluar")
+    .reduce((s, a) => s + (a.amount || 0), 0);
+  const netCash = received + adjustmentIn - expenses - adjustmentOut;
+
   return {
+    openingBalance,
     received,
-    expenses: periodExpenses,
-    profit,
-    margin: received > 0 ? (profit / received) * 100 : 0,
+    expenses,
+    adjustmentIn,
+    adjustmentOut,
+    netCash,
+    endingBalance: openingBalance + netCash,
+    incomeCount: periodPayments.length,
+    expenseCount: periodExpenses.length,
+  };
+}
+
+export interface ClosedCashSnapshotInput {
+  opening_cash_balance: number | null;
+  cash_in: number | null;
+  cash_out_expenses: number | null;
+  adjustment_in: number | null;
+  adjustment_out: number | null;
+  ending_cash_balance: number | null;
+}
+
+/** Ambil angka kas dari snapshot Tutup Buku (immutable) untuk bulan yang sudah closing. */
+export function cashPeriodFromClosingSnapshot(snapshot: ClosedCashSnapshotInput): CashPeriodTotals {
+  const openingBalance = Number(snapshot.opening_cash_balance) || 0;
+  const received = Number(snapshot.cash_in) || 0;
+  const expenses = Number(snapshot.cash_out_expenses) || 0;
+  const adjustmentIn = Number(snapshot.adjustment_in) || 0;
+  const adjustmentOut = Number(snapshot.adjustment_out) || 0;
+  const netCash = received + adjustmentIn - expenses - adjustmentOut;
+  return {
+    openingBalance,
+    received,
+    expenses,
+    adjustmentIn,
+    adjustmentOut,
+    netCash,
+    endingBalance: Number(snapshot.ending_cash_balance) || openingBalance + netCash,
+    incomeCount: 0,
+    expenseCount: 0,
   };
 }
 

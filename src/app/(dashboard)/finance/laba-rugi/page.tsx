@@ -11,7 +11,7 @@ import RouteGuard from "@/components/RouteGuard";
 import { cn, formatCurrency, formatNumber, localDateStr } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import type { DbFinanceCompanySettings } from "@/lib/supabase";
-import { cashOnHandForClosedPeriod, downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeCashOnHand, summarizeReceivables } from "@/lib/finance";
+import { cashPeriodFromClosingSnapshot, downloadCsv, monthLabel, periodEndDate, periodStartDate, receivableReferenceDate, summarizeCashPeriod, summarizeReceivables } from "@/lib/finance";
 import { exportProfitLossPdf } from "@/lib/finance-profit-loss-report";
 import { fetchMonthEvents, monthStartOf, type DbFinanceMonthEvent, type DbFinanceMonthStatus } from "@/lib/finance-closing";
 
@@ -35,6 +35,7 @@ export default function FinanceLabaRugiPage() {
   const [invoices, setInvoices] = useState<LabaRugiInvoice[]>([]);
   const [payments, setPayments] = useState<LabaRugiPayment[]>([]);
   const [expenses, setExpenses] = useState<{ expense_date: string; amount: number; category: { name: string; color: string } | null }[]>([]);
+  const [adjustments, setAdjustments] = useState<{ adjustment_date: string; type: "Masuk" | "Keluar"; amount: number }[]>([]);
   const [company, setCompany] = useState<DbFinanceCompanySettings | null>(null);
   const [closeStatuses, setCloseStatuses] = useState<DbFinanceMonthStatus[]>([]);
   const [closeEvents, setCloseEvents] = useState<DbFinanceMonthEvent[]>([]);
@@ -51,15 +52,53 @@ export default function FinanceLabaRugiPage() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: invData }, { data: payData }, { data: expData }, settingsRes] = await Promise.all([
-        supabase.from("finance_invoices").select("id, invoice_no, invoice_date, due_date, total_amount, client:finance_clients(contact_name, company_name)"),
-        supabase.from("finance_invoice_payments").select("invoice_id, payment_date, amount"),
-        supabase.from("finance_expenses").select("expense_date, amount, category:finance_expense_categories(name, color)"),
+      const PAGE = 1000;
+      async function fetchPaged(table: string, select: string, orders: { col: string; asc: boolean }[]) {
+        const all: Record<string, unknown>[] = [];
+        let offset = 0;
+        for (;;) {
+          let q = (supabase.from(table as never).select(select) as unknown as {
+            order(col: string, opts: { ascending: boolean }): unknown;
+            range(from: number, to: number): Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+          });
+          for (const o of orders) q = q.order(o.col, { ascending: o.asc }) as typeof q;
+          const { data, error } = await q.range(offset, offset + PAGE - 1);
+          if (error) throw error;
+          const rows = (data ?? []) as Record<string, unknown>[];
+          all.push(...rows);
+          if (rows.length < PAGE) break;
+          offset += PAGE;
+          if (offset > 50000) break;
+        }
+        return all;
+      }
+      const [invRaw, payRaw, expRaw, adjRaw, settingsRes] = await Promise.all([
+        fetchPaged(
+          "finance_invoices",
+          "id, invoice_no, invoice_date, due_date, total_amount, client:finance_clients(contact_name, company_name)",
+          [{ col: "invoice_date", asc: true }, { col: "id", asc: true }],
+        ),
+        fetchPaged(
+          "finance_invoice_payments",
+          "invoice_id, payment_date, amount",
+          [{ col: "payment_date", asc: true }, { col: "invoice_id", asc: true }],
+        ),
+        fetchPaged(
+          "finance_expenses",
+          "expense_date, amount, category:finance_expense_categories(name, color)",
+          [{ col: "expense_date", asc: true }, { col: "id", asc: true }],
+        ),
+        fetchPaged(
+          "finance_cash_adjustments",
+          "adjustment_date, type, amount",
+          [{ col: "adjustment_date", asc: true }, { col: "id", asc: true }],
+        ),
         supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
       ]);
-      if (invData) setInvoices(invData as unknown as LabaRugiInvoice[]);
-      if (payData) setPayments(payData as unknown as LabaRugiPayment[]);
-      if (expData) setExpenses(expData as unknown as typeof expenses);
+      setInvoices(invRaw as unknown as LabaRugiInvoice[]);
+      setPayments(payRaw as unknown as LabaRugiPayment[]);
+      setExpenses(expRaw as unknown as typeof expenses);
+      setAdjustments(adjRaw as unknown as { adjustment_date: string; type: "Masuk" | "Keluar"; amount: number }[]);
       if (settingsRes.data) setCompany(settingsRes.data as DbFinanceCompanySettings);
       try {
         const rpcClient = supabase as unknown as Parameters<typeof fetchMonthEvents>[0];
@@ -134,13 +173,16 @@ export default function FinanceLabaRugiPage() {
     const topExpense = categories[0]?.total || 0;
     const expenseShare = pengeluaran > 0 ? categories.map((c) => ({ ...c, pct: (c.total / pengeluaran) * 100 })) : [];
 
-    return { prefix, pendapatan, pengeluaran, laba, margin, categories, topExpense, expenseShare, countInv: pInvoices.length, countExp: pExpenses.length, invoiceIds: new Set(pInvoices.map((i) => i.id)) };
+    return { prefix, pendapatan, pengeluaran, laba, margin, categories, topExpense, expenseShare, countInv: pInvoices.length, countExp: pExpenses.length };
   }, [invoices, expenses, viewYear, viewMonth]);
 
-  // Semantik Laba On Hand di menu ini (Tutup Buku tidak diubah):
-  // - Mengikuti kohort invoice periode (invoice_date): seluruh pembayaran tercatat
-  //   untuk invoice periode tersebut, termasuk yang dibayar setelah periode berakhir.
-  // - Periode closed: kas mengikuti pembayaran terbaru, beban memakai snapshot Tutup Buku.
+  // Semantik Laba On Hand lama (kohort invoice) dihapus: angka "Laba On Hand" lama
+  // mencampur pembayaran invoice periode dengan pengeluaran periode, sehingga bisa
+  // minus walau kas bertambah. Sekarang dipakai basis kas murni:
+  // - Kas masuk = pembayaran pada periode (payment_date), termasuk pelunasan invoice
+  //   bulan sebelumnya; pendapatan tetap dihitung dari invoice_date agar tidak dobel.
+  // - Kas keluar = pengeluaran pada periode (expense_date).
+  // - Saldo = saldo awal + kas bersih; bulan closed memakai snapshot Tutup Buku.
   const periodStart = useMemo(() => periodStartDate(viewYear, viewMonth), [viewYear, viewMonth]);
   const periodEnd = useMemo(() => periodEndDate(viewYear, viewMonth), [viewYear, viewMonth]);
   const activeCloseEvent = useMemo(() => {
@@ -152,13 +194,17 @@ export default function FinanceLabaRugiPage() {
     return rows[0] ?? null;
   }, [viewMonth, periodStart, closeStatuses, closeEvents]);
   const isClosedPeriod = activeCloseEvent !== null;
-  const cashOnHand = useMemo(() => {
-    const cohort = summarizeCashOnHand(payments, expenses, periodStart, periodEnd, period.invoiceIds);
-    if (activeCloseEvent) {
-      return cashOnHandForClosedPeriod(cohort.received, Number(activeCloseEvent.expense_total) || 0);
-    }
-    return cohort;
-  }, [payments, expenses, periodStart, periodEnd, period, activeCloseEvent]);
+  const cashPeriod = useMemo(() => {
+    if (activeCloseEvent) return cashPeriodFromClosingSnapshot(activeCloseEvent);
+    return summarizeCashPeriod({
+      initialBalance: Number(company?.initial_cash_balance) || 0,
+      payments,
+      expenses,
+      adjustments,
+      periodStart,
+      periodEnd,
+    });
+  }, [payments, expenses, adjustments, company, periodStart, periodEnd, activeCloseEvent]);
   const receivablesLive = useMemo(() => summarizeReceivables(
     invoices.map((i) => ({
       id: i.id,
@@ -259,11 +305,14 @@ export default function FinanceLabaRugiPage() {
       ["Laba Bersih", formatCurrency(displayPeriod.laba)],
       ["Margin Laba", `${displayPeriod.margin.toFixed(2)}%`],
       [],
-      ["Laba On Hand (kohort invoice periode)"],
-      ["Pembayaran invoice periode (termasuk setelah periode)", formatCurrency(cashOnHand.received)],
-      ["Pengeluaran periode", formatCurrency(cashOnHand.expenses)],
-      ["Laba On Hand", formatCurrency(cashOnHand.profit)],
-      ["Margin On Hand", `${cashOnHand.margin.toFixed(2)}%`],
+      ["Kas (berdasar payment_date, semua invoice; piutang tidak dihitung sebagai kas)"],
+      ["Kas masuk periode", formatCurrency(cashPeriod.received)],
+      ["Pengeluaran kas periode", formatCurrency(cashPeriod.expenses)],
+      ["Penyesuaian masuk", formatCurrency(cashPeriod.adjustmentIn)],
+      ["Penyesuaian keluar", formatCurrency(cashPeriod.adjustmentOut)],
+      ["Kas bersih periode", formatCurrency(cashPeriod.netCash)],
+      ["Saldo kas awal periode", formatCurrency(cashPeriod.openingBalance)],
+      ["Saldo kas akhir periode", formatCurrency(cashPeriod.endingBalance)],
       [],
       [`Piutang periode ${periodLabel} (tanpa saldo bulan sebelumnya)`],
       ["Invoice periode ini", formatCurrency(receivables.totalInvoiced)],
@@ -298,10 +347,11 @@ export default function FinanceLabaRugiPage() {
         pengeluaran: displayPeriod.pengeluaran,
         laba: displayPeriod.laba,
         margin: displayPeriod.margin,
-        cashReceived: cashOnHand.received,
-        cashExpenses: cashOnHand.expenses,
-        cashProfit: cashOnHand.profit,
-        cashMargin: cashOnHand.margin,
+        cashReceived: cashPeriod.received,
+        cashExpenses: cashPeriod.expenses,
+        cashNet: cashPeriod.netCash,
+        cashOpening: cashPeriod.openingBalance,
+        cashEnding: cashPeriod.endingBalance,
         totalInvoiced: receivables.totalInvoiced,
         totalPaid: receivables.totalPaid,
         totalReceivable: receivables.totalReceivable,
@@ -338,7 +388,7 @@ export default function FinanceLabaRugiPage() {
   };
 
   const profitTone = displayPeriod.laba >= 0 ? "success" : "danger";
-  const cashProfitTone = cashOnHand.profit >= 0 ? "success" : "danger";
+  const cashNetTone = cashPeriod.netCash >= 0 ? "success" : "danger";
   const deltaIncome = prevPeriod.pendapatan > 0 ? ((displayPeriod.pendapatan - prevPeriod.pendapatan) / prevPeriod.pendapatan) * 100 : 0;
   const deltaExpense = prevPeriod.pengeluaran > 0 ? ((displayPeriod.pengeluaran - prevPeriod.pengeluaran) / prevPeriod.pengeluaran) * 100 : 0;
 
@@ -454,13 +504,15 @@ export default function FinanceLabaRugiPage() {
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-muted-foreground">Laba On Hand</p>
+                <p className="text-xs font-semibold text-muted-foreground">Kas Bersih</p>
                 <div className="w-8 h-8 rounded-lg bg-success-light flex items-center justify-center"><Wallet className="w-4 h-4 text-success" /></div>
               </div>
-              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", cashOnHand.profit >= 0 ? "text-success" : "text-danger")}>
-                {formatCurrency(cashOnHand.profit)}
+              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", cashNetTone === "success" ? "text-success" : "text-danger")}>
+                {formatCurrency(cashPeriod.netCash)}
               </p>
-              <p className="text-[11px] text-muted-foreground mt-1">Pembayaran invoice periode − Pengeluaran</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Saldo kas {formatCurrency(cashPeriod.endingBalance)} • kas masuk − pengeluaran
+              </p>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
@@ -626,22 +678,6 @@ export default function FinanceLabaRugiPage() {
                 <span className="text-muted-foreground flex items-center gap-2"><TrendingDown className="w-4 h-4 text-danger" /> Pengeluaran</span>
                 <span className="font-bold text-danger tabular-nums">{formatCurrency(displayPeriod.pengeluaran)}</span>
               </div>
-              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
-                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Pembayaran invoice periode (termasuk setelah periode)</span>
-                <span className="font-bold text-success tabular-nums">{formatCurrency(cashOnHand.received)}</span>
-              </div>
-              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
-                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-warning" /> {isClosedPeriod ? "Piutang Per Closing (immutable)" : "Piutang periode ini (belum menjadi kas)"}</span>
-                <span className="font-bold text-warning tabular-nums">{formatCurrency(receivables.totalReceivable)}</span>
-              </div>
-              <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", cashProfitTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
-                <span className={cn("flex items-center gap-2", cashProfitTone === "success" ? "text-success" : "text-danger")}>
-                  <Wallet className="w-4 h-4" /> Laba On Hand
-                </span>
-                <span className={cn("tabular-nums text-base", cashProfitTone === "success" ? "text-success" : "text-danger")}>
-                  {formatCurrency(cashOnHand.profit)}
-                </span>
-              </div>
               <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", profitTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
                 <span className={cn("flex items-center gap-2", profitTone === "success" ? "text-success" : "text-danger")}>
                   <PiggyBank className="w-4 h-4" /> Laba Bersih
@@ -650,6 +686,44 @@ export default function FinanceLabaRugiPage() {
                   {formatCurrency(displayPeriod.laba)}
                 </span>
               </div>
+              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-success" /> Kas masuk periode <span className="text-[9px] font-semibold uppercase text-muted-foreground/70">(pembayaran, semua invoice)</span></span>
+                <span className="font-bold text-success tabular-nums">{formatCurrency(cashPeriod.received)}</span>
+              </div>
+              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-danger" /> Pengeluaran kas periode</span>
+                <span className="font-bold text-danger tabular-nums">{formatCurrency(cashPeriod.expenses)}</span>
+              </div>
+              {(cashPeriod.adjustmentIn > 0 || cashPeriod.adjustmentOut > 0) && (
+                <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                  <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-warning" /> Penyesuaian kas (masuk − keluar)</span>
+                  <span className="font-bold text-warning tabular-nums">{formatCurrency(cashPeriod.adjustmentIn - cashPeriod.adjustmentOut)}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-warning" /> {isClosedPeriod ? "Piutang per closing (immutable)" : "Piutang periode ini (belum menjadi kas)"}</span>
+                <span className="font-bold text-warning tabular-nums">{formatCurrency(receivables.totalReceivable)}</span>
+              </div>
+              <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", cashNetTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
+                <span className={cn("flex items-center gap-2", cashNetTone === "success" ? "text-success" : "text-danger")}>
+                  <Wallet className="w-4 h-4" /> Kas Bersih Periode
+                </span>
+                <span className={cn("tabular-nums text-base", cashNetTone === "success" ? "text-success" : "text-danger")}>
+                  {formatCurrency(cashPeriod.netCash)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-muted-foreground" /> Saldo kas awal periode</span>
+                <span className="font-semibold text-foreground tabular-nums">{formatCurrency(cashPeriod.openingBalance)}</span>
+              </div>
+              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-primary" /> Saldo kas akhir periode</span>
+                <span className="font-bold text-primary tabular-nums">{formatCurrency(cashPeriod.endingBalance)}</span>
+              </div>
+              <p className="px-5 py-3 text-[11px] text-muted-foreground bg-muted/20">
+                Laba Bersih memakai nilai invoice periode. Kas Bersih memakai pembayaran yang benar-benar masuk pada periode
+                (termasuk pelunasan invoice bulan sebelumnya); piutang tidak dihitung sebagai kas.
+              </p>
             </div>
           </div>
         </>
