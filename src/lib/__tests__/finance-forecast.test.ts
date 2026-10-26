@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildForecastFilename,
   buildForecastWeeks,
+  chooseDefaultForecastOpening,
   clampDateToWeek,
   computeForecast,
   computeForecastExpenseCategoryTotals,
@@ -11,7 +12,9 @@ import {
   forecastMonthLabel,
   forecastMonthStart,
   normalizeForecastExpenseCategory,
+  normalizeForecastOpeningSource,
   rowsForWeek,
+  savedForecastClosing,
   shiftForecastPeriodKey,
   validateForecastDraft,
   weekNoForDate,
@@ -154,6 +157,55 @@ describe("computeForecast", () => {
     ]);
     expect(summary.closingBalance).toBe(-150_000);
     expect(summary.weeks[0].closing).toBe(-150_000);
+  });
+});
+
+describe("sumber saldo awal forecast", () => {
+  it("menormalkan sumber lama/kosong menjadi manual", () => {
+    expect(normalizeForecastOpeningSource("previous_forecast")).toBe("previous_forecast");
+    expect(normalizeForecastOpeningSource("previous_cash")).toBe("previous_cash");
+    expect(normalizeForecastOpeningSource("manual")).toBe("manual");
+    expect(normalizeForecastOpeningSource(null)).toBe("manual");
+    expect(normalizeForecastOpeningSource("tidak-dikenal")).toBe("manual");
+  });
+
+  it("menghitung saldo akhir Forecast tersimpan", () => {
+    expect(
+      savedForecastClosing({
+        opening_balance: 5_201_112,
+        incomes: [
+          { week_no: 1, amount: 150_000_000 },
+          { week_no: 4, amount: 616_502_127 },
+        ],
+        expenses: [
+          { week_no: 1, amount: 43_926_071, payment: 0, admin: 0 },
+          { week_no: 4, amount: 581_119_752, payment: 0, admin: 45_000 },
+        ],
+      }),
+    ).toBe(146_612_416);
+  });
+
+  it("mendahulukan Forecast, lalu kas aktual, dan tidak memakai nilai negatif", () => {
+    expect(
+      chooseDefaultForecastOpening({
+        forecast: { available: true, value: 12_000_000 },
+        cash: { available: true, value: 9_000_000 },
+      }),
+    ).toEqual({ source: "previous_forecast", value: 12_000_000 });
+
+    expect(
+      chooseDefaultForecastOpening({
+        forecast: { available: true, value: -1 },
+        cash: { available: true, value: 9_000_000 },
+      }),
+    ).toEqual({ source: "previous_cash", value: 9_000_000 });
+
+    expect(
+      chooseDefaultForecastOpening({
+        forecast: { available: false, value: null },
+        cash: { available: false, value: null },
+      }),
+    ).toEqual({ source: "manual", value: 0 });
   });
 });
 

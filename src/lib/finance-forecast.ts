@@ -6,6 +6,8 @@
  * - Saldo minggu = saldo awal + pemasukan − nominal pengeluaran − admin.
  * - Saldo awal minggu berikutnya = saldo akhir minggu sebelumnya.
  * - "Sisa" per pengeluaran = nominal rencana − pembayaran.
+ * - Saldo awal boleh manual atau dari saldo akhir bulan sebelumnya
+ *   (Forecast/kas aktual); nilai tersimpan tidak ditimpa otomatis.
  * - Forecast adalah rencana; tidak menyentuh transaksi aktual Finance.
  */
 
@@ -32,6 +34,63 @@ const FORECAST_MONTH_SHORT = [
 ] as const;
 
 export const FORECAST_WEEK_NO = [1, 2, 3, 4] as const;
+
+// ─── Sumber saldo awal ───
+
+export const FORECAST_OPENING_SOURCES = [
+  "manual",
+  "previous_forecast",
+  "previous_cash",
+] as const;
+
+export type ForecastOpeningSource = (typeof FORECAST_OPENING_SOURCES)[number];
+
+export const FORECAST_OPENING_SOURCE_LABELS: Record<ForecastOpeningSource, string> = {
+  manual: "Input manual",
+  previous_forecast: "Forecast bulan sebelumnya",
+  previous_cash: "Kas aktual bulan sebelumnya",
+};
+
+/** Nilai lama/kosong dianggap manual agar data sebelum fitur ini tetap kompatibel. */
+export function normalizeForecastOpeningSource(
+  value: string | null | undefined,
+): ForecastOpeningSource {
+  return FORECAST_OPENING_SOURCES.includes(value as ForecastOpeningSource)
+    ? (value as ForecastOpeningSource)
+    : "manual";
+}
+
+export interface ForecastOpeningSourceValue {
+  available: boolean;
+  value: number | null;
+}
+
+export interface ForecastOpeningDefault {
+  source: ForecastOpeningSource;
+  value: number;
+}
+
+/**
+ * Sumber awal untuk bulan yang belum pernah disimpan:
+ * pakai saldo akhir Forecast sebelumnya, lalu kas aktual sebelumnya.
+ * Nilai negatif (defisit) tidak dapat dipakai karena saldo awal minimum 0.
+ */
+export function chooseDefaultForecastOpening(args: {
+  forecast: ForecastOpeningSourceValue;
+  cash: ForecastOpeningSourceValue;
+}): ForecastOpeningDefault {
+  if (
+    args.forecast.available &&
+    args.forecast.value != null &&
+    args.forecast.value >= 0
+  ) {
+    return { source: "previous_forecast", value: args.forecast.value };
+  }
+  if (args.cash.available && args.cash.value != null && args.cash.value >= 0) {
+    return { source: "previous_cash", value: args.cash.value };
+  }
+  return { source: "manual", value: 0 };
+}
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -232,6 +291,17 @@ export function computeForecast(
     closingBalance: running,
     netChange: totalIncome - totalNominalOut - totalAdmin,
   };
+}
+
+export interface SavedForecastMonthLike {
+  opening_balance: number;
+  incomes: ForecastIncomeLike[];
+  expenses: ForecastExpenseLike[];
+}
+
+/** Saldo akhir Forecast bulan yang sudah tersimpan (dipakai sebagai sumber bulan berikutnya). */
+export function savedForecastClosing(month: SavedForecastMonthLike): number {
+  return computeForecast(month.opening_balance, month.incomes, month.expenses).closingBalance;
 }
 
 // ─── Kategori pengeluaran ───

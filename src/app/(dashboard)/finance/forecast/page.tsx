@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarRange, Plus, Trash2, Save, FileDown, ChevronDown, ChevronLeft, ChevronRight,
   Search, Loader2, CheckCircle2, Maximize2, Minimize2, ReceiptText, X, RefreshCw, Info, Wallet, Tag,
+  Link2, AlertTriangle,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -19,21 +20,32 @@ import type {
   DbFinanceForecastMonth,
 } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
-import { fmtDate } from "@/lib/finance";
-import { parseFinanceDbError } from "@/lib/finance-closing";
+import { fmtDate, summarizeCashPeriod } from "@/lib/finance";
+import {
+  FINANCE_BOOKS_START_MONTH,
+  isMonthEnded,
+  monthEndOf,
+  parseFinanceDbError,
+  type DbFinanceMonthStatus,
+} from "@/lib/finance-closing";
 import {
   buildForecastWeeks,
+  chooseDefaultForecastOpening,
   clampDateToWeek,
   computeForecast,
   computeForecastExpenseCategoryTotals,
   DEFAULT_FORECAST_EXPENSE_CATEGORY,
   FORECAST_EXPENSE_CATEGORIES,
+  FORECAST_OPENING_SOURCE_LABELS,
   forecastMonthLabel,
   forecastMonthStart,
   normalizeForecastExpenseCategory,
+  normalizeForecastOpeningSource,
+  savedForecastClosing,
   shiftForecastPeriodKey,
   validateForecastDraft,
   type ForecastExpenseCategoryTotal,
+  type ForecastOpeningSource,
   type ForecastSummary,
   type ForecastWeek,
   type ForecastWeekNo,
@@ -83,9 +95,87 @@ interface InvoiceOption {
   clientCompany: string;
 }
 
-function draftSnapshot(openingBalance: number, incomes: DraftIncome[], expenses: DraftExpense[]): string {
+interface OpeningSourceInfo {
+  available: boolean;
+  value: number | null;
+  detail: string;
+}
+
+interface OpeningSourcesState {
+  previousForecast: OpeningSourceInfo;
+  previousCash: OpeningSourceInfo;
+}
+
+async function fetchForecastMonthRows(monthId: number) {
+  const [incRes, expRes] = await Promise.all([
+    supabase
+      .from("finance_forecast_incomes")
+      .select("*")
+      .eq("month_id", monthId)
+      .order("week_no", { ascending: true })
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true }),
+    supabase
+      .from("finance_forecast_expenses")
+      .select("*")
+      .eq("month_id", monthId)
+      .order("week_no", { ascending: true })
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true }),
+  ]);
+  if (incRes.error) throw incRes.error;
+  if (expRes.error) throw expRes.error;
+  return {
+    incomes: (incRes.data ?? []) as DbFinanceForecastIncome[],
+    expenses: (expRes.data ?? []) as DbFinanceForecastExpense[],
+  };
+}
+
+async function fetchFinanceRowsThrough<T>(args: {
+  table: string;
+  select: string;
+  dateColumn: string;
+  to: string;
+}): Promise<T[]> {
+  const pageSize = 1000;
+  const rows: T[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from(args.table)
+      .select(args.select)
+      .lte(args.dateColumn, args.to)
+      .order(args.dateColumn, { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as T[];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  return rows;
+}
+
+function openingSourceUsable(info: OpeningSourceInfo): boolean {
+  return info.available && info.value != null && info.value >= 0;
+}
+
+function openingSourceOptionLabel(info: OpeningSourceInfo): string {
+  if (!info.available || info.value == null) return "Belum ada data";
+  if (info.value < 0) return `Defisit ${formatCurrency(info.value)}`;
+  return formatCurrency(info.value);
+}
+
+function draftSnapshot(
+  openingBalance: number,
+  openingSource: ForecastOpeningSource,
+  incomes: DraftIncome[],
+  expenses: DraftExpense[],
+): string {
   return JSON.stringify({
     openingBalance,
+    openingSource,
     incomes: incomes.map((r) => ({
       weekNo: r.weekNo,
       plannedDate: r.plannedDate,
@@ -534,6 +624,19 @@ export default function FinanceForecastPage() {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState<"pdf" | "xlsx" | null>(null);
   const [openingBalance, setOpeningBalance] = useState(0);
+  const [openingSource, setOpeningSource] = useState<ForecastOpeningSource>("manual");
+  const [openingSources, setOpeningSources] = useState<OpeningSourcesState>({
+    previousForecast: {
+      available: false,
+      value: null,
+      detail: "Forecast bulan sebelumnya belum tersedia",
+    },
+    previousCash: {
+      available: false,
+      value: null,
+      detail: "Kas aktual bulan sebelumnya belum tersedia",
+    },
+  });
   const [incomes, setIncomes] = useState<DraftIncome[]>([]);
   const [expenses, setExpenses] = useState<DraftExpense[]>([]);
   const [version, setVersion] = useState(0);
@@ -587,10 +690,63 @@ export default function FinanceForecastPage() {
   );
 
   const currentSnapshot = useMemo(
-    () => draftSnapshot(openingBalance, incomes, expenses),
-    [openingBalance, incomes, expenses],
+    () => draftSnapshot(openingBalance, openingSource, incomes, expenses),
+    [openingBalance, openingSource, incomes, expenses],
   );
   const dirty = snapshot !== "" && currentSnapshot !== snapshot;
+
+  const activeOpeningSourceInfo = useMemo(() => {
+    if (openingSource === "previous_forecast") return openingSources.previousForecast;
+    if (openingSource === "previous_cash") return openingSources.previousCash;
+    return null;
+  }, [openingSource, openingSources]);
+  const canApplyOpeningSource =
+    activeOpeningSourceInfo?.available === true &&
+    activeOpeningSourceInfo.value != null &&
+    activeOpeningSourceInfo.value >= 0;
+  const openingSourceValueChanged =
+    canApplyOpeningSource && openingBalance !== activeOpeningSourceInfo?.value;
+  const openingSourceExportLabel = useMemo(() => {
+    if (openingSource === "manual") return FORECAST_OPENING_SOURCE_LABELS.manual;
+    return activeOpeningSourceInfo?.detail ??
+      FORECAST_OPENING_SOURCE_LABELS[openingSource];
+  }, [activeOpeningSourceInfo, openingSource]);
+  const openingSourceStatus = useMemo(() => {
+    if (openingSource === "manual") {
+      return {
+        tone: "muted" as const,
+        text: "Saldo awal diisi manual. Nilai tersimpan tidak berubah otomatis.",
+      };
+    }
+    if (!activeOpeningSourceInfo?.available) {
+      return {
+        tone: "warning" as const,
+        text: `${activeOpeningSourceInfo?.detail ?? "Sumber saldo awal"} • Belum ada data.`,
+      };
+    }
+    if (activeOpeningSourceInfo.value == null) {
+      return {
+        tone: "warning" as const,
+        text: `${activeOpeningSourceInfo.detail} • Belum ada data.`,
+      };
+    }
+    if (activeOpeningSourceInfo.value < 0) {
+      return {
+        tone: "warning" as const,
+        text: `${activeOpeningSourceInfo.detail} • Defisit ${formatCurrency(activeOpeningSourceInfo.value)}; tidak dapat dipakai sebagai saldo awal.`,
+      };
+    }
+    if (openingBalance !== activeOpeningSourceInfo.value) {
+      return {
+        tone: "warning" as const,
+        text: `${activeOpeningSourceInfo.detail} • Nilai sumber ${formatCurrency(activeOpeningSourceInfo.value)}. Klik Ambil ulang untuk memperbarui.`,
+      };
+    }
+    return {
+      tone: "success" as const,
+      text: `${activeOpeningSourceInfo.detail} • Sesuai nilai sumber ${formatCurrency(activeOpeningSourceInfo.value)}.`,
+    };
+  }, [activeOpeningSourceInfo, openingBalance, openingSource]);
 
   const usedInvoiceIds = useMemo(
     () => new Set(incomes.filter((r) => r.invoiceId != null).map((r) => r.invoiceId as number)),
@@ -602,64 +758,184 @@ export default function FinanceForecastPage() {
       setLoading(true);
       try {
         const start = forecastMonthStart(key);
-        const [monthRes, companyRes] = await Promise.all([
+        const previousKey = shiftForecastPeriodKey(key, -1);
+        const previousStart = forecastMonthStart(previousKey);
+        const statusQuery = supabase
+          .from("finance_month_status" as never)
+          .select("*")
+          .eq("period_start", previousStart)
+          .maybeSingle() as unknown as Promise<{
+            data: DbFinanceMonthStatus | null;
+            error: unknown;
+          }>;
+        const [monthRes, companyRes, previousMonthRes, statusRes] = await Promise.all([
           supabase.from("finance_forecast_months").select("*").eq("period_start", start).maybeSingle(),
           supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
+          supabase.from("finance_forecast_months").select("*").eq("period_start", previousStart).maybeSingle(),
+          statusQuery,
         ]);
         if (monthRes.error) throw monthRes.error;
         if (companyRes.error) throw companyRes.error;
+        if (previousMonthRes.error) throw previousMonthRes.error;
 
         const month = (monthRes.data ?? null) as DbFinanceForecastMonth | null;
-        let nextIncomes: DraftIncome[] = [];
-        let nextExpenses: DraftExpense[] = [];
+        const previousMonth = (previousMonthRes.data ?? null) as DbFinanceForecastMonth | null;
+        const settings = (companyRes.data ?? null) as DbFinanceCompanySettings | null;
+        const [currentRows, previousRows] = await Promise.all([
+          month
+            ? fetchForecastMonthRows(month.id)
+            : Promise.resolve({
+                incomes: [] as DbFinanceForecastIncome[],
+                expenses: [] as DbFinanceForecastExpense[],
+              }),
+          previousMonth
+            ? fetchForecastMonthRows(previousMonth.id)
+            : Promise.resolve({
+                incomes: [] as DbFinanceForecastIncome[],
+                expenses: [] as DbFinanceForecastExpense[],
+              }),
+        ]);
 
-        if (month) {
-          const [incRes, expRes] = await Promise.all([
-            supabase
-              .from("finance_forecast_incomes")
-              .select("*")
-              .eq("month_id", month.id)
-              .order("week_no", { ascending: true })
-              .order("sort_order", { ascending: true })
-              .order("id", { ascending: true }),
-            supabase
-              .from("finance_forecast_expenses")
-              .select("*")
-              .eq("month_id", month.id)
-              .order("week_no", { ascending: true })
-              .order("sort_order", { ascending: true })
-              .order("id", { ascending: true }),
-          ]);
-          if (incRes.error) throw incRes.error;
-          if (expRes.error) throw expRes.error;
+        const nextIncomes: DraftIncome[] = currentRows.incomes.map((r) => ({
+          key: `db-inc-${r.id}`,
+          weekNo: r.week_no as ForecastWeekNo,
+          plannedDate: r.planned_date,
+          description: r.description,
+          amount: Number(r.amount) || 0,
+          invoiceId: r.invoice_id,
+        }));
+        const nextExpenses: DraftExpense[] = currentRows.expenses.map((r) => ({
+          key: `db-exp-${r.id}`,
+          weekNo: r.week_no as ForecastWeekNo,
+          plannedDate: r.planned_date,
+          description: r.description,
+          amount: Number(r.amount) || 0,
+          payment: Number(r.payment) || 0,
+          admin: Number(r.admin) || 0,
+          category: normalizeForecastExpenseCategory(r.category),
+        }));
 
-          nextIncomes = ((incRes.data ?? []) as DbFinanceForecastIncome[]).map((r) => ({
-            key: `db-inc-${r.id}`,
-            weekNo: r.week_no as ForecastWeekNo,
-            plannedDate: r.planned_date,
-            description: r.description,
-            amount: Number(r.amount) || 0,
-            invoiceId: r.invoice_id,
-          }));
-          nextExpenses = ((expRes.data ?? []) as DbFinanceForecastExpense[]).map((r) => ({
-            key: `db-exp-${r.id}`,
-            weekNo: r.week_no as ForecastWeekNo,
-            plannedDate: r.planned_date,
-            description: r.description,
-            amount: Number(r.amount) || 0,
-            payment: Number(r.payment) || 0,
-            admin: Number(r.admin) || 0,
-            category: normalizeForecastExpenseCategory(r.category),
-          }));
+        const previousLabel = forecastMonthLabel(previousKey);
+        const previousForecastInfo: OpeningSourceInfo = previousMonth
+          ? {
+              available: true,
+              value: savedForecastClosing({
+                opening_balance: Number(previousMonth.opening_balance) || 0,
+                incomes: previousRows.incomes.map((r) => ({
+                  week_no: r.week_no,
+                  amount: Number(r.amount) || 0,
+                })),
+                expenses: previousRows.expenses.map((r) => ({
+                  week_no: r.week_no,
+                  amount: Number(r.amount) || 0,
+                  payment: Number(r.payment) || 0,
+                  admin: Number(r.admin) || 0,
+                })),
+              }),
+              detail: `Saldo akhir Forecast ${previousLabel}`,
+            }
+          : {
+              available: false,
+              value: null,
+              detail: `Forecast ${previousLabel} belum tersedia`,
+            };
+
+        let previousCashInfo: OpeningSourceInfo;
+        const booksStart = settings?.books_start_month || FINANCE_BOOKS_START_MONTH;
+        const previousStatus = statusRes.error ? null : statusRes.data;
+        if (previousStart < booksStart) {
+          previousCashInfo = {
+            available: false,
+            value: null,
+            detail: `Kas aktual ${previousLabel} belum tersedia (sebelum awal pembukuan)`,
+          };
+        } else if (
+          previousStatus?.state === "close" &&
+          previousStatus.ending_cash_balance != null
+        ) {
+          previousCashInfo = {
+            available: true,
+            value: Number(previousStatus.ending_cash_balance) || 0,
+            detail: `Saldo akhir Tutup Buku ${previousLabel}`,
+          };
+        } else if (!isMonthEnded(previousStart, localDateStr())) {
+          previousCashInfo = {
+            available: false,
+            value: null,
+            detail: `Kas aktual ${previousLabel} belum tersedia (bulan belum berakhir)`,
+          };
+        } else {
+          try {
+            const previousEnd = monthEndOf(previousStart);
+            const [payments, expenses, adjustments] = await Promise.all([
+              fetchFinanceRowsThrough<{ payment_date: string; amount: number }>({
+                table: "finance_invoice_payments",
+                select: "payment_date, amount",
+                dateColumn: "payment_date",
+                to: previousEnd,
+              }),
+              fetchFinanceRowsThrough<{ expense_date: string; amount: number }>({
+                table: "finance_expenses",
+                select: "expense_date, amount",
+                dateColumn: "expense_date",
+                to: previousEnd,
+              }),
+              fetchFinanceRowsThrough<{
+                adjustment_date: string;
+                type: "Masuk" | "Keluar";
+                amount: number;
+              }>({
+                table: "finance_cash_adjustments",
+                select: "adjustment_date, type, amount",
+                dateColumn: "adjustment_date",
+                to: previousEnd,
+              }),
+            ]);
+            const liveCash = summarizeCashPeriod({
+              initialBalance: Number(settings?.initial_cash_balance) || 0,
+              payments,
+              expenses,
+              adjustments,
+              periodStart: previousStart,
+              periodEnd: previousEnd,
+            });
+            previousCashInfo = {
+              available: true,
+              value: liveCash.endingBalance,
+              detail: `Saldo akhir kas aktual ${previousLabel}`,
+            };
+          } catch {
+            previousCashInfo = {
+              available: false,
+              value: null,
+              detail: `Kas aktual ${previousLabel} gagal dimuat`,
+            };
+          }
         }
 
-        const opening = Number(month?.opening_balance) || 0;
+        setOpeningSources({
+          previousForecast: previousForecastInfo,
+          previousCash: previousCashInfo,
+        });
+
+        let opening = Number(month?.opening_balance) || 0;
+        let source = normalizeForecastOpeningSource(month?.opening_source);
+        if (!month) {
+          const fallback = chooseDefaultForecastOpening({
+            forecast: previousForecastInfo,
+            cash: previousCashInfo,
+          });
+          opening = fallback.value;
+          source = fallback.source;
+        }
+
         setOpeningBalance(opening);
+        setOpeningSource(source);
         setIncomes(nextIncomes);
         setExpenses(nextExpenses);
         setVersion(month?.version ?? 0);
-        setSnapshot(draftSnapshot(opening, nextIncomes, nextExpenses));
-        setCompany((companyRes.data ?? null) as DbFinanceCompanySettings | null);
+        setSnapshot(draftSnapshot(opening, source, nextIncomes, nextExpenses));
+        setCompany(settings);
       } catch (err) {
         addToast("error", parseFinanceDbError(err));
       } finally {
@@ -743,6 +1019,37 @@ export default function FinanceForecastPage() {
 
   const updateExpense = (key: string, patch: Partial<DraftExpense>) => {
     setExpenses((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  };
+
+  const handleOpeningSourceChange = (source: ForecastOpeningSource) => {
+    if (!canInput) return;
+    setOpeningSource(source);
+    if (source === "manual") return;
+    const info = source === "previous_forecast"
+      ? openingSources.previousForecast
+      : openingSources.previousCash;
+    if (info.available && info.value != null && info.value >= 0) {
+      setOpeningBalance(info.value);
+    }
+  };
+
+  const handleOpeningBalanceChange = (value: number) => {
+    setOpeningBalance(value);
+    if (openingSource !== "manual") setOpeningSource("manual");
+  };
+
+  const applyOpeningSource = () => {
+    if (!canInput || !activeOpeningSourceInfo) return;
+    if (!activeOpeningSourceInfo.available) {
+      addToast("error", "Belum ada data untuk sumber saldo awal ini.");
+      return;
+    }
+    if (activeOpeningSourceInfo.value == null || activeOpeningSourceInfo.value < 0) {
+      addToast("error", "Saldo akhir sumber negatif (defisit) sehingga tidak dapat dipakai sebagai saldo awal.");
+      return;
+    }
+    setOpeningBalance(activeOpeningSourceInfo.value);
+    addToast("success", `Saldo awal diambil dari ${activeOpeningSourceInfo.detail}.`);
   };
 
   // ─── Invoice picker ───
@@ -889,6 +1196,7 @@ export default function FinanceForecastPage() {
       const { data, error } = await supabase.rpc("save_finance_forecast", {
         p_period_start: forecastMonthStart(periodKey),
         p_opening_balance: Math.round(openingBalance),
+        p_opening_source: openingSource,
         p_version: version,
         p_notes: null,
         p_incomes: mappedIncomes,
@@ -899,7 +1207,7 @@ export default function FinanceForecastPage() {
       const result = (data ?? null) as { month_id?: number; version?: number } | null;
       const nextVersion = result?.version ?? version + 1;
       setVersion(nextVersion);
-      setSnapshot(draftSnapshot(openingBalance, incomes, expenses));
+      setSnapshot(draftSnapshot(openingBalance, openingSource, incomes, expenses));
 
       await logAudit({
         supabase,
@@ -911,6 +1219,7 @@ export default function FinanceForecastPage() {
           period_start: forecastMonthStart(periodKey),
           version: nextVersion,
           opening_balance: Math.round(openingBalance),
+          opening_source: openingSource,
           income_count: incomes.length,
           expense_count: expenses.length,
           total_income: summary.totalIncome,
@@ -936,6 +1245,7 @@ export default function FinanceForecastPage() {
       const args = {
         periodKey,
         openingBalance,
+        openingSource: openingSourceExportLabel,
         incomes: incomes.map((r) => ({
           week_no: r.weekNo,
           planned_date: r.plannedDate,
@@ -1129,58 +1439,125 @@ export default function FinanceForecastPage() {
 
           {/* Lembar kerja */}
           <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="flex flex-col lg:flex-row lg:items-center gap-3 p-4 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
-                  <CalendarRange className="w-4 h-4 text-primary" />
+            <div className="border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+              <div className="flex flex-col lg:flex-row lg:items-center gap-3 p-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center">
+                    <CalendarRange className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-foreground">Lembar Forecast — {forecastMonthLabel(periodKey)}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Minggu 1–7, 8–14, 15–21, 22–akhir bulan • nominal rencana
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-bold text-foreground">Lembar Forecast — {forecastMonthLabel(periodKey)}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Minggu 1–7, 8–14, 15–21, 22–akhir bulan • nominal rencana
-                  </p>
+                <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setCategoryOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors"
+                    title="Atur kategori rekap pengeluaran"
+                  >
+                    <Tag className="w-3.5 h-3.5 text-danger" />
+                    Atur Kategori
+                  </button>
+                  {dirty && (
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-warning bg-warning-light px-2.5 py-1 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
+                      Belum disimpan
+                    </span>
+                  )}
+                  {version > 0 && (
+                    <span className="text-[10px] text-muted-foreground font-medium">versi {version}</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={reload}
+                    disabled={loading || saving}
+                    className="p-2 rounded-xl border border-border hover:bg-muted disabled:opacity-40"
+                    title="Muat ulang data"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
-                <div className="flex items-center gap-2 bg-muted/50 rounded-xl px-3 py-1.5 border border-border">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Saldo Awal
-                  </span>
-                  <CurrencyInput
-                    value={openingBalance}
-                    onChange={setOpeningBalance}
-                    size="sm"
-                    disabled={!canInput}
-                    className="w-32 border-0 bg-transparent font-bold"
-                  />
+
+              <div className="px-4 pb-3">
+                <div className="rounded-xl border border-border bg-muted/40 p-2.5">
+                  <div className="flex flex-col xl:flex-row xl:items-center gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <Link2 className="w-3.5 h-3.5" />
+                        Sumber Saldo Awal
+                      </span>
+                      <select
+                        value={openingSource}
+                        onChange={(e) => handleOpeningSourceChange(e.target.value as ForecastOpeningSource)}
+                        disabled={!canInput}
+                        className="w-full sm:w-[270px] rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-semibold text-foreground outline-none focus:border-primary disabled:cursor-default disabled:opacity-70"
+                      >
+                        <option value="manual">{FORECAST_OPENING_SOURCE_LABELS.manual}</option>
+                        <option
+                          value="previous_forecast"
+                          disabled={!openingSourceUsable(openingSources.previousForecast)}
+                        >
+                          {FORECAST_OPENING_SOURCE_LABELS.previous_forecast} — {openingSourceOptionLabel(openingSources.previousForecast)}
+                        </option>
+                        <option
+                          value="previous_cash"
+                          disabled={!openingSourceUsable(openingSources.previousCash)}
+                        >
+                          {FORECAST_OPENING_SOURCE_LABELS.previous_cash} — {openingSourceOptionLabel(openingSources.previousCash)}
+                        </option>
+                      </select>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 xl:ml-auto">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Saldo Awal
+                      </span>
+                      <CurrencyInput
+                        value={openingBalance}
+                        onChange={handleOpeningBalanceChange}
+                        size="sm"
+                        disabled={!canInput}
+                        className="w-36 border-border bg-card font-bold"
+                      />
+                      {openingSource !== "manual" && (
+                        <button
+                          type="button"
+                          onClick={applyOpeningSource}
+                          disabled={!canInput || !canApplyOpeningSource || !openingSourceValueChanged}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[10px] font-bold text-foreground hover:bg-muted disabled:cursor-default disabled:opacity-45"
+                          title="Ambil ulang saldo akhir dari sumber terpilih"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Ambil ulang
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <p
+                    className={cn(
+                      "mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed",
+                      openingSourceStatus.tone === "warning"
+                        ? "text-warning"
+                        : openingSourceStatus.tone === "success"
+                          ? "text-success"
+                          : "text-muted-foreground",
+                    )}
+                  >
+                    {openingSourceStatus.tone === "warning" ? (
+                      <AlertTriangle className="mt-0.5 w-3 h-3 shrink-0" />
+                    ) : (
+                      <Info className="mt-0.5 w-3 h-3 shrink-0" />
+                    )}
+                    <span>{openingSourceStatus.text}</span>
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setCategoryOpen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors"
-                  title="Atur kategori rekap pengeluaran"
-                >
-                  <Tag className="w-3.5 h-3.5 text-danger" />
-                  Atur Kategori
-                </button>
-                {dirty && (
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-warning bg-warning-light px-2.5 py-1 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
-                    Belum disimpan
-                  </span>
-                )}
-                {version > 0 && (
-                  <span className="text-[10px] text-muted-foreground font-medium">versi {version}</span>
-                )}
-                <button
-                  type="button"
-                  onClick={reload}
-                  disabled={loading || saving}
-                  className="p-2 rounded-xl border border-border hover:bg-muted disabled:opacity-40"
-                  title="Muat ulang data"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+                <p className="mt-1.5 text-[10px] text-muted-foreground">
+                  Piutang tidak dihitung sebagai saldo awal karena belum menjadi kas. Nilai tersimpan tidak ditimpa otomatis.
+                </p>
               </div>
             </div>
 

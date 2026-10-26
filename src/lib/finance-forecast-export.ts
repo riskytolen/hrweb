@@ -50,6 +50,8 @@ export interface ForecastExpenseExportRow extends ForecastExpenseLike {
 export interface ForecastExportInput {
   periodKey: string;
   openingBalance: number;
+  /** Keterangan asal saldo awal, mis. "Kas aktual September 2026". */
+  openingSource?: string | null;
   incomes: ForecastIncomeExportRow[];
   expenses: ForecastExpenseExportRow[];
   company: ForecastCompanyInfo;
@@ -353,6 +355,14 @@ export async function exportForecastPdf(args: ForecastExportInput): Promise<stri
     ["Saldo Akhir Forecast", rp(summary.closingBalance)],
   ]);
 
+  if (args.openingSource) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(MUTED[0], MUTED[1], MUTED[2]);
+    doc.text(`Sumber saldo awal: ${args.openingSource}`, margin, y - 2.5);
+    y += 4;
+  }
+
   const body: unknown[] = [];
   for (const week of weeks) {
     body.push(
@@ -639,6 +649,9 @@ export async function exportForecastXlsx(args: ForecastExportInput): Promise<str
     "Dicetak",
     new Date().toLocaleString("id-ID"),
   ]);
+  if (args.openingSource) {
+    rows.push(["Sumber Saldo Awal", args.openingSource]);
+  }
   rows.push([]);
 
   for (const week of weeks) {
