@@ -600,6 +600,40 @@ export function summarizePriorReceivablesFromSnapshot(
   };
 }
 
+export interface OutstandingReceivableSummary {
+  /** Total sisa seluruh invoice yang sudah terbit sampai tanggal acuan. */
+  total: number;
+  /** Jumlah invoice yang masih memiliki sisa > 0. */
+  count: number;
+}
+
+/**
+ * Total piutang keseluruhan per tanggal acuan (termasuk invoice bulan sebelumnya).
+ * Pembayaran setelah tanggal acuan tidak mengurangi piutang.
+ */
+export function summarizeOutstandingReceivables(
+  invoices: { id: number; invoice_date: string; total_amount: number }[],
+  payments: { invoice_id: number; payment_date: string; amount: number }[],
+  asOf: string,
+): OutstandingReceivableSummary {
+  const paidByInvoice = new Map<number, number>();
+  for (const p of payments) {
+    if (p.payment_date > asOf) continue;
+    paidByInvoice.set(p.invoice_id, (paidByInvoice.get(p.invoice_id) ?? 0) + (p.amount || 0));
+  }
+
+  let total = 0;
+  let count = 0;
+  for (const inv of invoices) {
+    if (!inv.invoice_date || inv.invoice_date > asOf) continue;
+    const remaining = Math.max(0, (inv.total_amount || 0) - (paidByInvoice.get(inv.id) ?? 0));
+    total += remaining;
+    if (remaining > 0) count += 1;
+  }
+
+  return { total, count };
+}
+
 export function csvEscape(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const s = String(value);

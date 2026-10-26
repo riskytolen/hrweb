@@ -9,6 +9,8 @@
  * - Saldo Akhir = saldo awal periode + kas masuk periode − kas keluar periode.
  * - Search dan filter Masuk/Keluar hanya filter tampilan; tidak mengubah
  *   saldo awal, total periode, maupun saldo akhir.
+ * - Total piutang dan Selisih + Piutang bersifat informatif; piutang belum
+ *   menjadi kas dan tidak mengubah saldo kas.
  */
 
 import { downscaleDataUrl } from "./pdf-logo";
@@ -424,6 +426,8 @@ function addReportFooter(pdf: PdfDoc, companyName: string, reportLabel: string):
 export async function exportCashFlowPdf(args: {
   entries: CashPeriodEntry[];
   summary: CashPeriodSummary;
+  receivables?: { total: number; count: number };
+  netPlusReceivables?: number;
   from: string;
   to: string;
   company: CashCompanyInfo;
@@ -443,12 +447,17 @@ export async function exportCashFlowPdf(args: {
   drawReportHeader(doc, { pageWidth, margin, company: args.company, logoDataUrl, periodLabel });
 
   let y = 42;
-  y = drawSummaryCards(doc, margin, pageWidth, y, [
+  const summaryCards: [string, string][] = [
     ["Saldo Awal", formatRupiah(args.summary.openingBalance)],
     ["Kas Masuk", formatRupiah(args.summary.totalIn)],
     ["Kas Keluar", formatRupiah(args.summary.totalOut)],
     ["Saldo Akhir", formatRupiah(args.summary.endingBalance)],
-  ]);
+  ];
+  if (args.receivables) {
+    summaryCards.push(["Total Piutang", formatRupiah(args.receivables.total)]);
+    summaryCards.push(["Selisih + Piutang", formatRupiah(args.netPlusReceivables ?? 0)]);
+  }
+  y = drawSummaryCards(doc, margin, pageWidth, y, summaryCards);
 
   const body = args.entries.map((e, i) => [
     String(i + 1),

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Landmark, Plus, Search, Pencil, Trash2, X, RefreshCw, FileDown, ChevronDown,
-  AlertTriangle, ArrowUpRight, ArrowDownRight, Wallet, Scale,
+  AlertTriangle, ArrowUpRight, ArrowDownRight, Wallet, Scale, Receipt, PiggyBank,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -16,7 +16,7 @@ import { supabase } from "@/lib/supabase";
 import type { DbFinanceCashAdjustment, DbFinanceCompanySettings } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
 import { useAuth } from "@/components/AuthProvider";
-import { downloadCsv, fmtDate } from "@/lib/finance";
+import { downloadCsv, fmtDate, summarizeOutstandingReceivables } from "@/lib/finance";
 import {
   computeCashFlowPeriod, buildCashFlowFilename, exportCashFlowPdf, formatCashPeriodLabel,
 } from "@/lib/finance-cash-flow-report";
@@ -34,7 +34,8 @@ export default function FinanceArusKasPage() {
 
   const [loading, setLoading] = useState(true);
   const [initialBalance, setInitialBalance] = useState(0);
-  const [payments, setPayments] = useState<{ id: number; payment_date: string; amount: number; method: string | null; invoice_no: string; client_name: string | null }[]>([]);
+  const [invoices, setInvoices] = useState<{ id: number; invoice_date: string; total_amount: number }[]>([]);
+  const [payments, setPayments] = useState<{ id: number; invoice_id: number; payment_date: string; amount: number; method: string | null; invoice_no: string; client_name: string | null }[]>([]);
   const [expenses, setExpenses] = useState<{ id: number; expense_date: string; amount: number; method: string | null; description: string; category_name: string | null }[]>([]);
   const [adjustments, setAdjustments] = useState<DbFinanceCashAdjustment[]>([]);
   const [search, setSearch] = useState("");
@@ -94,9 +95,10 @@ export default function FinanceArusKasPage() {
         }
         return all;
       }
-      const [settingsRes, payRaw, expRaw, adjRaw] = await Promise.all([
+      const [settingsRes, invRaw, payRaw, expRaw, adjRaw] = await Promise.all([
         supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
-        fetchPaged("finance_invoice_payments", "id, payment_date, amount, method, invoice:finance_invoices(invoice_no, client:finance_clients(contact_name, company_name))", [{ col: "payment_date", asc: true }, { col: "id", asc: true }]),
+        fetchPaged("finance_invoices", "id, invoice_date, total_amount", [{ col: "invoice_date", asc: true }, { col: "id", asc: true }]),
+        fetchPaged("finance_invoice_payments", "id, invoice_id, payment_date, amount, method, invoice:finance_invoices(invoice_no, client:finance_clients(contact_name, company_name))", [{ col: "payment_date", asc: true }, { col: "id", asc: true }]),
         fetchPaged("finance_expenses", "id, expense_date, amount, method, description, category:finance_expense_categories(name)", [{ col: "expense_date", asc: true }, { col: "id", asc: true }]),
         fetchPaged("finance_cash_adjustments", "*", [{ col: "adjustment_date", asc: true }, { col: "id", asc: true }]),
       ]);
@@ -106,8 +108,10 @@ export default function FinanceArusKasPage() {
         setInitialBalance(Number(settingsData.initial_cash_balance) || 0);
         setCompany(settingsData);
       }
-      setPayments((payRaw as unknown as { id: number; payment_date: string; amount: number; method: string | null; invoice: { invoice_no: string; client: { contact_name: string; company_name: string | null } | null } | null }[]).map((p) => ({
+      setInvoices(invRaw as unknown as { id: number; invoice_date: string; total_amount: number }[]);
+      setPayments((payRaw as unknown as { id: number; invoice_id: number; payment_date: string; amount: number; method: string | null; invoice: { invoice_no: string; client: { contact_name: string; company_name: string | null } | null } | null }[]).map((p) => ({
         id: p.id,
+        invoice_id: p.invoice_id,
         payment_date: p.payment_date,
         amount: p.amount,
         method: p.method,
@@ -147,6 +151,13 @@ export default function FinanceArusKasPage() {
   );
   const stats = period.summary;
   const periodLabel = useMemo(() => formatCashPeriodLabel(dateFrom, dateTo), [dateFrom, dateTo]);
+  // Piutang dihitung per akhir periode filter (atau hari ini bila tanpa batas akhir).
+  const receivablesAsOf = useMemo(
+    () => summarizeOutstandingReceivables(invoices, payments, dateTo || localDateStr()),
+    [invoices, payments, dateTo],
+  );
+  const netPlusReceivables = stats.net + receivablesAsOf.total;
+  const receivablesRefLabel = dateTo ? fmtDate(dateTo) : "hari ini";
 
   const filtered = useMemo(() => {
     const s = search.toLowerCase();
@@ -245,6 +256,10 @@ export default function FinanceArusKasPage() {
       ...filtered.map((e, i) => [i + 1, e.tanggal, e.type === "payment" ? "Pembayaran" : e.type === "expense" ? "Pengeluaran" : "Penyesuaian", e.label, e.detail, e.method || "", e.masuk, e.keluar, e.balance]),
       ["", "", "", `Total (${filtered.length} baris tampil)`, "", "", shownIn, shownOut, ""],
       ["Saldo Akhir Periode", stats.endingBalance],
+      ["Total Piutang", receivablesAsOf.total],
+      ["Invoice Belum Lunas", receivablesAsOf.count],
+      ["Selisih Bersih + Piutang", netPlusReceivables],
+      ["Catatan", "Selisih + piutang bukan saldo kas; piutang belum tentu tertagih."],
     ];
     downloadCsv(buildCashFlowFilename("csv", dateFrom, dateTo), rows);
     setShowExportMenu(false);
@@ -256,6 +271,8 @@ export default function FinanceArusKasPage() {
       await exportCashFlowPdf({
         entries: period.entries,
         summary: stats,
+        receivables: { total: receivablesAsOf.total, count: receivablesAsOf.count },
+        netPlusReceivables,
         from: dateFrom,
         to: dateTo,
         company: companyInfo,
@@ -300,7 +317,7 @@ export default function FinanceArusKasPage() {
       />
 
       {/* KPI */}
-      <div className="grid gap-3 sm:gap-4 grid-cols-2 xl:grid-cols-4 mb-4">
+      <div className="grid gap-3 sm:gap-4 grid-cols-2 xl:grid-cols-3 mb-4">
         <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold text-muted-foreground">Saldo Kas</p>
@@ -334,6 +351,22 @@ export default function FinanceArusKasPage() {
             {stats.net >= 0 ? "+" : "−"}{formatCurrency(Math.abs(stats.net))}
           </p>
           <p className="text-[11px] text-muted-foreground mt-1">Kas masuk − kas keluar</p>
+        </div>
+        <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-muted-foreground">Total Piutang</p>
+            <div className="w-8 h-8 rounded-lg bg-warning-light flex items-center justify-center"><Receipt className="w-4 h-4 text-warning" /></div>
+          </div>
+          <p className="text-xl sm:text-2xl font-bold text-warning mt-1.5 tabular-nums">{formatCurrency(receivablesAsOf.total)}</p>
+          <p className="text-[11px] text-muted-foreground mt-1">{receivablesAsOf.count} invoice belum lunas • posisi {receivablesRefLabel}</p>
+        </div>
+        <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-muted-foreground">Selisih Bersih + Piutang</p>
+            <div className="w-8 h-8 rounded-lg bg-primary-light flex items-center justify-center"><PiggyBank className="w-4 h-4 text-primary" /></div>
+          </div>
+          <p className="text-xl sm:text-2xl font-bold text-primary mt-1.5 tabular-nums">{formatCurrency(netPlusReceivables)}</p>
+          <p className="text-[11px] text-muted-foreground mt-1">Termasuk tagihan belum tertagih • bukan saldo kas</p>
         </div>
       </div>
 

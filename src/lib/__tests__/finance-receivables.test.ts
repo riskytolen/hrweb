@@ -7,6 +7,7 @@ import {
   receivableOverdueDays,
   receivableReferenceDate,
   summarizeCashPeriod,
+  summarizeOutstandingReceivables,
   summarizePriorReceivables,
   summarizePriorReceivablesFromSnapshot,
   summarizeReceivables,
@@ -171,6 +172,25 @@ describe("finance receivables helpers", () => {
     expect(summary.paid).toBe(2_500_000);
     expect(summary.remaining).toBe(0);
     expect(summary.count).toBe(0);
+  });
+
+  it("total piutang per tanggal mencakup invoice lama dan mengabaikan pembayaran setelahnya", () => {
+    const summary = summarizeOutstandingReceivables(
+      [
+        { id: 1, invoice_date: "2026-09-20", total_amount: 10_000_000 },
+        { id: 2, invoice_date: "2026-10-05", total_amount: 5_000_000 },
+        { id: 3, invoice_date: "2026-11-01", total_amount: 7_000_000 },
+      ],
+      [
+        { invoice_id: 1, payment_date: "2026-09-25", amount: 4_000_000 },
+        { invoice_id: 1, payment_date: "2026-10-10", amount: 2_000_000 },
+        { invoice_id: 1, payment_date: "2026-11-02", amount: 1_000_000 },
+        { invoice_id: 2, payment_date: "2026-10-15", amount: 5_000_000 },
+      ],
+      "2026-10-26",
+    );
+    expect(summary.total).toBe(4_000_000);
+    expect(summary.count).toBe(1);
   });
 
   it("snapshot Tutup Buku memisahkan piutang lama dari piutang periode berjalan", () => {
