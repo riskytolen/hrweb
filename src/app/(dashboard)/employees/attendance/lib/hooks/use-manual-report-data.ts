@@ -18,6 +18,8 @@ export type ManualReportItem = {
   durasi_telat: number;
   catatan: string | null;
   alasan_manual: string | null;
+  evidence_path: string | null;
+  evidence_file_name: string | null;
 };
 
 export type ManualReportGroup = {
@@ -58,6 +60,8 @@ export function useManualReportData(
       durasi_telat: number;
       catatan: string | null;
       alasan_manual: string | null;
+      evidence_path: string | null;
+      evidence_file_name: string | null;
       pegawai?: { nama: string } | null;
       divisions?: { nama: string; color: string } | null;
     };
@@ -67,7 +71,7 @@ export function useManualReportData(
     while (hasMore) {
       const { data, error } = await supabase
         .from("attendance_records")
-        .select("id, employee_id, tanggal, status, jam_masuk, durasi_telat, catatan, alasan_manual, pegawai(nama), divisions(nama, color)")
+        .select("id, employee_id, tanggal, status, jam_masuk, durasi_telat, catatan, alasan_manual, evidence_path, evidence_file_name, pegawai(nama), divisions(nama, color)")
         .eq("is_manual", true)
         .gte("tanggal", period.start)
         .lte("tanggal", period.end)
@@ -91,6 +95,8 @@ export function useManualReportData(
         durasi_telat: r.durasi_telat,
         catatan: r.catatan,
         alasan_manual: r.alasan_manual,
+        evidence_path: r.evidence_path,
+        evidence_file_name: r.evidence_file_name,
       }))
       .filter((item) => !isBackOfficeDivision(item.divisionNama));
     setItems(mapped);

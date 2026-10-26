@@ -441,6 +441,14 @@ export interface DbAttendanceRecord {
   is_manual: boolean;
   /** Alasan input manual (wajib diisi saat is_manual = true). */
   alasan_manual: string | null;
+  /** Path foto eviden di bucket privat attendance-evidence. */
+  evidence_path: string | null;
+  evidence_file_name: string | null;
+  evidence_mime_type: string | null;
+  /** Ukuran foto eviden setelah kompresi (byte). */
+  evidence_size: number | null;
+  evidence_uploaded_at: string | null;
+  evidence_uploaded_by: string | null;
   created_at: string;
   updated_at: string;
   // joined

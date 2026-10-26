@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
+import { removeAttendanceEvidence } from "../attendance-evidence";
 import type { AttendanceRow } from "../attendance-types";
 import type { ToastType } from "./use-toast";
 
@@ -30,6 +31,7 @@ export function useAttendanceDelete(
         showToast("error", "Gagal Menghapus", error.message);
         return;
       }
+      await removeAttendanceEvidence(oldRecord?.evidence_path).catch(() => {});
       await logAudit({
         supabase,
         action: "delete",

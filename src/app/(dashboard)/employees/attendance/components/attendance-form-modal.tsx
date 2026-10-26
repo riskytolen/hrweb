@@ -1,8 +1,9 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   ClipboardCheck, Pencil, X, ChevronUp, ChevronDown, Clock, Check, Plus, AlertTriangle,
+  ImagePlus, Loader2,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
@@ -11,6 +12,20 @@ import Portal from "@/components/ui/Portal";
 import { cn, formatCurrency } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
+import { compressFile, formatFileSize } from "@/lib/file-compression";
+import { AttendanceEvidenceButton } from "./attendance-evidence-button";
+import {
+  ATTENDANCE_EVIDENCE_MIME_TYPES,
+  buildAttendanceEvidencePath,
+  createAttendanceEvidenceUniqueId,
+  requiresManualAttendanceEvidence,
+  validateAttendanceEvidenceSourceFile,
+  validateCompressedAttendanceEvidence,
+} from "../lib/attendance-evidence-spec";
+import {
+  removeAttendanceEvidence,
+  uploadAttendanceEvidence,
+} from "../lib/attendance-evidence";
 import {
   MIN_DATE,
   ALASAN_MANUAL_OPTIONS,
@@ -90,6 +105,22 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [existingEmpIds, setExistingEmpIds] = useState<Set<string>>(new Set());
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [evidenceExistingPath, setEvidenceExistingPath] = useState<string | null>(null);
+  const [evidenceExistingName, setEvidenceExistingName] = useState<string | null>(null);
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
+  const [evidenceError, setEvidenceError] = useState("");
+  const evidenceInputRef = useRef<HTMLInputElement>(null);
+  const evidencePreviewUrl = useMemo(
+    () => (evidenceFile ? URL.createObjectURL(evidenceFile) : ""),
+    [evidenceFile],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (evidencePreviewUrl) URL.revokeObjectURL(evidencePreviewUrl);
+    };
+  }, [evidencePreviewUrl]);
 
   // Lock body scroll when modal open
   useEffect(() => {
@@ -114,6 +145,10 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
     setForm({ ...EMPTY_FORM, tanggal: dateFilter });
     setEditingId(null);
     setError("");
+    setEvidenceFile(null);
+    setEvidenceExistingPath(null);
+    setEvidenceExistingName(null);
+    setEvidenceError("");
     fetchExisting(dateFilter);
     setOpen(true);
   }, [dateFilter, fetchExisting]);
@@ -131,6 +166,10 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
     });
     setEditingId(row.id);
     setError("");
+    setEvidenceFile(null);
+    setEvidenceExistingPath(row.evidence_path ?? null);
+    setEvidenceExistingName(row.evidence_file_name ?? null);
+    setEvidenceError("");
     setOpen(true);
   }, []);
 
@@ -160,9 +199,50 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
     ? STATUS_OPTIONS.find((s) => s.value === formPreview.status)?.color || "#6b7280"
     : "#6b7280";
 
+  const evidenceRequired = requiresManualAttendanceEvidence({
+    isEditing: editingId !== null,
+    isSpecial,
+  });
+
+  const handleEvidenceSelect = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file || evidenceBusy) return;
+
+    setEvidenceError("");
+    const sourceValidation = validateAttendanceEvidenceSourceFile(file);
+    if (!sourceValidation.ok) {
+      setEvidenceError(sourceValidation.message);
+      return;
+    }
+
+    setEvidenceBusy(true);
+    try {
+      const compressed = await compressFile(file, 2048);
+      if (!compressed.success) {
+        setEvidenceError(compressed.error);
+        return;
+      }
+      const compressedValidation = validateCompressedAttendanceEvidence(compressed.file);
+      if (!compressedValidation.ok) {
+        setEvidenceError(compressedValidation.message);
+        return;
+      }
+      setEvidenceFile(compressed.file);
+    } catch (err) {
+      setEvidenceError(err instanceof Error ? err.message : "Gagal memproses foto eviden.");
+    } finally {
+      setEvidenceBusy(false);
+    }
+  };
+
   const close = useCallback(() => {
-    if (!saving) setOpen(false);
-  }, [saving]);
+    if (saving || evidenceBusy) return;
+    setOpen(false);
+    setEvidenceFile(null);
+    setEvidenceError("");
+  }, [saving, evidenceBusy]);
 
   const handleSave = async () => {
     setError("");
@@ -172,6 +252,14 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
     if (!form.tanggal) { setError("Pilih tanggal terlebih dahulu."); return; }
     if (!isSpecial && !form.jam_masuk) { setError("Isi jam masuk atau pilih status Alpha."); return; }
     if (!form.alasan_manual) { setError("Pilih alasan input manual."); return; }
+    if (evidenceRequired && !evidenceFile) {
+      setError("Eviden foto wajib dilampirkan untuk absen manual Hadir/Terlambat.");
+      return;
+    }
+    if (evidenceBusy) {
+      setError("Tunggu proses kompresi foto eviden selesai.");
+      return;
+    }
 
     if (!editingId && form.employee_id && form.tanggal) {
       const emp = employees.find((e) => e.id === form.employee_id);
@@ -254,7 +342,7 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
       });
     }
 
-    const payload = {
+    const payloadBase = {
       employee_id: form.employee_id,
       division_id: form.division_id,
       tanggal: form.tanggal,
@@ -269,11 +357,66 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
       alasan_manual: form.alasan_manual || null,
     };
 
+    let uploadedEvidencePath: string | null = null;
+    let evidenceMeta:
+      | {
+          evidence_path: string;
+          evidence_file_name: string;
+          evidence_mime_type: string;
+          evidence_size: number;
+          evidence_uploaded_at: string;
+          evidence_uploaded_by: string;
+        }
+      | null = null;
+
+    if (evidenceFile) {
+      try {
+        const evidencePath = buildAttendanceEvidencePath({
+          tanggal: form.tanggal,
+          employeeId: form.employee_id,
+          mimeType: evidenceFile.type,
+          uniqueId: createAttendanceEvidenceUniqueId(),
+        });
+        await uploadAttendanceEvidence(evidencePath, evidenceFile);
+        uploadedEvidencePath = evidencePath;
+        evidenceMeta = {
+          evidence_path: evidencePath,
+          evidence_file_name: (evidenceFile.name.split(/[\\/]/).pop() || "eviden").slice(0, 200),
+          evidence_mime_type: evidenceFile.type,
+          evidence_size: evidenceFile.size,
+          evidence_uploaded_at: new Date().toISOString(),
+          evidence_uploaded_by: sessionData.session.user.id,
+        };
+      } catch (err) {
+        setError(
+          `Gagal mengunggah foto eviden: ${err instanceof Error ? err.message : "coba lagi."} ` +
+            "Absensi tidak disimpan.",
+        );
+        setSaving(false);
+        return;
+      }
+    }
+
+    const payload = {
+      ...payloadBase,
+      ...(evidenceMeta ?? {}),
+    };
+    let dbSaved = false;
+
     try {
       if (editingId) {
         const oldRecord = records.find((r) => r.id === editingId);
         const { error: err } = await supabase.from("attendance_records").update(payload).eq("id", editingId);
-        if (err) { setError(err.message); setSaving(false); return; }
+        if (err) {
+          await removeAttendanceEvidence(uploadedEvidencePath).catch(() => {});
+          setError(err.message);
+          setSaving(false);
+          return;
+        }
+        dbSaved = true;
+        if (evidenceMeta && evidenceExistingPath && evidenceExistingPath !== evidenceMeta.evidence_path) {
+          await removeAttendanceEvidence(evidenceExistingPath).catch(() => {});
+        }
         const empNama = employees.find((e) => e.id === form.employee_id)?.nama || form.employee_id;
         await logAudit({
           supabase,
@@ -293,6 +436,7 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
           .select("id, jam_masuk, status, durasi_telat")
           .single();
         if (err) {
+          await removeAttendanceEvidence(uploadedEvidencePath).catch(() => {});
           if (err.message.includes("duplicate") || err.message.includes("unique")) {
             setError("Pegawai ini sudah memiliki data absen di tanggal tersebut.");
           } else {
@@ -306,6 +450,7 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
           const dbJam = String(inserted.jam_masuk).slice(0, 5);
           if (formJam !== dbJam) {
             await supabase.from("attendance_records").delete().eq("id", inserted.id);
+            await removeAttendanceEvidence(uploadedEvidencePath).catch(() => {});
             setError(
               `Sesi login bermasalah: server mengubah jam menjadi ${dbJam} (form: ${formJam}). ` +
                 `Data tidak disimpan. Silakan logout dan login ulang sebagai Admin, kemudian coba lagi.`
@@ -314,6 +459,7 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
             return;
           }
         }
+        dbSaved = true;
         onShowToast("success", "Absensi Disimpan", `Data absen ${employees.find((e) => e.id === form.employee_id)?.nama || ""} berhasil disimpan.`);
         await logAudit({
           supabase,
@@ -328,6 +474,9 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
       setOpen(false);
       await onSaved(form.tanggal);
     } catch (err) {
+      if (!dbSaved) {
+        await removeAttendanceEvidence(uploadedEvidencePath).catch(() => {});
+      }
       setError(err instanceof Error ? err.message : "Terjadi kesalahan.");
     } finally {
       setSaving(false);
@@ -547,6 +696,89 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
             )}
 
             <div>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <label className="text-xs font-semibold text-foreground">
+                  Eviden Foto {evidenceRequired ? <span className="text-danger">*</span> : !evidenceExistingPath ? <span className="font-normal text-muted-foreground">(opsional)</span> : null}
+                </label>
+                {evidenceFile ? (
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold text-primary">Foto baru</span>
+                ) : evidenceExistingPath ? (
+                  <span className="rounded-full bg-success/10 px-2 py-0.5 text-[9px] font-bold text-success">Tersimpan</span>
+                ) : null}
+              </div>
+
+              {evidenceExistingPath && !evidenceFile && (
+                <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-foreground">Eviden tersimpan</p>
+                    <p className="truncate text-[10px] text-muted-foreground">{evidenceExistingName || "Foto absensi"}</p>
+                  </div>
+                  <AttendanceEvidenceButton
+                    path={evidenceExistingPath}
+                    fileName={evidenceExistingName}
+                    label="Lihat"
+                    className="shrink-0"
+                  />
+                </div>
+              )}
+
+              {evidenceFile && evidencePreviewUrl && (
+                <div className="mb-2 overflow-hidden rounded-xl border border-border bg-muted/20">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- preview object URL lokal. */}
+                  <img src={evidencePreviewUrl} alt="Preview eviden absensi" className="max-h-48 w-full object-contain" />
+                  <div className="flex items-center justify-between gap-2 border-t border-border bg-card px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-[10px] font-semibold text-foreground">{evidenceFile.name}</p>
+                      <p className="text-[9px] text-muted-foreground">{formatFileSize(evidenceFile.size)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEvidenceFile(null)}
+                      disabled={saving || evidenceBusy}
+                      className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-danger-light hover:text-danger disabled:opacity-40"
+                      title="Batalkan foto yang dipilih"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <input
+                ref={evidenceInputRef}
+                type="file"
+                accept={ATTENDANCE_EVIDENCE_MIME_TYPES.join(",")}
+                className="hidden"
+                disabled={saving || evidenceBusy}
+                onChange={handleEvidenceSelect}
+              />
+              <button
+                type="button"
+                onClick={() => evidenceInputRef.current?.click()}
+                disabled={saving || evidenceBusy}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/30 px-3 py-2.5 text-[11px] font-semibold text-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-default disabled:opacity-50"
+              >
+                {evidenceBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4 text-primary" />}
+                {evidenceBusy ? "Mengompres foto..." : evidenceFile || evidenceExistingPath ? "Ganti Foto Eviden" : "Pilih Foto Eviden"}
+              </button>
+
+              {evidenceError && (
+                <p className="mt-1.5 flex items-start gap-1 text-[10px] font-medium text-danger">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                  {evidenceError}
+                </p>
+              )}
+              <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                {evidenceRequired
+                  ? "Wajib dilampirkan untuk input manual Hadir/Terlambat. "
+                  : editingId && !evidenceExistingPath
+                    ? "Data lama belum memiliki eviden; foto opsional saat edit. "
+                    : ""}
+                JPG/PNG/WebP, otomatis dikompres, maksimal 2 MB.
+              </p>
+            </div>
+
+            <div>
               <label className="text-xs font-semibold text-foreground mb-1.5 block">Alasan Input Manual <span className="text-danger">*</span></label>
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {ALASAN_MANUAL_OPTIONS.map((alasan) => (
@@ -577,8 +809,8 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
           </div>
 
           <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0">
-            <Button variant="outline" size="sm" onClick={close} disabled={saving}>Batal</Button>
-            <Button size="sm" icon={editingId ? Check : Plus} onClick={handleSave} disabled={saving}>
+            <Button variant="outline" size="sm" onClick={close} disabled={saving || evidenceBusy}>Batal</Button>
+            <Button size="sm" icon={editingId ? Check : Plus} onClick={handleSave} disabled={saving || evidenceBusy}>
               {saving ? "Menyimpan..." : editingId ? "Simpan Perubahan" : "Simpan Absen"}
             </Button>
           </div>

@@ -14,6 +14,7 @@ import { STATUS_OPTIONS } from "../lib/attendance-status";
 import { getSummaryPeriodRange, getSummaryCurrentPeriodKey } from "../lib/attendance-helpers";
 import { useManualReportData } from "../lib/hooks/use-manual-report-data";
 import { useDropdown } from "../lib/hooks/use-click-outside";
+import { AttendanceEvidenceButton } from "./attendance-evidence-button";
 import type { EmployeeLite } from "../lib/attendance-types";
 
 type SortKey = "nama" | "total";
@@ -312,6 +313,7 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
                                   <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Status</th>
                                   <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Jam</th>
                                   <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-16">Telat</th>
+                                  <th className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2 w-20">Eviden</th>
                                   <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">Alasan Manual</th>
                                   <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-2">Catatan</th>
                                 </tr>
@@ -330,6 +332,16 @@ export function ManualReportView({ employees }: ManualReportViewProps) {
                                     </td>
                                     <td className="px-3 py-2 text-center text-xs text-foreground">{it.jam_masuk ? it.jam_masuk.slice(0, 5) : "-"}</td>
                                     <td className="px-3 py-2 text-center text-xs text-muted-foreground">{it.durasi_telat || "-"}</td>
+                                    <td className="px-3 py-2 text-center">
+                                      {it.evidence_path ? (
+                                        <AttendanceEvidenceButton
+                                          path={it.evidence_path}
+                                          fileName={it.evidence_file_name}
+                                        />
+                                      ) : (
+                                        <span className="text-xs italic text-muted-foreground">-</span>
+                                      )}
+                                    </td>
                                     <td className="px-3 py-2 text-xs text-muted-foreground">{it.alasan_manual || "-"}</td>
                                     <td className="px-3 py-2 text-xs text-muted-foreground max-w-[200px] truncate" title={it.catatan || ""}>{it.catatan || "-"}</td>
                                   </tr>

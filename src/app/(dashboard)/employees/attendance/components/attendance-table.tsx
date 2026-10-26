@@ -8,6 +8,7 @@ import { MIN_DATE, PAGE_SIZE } from "../lib/attendance-constants";
 import { NO_JAM_STATUSES, STATUS_OPTIONS, type StatusOption } from "../lib/attendance-status";
 import { addDays, getDeadlineTime } from "../lib/attendance-helpers";
 import { ExportMenuButton } from "./export-menu-button";
+import { AttendanceEvidenceButton } from "./attendance-evidence-button";
 import type { AttendanceRow } from "../lib/attendance-types";
 
 type AttendanceTableProps = {
@@ -140,13 +141,14 @@ export function AttendanceTable({
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Status</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-24">Telat</th>
                 <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Denda</th>
+                <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 py-3.5 w-20">Eviden</th>
                 <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Catatan</th>
                 <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 w-28">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
-              {loading ? <SkeletonTable rows={6} cols={11} /> : paged.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data absen</td></tr>
+              {loading ? <SkeletonTable rows={6} cols={12} /> : paged.length === 0 ? (
+                <tr><td colSpan={12} className="text-center py-10 text-sm text-muted-foreground">Tidak ada data absen</td></tr>
               ) : paged.map((row, idx) => {
                 const statusColor = sc(row.status);
                 return (
@@ -215,6 +217,13 @@ export function AttendanceTable({
                     </td>
                     <td className="px-5 py-3.5 text-right text-sm">
                       {row.denda > 0 ? <span className="font-semibold text-danger">{formatCurrency(row.denda)}</span> : <span className="text-muted-foreground">-</span>}
+                    </td>
+                    <td className="px-3 py-3.5 text-center">
+                      {row.evidence_path ? (
+                        <AttendanceEvidenceButton path={row.evidence_path} fileName={row.evidence_file_name} />
+                      ) : (
+                        <span className="text-xs italic text-muted-foreground">-</span>
+                      )}
                     </td>
                     <td className="px-5 py-3.5 text-xs text-muted-foreground max-w-[150px] truncate">{row.catatan || <span className="italic">-</span>}</td>
                     <td className="px-5 py-3.5">
