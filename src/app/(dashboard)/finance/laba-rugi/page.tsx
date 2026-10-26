@@ -389,6 +389,7 @@ export default function FinanceLabaRugiPage() {
 
   const profitTone = displayPeriod.laba >= 0 ? "success" : "danger";
   const cashNetTone = cashPeriod.netCash >= 0 ? "success" : "danger";
+  const cashEndingTone = cashPeriod.endingBalance >= 0 ? "success" : "danger";
   const deltaIncome = prevPeriod.pendapatan > 0 ? ((displayPeriod.pendapatan - prevPeriod.pendapatan) / prevPeriod.pendapatan) * 100 : 0;
   const deltaExpense = prevPeriod.pengeluaran > 0 ? ((displayPeriod.pengeluaran - prevPeriod.pengeluaran) / prevPeriod.pengeluaran) * 100 : 0;
 
@@ -504,14 +505,14 @@ export default function FinanceLabaRugiPage() {
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-muted-foreground">Kas Bersih</p>
+                <p className="text-xs font-semibold text-muted-foreground">Saldo Kas Akhir</p>
                 <div className="w-8 h-8 rounded-lg bg-success-light flex items-center justify-center"><Wallet className="w-4 h-4 text-success" /></div>
               </div>
-              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", cashNetTone === "success" ? "text-success" : "text-danger")}>
-                {formatCurrency(cashPeriod.netCash)}
+              <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", cashEndingTone === "success" ? "text-success" : "text-danger")}>
+                {formatCurrency(cashPeriod.endingBalance)}
               </p>
               <p className="text-[11px] text-muted-foreground mt-1">
-                Saldo kas {formatCurrency(cashPeriod.endingBalance)} • kas masuk − pengeluaran
+                Kas bersih periode {cashPeriod.netCash > 0 ? "+" : ""}{formatCurrency(cashPeriod.netCash)} • kas masuk − pengeluaran
               </p>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
@@ -704,11 +705,9 @@ export default function FinanceLabaRugiPage() {
                 <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-warning" /> {isClosedPeriod ? "Piutang per closing (immutable)" : "Piutang periode ini (belum menjadi kas)"}</span>
                 <span className="font-bold text-warning tabular-nums">{formatCurrency(receivables.totalReceivable)}</span>
               </div>
-              <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", cashNetTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
-                <span className={cn("flex items-center gap-2", cashNetTone === "success" ? "text-success" : "text-danger")}>
-                  <Wallet className="w-4 h-4" /> Kas Bersih Periode
-                </span>
-                <span className={cn("tabular-nums text-base", cashNetTone === "success" ? "text-success" : "text-danger")}>
+              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
+                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-muted-foreground" /> Kas Bersih Periode</span>
+                <span className={cn("font-bold tabular-nums", cashNetTone === "success" ? "text-success" : "text-danger")}>
                   {formatCurrency(cashPeriod.netCash)}
                 </span>
               </div>
@@ -716,9 +715,13 @@ export default function FinanceLabaRugiPage() {
                 <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-muted-foreground" /> Saldo kas awal periode</span>
                 <span className="font-semibold text-foreground tabular-nums">{formatCurrency(cashPeriod.openingBalance)}</span>
               </div>
-              <div className="flex items-center justify-between px-5 py-3.5 text-sm">
-                <span className="text-muted-foreground flex items-center gap-2"><Wallet className="w-4 h-4 text-primary" /> Saldo kas akhir periode</span>
-                <span className="font-bold text-primary tabular-nums">{formatCurrency(cashPeriod.endingBalance)}</span>
+              <div className={cn("flex items-center justify-between px-5 py-4 text-sm font-bold", cashEndingTone === "success" ? "bg-success/[0.04]" : "bg-danger/[0.04]")}>
+                <span className={cn("flex items-center gap-2", cashEndingTone === "success" ? "text-success" : "text-danger")}>
+                  <Wallet className="w-4 h-4" /> Saldo Kas Akhir Periode
+                </span>
+                <span className={cn("tabular-nums text-base", cashEndingTone === "success" ? "text-success" : "text-danger")}>
+                  {formatCurrency(cashPeriod.endingBalance)}
+                </span>
               </div>
               <p className="px-5 py-3 text-[11px] text-muted-foreground bg-muted/20">
                 Laba Bersih memakai nilai invoice periode. Kas Bersih memakai pembayaran yang benar-benar masuk pada periode
