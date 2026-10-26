@@ -511,9 +511,26 @@ export default function FinanceLabaRugiPage() {
               <p className={cn("text-xl sm:text-2xl font-bold mt-1.5 tabular-nums", cashEndingTone === "success" ? "text-success" : "text-danger")}>
                 {formatCurrency(cashPeriod.endingBalance)}
               </p>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Kas bersih periode {cashPeriod.netCash > 0 ? "+" : ""}{formatCurrency(cashPeriod.netCash)} • kas masuk − pengeluaran
-              </p>
+              <div className="mt-2.5 pt-2 border-t border-border/60 space-y-0.5 text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Saldo awal</span>
+                  <span className="font-medium text-foreground tabular-nums">{formatCurrency(cashPeriod.openingBalance)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Kas masuk</span>
+                  <span className="font-medium text-success tabular-nums">{cashPeriod.received > 0 ? "+" : ""}{formatCurrency(cashPeriod.received)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Pengeluaran</span>
+                  <span className="font-medium text-danger tabular-nums">{cashPeriod.expenses > 0 ? "−" : ""}{formatCurrency(cashPeriod.expenses)}</span>
+                </div>
+                {(cashPeriod.adjustmentIn > 0 || cashPeriod.adjustmentOut > 0) && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Penyesuaian</span>
+                    <span className="font-medium text-warning tabular-nums">{formatCurrency(cashPeriod.adjustmentIn - cashPeriod.adjustmentOut)}</span>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="bg-card rounded-2xl border border-border p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
