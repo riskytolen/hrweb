@@ -6,6 +6,8 @@
  * `attendance-evidence`.
  */
 
+import { NO_JAM_STATUSES } from "./attendance-status";
+
 export const ATTENDANCE_EVIDENCE_BUCKET = "attendance-evidence";
 export const ATTENDANCE_EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
 export const ATTENDANCE_EVIDENCE_MAX_SOURCE_BYTES = 10 * 1024 * 1024;
@@ -107,4 +109,23 @@ export function buildAttendanceEvidencePath(args: {
 export function createAttendanceEvidenceUniqueId(now = Date.now(), random = Math.random()): string {
   const suffix = Math.floor(random * 1_000_000_000).toString(36);
   return `${now}-${suffix}`;
+}
+
+/**
+ * Edit yang tidak mengubah divisi/jam/status tidak boleh menghitung ulang
+ * snapshot absensi lama. Dipakai saat admin hanya menambah/mengganti eviden,
+ * catatan, atau alasan manual.
+ */
+export function shouldPreserveStoredAttendance(args: {
+  isEditing: boolean;
+  sameDivision: boolean;
+  originalStatus: string;
+  nextSpecialStatus: string;
+  originalJamMasuk: string;
+  nextJamMasuk: string;
+}): boolean {
+  if (!args.isEditing || !args.sameDivision) return false;
+  if (args.nextSpecialStatus) return args.originalStatus === args.nextSpecialStatus;
+  if ((NO_JAM_STATUSES as readonly string[]).includes(args.originalStatus)) return false;
+  return args.originalJamMasuk.slice(0, 5) === args.nextJamMasuk.slice(0, 5);
 }

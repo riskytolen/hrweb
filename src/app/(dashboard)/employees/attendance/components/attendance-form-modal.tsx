@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   ClipboardCheck, Pencil, X, ChevronUp, ChevronDown, Clock, Check, Plus, AlertTriangle,
-  ImagePlus, Loader2,
+  ImagePlus, Loader2, Info,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
@@ -19,6 +19,7 @@ import {
   buildAttendanceEvidencePath,
   createAttendanceEvidenceUniqueId,
   requiresManualAttendanceEvidence,
+  shouldPreserveStoredAttendance,
   validateAttendanceEvidenceSourceFile,
   validateCompressedAttendanceEvidence,
 } from "../lib/attendance-evidence-spec";
@@ -179,8 +180,27 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
   const isSpecial = form.specialStatus !== "" && (NO_JAM_STATUSES as readonly string[]).includes(form.specialStatus);
   const formSchedule = useMemo(() => schedules.find((s) => s.division_id === form.division_id), [schedules, form.division_id]);
   const formPenalty = useMemo(() => penalties.find((p) => p.division_id === form.division_id), [penalties, form.division_id]);
+  const originalRecord = useMemo(
+    () => (editingId === null ? null : records.find((r) => r.id === editingId) ?? null),
+    [editingId, records],
+  );
+  const preserveStoredAttendance = shouldPreserveStoredAttendance({
+    isEditing: editingId !== null,
+    sameDivision: (originalRecord?.division_id ?? 0) === form.division_id,
+    originalStatus: originalRecord?.status ?? "",
+    nextSpecialStatus: form.specialStatus,
+    originalJamMasuk: originalRecord?.jam_masuk ?? "",
+    nextJamMasuk: form.jam_masuk,
+  });
 
   const formPreview = useMemo(() => {
+    if (preserveStoredAttendance && originalRecord) {
+      return {
+        status: originalRecord.status,
+        durasi: originalRecord.durasi_telat,
+        denda: originalRecord.denda,
+      };
+    }
     if (isSpecial) {
       const denda = form.specialStatus === "Alpha" ? computeDendaAlpha(formPenalty, DEFAULT_DENDA_ALPHA) : 0;
       return { status: form.specialStatus as string, durasi: 0, denda };
@@ -193,7 +213,7 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
       maksimum: DEFAULT_DENDA_MAKSIMUM,
     });
     return { status: result.status, durasi: result.durasi, denda };
-  }, [form.jam_masuk, form.specialStatus, formSchedule, formPenalty, isSpecial]);
+  }, [form.jam_masuk, form.specialStatus, formSchedule, formPenalty, isSpecial, preserveStoredAttendance, originalRecord]);
 
   const previewColor = formPreview
     ? STATUS_OPTIONS.find((s) => s.value === formPreview.status)?.color || "#6b7280"
@@ -321,14 +341,22 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
 
     const sched = schedules.find((s) => s.division_id === form.division_id);
     const penalty = penalties.find((p) => p.division_id === form.division_id);
-    const schedJamMasuk = sched?.jam_masuk || "08:00";
-    const toleransi = sched?.toleransi_menit || 0;
+    const schedJamMasuk = preserveStoredAttendance && originalRecord
+      ? originalRecord.schedule_jam_masuk
+      : sched?.jam_masuk || "08:00";
+    const toleransi = preserveStoredAttendance && originalRecord
+      ? originalRecord.toleransi_menit
+      : sched?.toleransi_menit || 0;
 
     let status = "";
     let durasi = 0;
     let denda = 0;
 
-    if (isSpecial) {
+    if (preserveStoredAttendance && originalRecord) {
+      status = originalRecord.status;
+      durasi = originalRecord.durasi_telat;
+      denda = originalRecord.denda;
+    } else if (isSpecial) {
       status = form.specialStatus;
       if (status === "Alpha") denda = computeDendaAlpha(penalty, DEFAULT_DENDA_ALPHA);
     } else {
@@ -346,7 +374,9 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
       employee_id: form.employee_id,
       division_id: form.division_id,
       tanggal: form.tanggal,
-      jam_masuk: isSpecial ? schedJamMasuk : form.jam_masuk,
+      jam_masuk: preserveStoredAttendance && originalRecord
+        ? originalRecord.jam_masuk
+        : isSpecial ? schedJamMasuk : form.jam_masuk,
       schedule_jam_masuk: schedJamMasuk,
       toleransi_menit: toleransi,
       status,
@@ -426,7 +456,11 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
           entityLabel: `Absensi ${empNama} (${form.tanggal})`,
           oldData: oldRecord ? { ...oldRecord } as unknown as Record<string, unknown> : null,
           newData: { ...payload } as Record<string, unknown>,
-          metadata: { alasan_manual: form.alasan_manual || null, is_manual: true },
+          metadata: {
+            alasan_manual: form.alasan_manual || null,
+            is_manual: true,
+            attendance_snapshot_preserved: preserveStoredAttendance,
+          },
         });
         onShowToast("success", "Data Diperbarui", "Data absen berhasil diperbarui.");
       } else {
@@ -693,6 +727,13 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
                   )}
                 </div>
               </div>
+            )}
+
+            {editingId !== null && preserveStoredAttendance && (
+              <p className="flex items-start gap-1.5 rounded-lg bg-info/10 px-2.5 py-2 text-[10px] leading-relaxed text-info">
+                <Info className="mt-0.5 h-3 w-3 shrink-0" />
+                Jadwal, status, keterlambatan, dan denda tersimpan dipertahankan karena divisi/jam masuk tidak diubah.
+              </p>
             )}
 
             <div>

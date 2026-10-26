@@ -7,6 +7,7 @@ import {
   createAttendanceEvidenceUniqueId,
   isAttendanceEvidenceMime,
   requiresManualAttendanceEvidence,
+  shouldPreserveStoredAttendance,
   validateAttendanceEvidenceSourceFile,
   validateCompressedAttendanceEvidence,
 } from "@/app/(dashboard)/employees/attendance/lib/attendance-evidence-spec";
@@ -51,6 +52,33 @@ describe("attendance evidence spec", () => {
     expect(requiresManualAttendanceEvidence({ isEditing: false, isSpecial: false })).toBe(true);
     expect(requiresManualAttendanceEvidence({ isEditing: true, isSpecial: false })).toBe(false);
     expect(requiresManualAttendanceEvidence({ isEditing: false, isSpecial: true })).toBe(false);
+  });
+
+  it("mempertahankan snapshot absensi saat edit hanya eviden/catatan", () => {
+    const base = {
+      isEditing: true,
+      sameDivision: true,
+      originalStatus: "Terlambat",
+      nextSpecialStatus: "",
+      originalJamMasuk: "08:17:42",
+      nextJamMasuk: "08:17",
+    };
+    expect(shouldPreserveStoredAttendance(base)).toBe(true);
+    expect(shouldPreserveStoredAttendance({ ...base, nextJamMasuk: "08:18" })).toBe(false);
+    expect(shouldPreserveStoredAttendance({ ...base, sameDivision: false })).toBe(false);
+    expect(shouldPreserveStoredAttendance({ ...base, isEditing: false })).toBe(false);
+    expect(shouldPreserveStoredAttendance({
+      ...base,
+      originalStatus: "Izin",
+      nextSpecialStatus: "Izin",
+    })).toBe(true);
+    expect(shouldPreserveStoredAttendance({
+      ...base,
+      originalStatus: "Izin",
+      nextSpecialStatus: "",
+      originalJamMasuk: "00:00:00",
+      nextJamMasuk: "00:00",
+    })).toBe(false);
   });
 
   it("membuat path aman dan unik", () => {
