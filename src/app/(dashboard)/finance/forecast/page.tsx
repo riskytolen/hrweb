@@ -321,6 +321,7 @@ function IncomePanel({
 function ExpensePanel({
   week,
   rows,
+  categories,
   canInput,
   onAdd,
   onChange,
@@ -328,6 +329,7 @@ function ExpensePanel({
 }: {
   week: ForecastWeek;
   rows: DraftExpense[];
+  categories: string[];
   canInput: boolean;
   onAdd: () => void;
   onChange: (key: string, patch: Partial<DraftExpense>) => void;
@@ -357,7 +359,7 @@ function ExpensePanel({
           <thead>
             <tr className="bg-muted/30 text-[9px] uppercase tracking-wide text-muted-foreground">
               <th className="text-left font-semibold px-2 py-1.5 w-[110px]">Tanggal</th>
-              <th className="text-left font-semibold px-2 py-1.5">Keterangan</th>
+              <th className="text-left font-semibold px-2 py-1.5">Keterangan & Kategori</th>
               <th className="text-right font-semibold px-2 py-1.5 w-[128px]">Nominal</th>
               <th className="text-right font-semibold px-2 py-1.5 w-[128px]">Pembayaran</th>
               <th className="text-right font-semibold px-2 py-1.5 w-[110px]">Admin</th>
@@ -389,6 +391,22 @@ function ExpensePanel({
                       placeholder="Contoh: Gaji driver, BBM, tol ..."
                       className="w-full bg-transparent px-1.5 py-1.5 text-xs outline-none rounded-lg focus:bg-muted/40 text-foreground placeholder:text-muted-foreground/50 disabled:cursor-default"
                     />
+                    <div className="mt-0.5 flex items-center gap-1">
+                      <Tag className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+                      <select
+                        value={row.category}
+                        onChange={(e) => onChange(row.key, { category: e.target.value })}
+                        disabled={!canInput}
+                        aria-label={`Kategori ${row.description || "pengeluaran"}`}
+                        className="min-w-0 flex-1 rounded-md bg-muted/40 px-1 py-0.5 text-[9px] font-semibold text-muted-foreground outline-none focus:bg-primary/10 focus:text-primary disabled:cursor-default disabled:opacity-70"
+                      >
+                        {categories.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </td>
                   <td className="px-2 py-1">
                     <CurrencyInput
@@ -617,6 +635,10 @@ export default function FinanceForecastPage() {
   const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
   const [invoicesLoaded, setInvoicesLoaded] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categories, setCategories] = useState<string[]>([...FORECAST_EXPENSE_CATEGORIES]);
+  const [newCategory, setNewCategory] = useState("");
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState("");
 
   const addToast = useCallback((type: "success" | "error", msg: string) => {
     const id = Date.now() + Math.random();
@@ -647,8 +669,8 @@ export default function FinanceForecastPage() {
   );
 
   const categoryTotals = useMemo(
-    () => computeForecastExpenseCategoryTotals(expenses),
-    [expenses],
+    () => computeForecastExpenseCategoryTotals(expenses, categories),
+    [expenses, categories],
   );
 
   const currentSnapshot = useMemo(
@@ -721,18 +743,31 @@ export default function FinanceForecastPage() {
         const start = forecastMonthStart(key);
         const previousKey = shiftForecastPeriodKey(key, -1);
         const previousStart = forecastMonthStart(previousKey);
-        const [monthRes, companyRes, previousMonthRes] = await Promise.all([
+        const [monthRes, companyRes, previousMonthRes, categoryRes] = await Promise.all([
           supabase.from("finance_forecast_months").select("*").eq("period_start", start).maybeSingle(),
           supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
           supabase.from("finance_forecast_months").select("*").eq("period_start", previousStart).maybeSingle(),
+          supabase
+            .from("finance_forecast_categories")
+            .select("name, sort_order")
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
         ]);
         if (monthRes.error) throw monthRes.error;
         if (companyRes.error) throw companyRes.error;
         if (previousMonthRes.error) throw previousMonthRes.error;
+        if (categoryRes.error) throw categoryRes.error;
 
         const month = (monthRes.data ?? null) as DbFinanceForecastMonth | null;
         const previousMonth = (previousMonthRes.data ?? null) as DbFinanceForecastMonth | null;
         const settings = (companyRes.data ?? null) as DbFinanceCompanySettings | null;
+        const categoryNames = ((categoryRes.data ?? []) as { name: string }[])
+          .map((row) => row.name)
+          .filter(Boolean);
+        const activeCategories = categoryNames.length > 0
+          ? categoryNames
+          : [...FORECAST_EXPENSE_CATEGORIES];
+        setCategories(activeCategories);
         const [currentRows, previousRows] = await Promise.all([
           month
             ? fetchForecastMonthRows(month.id)
@@ -764,7 +799,7 @@ export default function FinanceForecastPage() {
           amount: Number(r.amount) || 0,
           payment: Number(r.payment) || 0,
           admin: Number(r.admin) || 0,
-          category: normalizeForecastExpenseCategory(r.category),
+          category: normalizeForecastExpenseCategory(r.category, activeCategories),
         }));
 
         const previousLabel = forecastMonthLabel(previousKey);
@@ -896,6 +931,50 @@ export default function FinanceForecastPage() {
 
   const updateExpense = (key: string, patch: Partial<DraftExpense>) => {
     setExpenses((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  };
+
+  const handleAddCategory = async () => {
+    if (!canInput || addingCategory) return;
+    const name = newCategory.trim().toUpperCase();
+    setCategoryError("");
+    if (!name) {
+      setCategoryError("Nama kategori wajib diisi.");
+      return;
+    }
+    if (name.length > 60) {
+      setCategoryError("Nama kategori maksimal 60 karakter.");
+      return;
+    }
+    if (categories.some((category) => category.toUpperCase() === name)) {
+      setCategoryError("Kategori tersebut sudah ada.");
+      return;
+    }
+
+    setAddingCategory(true);
+    try {
+      const { data, error } = await supabase.rpc("add_finance_forecast_category", {
+        p_name: name,
+      });
+      if (error) throw error;
+      const result = (data ?? null) as { name?: string; created?: boolean } | null;
+      const savedName = result?.name ?? name;
+      setCategories((prev) => (
+        prev.some((category) => category.toUpperCase() === savedName.toUpperCase())
+          ? prev
+          : [...prev, savedName]
+      ));
+      setNewCategory("");
+      addToast(
+        "success",
+        result?.created === false
+          ? `Kategori ${savedName} sudah tersedia.`
+          : `Kategori ${savedName} ditambahkan.`,
+      );
+    } catch (err) {
+      setCategoryError(parseFinanceDbError(err));
+    } finally {
+      setAddingCategory(false);
+    }
   };
 
   const handleOpeningSourceChange = (source: ForecastOpeningSource) => {
@@ -1037,7 +1116,7 @@ export default function FinanceForecastPage() {
       amount: Math.round(r.amount) || 0,
       payment: Math.round(r.payment) || 0,
       admin: Math.round(r.admin) || 0,
-      category: normalizeForecastExpenseCategory(r.category),
+      category: normalizeForecastExpenseCategory(r.category, categories),
       sort_order: i,
     }));
 
@@ -1058,7 +1137,7 @@ export default function FinanceForecastPage() {
         amount: Math.round(r.amount) || 0,
         payment: Math.round(r.payment) || 0,
         admin: Math.round(r.admin) || 0,
-        category: normalizeForecastExpenseCategory(r.category),
+        category: normalizeForecastExpenseCategory(r.category, categories),
       })),
     });
     if (errors.length > 0) {
@@ -1121,6 +1200,7 @@ export default function FinanceForecastPage() {
         periodKey,
         openingBalance,
         openingSource: openingSourceExportLabel,
+        categories,
         incomes: incomes.map((r) => ({
           week_no: r.weekNo,
           planned_date: r.plannedDate,
@@ -1135,7 +1215,7 @@ export default function FinanceForecastPage() {
           amount: Math.round(r.amount) || 0,
           payment: Math.round(r.payment) || 0,
           admin: Math.round(r.admin) || 0,
-          category: normalizeForecastExpenseCategory(r.category),
+          category: normalizeForecastExpenseCategory(r.category, categories),
         })),
         company: {
           company_name: company?.company_name || "Perusahaan",
@@ -1475,6 +1555,7 @@ export default function FinanceForecastPage() {
                     <ExpensePanel
                       week={week}
                       rows={weekExpenses}
+                      categories={categories}
                       canInput={canInput}
                       onAdd={() => addExpense(week)}
                       onChange={updateExpense}
@@ -1545,8 +1626,9 @@ export default function FinanceForecastPage() {
               <Info className="w-3.5 h-3.5 shrink-0" />
               <span>
                 Tombol <span className="font-semibold text-foreground">Invoice</span> pada panel pemasukan mengambil
-                sisa tagihan. Invoice yang sama hanya boleh dipakai sekali per bulan. Kategori pengeluaran diatur
-                lewat <span className="font-semibold text-foreground">Atur Kategori</span> dan hanya memengaruhi
+                sisa tagihan. Invoice yang sama hanya boleh dipakai sekali per bulan. Kategori pengeluaran bisa
+                dipilih langsung di setiap baris atau lewat{" "}
+                <span className="font-semibold text-foreground">Atur Kategori</span>, dan hanya memengaruhi
                 rekap bulanan.
               </span>
             </div>
@@ -1584,6 +1666,49 @@ export default function FinanceForecastPage() {
               >
                 <X className="w-4 h-4" />
               </button>
+            </div>
+
+            <div className="border-b border-border px-4 py-3">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                Tambah Kategori Baru
+              </label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  value={newCategory}
+                  onChange={(e) => {
+                    setNewCategory(e.target.value.toUpperCase());
+                    setCategoryError("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleAddCategory();
+                    }
+                  }}
+                  maxLength={60}
+                  disabled={!canInput || addingCategory}
+                  placeholder="Contoh: BIAYA OPERASIONAL CABANG"
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs font-semibold text-foreground outline-none focus:border-primary disabled:cursor-default disabled:opacity-60"
+                />
+                <Button
+                  size="sm"
+                  icon={addingCategory ? Loader2 : Plus}
+                  onClick={() => void handleAddCategory()}
+                  disabled={!canInput || addingCategory || !newCategory.trim()}
+                  className={addingCategory ? "[&_svg]:animate-spin" : ""}
+                >
+                  {addingCategory ? "Menambah..." : "Tambah Kategori"}
+                </Button>
+              </div>
+              {categoryError && (
+                <p className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-danger">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  {categoryError}
+                </p>
+              )}
+              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                Kategori baru langsung tersedia di pilihan pengeluaran, rekap bulanan, dan ekspor Forecast.
+              </p>
             </div>
 
             <div className="flex-1 overflow-auto">
@@ -1633,7 +1758,7 @@ export default function FinanceForecastPage() {
                               aria-label={`Kategori ${row.description || "pengeluaran"}`}
                               className="w-full shrink-0 rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-[11px] font-medium text-foreground/80 outline-none focus:border-primary disabled:cursor-default disabled:opacity-70 sm:w-[210px]"
                             >
-                              {FORECAST_EXPENSE_CATEGORIES.map((category) => (
+                              {categories.map((category) => (
                                 <option key={category} value={category}>
                                   {category}
                                 </option>

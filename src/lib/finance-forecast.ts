@@ -322,20 +322,18 @@ export const FORECAST_EXPENSE_CATEGORIES = [
   "ANGSURAN",
 ] as const;
 
-export type ForecastExpenseCategory = (typeof FORECAST_EXPENSE_CATEGORIES)[number];
+export type ForecastExpenseCategory = string;
 
-export const DEFAULT_FORECAST_EXPENSE_CATEGORY: ForecastExpenseCategory = "PENGELUARAN LAINNYA";
-
-const FORECAST_EXPENSE_CATEGORY_SET = new Set<string>(FORECAST_EXPENSE_CATEGORIES);
+export const DEFAULT_FORECAST_EXPENSE_CATEGORY = "PENGELUARAN LAINNYA";
 
 /** Kategori valid (case-insensitive); nilai kosong/asing → PENGELUARAN LAINNYA. */
 export function normalizeForecastExpenseCategory(
   value: string | null | undefined,
+  categories: readonly string[] = FORECAST_EXPENSE_CATEGORIES,
 ): ForecastExpenseCategory {
   const normalized = (value ?? "").trim().toUpperCase();
-  return FORECAST_EXPENSE_CATEGORY_SET.has(normalized)
-    ? (normalized as ForecastExpenseCategory)
-    : DEFAULT_FORECAST_EXPENSE_CATEGORY;
+  const allowed = new Set(categories.map((category) => category.trim().toUpperCase()));
+  return allowed.has(normalized) ? normalized : DEFAULT_FORECAST_EXPENSE_CATEGORY;
 }
 
 export interface ForecastExpenseCategoryTotal {
@@ -344,20 +342,28 @@ export interface ForecastExpenseCategoryTotal {
 }
 
 /**
- * Total nominal pengeluaran per kategori, selalu lengkap 14 kategori
- * (termasuk yang bernilai 0) dan mengikuti urutan laporan.
+ * Total nominal pengeluaran per kategori. Daftar kategori mengikuti master
+ * dinamis (termasuk yang bernilai 0) dan tetap menyertakan kategori default.
  */
 export function computeForecastExpenseCategoryTotals(
   expenses: { category?: string | null; amount: number }[],
+  categories: readonly string[] = FORECAST_EXPENSE_CATEGORIES,
 ): ForecastExpenseCategoryTotal[] {
-  const totals = new Map<ForecastExpenseCategory, number>(
-    FORECAST_EXPENSE_CATEGORIES.map((category) => [category, 0]),
-  );
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const value of [...categories, DEFAULT_FORECAST_EXPENSE_CATEGORY]) {
+    const category = value.trim().toUpperCase();
+    if (!category || seen.has(category)) continue;
+    seen.add(category);
+    ordered.push(category);
+  }
+
+  const totals = new Map<string, number>(ordered.map((category) => [category, 0]));
   for (const row of expenses) {
-    const category = normalizeForecastExpenseCategory(row.category);
+    const category = normalizeForecastExpenseCategory(row.category, ordered);
     totals.set(category, (totals.get(category) ?? 0) + toRupiah(row.amount));
   }
-  return FORECAST_EXPENSE_CATEGORIES.map((category) => ({
+  return ordered.map((category) => ({
     category,
     amount: totals.get(category) ?? 0,
   }));

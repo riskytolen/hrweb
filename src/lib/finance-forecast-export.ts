@@ -52,6 +52,8 @@ export interface ForecastExportInput {
   openingBalance: number;
   /** Keterangan asal saldo awal, mis. "Forecast September 2026". */
   openingSource?: string | null;
+  /** Master kategori aktif; jika kosong memakai daftar default. */
+  categories?: string[] | null;
   incomes: ForecastIncomeExportRow[];
   expenses: ForecastExpenseExportRow[];
   company: ForecastCompanyInfo;
@@ -311,6 +313,7 @@ interface ForecastRecapItems {
 function buildRecapItems(
   summary: ForecastSummary,
   expenses: ForecastExpenseExportRow[],
+  categories?: string[] | null,
 ): ForecastRecapItems {
   const left: [string, number][] = [["Saldo Awal", summary.openingBalance]];
   for (const week of summary.weeks) {
@@ -318,7 +321,7 @@ function buildRecapItems(
   }
   left.push(["Lainnya", 0]);
 
-  const right: [string, number][] = computeForecastExpenseCategoryTotals(expenses).map(
+  const right: [string, number][] = computeForecastExpenseCategoryTotals(expenses, categories ?? undefined).map(
     (item) => [item.category, item.amount],
   );
 
@@ -447,7 +450,7 @@ export async function exportForecastPdf(args: ForecastExportInput): Promise<stri
   });
 
   // Rekap bulanan bergaya lembar PDF: saldo di kiri, kategori di kanan.
-  const recap = buildRecapItems(summary, args.expenses);
+  const recap = buildRecapItems(summary, args.expenses, args.categories);
   const pageHeight = doc.internal.pageSize.getHeight();
   let recapY = lastAutoTableY(doc, y) + 8;
   if (recapY + 40 > pageHeight - 16) {
@@ -674,7 +677,7 @@ export async function exportForecastXlsx(args: ForecastExportInput): Promise<str
   rows.push(["REKAP BULANAN — SALDO & PENGELUARAN PER KATEGORI"]);
   rows.push(["SALDO", "", "", "", "", "PENGELUARAN", "", "", "", ""]);
 
-  const recap = buildRecapItems(summary, args.expenses);
+  const recap = buildRecapItems(summary, args.expenses, args.categories);
   const recapRowCount = Math.max(recap.left.length, recap.right.length);
   for (let i = 0; i < recapRowCount; i += 1) {
     const left = recap.left[i];

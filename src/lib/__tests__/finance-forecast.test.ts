@@ -236,6 +236,23 @@ describe("kategori pengeluaran forecast", () => {
     expect(totals.every((row) => row.amount === 0)).toBe(true);
     expect(totals.map((row) => row.category)).toEqual([...FORECAST_EXPENSE_CATEGORIES]);
   });
+
+  it("mendukung kategori master dinamis pada rekap dan normalisasi", () => {
+    const categories = [...FORECAST_EXPENSE_CATEGORIES, "BIAYA OPERASIONAL CABANG"];
+    const totals = computeForecastExpenseCategoryTotals(
+      [
+        { category: "biaya operasional cabang", amount: 75_000 },
+        { category: "GAJI KARYAWAN", amount: 125_000 },
+      ],
+      categories,
+    );
+
+    expect(totals).toHaveLength(categories.length);
+    expect(totals.find((row) => row.category === "BIAYA OPERASIONAL CABANG")?.amount).toBe(75_000);
+    expect(totals.find((row) => row.category === "GAJI KARYAWAN")?.amount).toBe(125_000);
+    expect(normalizeForecastExpenseCategory("biaya operasional cabang", categories))
+      .toBe("BIAYA OPERASIONAL CABANG");
+  });
 });
 
 describe("validateForecastDraft", () => {
