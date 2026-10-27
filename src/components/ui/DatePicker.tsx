@@ -171,7 +171,17 @@ export default function DatePicker({ value, onChange, placeholder = "Pilih tangg
   }, [value]);
 
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+          setViewMode("days");
+        }
+      }}
+    >
       {/* Input trigger */}
       <button
         ref={triggerRef}

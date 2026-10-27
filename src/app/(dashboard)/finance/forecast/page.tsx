@@ -28,7 +28,6 @@ import {
   clampDateToWeek,
   computeForecast,
   computeForecastExpenseCategoryTotals,
-  DEFAULT_FORECAST_EXPENSE_CATEGORY,
   FORECAST_EXPENSE_CATEGORIES,
   FORECAST_OPENING_SOURCE_LABELS,
   forecastMonthLabel,
@@ -45,6 +44,10 @@ import {
   type ForecastWeekNo,
 } from "@/lib/finance-forecast";
 import { exportForecastPdf, exportForecastXlsx } from "@/lib/finance-forecast-export";
+import ForecastEntryModal, {
+  type ForecastEntryMode,
+  type ForecastEntryValues,
+} from "./components/forecast-entry-modal";
 
 interface Toast { id: number; type: "success" | "error"; msg: string }
 
@@ -635,6 +638,10 @@ export default function FinanceForecastPage() {
   const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
   const [invoicesLoaded, setInvoicesLoaded] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [entryModal, setEntryModal] = useState<{
+    mode: ForecastEntryMode;
+    week: ForecastWeek;
+  } | null>(null);
   const [categories, setCategories] = useState<string[]>([...FORECAST_EXPENSE_CATEGORIES]);
   const [newCategory, setNewCategory] = useState("");
   const [addingCategory, setAddingCategory] = useState(false);
@@ -895,35 +902,12 @@ export default function FinanceForecastPage() {
     void load(periodKey);
   };
 
-  const addIncome = (week: ForecastWeek) => {
-    setIncomes((prev) => [
-      ...prev,
-      {
-        key: nextKey("inc"),
-        weekNo: week.weekNo,
-        plannedDate: week.start,
-        description: "",
-        amount: 0,
-        invoiceId: null,
-      },
-    ]);
+  const openEntryModal = (mode: ForecastEntryMode, week: ForecastWeek) => {
+    if (!canInput || saving) return;
+    setEntryModal({ mode, week });
   };
 
-  const addExpense = (week: ForecastWeek) => {
-    setExpenses((prev) => [
-      ...prev,
-      {
-        key: nextKey("exp"),
-        weekNo: week.weekNo,
-        plannedDate: week.start,
-        description: "",
-        amount: 0,
-        payment: 0,
-        admin: 0,
-        category: DEFAULT_FORECAST_EXPENSE_CATEGORY,
-      },
-    ]);
-  };
+  const closeEntryModal = useCallback(() => setEntryModal(null), []);
 
   const updateIncome = (key: string, patch: Partial<DraftIncome>) => {
     setIncomes((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -932,6 +916,65 @@ export default function FinanceForecastPage() {
   const updateExpense = (key: string, patch: Partial<DraftExpense>) => {
     setExpenses((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   };
+
+  const handleEntrySubmit = (values: ForecastEntryValues) => {
+    const target = entryModal;
+    if (!target) return;
+    if (values.mode === "income") {
+      setIncomes((prev) => [
+        ...prev,
+        {
+          key: nextKey("inc"),
+          weekNo: target.week.weekNo,
+          plannedDate: values.plannedDate,
+          description: values.description,
+          amount: values.amount,
+          invoiceId: null,
+        },
+      ]);
+    } else {
+      setExpenses((prev) => [
+        ...prev,
+        {
+          key: nextKey("exp"),
+          weekNo: target.week.weekNo,
+          plannedDate: values.plannedDate,
+          description: values.description,
+          amount: values.amount,
+          payment: values.payment,
+          admin: values.admin,
+          category: normalizeForecastExpenseCategory(values.category, [...categories, values.category]),
+        },
+      ]);
+    }
+    setEntryModal(null);
+  };
+
+  const createForecastCategory = useCallback(async (rawName: string) => {
+    const name = rawName.trim().toUpperCase();
+    if (!name) throw new Error("Nama kategori wajib diisi.");
+    if (name.length > 60) throw new Error("Nama kategori maksimal 60 karakter.");
+
+    const { data, error } = await supabase.rpc("add_finance_forecast_category", {
+      p_name: name,
+    });
+    if (error) throw new Error(parseFinanceDbError(error));
+
+    const result = (data ?? null) as { name?: string; created?: boolean } | null;
+    const savedName = result?.name ?? name;
+    setCategories((prev) => (
+      prev.some((category) => category.toUpperCase() === savedName.toUpperCase())
+        ? prev
+        : [...prev, savedName]
+    ));
+    addToast(
+      "success",
+      result?.created === false
+        ? `Kategori ${savedName} sudah tersedia.`
+        : `Kategori ${savedName} ditambahkan.`,
+    );
+    return savedName;
+  }, [addToast]);
 
   const handleAddCategory = async () => {
     if (!canInput || addingCategory) return;
@@ -952,26 +995,10 @@ export default function FinanceForecastPage() {
 
     setAddingCategory(true);
     try {
-      const { data, error } = await supabase.rpc("add_finance_forecast_category", {
-        p_name: name,
-      });
-      if (error) throw error;
-      const result = (data ?? null) as { name?: string; created?: boolean } | null;
-      const savedName = result?.name ?? name;
-      setCategories((prev) => (
-        prev.some((category) => category.toUpperCase() === savedName.toUpperCase())
-          ? prev
-          : [...prev, savedName]
-      ));
+      await createForecastCategory(name);
       setNewCategory("");
-      addToast(
-        "success",
-        result?.created === false
-          ? `Kategori ${savedName} sudah tersedia.`
-          : `Kategori ${savedName} ditambahkan.`,
-      );
     } catch (err) {
-      setCategoryError(parseFinanceDbError(err));
+      setCategoryError(err instanceof Error ? err.message : parseFinanceDbError(err));
     } finally {
       setAddingCategory(false);
     }
@@ -1547,7 +1574,7 @@ export default function FinanceForecastPage() {
                       week={week}
                       rows={weekIncomes}
                       canInput={canInput}
-                      onAdd={() => addIncome(week)}
+                      onAdd={() => openEntryModal("income", week)}
                       onAddInvoice={() => openInvoicePicker(week)}
                       onChange={updateIncome}
                       onRemove={(key) => setIncomes((prev) => prev.filter((r) => r.key !== key))}
@@ -1557,7 +1584,7 @@ export default function FinanceForecastPage() {
                       rows={weekExpenses}
                       categories={categories}
                       canInput={canInput}
-                      onAdd={() => addExpense(week)}
+                      onAdd={() => openEntryModal("expense", week)}
                       onChange={updateExpense}
                       onRemove={(key) => setExpenses((prev) => prev.filter((r) => r.key !== key))}
                     />
@@ -1626,10 +1653,12 @@ export default function FinanceForecastPage() {
               <Info className="w-3.5 h-3.5 shrink-0" />
               <span>
                 Tombol <span className="font-semibold text-foreground">Invoice</span> pada panel pemasukan mengambil
-                sisa tagihan. Invoice yang sama hanya boleh dipakai sekali per bulan. Kategori pengeluaran bisa
-                dipilih langsung di setiap baris atau lewat{" "}
+                sisa tagihan. Invoice yang sama hanya boleh dipakai sekali per bulan. Tombol{" "}
+                <span className="font-semibold text-foreground">Tambah</span> membuka form pengisian sebelum data
+                masuk ke draft. Kategori pengeluaran bisa dipilih langsung di setiap baris atau lewat{" "}
                 <span className="font-semibold text-foreground">Atur Kategori</span>, dan hanya memengaruhi
-                rekap bulanan.
+                rekap bulanan. Klik <span className="font-semibold text-foreground">Simpan Forecast</span> untuk
+                menyimpan permanen.
               </span>
             </div>
           </div>
@@ -1775,7 +1804,7 @@ export default function FinanceForecastPage() {
 
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border bg-muted/20">
               <p className="text-[11px] text-muted-foreground">
-                Perubahan kategori ikut tersimpan lewat tombol{" "}
+                Kategori baru langsung tersimpan. Perubahan kategori pada baris ikut tersimpan lewat tombol{" "}
                 <span className="font-semibold text-foreground">Simpan</span>.
               </p>
               <button
@@ -1788,6 +1817,19 @@ export default function FinanceForecastPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Form tambah pemasukan / pengeluaran */}
+      {entryModal && (
+        <ForecastEntryModal
+          key={`${periodKey}-${entryModal.mode}-${entryModal.week.weekNo}`}
+          mode={entryModal.mode}
+          week={entryModal.week}
+          categories={categories}
+          onClose={closeEntryModal}
+          onSubmit={handleEntrySubmit}
+          onCreateCategory={createForecastCategory}
+        />
       )}
 
       {/* Invoice picker */}

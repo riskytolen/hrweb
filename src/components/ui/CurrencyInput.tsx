@@ -106,6 +106,7 @@ export const CurrencyInput = React.forwardRef<HTMLInputElement, CurrencyInputPro
           onBlur={handleBlur}
           className={cn(
             "w-full rounded-lg border border-border bg-muted/30 outline-none focus:border-primary text-right tabular-nums",
+            "aria-invalid:border-danger aria-invalid:focus:border-danger aria-invalid:focus:ring-2 aria-invalid:focus:ring-danger/10",
             size === "sm"
               ? "pl-6 pr-2 py-2 text-xs"
               : "pl-9 pr-3 py-2.5 text-xs rounded-xl",

@@ -123,15 +123,18 @@ export default function Select({
 
   // Focus search on open
   useEffect(() => {
-    if (open && isSearchable) {
-      setTimeout(() => searchRef.current?.focus(), 50);
-    }
-    if (open) {
-      // Highlight current value
-      const idx = filtered.findIndex((o) => o.value === value);
-      setHighlightIdx(idx >= 0 ? idx : 0);
-    }
-  }, [open]);
+    if (!open || !isSearchable) return;
+    const timer = setTimeout(() => searchRef.current?.focus(), 50);
+    return () => clearTimeout(timer);
+  }, [open, isSearchable]);
+
+  const openDropdown = useCallback(() => {
+    if (portal) updatePortalPosition();
+    const idx = options.findIndex((option) => option.value === value);
+    setHighlightIdx(idx >= 0 ? idx : 0);
+    setOpen(true);
+    setSearch("");
+  }, [options, portal, updatePortalPosition, value]);
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -151,7 +154,7 @@ export default function Select({
     if (!open) {
       if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
         e.preventDefault();
-        setOpen(true);
+        openDropdown();
       }
       return;
     }
@@ -173,6 +176,7 @@ export default function Select({
         break;
       case "Escape":
         e.preventDefault();
+        e.stopPropagation();
         setOpen(false);
         setSearch("");
         break;
@@ -263,9 +267,12 @@ export default function Select({
         ref={triggerRef}
         type="button"
         onClick={() => {
-          if (!open && portal) updatePortalPosition();
-          setOpen(!open);
-          setSearch("");
+          if (open) {
+            setOpen(false);
+            setSearch("");
+          } else {
+            openDropdown();
+          }
         }}
         className={cn(
           "w-full flex items-center justify-between outline-none transition-all duration-200",
