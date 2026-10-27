@@ -40,7 +40,6 @@ export const FORECAST_WEEK_NO = [1, 2, 3, 4] as const;
 export const FORECAST_OPENING_SOURCES = [
   "manual",
   "previous_forecast",
-  "previous_cash",
 ] as const;
 
 export type ForecastOpeningSource = (typeof FORECAST_OPENING_SOURCES)[number];
@@ -48,7 +47,6 @@ export type ForecastOpeningSource = (typeof FORECAST_OPENING_SOURCES)[number];
 export const FORECAST_OPENING_SOURCE_LABELS: Record<ForecastOpeningSource, string> = {
   manual: "Input manual",
   previous_forecast: "Forecast bulan sebelumnya",
-  previous_cash: "Kas aktual bulan sebelumnya",
 };
 
 /** Nilai lama/kosong dianggap manual agar data sebelum fitur ini tetap kompatibel. */
@@ -72,12 +70,11 @@ export interface ForecastOpeningDefault {
 
 /**
  * Sumber awal untuk bulan yang belum pernah disimpan:
- * pakai saldo akhir Forecast sebelumnya, lalu kas aktual sebelumnya.
+ * pakai saldo akhir Forecast sebelumnya; jika tidak tersedia, manual 0.
  * Nilai negatif (defisit) tidak dapat dipakai karena saldo awal minimum 0.
  */
 export function chooseDefaultForecastOpening(args: {
   forecast: ForecastOpeningSourceValue;
-  cash: ForecastOpeningSourceValue;
 }): ForecastOpeningDefault {
   if (
     args.forecast.available &&
@@ -85,9 +82,6 @@ export function chooseDefaultForecastOpening(args: {
     args.forecast.value >= 0
   ) {
     return { source: "previous_forecast", value: args.forecast.value };
-  }
-  if (args.cash.available && args.cash.value != null && args.cash.value >= 0) {
-    return { source: "previous_cash", value: args.cash.value };
   }
   return { source: "manual", value: 0 };
 }

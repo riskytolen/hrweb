@@ -163,7 +163,7 @@ describe("computeForecast", () => {
 describe("sumber saldo awal forecast", () => {
   it("menormalkan sumber lama/kosong menjadi manual", () => {
     expect(normalizeForecastOpeningSource("previous_forecast")).toBe("previous_forecast");
-    expect(normalizeForecastOpeningSource("previous_cash")).toBe("previous_cash");
+    expect(normalizeForecastOpeningSource("previous_cash")).toBe("manual");
     expect(normalizeForecastOpeningSource("manual")).toBe("manual");
     expect(normalizeForecastOpeningSource(null)).toBe("manual");
     expect(normalizeForecastOpeningSource("tidak-dikenal")).toBe("manual");
@@ -185,25 +185,22 @@ describe("sumber saldo awal forecast", () => {
     ).toBe(146_612_416);
   });
 
-  it("mendahulukan Forecast, lalu kas aktual, dan tidak memakai nilai negatif", () => {
+  it("mendahulukan Forecast dan tidak memakai nilai negatif", () => {
     expect(
       chooseDefaultForecastOpening({
         forecast: { available: true, value: 12_000_000 },
-        cash: { available: true, value: 9_000_000 },
       }),
     ).toEqual({ source: "previous_forecast", value: 12_000_000 });
 
     expect(
       chooseDefaultForecastOpening({
         forecast: { available: true, value: -1 },
-        cash: { available: true, value: 9_000_000 },
       }),
-    ).toEqual({ source: "previous_cash", value: 9_000_000 });
+    ).toEqual({ source: "manual", value: 0 });
 
     expect(
       chooseDefaultForecastOpening({
         forecast: { available: false, value: null },
-        cash: { available: false, value: null },
       }),
     ).toEqual({ source: "manual", value: 0 });
   });

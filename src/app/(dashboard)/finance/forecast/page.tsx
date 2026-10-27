@@ -20,14 +20,8 @@ import type {
   DbFinanceForecastMonth,
 } from "@/lib/supabase";
 import { logAudit } from "@/lib/audit";
-import { fmtDate, summarizeCashPeriod } from "@/lib/finance";
-import {
-  FINANCE_BOOKS_START_MONTH,
-  isMonthEnded,
-  monthEndOf,
-  parseFinanceDbError,
-  type DbFinanceMonthStatus,
-} from "@/lib/finance-closing";
+import { fmtDate } from "@/lib/finance";
+import { parseFinanceDbError } from "@/lib/finance-closing";
 import {
   buildForecastWeeks,
   chooseDefaultForecastOpening,
@@ -103,7 +97,6 @@ interface OpeningSourceInfo {
 
 interface OpeningSourcesState {
   previousForecast: OpeningSourceInfo;
-  previousCash: OpeningSourceInfo;
 }
 
 async function fetchForecastMonthRows(monthId: number) {
@@ -129,32 +122,6 @@ async function fetchForecastMonthRows(monthId: number) {
     incomes: (incRes.data ?? []) as DbFinanceForecastIncome[],
     expenses: (expRes.data ?? []) as DbFinanceForecastExpense[],
   };
-}
-
-async function fetchFinanceRowsThrough<T>(args: {
-  table: string;
-  select: string;
-  dateColumn: string;
-  to: string;
-}): Promise<T[]> {
-  const pageSize = 1000;
-  const rows: T[] = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await supabase
-      .from(args.table)
-      .select(args.select)
-      .lte(args.dateColumn, args.to)
-      .order(args.dateColumn, { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    const batch = (data ?? []) as T[];
-    rows.push(...batch);
-    if (batch.length < pageSize) break;
-    from += pageSize;
-  }
-  return rows;
 }
 
 function openingSourceUsable(info: OpeningSourceInfo): boolean {
@@ -631,11 +598,6 @@ export default function FinanceForecastPage() {
       value: null,
       detail: "Forecast bulan sebelumnya belum tersedia",
     },
-    previousCash: {
-      available: false,
-      value: null,
-      detail: "Kas aktual bulan sebelumnya belum tersedia",
-    },
   });
   const [incomes, setIncomes] = useState<DraftIncome[]>([]);
   const [expenses, setExpenses] = useState<DraftExpense[]>([]);
@@ -697,7 +659,6 @@ export default function FinanceForecastPage() {
 
   const activeOpeningSourceInfo = useMemo(() => {
     if (openingSource === "previous_forecast") return openingSources.previousForecast;
-    if (openingSource === "previous_cash") return openingSources.previousCash;
     return null;
   }, [openingSource, openingSources]);
   const canApplyOpeningSource =
@@ -760,19 +721,10 @@ export default function FinanceForecastPage() {
         const start = forecastMonthStart(key);
         const previousKey = shiftForecastPeriodKey(key, -1);
         const previousStart = forecastMonthStart(previousKey);
-        const statusQuery = supabase
-          .from("finance_month_status" as never)
-          .select("*")
-          .eq("period_start", previousStart)
-          .maybeSingle() as unknown as Promise<{
-            data: DbFinanceMonthStatus | null;
-            error: unknown;
-          }>;
-        const [monthRes, companyRes, previousMonthRes, statusRes] = await Promise.all([
+        const [monthRes, companyRes, previousMonthRes] = await Promise.all([
           supabase.from("finance_forecast_months").select("*").eq("period_start", start).maybeSingle(),
           supabase.from("finance_company_settings").select("*").eq("id", 1).maybeSingle(),
           supabase.from("finance_forecast_months").select("*").eq("period_start", previousStart).maybeSingle(),
-          statusQuery,
         ]);
         if (monthRes.error) throw monthRes.error;
         if (companyRes.error) throw companyRes.error;
@@ -840,82 +792,8 @@ export default function FinanceForecastPage() {
               detail: `Forecast ${previousLabel} belum tersedia`,
             };
 
-        let previousCashInfo: OpeningSourceInfo;
-        const booksStart = settings?.books_start_month || FINANCE_BOOKS_START_MONTH;
-        const previousStatus = statusRes.error ? null : statusRes.data;
-        if (previousStart < booksStart) {
-          previousCashInfo = {
-            available: false,
-            value: null,
-            detail: `Kas aktual ${previousLabel} belum tersedia (sebelum awal pembukuan)`,
-          };
-        } else if (
-          previousStatus?.state === "close" &&
-          previousStatus.ending_cash_balance != null
-        ) {
-          previousCashInfo = {
-            available: true,
-            value: Number(previousStatus.ending_cash_balance) || 0,
-            detail: `Saldo akhir Tutup Buku ${previousLabel}`,
-          };
-        } else if (!isMonthEnded(previousStart, localDateStr())) {
-          previousCashInfo = {
-            available: false,
-            value: null,
-            detail: `Kas aktual ${previousLabel} belum tersedia (bulan belum berakhir)`,
-          };
-        } else {
-          try {
-            const previousEnd = monthEndOf(previousStart);
-            const [payments, expenses, adjustments] = await Promise.all([
-              fetchFinanceRowsThrough<{ payment_date: string; amount: number }>({
-                table: "finance_invoice_payments",
-                select: "payment_date, amount",
-                dateColumn: "payment_date",
-                to: previousEnd,
-              }),
-              fetchFinanceRowsThrough<{ expense_date: string; amount: number }>({
-                table: "finance_expenses",
-                select: "expense_date, amount",
-                dateColumn: "expense_date",
-                to: previousEnd,
-              }),
-              fetchFinanceRowsThrough<{
-                adjustment_date: string;
-                type: "Masuk" | "Keluar";
-                amount: number;
-              }>({
-                table: "finance_cash_adjustments",
-                select: "adjustment_date, type, amount",
-                dateColumn: "adjustment_date",
-                to: previousEnd,
-              }),
-            ]);
-            const liveCash = summarizeCashPeriod({
-              initialBalance: Number(settings?.initial_cash_balance) || 0,
-              payments,
-              expenses,
-              adjustments,
-              periodStart: previousStart,
-              periodEnd: previousEnd,
-            });
-            previousCashInfo = {
-              available: true,
-              value: liveCash.endingBalance,
-              detail: `Saldo akhir kas aktual ${previousLabel}`,
-            };
-          } catch {
-            previousCashInfo = {
-              available: false,
-              value: null,
-              detail: `Kas aktual ${previousLabel} gagal dimuat`,
-            };
-          }
-        }
-
         setOpeningSources({
           previousForecast: previousForecastInfo,
-          previousCash: previousCashInfo,
         });
 
         let opening = Number(month?.opening_balance) || 0;
@@ -923,7 +801,6 @@ export default function FinanceForecastPage() {
         if (!month) {
           const fallback = chooseDefaultForecastOpening({
             forecast: previousForecastInfo,
-            cash: previousCashInfo,
           });
           opening = fallback.value;
           source = fallback.source;
@@ -1025,9 +902,7 @@ export default function FinanceForecastPage() {
     if (!canInput) return;
     setOpeningSource(source);
     if (source === "manual") return;
-    const info = source === "previous_forecast"
-      ? openingSources.previousForecast
-      : openingSources.previousCash;
+    const info = openingSources.previousForecast;
     if (info.available && info.value != null && info.value >= 0) {
       setOpeningBalance(info.value);
     }
@@ -1504,12 +1379,6 @@ export default function FinanceForecastPage() {
                         >
                           {FORECAST_OPENING_SOURCE_LABELS.previous_forecast} — {openingSourceOptionLabel(openingSources.previousForecast)}
                         </option>
-                        <option
-                          value="previous_cash"
-                          disabled={!openingSourceUsable(openingSources.previousCash)}
-                        >
-                          {FORECAST_OPENING_SOURCE_LABELS.previous_cash} — {openingSourceOptionLabel(openingSources.previousCash)}
-                        </option>
                       </select>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 xl:ml-auto">
@@ -1556,7 +1425,7 @@ export default function FinanceForecastPage() {
                   </p>
                 </div>
                 <p className="mt-1.5 text-[10px] text-muted-foreground">
-                  Piutang tidak dihitung sebagai saldo awal karena belum menjadi kas. Nilai tersimpan tidak ditimpa otomatis.
+                  Saldo awal hanya diambil dari Forecast bulan sebelumnya atau input manual. Nilai tersimpan tidak ditimpa otomatis.
                 </p>
               </div>
             </div>

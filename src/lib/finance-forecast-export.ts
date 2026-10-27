@@ -50,7 +50,7 @@ export interface ForecastExpenseExportRow extends ForecastExpenseLike {
 export interface ForecastExportInput {
   periodKey: string;
   openingBalance: number;
-  /** Keterangan asal saldo awal, mis. "Kas aktual September 2026". */
+  /** Keterangan asal saldo awal, mis. "Forecast September 2026". */
   openingSource?: string | null;
   incomes: ForecastIncomeExportRow[];
   expenses: ForecastExpenseExportRow[];

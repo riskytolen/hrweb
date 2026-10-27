@@ -1056,8 +1056,8 @@ export interface DbFinanceForecastMonth {
   id: number;
   period_start: string;
   opening_balance: number;
-  /** Asal saldo awal: manual / previous_forecast / previous_cash. */
-  opening_source: "manual" | "previous_forecast" | "previous_cash" | null;
+  /** Asal saldo awal: manual / previous_forecast. */
+  opening_source: "manual" | "previous_forecast" | null;
   notes: string | null;
   version: number;
   created_at: string;
