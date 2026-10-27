@@ -59,6 +59,7 @@ import ForecastCopyPreviousModal, {
   type ForecastCopyIncomeCandidate,
   type ForecastCopySelection,
 } from "./components/forecast-copy-previous-modal";
+import ForecastInvoiceContent from "./components/forecast-invoice-content";
 
 interface Toast { id: number; type: "success" | "error"; msg: string }
 
@@ -88,6 +89,13 @@ interface InvoiceQueryRow {
   invoice_date: string;
   due_date: string | null;
   total_amount: number;
+  subtotal: number;
+  description: string | null;
+  toll_amount: number | null;
+  parking_amount: number | null;
+  other_amount: number | null;
+  pph_amount: number | null;
+  notes: string | null;
   client?: { contact_name: string; company_name: string | null } | null;
 }
 
@@ -97,6 +105,13 @@ interface InvoiceOption {
   invoiceDate: string;
   dueDate: string | null;
   totalAmount: number;
+  subtotal: number;
+  description: string | null;
+  tollAmount: number;
+  parkingAmount: number;
+  otherAmount: number;
+  pphAmount: number;
+  notes: string | null;
   paidAmount: number;
   remaining: number;
   clientName: string;
@@ -230,6 +245,7 @@ function IncomePanel({
   week,
   rows,
   canInput,
+  invoiceById,
   onAdd,
   onAddInvoice,
   onChange,
@@ -238,6 +254,7 @@ function IncomePanel({
   week: ForecastWeek;
   rows: DraftIncome[];
   canInput: boolean;
+  invoiceById: Map<number, InvoiceOption>;
   onAdd: () => void;
   onAddInvoice: () => void;
   onChange: (key: string, patch: Partial<DraftIncome>) => void;
@@ -284,50 +301,78 @@ function IncomePanel({
             </tr>
           </thead>
           <tbody className="divide-y divide-border/50">
-            {rows.map((row) => (
-              <tr key={row.key} className="hover:bg-muted/20">
-                <td className="px-2 py-1">
-                  <input
-                    value={row.description}
-                    onChange={(e) => onChange(row.key, { description: e.target.value })}
-                    disabled={!canInput}
-                    placeholder="Contoh: Pelunasan invoice ..."
-                    className="w-full bg-transparent px-1.5 py-1.5 text-xs outline-none rounded-lg focus:bg-muted/40 text-foreground placeholder:text-muted-foreground/50 disabled:cursor-default"
-                  />
-                </td>
-                <td className="px-2 py-1">
-                  <input
-                    type="date"
-                    value={row.plannedDate}
-                    min={week.start}
-                    max={week.end}
-                    onChange={(e) => onChange(row.key, { plannedDate: e.target.value })}
-                    disabled={!canInput}
-                    className="w-full bg-transparent px-1 py-1.5 text-[11px] outline-none rounded-lg focus:bg-muted/40 text-foreground disabled:cursor-default"
-                  />
-                </td>
-                <td className="px-2 py-1">
-                  <CurrencyInput
-                    size="sm"
-                    value={row.amount}
-                    onChange={(v) => onChange(row.key, { amount: v })}
-                    disabled={!canInput}
-                  />
-                </td>
-                <td className="px-1 py-1 text-center">
-                  {canInput && (
-                    <button
-                      type="button"
-                      onClick={() => onRemove(row.key)}
-                      className="p-1.5 rounded-lg text-muted-foreground hover:text-danger hover:bg-danger-light transition-colors"
-                      title="Hapus baris"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {rows.map((row) => {
+              const invoiceDetail = row.invoiceId != null
+                ? invoiceById.get(row.invoiceId)
+                : undefined;
+              return (
+                <tr key={row.key} className="hover:bg-muted/20 align-top">
+                  <td className="px-2 py-1">
+                    {invoiceDetail ? (
+                      <div className="px-1.5 py-1.5">
+                        <ForecastInvoiceContent
+                          view={{
+                            invoiceNo: invoiceDetail.invoiceNo,
+                            description: invoiceDetail.description,
+                            clientLabel: invoiceDetail.clientCompany || invoiceDetail.clientName,
+                            clientContact:
+                              invoiceDetail.clientCompany &&
+                              invoiceDetail.clientName &&
+                              invoiceDetail.clientCompany !== invoiceDetail.clientName
+                                ? invoiceDetail.clientName
+                                : null,
+                            tollAmount: invoiceDetail.tollAmount,
+                            parkingAmount: invoiceDetail.parkingAmount,
+                            otherAmount: invoiceDetail.otherAmount,
+                            pphAmount: invoiceDetail.pphAmount,
+                            notes: invoiceDetail.notes,
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <input
+                        value={row.description}
+                        onChange={(e) => onChange(row.key, { description: e.target.value })}
+                        disabled={!canInput}
+                        placeholder="Contoh: Pelunasan invoice ..."
+                        className="w-full bg-transparent px-1.5 py-1.5 text-xs outline-none rounded-lg focus:bg-muted/40 text-foreground placeholder:text-muted-foreground/50 disabled:cursor-default"
+                      />
+                    )}
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      type="date"
+                      value={row.plannedDate}
+                      min={week.start}
+                      max={week.end}
+                      onChange={(e) => onChange(row.key, { plannedDate: e.target.value })}
+                      disabled={!canInput}
+                      className="w-full bg-transparent px-1 py-1.5 text-[11px] outline-none rounded-lg focus:bg-muted/40 text-foreground disabled:cursor-default"
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <CurrencyInput
+                      size="sm"
+                      value={row.amount}
+                      onChange={(v) => onChange(row.key, { amount: v })}
+                      disabled={!canInput}
+                    />
+                  </td>
+                  <td className="px-1 py-1 text-center">
+                    {canInput && (
+                      <button
+                        type="button"
+                        onClick={() => onRemove(row.key)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-danger hover:bg-danger-light transition-colors"
+                        title="Hapus baris"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-3 py-5 text-center text-[11px] text-muted-foreground">
@@ -658,6 +703,10 @@ export default function FinanceForecastPage() {
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
   const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  /** Semua invoice (termasuk yang lunas) agar detail tampil setelah reload. */
+  const [invoiceAllById, setInvoiceAllById] = useState<Map<number, InvoiceOption>>(new Map());
+  const invoiceLoadingRef = useRef(false);
+  const invoicesLoadedRef = useRef(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [entryModal, setEntryModal] = useState<{
     mode: ForecastEntryMode;
@@ -822,6 +871,7 @@ export default function FinanceForecastPage() {
       }
       if (invoiceDuplicate) unavailableReason = "Invoice sudah dipakai di bulan ini.";
 
+      const invoiceDetail = invoiceAllById.get(row.invoice_id as number);
       return {
         sourceId: row.id,
         description: row.description,
@@ -830,13 +880,30 @@ export default function FinanceForecastPage() {
         amount: invoice?.remaining ?? previousAmount,
         previousAmount,
         invoiceId: row.invoice_id,
-        invoiceNo: invoice?.invoiceNo ?? null,
+        invoiceNo: invoiceDetail?.invoiceNo ?? null,
+        invoiceDetail: invoiceDetail
+          ? {
+              description: invoiceDetail.description,
+              clientLabel: invoiceDetail.clientCompany || invoiceDetail.clientName || null,
+              clientContact:
+                invoiceDetail.clientCompany && invoiceDetail.clientName &&
+                  invoiceDetail.clientCompany !== invoiceDetail.clientName
+                  ? invoiceDetail.clientName
+                  : null,
+              tollAmount: invoiceDetail.tollAmount,
+              parkingAmount: invoiceDetail.parkingAmount,
+              otherAmount: invoiceDetail.otherAmount,
+              pphAmount: invoiceDetail.pphAmount,
+              notes: invoiceDetail.notes,
+            }
+          : null,
         duplicate,
         unavailableReason,
       };
     });
   }, [
     currentIncomeCopyKeys,
+    invoiceAllById,
     invoiceById,
     invoiceLoading,
     invoicesLoaded,
@@ -875,6 +942,71 @@ export default function FinanceForecastPage() {
     : previousCopyTotal === 0
       ? `Forecast ${previousForecast.label} belum memiliki data`
       : `Salin pemasukan dan pengeluaran dari Forecast ${previousForecast.label}`;
+
+  // ─── Muat invoice (rincian lengkap + sisa tagihan) ───
+
+  const loadInvoices = useCallback(async (): Promise<boolean> => {
+    if (invoiceLoadingRef.current) return invoicesLoadedRef.current;
+    invoiceLoadingRef.current = true;
+    setInvoiceLoading(true);
+    try {
+      const [invRes, payRes] = await Promise.all([
+        supabase
+          .from("finance_invoices")
+          .select(
+            "id, invoice_no, invoice_date, due_date, total_amount, subtotal, description, toll_amount, parking_amount, other_amount, pph_amount, notes, client:finance_clients(contact_name, company_name)",
+          )
+          .order("invoice_date", { ascending: false }),
+        supabase.from("finance_invoice_payments").select("invoice_id, amount"),
+      ]);
+      if (invRes.error) throw invRes.error;
+      if (payRes.error) throw payRes.error;
+
+      const paidMap = new Map<number, number>();
+      for (const p of (payRes.data ?? []) as { invoice_id: number; amount: number }[]) {
+        paidMap.set(p.invoice_id, (paidMap.get(p.invoice_id) ?? 0) + (Number(p.amount) || 0));
+      }
+
+      const allOptions: InvoiceOption[] = ((invRes.data ?? []) as unknown as InvoiceQueryRow[])
+        .map((r) => {
+          const total = Number(r.total_amount) || 0;
+          const paid = paidMap.get(r.id) ?? 0;
+          return {
+            id: r.id,
+            invoiceNo: r.invoice_no,
+            invoiceDate: r.invoice_date,
+            dueDate: r.due_date,
+            totalAmount: total,
+            subtotal: Number(r.subtotal) || 0,
+            description: r.description ?? null,
+            tollAmount: Number(r.toll_amount) || 0,
+            parkingAmount: Number(r.parking_amount) || 0,
+            otherAmount: Number(r.other_amount) || 0,
+            pphAmount: Number(r.pph_amount) || 0,
+            notes: r.notes ?? null,
+            paidAmount: paid,
+            remaining: total - paid,
+            clientName: r.client?.contact_name ?? "",
+            clientCompany: r.client?.company_name ?? "",
+          };
+        });
+      const invoiceMap = new Map<number, InvoiceOption>(
+        allOptions.map((option) => [option.id, option]),
+      );
+
+      setInvoiceAllById(invoiceMap);
+      setInvoices(allOptions.filter((option) => option.remaining > 0));
+      setInvoicesLoaded(true);
+      invoicesLoadedRef.current = true;
+      return true;
+    } catch (err) {
+      addToast("error", parseFinanceDbError(err));
+      return false;
+    } finally {
+      invoiceLoadingRef.current = false;
+      setInvoiceLoading(false);
+    }
+  }, [addToast]);
 
   const load = useCallback(
     async (key: string) => {
@@ -950,6 +1082,12 @@ export default function FinanceForecastPage() {
           category: normalizeForecastExpenseCategory(r.category, activeCategories),
         }));
 
+        // Muat detail invoice untuk baris pemasukan yang terhubung invoice,
+        // termasuk invoice yang sudah lunas (detail tetap tampil).
+        if (nextIncomes.some((row) => row.invoiceId != null)) {
+          void loadInvoices();
+        }
+
         const previousLabel = forecastMonthLabel(previousKey);
         const previousForecastInfo: OpeningSourceInfo = previousMonth
           ? {
@@ -1011,7 +1149,7 @@ export default function FinanceForecastPage() {
         setLoading(false);
       }
     },
-    [addToast],
+    [addToast, loadInvoices],
   );
 
   useEffect(() => {
@@ -1252,54 +1390,6 @@ export default function FinanceForecastPage() {
 
   // ─── Invoice picker ───
 
-  const loadInvoices = async (): Promise<boolean> => {
-    if (invoiceLoading) return invoicesLoaded;
-    setInvoiceLoading(true);
-    try {
-      const [invRes, payRes] = await Promise.all([
-        supabase
-          .from("finance_invoices")
-          .select("id, invoice_no, invoice_date, due_date, total_amount, client:finance_clients(contact_name, company_name)")
-          .order("invoice_date", { ascending: false }),
-        supabase.from("finance_invoice_payments").select("invoice_id, amount"),
-      ]);
-      if (invRes.error) throw invRes.error;
-      if (payRes.error) throw payRes.error;
-
-      const paidMap = new Map<number, number>();
-      for (const p of (payRes.data ?? []) as { invoice_id: number; amount: number }[]) {
-        paidMap.set(p.invoice_id, (paidMap.get(p.invoice_id) ?? 0) + (Number(p.amount) || 0));
-      }
-
-      const options: InvoiceOption[] = ((invRes.data ?? []) as unknown as InvoiceQueryRow[])
-        .map((r) => {
-          const total = Number(r.total_amount) || 0;
-          const paid = paidMap.get(r.id) ?? 0;
-          return {
-            id: r.id,
-            invoiceNo: r.invoice_no,
-            invoiceDate: r.invoice_date,
-            dueDate: r.due_date,
-            totalAmount: total,
-            paidAmount: paid,
-            remaining: total - paid,
-            clientName: r.client?.contact_name ?? "",
-            clientCompany: r.client?.company_name ?? "",
-          };
-        })
-        .filter((r) => r.remaining > 0);
-
-      setInvoices(options);
-      setInvoicesLoaded(true);
-      return true;
-    } catch (err) {
-      addToast("error", parseFinanceDbError(err));
-      return false;
-    } finally {
-      setInvoiceLoading(false);
-    }
-  };
-
   const openInvoicePicker = (week: ForecastWeek) => {
     if (!canInput) return;
     setInvoiceWeek(week);
@@ -1401,7 +1491,9 @@ export default function FinanceForecastPage() {
       (inv) =>
         inv.invoiceNo.toLowerCase().includes(q) ||
         inv.clientName.toLowerCase().includes(q) ||
-        inv.clientCompany.toLowerCase().includes(q),
+        inv.clientCompany.toLowerCase().includes(q) ||
+        (inv.description ?? "").toLowerCase().includes(q) ||
+        (inv.notes ?? "").toLowerCase().includes(q),
     );
   }, [invoices, invoiceSearch]);
 
@@ -1874,6 +1966,7 @@ export default function FinanceForecastPage() {
                       week={week}
                       rows={weekIncomes}
                       canInput={canInput}
+                      invoiceById={invoiceAllById}
                       onAdd={() => openEntryModal("income", week)}
                       onAddInvoice={() => openInvoicePicker(week)}
                       onChange={updateIncome}
@@ -2074,10 +2167,20 @@ export default function FinanceForecastPage() {
                     {filteredInvoices.map((inv) => {
                       const used = usedInvoiceIds.has(inv.id);
                       return (
-                        <tr key={inv.id} className="hover:bg-muted/20">
+                        <tr key={inv.id} className="hover:bg-muted/20 align-top">
                           <td className="px-4 py-2.5">
-                            <p className="text-xs font-bold text-foreground">{inv.invoiceNo}</p>
-                            <p className="text-[10px] text-muted-foreground">{fmtDate(inv.invoiceDate)}</p>
+                            <ForecastInvoiceContent
+                              view={{
+                                invoiceNo: inv.invoiceNo,
+                                description: inv.description,
+                                tollAmount: inv.tollAmount,
+                                parkingAmount: inv.parkingAmount,
+                                otherAmount: inv.otherAmount,
+                                pphAmount: inv.pphAmount,
+                                notes: inv.notes,
+                              }}
+                            />
+                            <p className="mt-1 text-[10px] text-muted-foreground">{fmtDate(inv.invoiceDate)}</p>
                           </td>
                           <td className="px-3 py-2.5">
                             <p className="text-xs text-foreground">{inv.clientCompany || inv.clientName || "—"}</p>

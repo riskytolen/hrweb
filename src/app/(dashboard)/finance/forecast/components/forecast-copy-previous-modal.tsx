@@ -15,9 +15,21 @@ import {
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Portal from "@/components/ui/Portal";
+import ForecastInvoiceContent from "./forecast-invoice-content";
 import { fmtDate } from "@/lib/finance";
 import type { ForecastWeekNo } from "@/lib/finance-forecast";
 import { cn, formatCurrency } from "@/lib/utils";
+
+export interface ForecastCopyIncomeCandidateInvoiceDetail {
+  description: string | null;
+  clientLabel: string | null;
+  clientContact: string | null;
+  tollAmount: number;
+  parkingAmount: number;
+  otherAmount: number;
+  pphAmount: number;
+  notes: string | null;
+}
 
 export interface ForecastCopyIncomeCandidate {
   sourceId: number;
@@ -28,6 +40,7 @@ export interface ForecastCopyIncomeCandidate {
   previousAmount: number;
   invoiceId: number | null;
   invoiceNo: string | null;
+  invoiceDetail: ForecastCopyIncomeCandidateInvoiceDetail | null;
   duplicate: boolean;
   unavailableReason: string | null;
 }
@@ -336,20 +349,36 @@ export default function ForecastCopyPreviousModal({
                           className="mt-1 h-4 w-4 shrink-0 rounded border-border accent-primary"
                         />
                         <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <p
-                              className="truncate text-xs font-bold text-foreground"
-                              title={item.description}
-                            >
-                              {item.description}
-                            </p>
-                            {item.invoiceId != null && (
-                              <span className="inline-flex items-center gap-1 rounded-md bg-primary-light px-1.5 py-0.5 text-[9px] font-semibold text-primary">
-                                <ReceiptText className="h-2.5 w-2.5" />
-                                Invoice {item.invoiceNo ?? `#${item.invoiceId}`}
-                              </span>
-                            )}
-                          </div>
+                          {item.invoiceDetail ? (
+                            <ForecastInvoiceContent
+                              view={{
+                                invoiceNo: item.invoiceNo ?? `#${item.invoiceId}`,
+                                description: item.invoiceDetail.description,
+                                clientLabel: item.invoiceDetail.clientLabel,
+                                clientContact: item.invoiceDetail.clientContact,
+                                tollAmount: item.invoiceDetail.tollAmount,
+                                parkingAmount: item.invoiceDetail.parkingAmount,
+                                otherAmount: item.invoiceDetail.otherAmount,
+                                pphAmount: item.invoiceDetail.pphAmount,
+                                notes: item.invoiceDetail.notes,
+                              }}
+                            />
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p
+                                className="truncate text-xs font-bold text-foreground"
+                                title={item.description}
+                              >
+                                {item.description}
+                              </p>
+                              {item.invoiceId != null && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-primary-light px-1.5 py-0.5 text-[9px] font-semibold text-primary">
+                                  <ReceiptText className="h-2.5 w-2.5" />
+                                  Invoice {item.invoiceNo ?? `#${item.invoiceId}`}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
                             <span className="inline-flex items-center gap-1">
                               <CalendarDays className="h-2.5 w-2.5" />
