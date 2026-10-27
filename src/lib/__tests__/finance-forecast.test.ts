@@ -11,6 +11,8 @@ import {
   FORECAST_EXPENSE_CATEGORIES,
   forecastMonthLabel,
   forecastMonthStart,
+  forecastCopyFingerprint,
+  mapForecastDateToMonth,
   normalizeForecastExpenseCategory,
   normalizeForecastOpeningSource,
   renameForecastSnapshotCategory,
@@ -47,6 +49,20 @@ describe("buildForecastWeeks", () => {
     const weeks = buildForecastWeeks("2028-02");
     expect(daysInForecastMonth("2028-02")).toBe(29);
     expect(weeks[3].end).toBe("2028-02-29");
+  });
+});
+
+describe("pemetaan tanggal salinan Forecast", () => {
+  it("mempertahankan tanggal dan memindahkan bulan", () => {
+    expect(mapForecastDateToMonth("2026-09-05", "2026-10")).toBe("2026-10-05");
+    expect(mapForecastDateToMonth("2026-01-31", "2026-02")).toBe("2026-02-28");
+    expect(mapForecastDateToMonth("2024-01-31", "2024-02")).toBe("2024-02-29");
+    expect(mapForecastDateToMonth("bukan-tanggal", "2026-10")).toBe("2026-10-01");
+  });
+
+  it("membuat fingerprint duplikat dari tanggal, keterangan, dan nominal", () => {
+    expect(forecastCopyFingerprint("2026-10-05", "  Gaji   Driver ", 1_000_000))
+      .toBe("2026-10-05|GAJI DRIVER|1000000");
   });
 });
 

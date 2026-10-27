@@ -166,6 +166,28 @@ export function clampDateToWeek(date: string | null | undefined, week: ForecastW
   return date;
 }
 
+/**
+ * Pindahkan tanggal dari bulan sumber ke bulan tujuan dengan tanggal yang
+ * sama. Tanggal 29–31 pada bulan tujuan yang lebih pendek dipotong ke hari
+ * terakhir bulan tersebut.
+ */
+export function mapForecastDateToMonth(date: string, periodKey: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return `${periodKey}-01`;
+  const day = Number(date.slice(8, 10));
+  if (!Number.isFinite(day) || day < 1) return `${periodKey}-01`;
+  return `${periodKey}-${pad2(Math.min(day, daysInForecastMonth(periodKey)))}`;
+}
+
+/** Kunci pembanding cepat untuk mendeteksi baris salinan yang sudah ada. */
+export function forecastCopyFingerprint(
+  plannedDate: string,
+  description: string,
+  amount: number,
+): string {
+  const normalizedDescription = description.trim().replace(/\s+/g, " ").toUpperCase();
+  return `${plannedDate}|${normalizedDescription}|${toRupiah(amount)}`;
+}
+
 /** Ambil baris milik satu minggu, urutan input dipertahankan. */
 export function rowsForWeek<T extends { week_no: number }>(rows: T[], weekNo: number): T[] {
   return rows.filter((r) => r.week_no === weekNo);

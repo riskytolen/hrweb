@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarRange, Plus, Trash2, Save, FileDown, ChevronDown, ChevronLeft, ChevronRight,
   Search, Loader2, CheckCircle2, Maximize2, Minimize2, ReceiptText, X, RefreshCw, Info, Wallet, Tag,
-  Link2, AlertTriangle,
+  Link2, AlertTriangle, Copy,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import Button from "@/components/ui/Button";
@@ -31,14 +31,17 @@ import {
   computeForecastExpenseCategoryTotals,
   FORECAST_EXPENSE_CATEGORIES,
   FORECAST_OPENING_SOURCE_LABELS,
+  forecastCopyFingerprint,
   forecastMonthLabel,
   forecastMonthStart,
+  mapForecastDateToMonth,
   normalizeForecastExpenseCategory,
   normalizeForecastOpeningSource,
   renameForecastSnapshotCategory,
   savedForecastClosing,
   shiftForecastPeriodKey,
   validateForecastDraft,
+  weekNoForDate,
   type ForecastExpenseCategoryTotal,
   type ForecastOpeningSource,
   type ForecastSummary,
@@ -51,6 +54,11 @@ import ForecastEntryModal, {
   type ForecastEntryValues,
 } from "./components/forecast-entry-modal";
 import ForecastCategorySettingsModal from "./components/forecast-category-settings-modal";
+import ForecastCopyPreviousModal, {
+  type ForecastCopyExpenseCandidate,
+  type ForecastCopyIncomeCandidate,
+  type ForecastCopySelection,
+} from "./components/forecast-copy-previous-modal";
 
 interface Toast { id: number; type: "success" | "error"; msg: string }
 
@@ -103,6 +111,12 @@ interface OpeningSourceInfo {
 
 interface OpeningSourcesState {
   previousForecast: OpeningSourceInfo;
+}
+
+interface PreviousForecastSource {
+  label: string;
+  incomes: DbFinanceForecastIncome[];
+  expenses: DbFinanceForecastExpense[];
 }
 
 async function fetchForecastMonthRows(monthId: number) {
@@ -649,6 +663,10 @@ export default function FinanceForecastPage() {
     mode: ForecastEntryMode;
     week: ForecastWeek;
   } | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyPreparing, setCopyPreparing] = useState(false);
+  const [previousForecast, setPreviousForecast] = useState<PreviousForecastSource | null>(null);
+  const copyRequestRef = useRef(0);
   const [categoryRows, setCategoryRows] = useState<DbFinanceForecastCategory[]>(() =>
     FORECAST_EXPENSE_CATEGORIES.map((name, index) => ({
       id: -(index + 1),
@@ -757,8 +775,113 @@ export default function FinanceForecastPage() {
     [incomes],
   );
 
+  const invoiceById = useMemo(
+    () => new Map(invoices.map((invoice) => [invoice.id, invoice])),
+    [invoices],
+  );
+
+  const currentIncomeCopyKeys = useMemo(
+    () => new Set(incomes.map((income) => forecastCopyFingerprint(
+      income.plannedDate,
+      income.description,
+      income.amount,
+    ))),
+    [incomes],
+  );
+
+  const currentExpenseCopyKeys = useMemo(
+    () => new Set(expenses.map((expense) => forecastCopyFingerprint(
+      expense.plannedDate,
+      expense.description,
+      expense.amount,
+    ))),
+    [expenses],
+  );
+
+  const copyIncomeCandidates = useMemo<ForecastCopyIncomeCandidate[]>(() => {
+    if (!previousForecast) return [];
+    return previousForecast.incomes.map((row) => {
+      const plannedDate = mapForecastDateToMonth(row.planned_date, periodKey);
+      const weekNo = weekNoForDate(plannedDate, weeks) ?? (1 as ForecastWeekNo);
+      const previousAmount = Number(row.amount) || 0;
+      const invoice = row.invoice_id != null ? invoiceById.get(row.invoice_id) : undefined;
+      const invoiceDuplicate = row.invoice_id != null && usedInvoiceIds.has(row.invoice_id);
+      const manualDuplicate = row.invoice_id == null && currentIncomeCopyKeys.has(
+        forecastCopyFingerprint(plannedDate, row.description, previousAmount),
+      );
+      const duplicate = invoiceDuplicate || manualDuplicate;
+      let unavailableReason: string | null = null;
+      if (row.invoice_id != null && !invoice) {
+        unavailableReason = invoiceLoading
+          ? "Memuat sisa tagihan invoice..."
+          : !invoicesLoaded
+            ? "Data sisa invoice belum tersedia."
+            : "Tidak ada sisa tagihan invoice.";
+      } else if (invoice && invoice.remaining <= 0) {
+        unavailableReason = "Tidak ada sisa tagihan invoice.";
+      }
+      if (invoiceDuplicate) unavailableReason = "Invoice sudah dipakai di bulan ini.";
+
+      return {
+        sourceId: row.id,
+        description: row.description,
+        plannedDate,
+        weekNo,
+        amount: invoice?.remaining ?? previousAmount,
+        previousAmount,
+        invoiceId: row.invoice_id,
+        invoiceNo: invoice?.invoiceNo ?? null,
+        duplicate,
+        unavailableReason,
+      };
+    });
+  }, [
+    currentIncomeCopyKeys,
+    invoiceById,
+    invoiceLoading,
+    invoicesLoaded,
+    periodKey,
+    previousForecast,
+    usedInvoiceIds,
+    weeks,
+  ]);
+
+  const copyExpenseCandidates = useMemo<ForecastCopyExpenseCandidate[]>(() => {
+    if (!previousForecast) return [];
+    return previousForecast.expenses.map((row) => {
+      const plannedDate = mapForecastDateToMonth(row.planned_date, periodKey);
+      const weekNo = weekNoForDate(plannedDate, weeks) ?? (1 as ForecastWeekNo);
+      const amount = Number(row.amount) || 0;
+      return {
+        sourceId: row.id,
+        description: row.description,
+        plannedDate,
+        weekNo,
+        amount,
+        admin: Number(row.admin) || 0,
+        category: normalizeForecastExpenseCategory(row.category, categories),
+        duplicate: currentExpenseCopyKeys.has(
+          forecastCopyFingerprint(plannedDate, row.description, amount),
+        ),
+      };
+    });
+  }, [categories, currentExpenseCopyKeys, periodKey, previousForecast, weeks]);
+
+  const previousCopyTotal = previousForecast
+    ? previousForecast.incomes.length + previousForecast.expenses.length
+    : 0;
+  const copyPreviousTitle = !previousForecast
+    ? "Forecast bulan sebelumnya belum tersedia"
+    : previousCopyTotal === 0
+      ? `Forecast ${previousForecast.label} belum memiliki data`
+      : `Salin pemasukan dan pengeluaran dari Forecast ${previousForecast.label}`;
+
   const load = useCallback(
     async (key: string) => {
+      copyRequestRef.current += 1;
+      setCopyOpen(false);
+      setCopyPreparing(false);
+      setPreviousForecast(null);
       setLoading(true);
       try {
         const start = forecastMonthStart(key);
@@ -855,6 +978,15 @@ export default function FinanceForecastPage() {
         setOpeningSources({
           previousForecast: previousForecastInfo,
         });
+        setPreviousForecast(
+          previousMonth
+            ? {
+                label: previousLabel,
+                incomes: previousRows.incomes,
+                expenses: previousRows.expenses,
+              }
+            : null,
+        );
 
         let opening = Number(month?.opening_balance) || 0;
         let source = normalizeForecastOpeningSource(month?.opening_source);
@@ -1120,8 +1252,8 @@ export default function FinanceForecastPage() {
 
   // ─── Invoice picker ───
 
-  const loadInvoices = async () => {
-    if (invoiceLoading) return;
+  const loadInvoices = async (): Promise<boolean> => {
+    if (invoiceLoading) return invoicesLoaded;
     setInvoiceLoading(true);
     try {
       const [invRes, payRes] = await Promise.all([
@@ -1159,8 +1291,10 @@ export default function FinanceForecastPage() {
 
       setInvoices(options);
       setInvoicesLoaded(true);
+      return true;
     } catch (err) {
       addToast("error", parseFinanceDbError(err));
+      return false;
     } finally {
       setInvoiceLoading(false);
     }
@@ -1172,6 +1306,68 @@ export default function FinanceForecastPage() {
     setInvoiceSearch("");
     setInvoiceOpen(true);
     if (!invoicesLoaded) void loadInvoices();
+  };
+
+  const openCopyPrevious = async () => {
+    if (!canInput || saving || copyPreparing || invoiceLoading || !previousForecast) return;
+    if (previousForecast.incomes.length + previousForecast.expenses.length === 0) return;
+
+    const needsInvoices = previousForecast.incomes.some(
+      (row) => row.invoice_id != null,
+    );
+    if (!needsInvoices) {
+      setCopyOpen(true);
+      return;
+    }
+
+    const requestId = copyRequestRef.current + 1;
+    copyRequestRef.current = requestId;
+    setCopyPreparing(true);
+    try {
+      await loadInvoices();
+    } finally {
+      if (copyRequestRef.current === requestId) {
+        setCopyOpen(true);
+        setCopyPreparing(false);
+      }
+    }
+  };
+
+  const handleCopyPrevious = (selection: ForecastCopySelection) => {
+    if (!previousForecast) return;
+
+    const newIncomes: DraftIncome[] = selection.incomes.map((item) => ({
+      key: nextKey("copy-inc"),
+      weekNo: item.weekNo,
+      plannedDate: item.plannedDate,
+      description: item.description,
+      amount: Math.round(item.amount) || 0,
+      invoiceId: item.invoiceId,
+    }));
+    const newExpenses: DraftExpense[] = selection.expenses.map((item) => ({
+      key: nextKey("copy-exp"),
+      weekNo: item.weekNo,
+      plannedDate: item.plannedDate,
+      description: item.description,
+      amount: Math.round(item.amount) || 0,
+      payment: 0,
+      admin: Math.round(item.admin) || 0,
+      category: normalizeForecastExpenseCategory(item.category, categories),
+    }));
+    const total = newIncomes.length + newExpenses.length;
+    if (total === 0) return;
+
+    if (newIncomes.length > 0) {
+      setIncomes((prev) => [...prev, ...newIncomes]);
+    }
+    if (newExpenses.length > 0) {
+      setExpenses((prev) => [...prev, ...newExpenses]);
+    }
+    setCopyOpen(false);
+    addToast(
+      "success",
+      `${total} baris dari Forecast ${previousForecast.label} ditambahkan ke draft.`,
+    );
   };
 
   const pickInvoice = (inv: InvoiceOption) => {
@@ -1520,6 +1716,22 @@ export default function FinanceForecastPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
+                  {canInput && (
+                    <button
+                      type="button"
+                      onClick={() => void openCopyPrevious()}
+                      disabled={saving || copyPreparing || invoiceLoading || !previousForecast || previousCopyTotal === 0}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-[11px] font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-40"
+                      title={copyPreviousTitle}
+                    >
+                      {copyPreparing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5 text-primary" />
+                      )}
+                      {copyPreparing ? "Menyiapkan..." : "Ambil Bulan Lalu"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -1745,8 +1957,9 @@ export default function FinanceForecastPage() {
                 <span className="font-semibold text-foreground">Tambah</span> membuka form pengisian sebelum data
                 masuk ke draft. Kategori pengeluaran dipilih saat mengisi atau mengedit baris.{" "}
                 <span className="font-semibold text-foreground">Atur Kategori</span> hanya untuk mengelola master
-                kategori. Klik <span className="font-semibold text-foreground">Simpan Forecast</span> untuk
-                menyimpan permanen.
+                kategori. <span className="font-semibold text-foreground">Ambil Bulan Lalu</span> menyalin rencana
+                Forecast bulan sebelumnya ke draft; pembayaran pengeluaran direset. Klik{" "}
+                <span className="font-semibold text-foreground">Simpan Forecast</span> untuk menyimpan permanen.
               </span>
             </div>
           </div>
@@ -1758,6 +1971,18 @@ export default function FinanceForecastPage() {
             categoryTotals={categoryTotals}
           />
         </div>
+      )}
+
+      {/* Salin rencana dari Forecast bulan sebelumnya */}
+      {copyOpen && previousForecast && (
+        <ForecastCopyPreviousModal
+          previousMonthLabel={previousForecast.label}
+          currentMonthLabel={forecastMonthLabel(periodKey)}
+          incomes={copyIncomeCandidates}
+          expenses={copyExpenseCandidates}
+          onClose={() => setCopyOpen(false)}
+          onAdd={handleCopyPrevious}
+        />
       )}
 
       {/* Pengaturan master kategori */}
