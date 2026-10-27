@@ -78,6 +78,7 @@ export type AuditEntityType =
   | "finance_cash_adjustments"
   | "finance_month_events"
   | "finance_forecast_months"
+  | "finance_forecast_categories"
   | "company_legal_categories"
   | "company_legal_documents"
   | "company_legal_document_versions"

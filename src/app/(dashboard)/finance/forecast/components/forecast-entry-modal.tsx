@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -40,7 +40,7 @@ interface ForecastEntryModalProps {
   categories: string[];
   onClose: () => void;
   onSubmit: (values: ForecastEntryValues) => void;
-  onCreateCategory?: (name: string) => Promise<string>;
+  onCreateCategory?: (name: string) => Promise<{ name: string }>;
 }
 
 type FieldErrors = Partial<
@@ -70,7 +70,9 @@ export default function ForecastEntryModal({
   onCreateCategory,
 }: ForecastEntryModalProps) {
   const isIncome = mode === "income";
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const focusDialog = useCallback((node: HTMLDivElement | null) => {
+    node?.focus();
+  }, []);
   const [plannedDate, setPlannedDate] = useState(() => initialDate(week));
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState(0);
@@ -87,7 +89,6 @@ export default function ForecastEntryModal({
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    dialogRef.current?.focus();
     return () => {
       document.body.style.overflow = previousOverflow;
     };
@@ -157,8 +158,8 @@ export default function ForecastEntryModal({
     }
     setCreatingCategory(true);
     try {
-      const savedName = await onCreateCategory(name);
-      setCategory(savedName);
+      const created = await onCreateCategory(name);
+      setCategory(created.name);
       setNewCategory("");
       setCategoryFormOpen(false);
     } catch (error) {
@@ -183,7 +184,7 @@ export default function ForecastEntryModal({
           aria-hidden="true"
         />
         <div
-          ref={dialogRef}
+          ref={focusDialog}
           role="dialog"
           aria-modal="true"
           aria-labelledby="forecast-entry-title"

@@ -1093,6 +1093,14 @@ export interface DbFinanceForecastExpense {
   updated_at: string;
 }
 
+export interface DbFinanceForecastCategory {
+  id: number;
+  name: string;
+  sort_order: number;
+  created_at?: string;
+  created_by?: string | null;
+}
+
 export interface DbFinanceMonthEvent {
   id: number;
   period_start: string;

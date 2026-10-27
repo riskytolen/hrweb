@@ -369,6 +369,41 @@ export function computeForecastExpenseCategoryTotals(
   }));
 }
 
+/**
+ * Ganti nama kategori di dalam snapshot draft Forecast tanpa menyentuh
+ * perubahan lain. Dipakai saat master kategori di-rename agar status
+ * "belum disimpan" tidak berubah hanya karena rename.
+ */
+export function renameForecastSnapshotCategory(
+  snapshot: string,
+  previousName: string,
+  nextName: string,
+): string {
+  if (!snapshot || !previousName || previousName === nextName) return snapshot;
+  try {
+    const parsed = JSON.parse(snapshot) as {
+      expenses?: ({ category?: string } | null)[];
+    };
+    if (!Array.isArray(parsed.expenses)) return snapshot;
+    const previous = previousName.trim().toUpperCase();
+    let changed = false;
+    parsed.expenses = parsed.expenses.map((expense) => {
+      if (
+        !expense ||
+        typeof expense.category !== "string" ||
+        expense.category.trim().toUpperCase() !== previous
+      ) {
+        return expense;
+      }
+      changed = true;
+      return { ...expense, category: nextName };
+    });
+    return changed ? JSON.stringify(parsed) : snapshot;
+  } catch {
+    return snapshot;
+  }
+}
+
 // ─── Validasi draft ───
 
 export interface ForecastIncomeDraft extends ForecastIncomeLike {

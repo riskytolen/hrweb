@@ -13,6 +13,7 @@ import {
   forecastMonthStart,
   normalizeForecastExpenseCategory,
   normalizeForecastOpeningSource,
+  renameForecastSnapshotCategory,
   rowsForWeek,
   savedForecastClosing,
   shiftForecastPeriodKey,
@@ -252,6 +253,32 @@ describe("kategori pengeluaran forecast", () => {
     expect(totals.find((row) => row.category === "GAJI KARYAWAN")?.amount).toBe(125_000);
     expect(normalizeForecastExpenseCategory("biaya operasional cabang", categories))
       .toBe("BIAYA OPERASIONAL CABANG");
+  });
+
+  it("mengganti nama kategori di snapshot tanpa mengubah data lain", () => {
+    const snapshot = JSON.stringify({
+      openingBalance: 1_000_000,
+      openingSource: "manual",
+      incomes: [],
+      expenses: [
+        { description: "BOP", category: "BOP KIKI", amount: 10_000 },
+        { description: "Gaji", category: "GAJI KARYAWAN", amount: 20_000 },
+      ],
+    });
+
+    const renamed = renameForecastSnapshotCategory(snapshot, "bop kiki", "BOP OPERASIONAL");
+    expect(JSON.parse(renamed)).toEqual({
+      openingBalance: 1_000_000,
+      openingSource: "manual",
+      incomes: [],
+      expenses: [
+        { description: "BOP", category: "BOP OPERASIONAL", amount: 10_000 },
+        { description: "Gaji", category: "GAJI KARYAWAN", amount: 20_000 },
+      ],
+    });
+    expect(renameForecastSnapshotCategory(snapshot, "BOP KIKI", "BOP KIKI")).toBe(snapshot);
+    expect(renameForecastSnapshotCategory("bukan-json", "BOP KIKI", "BOP OPERASIONAL"))
+      .toBe("bukan-json");
   });
 });
 
