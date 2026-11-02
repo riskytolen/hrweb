@@ -161,6 +161,7 @@ const allSections: MenuSection[] = [
         items: [
           { name: "Dashboard", href: "/finance", icon: LineChart, permission: "finance" },
           { name: "Pendapatan", href: "/finance/pendapatan", icon: ReceiptText, permission: "finance" },
+          { name: "Pengiriman Invoice", href: "/finance/pengiriman-invoice", icon: Truck, permission: "finance" },
           { name: "Pengeluaran", href: "/finance/pengeluaran", icon: TrendingUpDown, permission: "finance" },
           { name: "Arus Kas", href: "/finance/arus-kas", icon: Landmark, permission: "finance" },
           { name: "Forecast Finance", href: "/finance/forecast", icon: CalendarRange, permission: "finance" },

@@ -72,6 +72,7 @@ export type AuditEntityType =
   | "finance_company_settings"
   | "finance_clients"
   | "finance_invoices"
+  | "finance_invoice_deliveries"
   | "finance_invoice_payments"
   | "finance_expense_categories"
   | "finance_expenses"
@@ -265,6 +266,7 @@ export function entityLabel(entityType: string): string {
     finance_company_settings: "Pengaturan Finance",
     finance_clients: "Klien Finance",
     finance_invoices: "Invoice Finance",
+    finance_invoice_deliveries: "Pengiriman Invoice",
     finance_invoice_payments: "Pembayaran Invoice",
     finance_expense_categories: "Kategori Pengeluaran",
     finance_expenses: "Pengeluaran Finance",

@@ -28,6 +28,8 @@ import {
 } from "@/lib/finance-revenue-report";
 import { monthStartOf, parseFinanceDbError } from "@/lib/finance-closing";
 import { SIGNATURE_BUCKET } from "@/lib/finance-signature";
+import InvoiceDeliveryModal from "@/components/finance/InvoiceDeliveryModal";
+import { DELIVERY_STATUSES, fetchDeliveries, latestDeliveries, type InvoiceDelivery } from "@/lib/finance-delivery";
 
 type Tab = "invoices" | "payments" | "clients";
 type InvStatus = "Lunas" | "Sebagian" | "Belum Lunas";
@@ -52,6 +54,14 @@ export default function FinancePendapatanPage() {
   const permLevel = getPermissionLevel("finance");
   const canInput = permLevel === "input" || permLevel === "edit";
   const canEdit = permLevel === "edit";
+  const [deliveryMap, setDeliveryMap] = useState<Map<number, InvoiceDelivery>>(new Map());
+  const [deliveryError, setDeliveryError] = useState("");
+  const [deliveryTarget, setDeliveryTarget] = useState<{ invoice: InvoiceRow; status?: InvoiceDelivery["status"] } | null>(null);
+  const loadDeliveries = useCallback(async () => {
+    try { setDeliveryMap(latestDeliveries(await fetchDeliveries())); setDeliveryError(""); }
+    catch { setDeliveryError("Gagal memuat status pengiriman. Coba refresh."); }
+  }, []);
+  useEffect(() => { void (async () => { await loadDeliveries(); })(); }, [loadDeliveries]);
 
   const [tab, setTab] = useState<Tab>("invoices");
   const [loading, setLoading] = useState(true);
@@ -750,6 +760,8 @@ export default function FinancePendapatanPage() {
       />
 
       {/* Tabs */}
+      {deliveryError && <p role="alert" className="text-danger text-sm mb-3">{deliveryError} <button className="underline" onClick={() => void loadDeliveries()}>Refresh pengiriman</button></p>}
+      {deliveryTarget && <InvoiceDeliveryModal invoiceId={deliveryTarget.invoice.id} invoiceNo={deliveryTarget.invoice.invoice_no} current={deliveryMap.get(deliveryTarget.invoice.id)} initialStatus={deliveryTarget.status} onClose={() => setDeliveryTarget(null)} onSaved={() => void loadDeliveries()} />}
       <div className="flex items-center gap-1 p-1 bg-muted rounded-xl w-fit mb-4">
         {([
           { key: "invoices" as Tab, label: "Invoices", icon: ReceiptText, count: invoices.length },
@@ -872,7 +884,8 @@ export default function FinancePendapatanPage() {
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Total</th>
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Dibayar</th>
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Sisa</th>
-                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Status</th>
+                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Status Bayar</th>
+                    <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Pengiriman</th>
                     <th className="text-right px-4 py-3 font-semibold text-muted-foreground">Aksi</th>
                   </tr>
                 </thead>
@@ -918,6 +931,12 @@ export default function FinancePendapatanPage() {
                           <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold", statusColor(inv.status || "Belum Lunas"))}>
                             {inv.status === "Belum Lunas" && inv.due_date && inv.due_date < localDateStr() && inv.paid === 0 ? "Overdue" : inv.status}
                           </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {deliveryError ? <span className="text-danger text-xs">Tidak tersedia</span> : <>
+                            {canInput && (canEdit || deliveryMap.get(inv.id)?.status !== "Terkirim") ? <select aria-label={`Pengiriman ${inv.invoice_no}`} className="border border-border rounded-lg bg-card p-2 text-xs" value={deliveryMap.get(inv.id)?.status ?? ""} onChange={e => setDeliveryTarget({ invoice: inv, status: e.target.value as InvoiceDelivery["status"] })}><option value="" disabled>Belum Dicatat</option>{DELIVERY_STATUSES.map(s => <option key={s}>{s}</option>)}</select> : <span className="text-xs">{deliveryMap.get(inv.id)?.status ?? "Belum Dicatat"}</span>}
+                            <button className="block text-xs text-primary mt-1" onClick={() => setDeliveryTarget({ invoice: inv })}>{deliveryMap.has(inv.id) ? `Ke-${deliveryMap.get(inv.id)!.attempt} • Riwayat` : "Catat / Detail"}</button>
+                          </>}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
@@ -1293,6 +1312,10 @@ export default function FinancePendapatanPage() {
                 </div>
               </div>
               <div className="px-6 py-5 space-y-4 flex-1 overflow-y-auto text-sm">
+                <button className="w-full text-left rounded-xl border border-border p-3 hover:bg-muted" onClick={() => { setShowInvDetail(false); setDeliveryTarget({ invoice: detailInvoice }); }}>
+                  <span className="font-semibold">Pengiriman: {deliveryError ? "Gagal dimuat" : deliveryMap.get(detailInvoice.id)?.status ?? "Belum Dicatat"}</span>
+                  <span className="block text-xs text-primary mt-1">Lihat penerima, bukti foto, dan riwayat pengiriman</span>
+                </button>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-xl bg-muted/40 border border-border p-3">
                     <p className="text-[11px] font-semibold text-muted-foreground">Klien</p>
