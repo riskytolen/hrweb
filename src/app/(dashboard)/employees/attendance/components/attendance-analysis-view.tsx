@@ -12,6 +12,7 @@ import {
 } from "recharts";
 import { useAttendanceAnalysis } from "../lib/hooks/use-attendance-analysis";
 import { exportChallengeWeekPdf } from "../lib/attendance-challenge-pdf";
+import { DivisionFilter } from "./division-filter";
 import type { EmployeeLite, ChallengeWeek } from "../lib/attendance-types";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -99,7 +100,7 @@ function KpiCard({
 }
 
 export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
-  const [divisionFilter, setDivisionFilter] = useState("semua");
+  const [divisionFilter, setDivisionFilter] = useState("1"); // CP Suka
   const allDivisions = divisionFilter === "semua";
   const {
     loading, periodKey, setPeriodKey, currPeriod, global, globalPrev,
@@ -246,16 +247,7 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
             </button>
           </div>
 
-          <div className="flex items-center gap-2 bg-muted rounded-xl px-2.5 py-1.5">
-            <span className="text-[10px] font-semibold text-muted-foreground">Divisi:</span>
-            <select value={divisionFilter} onChange={(e) => setDivisionFilter(e.target.value)}
-              className="bg-transparent text-xs outline-none text-foreground font-medium">
-              <option value="semua">Semua Divisi</option>
-              {divisionList.map((d) => (
-                <option key={d.id} value={d.id}>{d.nama}</option>
-              ))}
-            </select>
-          </div>
+          <DivisionFilter value={divisionFilter} onChange={setDivisionFilter} divisions={divisionList} />
 
           {scope === "individual" && (
             <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 flex-1 min-w-[200px]">
