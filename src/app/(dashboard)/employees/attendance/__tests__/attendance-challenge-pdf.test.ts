@@ -14,6 +14,8 @@ function makeItem(overrides: Partial<ChallengeEmployeeResult>): ChallengeEmploye
     divisionNama: "CP Suka",
     divisionColor: "#f59e0b",
     hadirWajib: 6,
+    hadirDivisi: 6,
+    lintasDivisi: false,
     totalWajib: 6,
     manual: 0,
     avgJamMasuk: "07:35:00",
@@ -30,7 +32,7 @@ function makeItem(overrides: Partial<ChallengeEmployeeResult>): ChallengeEmploye
 describe("attendance-challenge-pdf", () => {
   describe("buildChallengePdfFilename", () => {
     it("format Challenge_CP_Suka_<weekStart>_<weekEnd>.pdf", () => {
-      expect(buildChallengePdfFilename("2026-10-19", "2026-10-25")).toBe(
+      expect(buildChallengePdfFilename("2026-10-19", "2026-10-25", "CP Suka")).toBe(
         "Challenge_CP_Suka_2026-10-19_2026-10-25.pdf",
       );
     });
@@ -56,6 +58,20 @@ describe("attendance-challenge-pdf", () => {
   });
 
   describe("buildChallengePdfRows", () => {
+    it("PDF lintas divisi memisahkan kehadiran dan tidak memberi peringkat", () => {
+      const row = buildChallengePdfRows([makeItem({ hadirDivisi: 1, hadirWajib: 5, totalWajib: 5, lintasDivisi: true, rank: null })])[0];
+      expect(row.slice(0, 4)).toEqual(["—", "Budi", "1/5", "5/5"]);
+      expect(row[13]).toBe("Lintas Divisi • LOLOS");
+    });
+
+    it("Semua Divisi tanpa kolom ranking dan rata-rata", () => {
+      const row = buildChallengePdfRows([makeItem({ avgJamMasuk: null, rank: null })], true)[0];
+      expect(row).toHaveLength(11);
+      expect(row.slice(0, 2)).toEqual(["Budi", "6/6"]);
+      expect(row[10]).toBe("LENGKAP");
+      expect(buildChallengePdfFilename("2026-11-02", "2026-11-08", "Semua Divisi")).toBe("Challenge_Semua_Divisi_2026-11-02_2026-11-08.pdf");
+      expect(buildChallengePdfFilename("2026-11-02", "2026-11-08", "Gudang")).toBe("Challenge_Gudang_2026-11-02_2026-11-08.pdf");
+    });
     it("peserta lolos: rank angka, status LOLOS, rekap status terisi", () => {
       const rows = buildChallengePdfRows([
         makeItem({
@@ -66,7 +82,7 @@ describe("attendance-challenge-pdf", () => {
         }),
       ]);
       expect(rows).toEqual([
-        ["2", "Siti", "6/6", "5", "1", "0", "0", "0", "0", "0", "1", "07:35:00", "LOLOS"],
+        ["2", "Siti", "6/6", "6/6", "5", "1", "0", "0", "0", "0", "0", "1", "07:35:00", "LOLOS"],
       ]);
     });
 
@@ -83,7 +99,7 @@ describe("attendance-challenge-pdf", () => {
         }),
       ]);
       expect(rows).toEqual([
-        ["—", "Rudi", "6/6", "4", "0", "1", "0", "0", "1", "0", "0", "—", "Izin pada 19 Okt • 2 absen manual (maks 1)"],
+        ["—", "Rudi", "6/6", "6/6", "4", "0", "1", "0", "0", "1", "0", "0", "—", "Izin pada 19 Okt • 2 absen manual (maks 1)"],
       ]);
     });
 
@@ -95,7 +111,7 @@ describe("attendance-challenge-pdf", () => {
       ]);
       expect(rows.map((r) => r[0])).toEqual(["1", "2", "—"]);
       expect(rows.map((r) => r[1])).toEqual(["A", "B", "C"]);
-      expect(rows.map((r) => r[12])).toEqual(["LOLOS", "LOLOS", "Alpha pada 20 Okt"]);
+      expect(rows.map((r) => r[13])).toEqual(["LOLOS", "LOLOS", "Alpha pada 20 Okt"]);
     });
   });
 });

@@ -465,7 +465,7 @@ export function isEmployeeActiveInPeriod(period: { start: string; end: string },
   return hasActiveDayInPeriodCentral(employee, period.start, period.end);
 }
 
-// ─── Challenge Mingguan (divisi CP Suka) ─────────────────────────────
+// ─── Challenge Mingguan per divisi ──────────────────────────────────
 // Ranking mingguan dengan aturan gugur di Analisa → Perorangan.
 // Semua fungsi murni — record absensi di-fetch oleh hook analisa.
 
@@ -496,19 +496,23 @@ export type ChallengeStatusCounts = {
   libur: number;
 };
 
-/** Baris peserta Challenge Mingguan CP Suka pada Analisa → Perorangan. */
+/** Baris peserta Challenge Mingguan pada Analisa → Perorangan. */
 export type ChallengeEmployeeResult = {
+  /** Kehadiran pada divisi terpilih, hanya hari wajib. */
+  hadirDivisi: number;
+  /** Memiliki record divisi terpilih tetapi divisi dominannya berbeda. */
+  lintasDivisi: boolean;
   employee_id: string;
   nama: string;
   divisionNama: string;
   divisionColor: string;
-  /** Hari wajib yang dihadiri (mis. 6). */
+  /** Hari wajib yang dihadiri di divisi mana pun (mis. 6). */
   hadirWajib: number;
   /** Total hari wajib minggu ini — libur terjadwal & hari mendatang dikecualikan. */
   totalWajib: number;
-  /** Jumlah absen manual pegawai pada minggu ini. */
+  /** Jumlah tanggal manual pada divisi terpilih (gabungan untuk Semua Divisi). */
   manual: number;
-  /** Rata-rata jam masuk di divisi CP Suka "HH:MM:SS"; null bila tak ada record berjam. */
+  /** Rata-rata jam divisi terpilih "HH:MM:SS"; null untuk Semua Divisi/tanpa jam. */
   avgJamMasuk: string | null;
   /** Rata-rata jam masuk mentah dalam detik (tanpa pembulatan menit) untuk pemecah seri. */
   avgJamDetik: number | null;
@@ -516,7 +520,7 @@ export type ChallengeEmployeeResult = {
   lolos: boolean;
   /** Daftar alasan gugur (kosong bila lolos). */
   alasanGugur: string[];
-  /** Peringkat hanya untuk peserta lolos; gugur bernilai null. */
+  /** Peringkat hanya untuk peserta lolos divisi dominan; lainnya null. */
   rank: number | null;
   /** Rekap jumlah hari per status minggu ini (kolom detail di tabel). */
   statusCounts: ChallengeStatusCounts;
@@ -526,6 +530,8 @@ export type ChallengeEmployeeResult = {
 
 /** Satu minggu challenge pada periode analisa. */
 export type ChallengeWeek = {
+  divisionId: number | null;
+  divisionNama: string;
   /** Senin minggu (YYYY-MM-DD). */
   weekStart: string;
   /** Minggu minggu (YYYY-MM-DD). */
@@ -622,17 +628,17 @@ export function compareChallengeLolos(
 }
 
 /**
- * Hitung Challenge Mingguan CP Suka untuk satu minggu Senin–Minggu (murni).
+ * Hitung Challenge Mingguan untuk divisi terpilih; null menggabungkan semua divisi.
  *
  * Aturan:
- * - Peserta = pegawai yang divisi dominannya pada minggu ini adalah CP Suka.
+ * - Semua pegawai dengan record divisi terpilih tampil; hanya divisi dominan ikut rank.
  *   Record otomatis tanpa divisi (Libur/Alpha) tidak ikut menentukan dominan.
  * - Hari wajib = hari minggu yang sudah lewat (≤ todayStr) minus hari Libur —
  *   libur terjadwal bersifat netral. Hari mendatang belum dinilai.
  * - Gugur bila pada salah satu hari wajib pegawai tidak hadir
  *   (Izin/Sakit/Cuti/Alpha/tanpa absen), ATAU absen manual > CHALLENGE_MAX_MANUAL.
  * - Peringkat lolos: manual tersedikit → rata-rata jam masuk paling awal
- *   dalam presisi detik (record Hadir/Terlambat di divisi CP Suka). Dua peserta
+ *   dalam presisi detik (record Hadir/Terlambat di divisi terpilih). Dua peserta
  *   yang manualnya dan rata-rata detiknya persis sama dianggap seri dan
  *   mendapat peringkat bersama (1, 1, 3, ...). Gugur selalu di bawah, rank null.
  */
@@ -641,11 +647,14 @@ export function computeWeeklyChallenge(
   weekStart: string,
   todayStr: string,
   empNames?: Map<string, string>,
+  targetDivision: { id: number; nama: string } | null = null,
 ): ChallengeWeek {
   const weekEnd = addDaysUtc(weekStart, 6);
   const isRunning = weekStart <= todayStr && todayStr <= weekEnd;
   const isFuture = weekStart > todayStr;
   const week: ChallengeWeek = {
+    divisionId: targetDivision?.id ?? null,
+    divisionNama: targetDivision?.nama ?? "Semua Divisi",
     weekStart,
     weekEnd,
     label: formatWeekLabel(weekStart, weekEnd),
@@ -665,7 +674,7 @@ export function computeWeeklyChallenge(
   const allByEmp = new Map<string, ChallengeRecordInput[]>();
   const byDateByEmp = new Map<string, Map<string, ChallengeRecordInput[]>>();
   for (const r of records) {
-    if (r.tanggal < weekStart || r.tanggal > weekEnd) continue;
+    if (r.tanggal < weekStart || r.tanggal > last) continue;
     let byDate = byDateByEmp.get(r.employee_id);
     if (!byDate) {
       byDate = new Map();
@@ -684,24 +693,34 @@ export function computeWeeklyChallenge(
 
     // Divisi dominan hanya dari record yang punya divisi (auto Libur/Alpha tanpa divisi).
     const dominant = pickDominantDivisionLabel(
-      all.flatMap((r) =>
+      all.filter((r, i) => all.findIndex((other) => other.division_id === r.division_id && other.tanggal === r.tanggal) === i).flatMap((r) =>
         r.divisionNama
           ? [{ division_id: r.division_id as number, tanggal: r.tanggal, nama: r.divisionNama, color: r.divisionColor }]
           : [],
       ),
     );
-    if (!dominant || !isCpSukaDivision(dominant.nama)) continue;
-
-    const manual = all.filter((r) => r.is_manual).length;
-    const avgJamDetik = computeAvgJamMasukSeconds(
-      all.map((r) => ({ division_id: r.division_id as number, status: r.status, jam_masuk: r.jam_masuk })),
-      dominant.id,
-    );
+    const selected = all.filter((r) => !targetDivision || r.division_id === targetDivision.id);
+    if (!selected.length) continue;
+    const lintasDivisi = !!targetDivision && dominant?.id !== targetDivision.id;
+    const manual = new Set(selected.filter((r) => r.is_manual && r.status !== "Libur").map((r) => r.tanggal)).size;
+    // Satu tanggal satu jam: pilih jam hadir paling awal secara deterministik.
+    const dailyPresence = horizon.flatMap((tanggal) => {
+      const candidates = selected.filter((r) => r.tanggal === tanggal && (r.status === "Hadir" || r.status === "Terlambat"))
+        .sort((a, b) => (a.jam_masuk ?? "99").localeCompare(b.jam_masuk ?? "99") || a.status.localeCompare(b.status));
+      return candidates.length ? [candidates[0]] : [];
+    });
+    const avgJamDetik = targetDivision ? computeAvgJamMasukSeconds(
+      dailyPresence.map((r) => ({ division_id: r.division_id as number, status: r.status, jam_masuk: r.jam_masuk })),
+      targetDivision.id,
+    ) : null;
     const avgJamMasuk = avgJamDetik === null ? null : secondsToHHMMSS(avgJamDetik);
 
     const days: ChallengeDayResult[] = horizon.map((tanggal) => {
       const dayRecs = byDate.get(tanggal) ?? [];
       const presenceDay = dayRecs.find((r) => r.status === "Hadir" || r.status === "Terlambat");
+      if (dayRecs.some((r) => r.status === "Libur")) {
+        return { tanggal, libur: true, hadir: false, statusMasuk: null, alasan: null };
+      }
       if (presenceDay) {
         return { tanggal, libur: false, hadir: true, statusMasuk: presenceDay.status as "Hadir" | "Terlambat", alasan: null };
       }
@@ -709,20 +728,20 @@ export function computeWeeklyChallenge(
         (r) => r.status !== "Hadir" && r.status !== "Terlambat" && r.status !== "Libur",
       );
       if (absent) return { tanggal, libur: false, hadir: false, statusMasuk: null, alasan: absent.status as ChallengeDayReason };
-      if (dayRecs.some((r) => r.status === "Libur")) {
-        return { tanggal, libur: true, hadir: false, statusMasuk: null, alasan: null };
-      }
       return { tanggal, libur: false, hadir: false, statusMasuk: null, alasan: "Tanpa absen" };
     });
     const wajib = days.filter((d) => !d.libur);
     const hadirWajib = wajib.filter((d) => d.hadir).length;
+    const hadirDivisi = wajib.filter((d) => dailyPresence.some((r) => r.tanggal === d.tanggal)).length;
 
     // Rekap jumlah hari per status (kolom detail): hadir, terlambat, izin, dll.
     const statusCounts: ChallengeStatusCounts = { hadir: 0, terlambat: 0, izin: 0, sakit: 0, cuti: 0, alpha: 0, libur: 0 };
     for (const d of days) {
+      const scopedPresence = dailyPresence.find((r) => r.tanggal === d.tanggal);
       if (d.libur) statusCounts.libur++;
-      else if (d.hadir && d.statusMasuk === "Terlambat") statusCounts.terlambat++;
-      else if (d.hadir) statusCounts.hadir++;
+      else if (scopedPresence?.status === "Terlambat") statusCounts.terlambat++;
+      else if (scopedPresence) statusCounts.hadir++;
+      else if (targetDivision && !selected.some((r) => r.tanggal === d.tanggal && r.status === d.alasan)) continue;
       else if (d.alasan === "Izin") statusCounts.izin++;
       else if (d.alasan === "Sakit") statusCounts.sakit++;
       else if (d.alasan === "Cuti") statusCounts.cuti++;
@@ -733,15 +752,17 @@ export function computeWeeklyChallenge(
     for (const d of wajib) {
       if (!d.hadir && d.alasan) alasanGugur.push(`${d.alasan} pada ${idShortDay(d.tanggal)}`);
     }
-    if (manual > CHALLENGE_MAX_MANUAL) {
+    if (targetDivision && manual > CHALLENGE_MAX_MANUAL) {
       alasanGugur.push(`${manual} absen manual (maks ${CHALLENGE_MAX_MANUAL})`);
     }
 
     drafts.push({
+      hadirDivisi,
+      lintasDivisi,
       employee_id: eid,
       nama: empNames?.get(eid) || eid,
-      divisionNama: dominant.nama || "Cp Suka",
-      divisionColor: dominant.color || "#6b7280",
+      divisionNama: week.divisionNama,
+      divisionColor: selected[0]?.divisionColor || "#6b7280",
       hadirWajib,
       totalWajib: wajib.length,
       manual,
@@ -756,7 +777,7 @@ export function computeWeeklyChallenge(
   }
 
   const lolos = drafts
-    .filter((d) => d.lolos)
+    .filter((d) => d.lolos && !d.lintasDivisi && targetDivision !== null)
     .sort((a, b) =>
       compareChallengeLolos(
         { manual: a.manual, avgJamDetik: a.avgJamDetik, nama: a.nama },
@@ -773,7 +794,7 @@ export function computeWeeklyChallenge(
     ) === 0;
     d.rank = seri ? prev.rank : i + 1;
   });
-  const gugur = drafts.filter((d) => !d.lolos).sort((a, b) => a.nama.localeCompare(b.nama));
-  week.items = [...lolos, ...gugur];
+  const tanpaRank = drafts.filter((d) => !lolos.includes(d)).sort((a, b) => Number(b.lolos) - Number(a.lolos) || a.nama.localeCompare(b.nama));
+  week.items = [...lolos, ...tanpaRank];
   return week;
 }

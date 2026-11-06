@@ -1,5 +1,5 @@
 /**
- * Export PDF Laporan Challenge Mingguan CP Suka (Absensi → Analisa → Perorangan).
+ * Export PDF Laporan Challenge Mingguan per divisi (Absensi → Analisa → Perorangan).
  *
  * Desain: A4 landscape, tema biru — kop perusahaan dengan logo,
  * kartu ringkasan peserta/lolos/gugur, tabel peringkat lengkap dengan
@@ -24,18 +24,20 @@ export function challengeMedalColor(rank: number | null): RGB | null {
 }
 
 /** Nama file aman untuk export PDF Challenge Mingguan. */
-export function buildChallengePdfFilename(weekStart: string, weekEnd: string): string {
-  return `Challenge_CP_Suka_${weekStart}_${weekEnd}.pdf`;
+export function buildChallengePdfFilename(weekStart: string, weekEnd: string, divisionNama: string): string {
+  const safeName = divisionNama.replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_|_$/g, "") || "Divisi";
+  return `Challenge_${safeName}_${weekStart}_${weekEnd}.pdf`;
 }
 
 /**
  * Baris tabel PDF dari item challenge. Urutan input dipertahankan
  * (sudah rank lolos → gugur di bawah); styling medal dilakukan renderer.
  */
-export function buildChallengePdfRows(items: ChallengeEmployeeResult[]): string[][] {
+export function buildChallengePdfRows(items: ChallengeEmployeeResult[], allDivisions = false): string[][] {
   return items.map((r) => [
-    r.rank === null ? "—" : String(r.rank),
+    ...(!allDivisions ? [r.rank === null ? "—" : String(r.rank)] : []),
     r.nama,
+    ...(!allDivisions ? [`${r.hadirDivisi}/${r.totalWajib}`] : []),
     `${r.hadirWajib}/${r.totalWajib}`,
     String(r.statusCounts.hadir),
     String(r.statusCounts.terlambat),
@@ -45,8 +47,8 @@ export function buildChallengePdfRows(items: ChallengeEmployeeResult[]): string[
     String(r.statusCounts.alpha),
     String(r.statusCounts.libur),
     String(r.manual),
-    r.avgJamMasuk ?? "—",
-    r.lolos ? "LOLOS" : r.alasanGugur.join(" • "),
+    ...(!allDivisions ? [r.avgJamMasuk ?? "—"] : []),
+    (r.lintasDivisi ? "Lintas Divisi • " : "") + (r.lolos ? (allDivisions ? "LENGKAP" : "LOLOS") : (allDivisions ? "BELUM LENGKAP • " : "") + r.alasanGugur.join(" • ")),
   ]);
 }
 
@@ -129,6 +131,7 @@ function drawReportHeader(
     periodLabel: string;
     search: string;
     isRunning: boolean;
+    divisionNama: string;
   },
 ): number {
   const { pageWidth, margin, company, logoDataUrl, weekLabel, periodLabel, search, isRunning } = opts;
@@ -164,7 +167,7 @@ function drawReportHeader(
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(13);
   pdf.setTextColor(BLUE[0], BLUE[1], BLUE[2]);
-  pdf.text("CHALLENGE MINGGUAN CP SUKA", right, 14, { align: "right" });
+  pdf.text(`CHALLENGE MINGGUAN — ${opts.divisionNama.toUpperCase()}`, right, 14, { align: "right" });
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(8);
   pdf.setTextColor(MUTED[0], MUTED[1], MUTED[2]);
@@ -246,7 +249,7 @@ function drawSummaryCards(
   return y + 18;
 }
 
-function addReportFooter(pdf: PdfDoc, weekLabel: string): void {
+function addReportFooter(pdf: PdfDoc, week: ChallengeWeek): void {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const pages = pdf.getNumberOfPages();
@@ -258,7 +261,7 @@ function addReportFooter(pdf: PdfDoc, weekLabel: string): void {
     pdf.setFontSize(6.5);
     pdf.setTextColor(FAINT[0], FAINT[1], FAINT[2]);
     pdf.text(
-      `Divisi CP Suka • Senin–Minggu (${weekLabel}) • maksimal 1 absen manual • seri diputuskan rata-rata jam masuk paling awal`,
+      `${week.divisionNama} • Total hadir lintas divisi; Libur netral; hari mendatang belum dinilai. ${week.divisionId === null ? "Tanpa peringkat / rata-rata." : "Rank: divisi dominan, manual maks 1, jam paling awal."}`,
       14,
       pageHeight - 6,
     );
@@ -266,7 +269,7 @@ function addReportFooter(pdf: PdfDoc, weekLabel: string): void {
   }
 }
 
-/** Generate PDF Laporan Challenge Mingguan CP Suka dan simpan ke browser. */
+/** Generate PDF sesuai filter Challenge Mingguan dan simpan ke browser. */
 export async function exportChallengeWeekPdf(args: {
   week: ChallengeWeek;
   items: ChallengeEmployeeResult[];
@@ -274,6 +277,7 @@ export async function exportChallengeWeekPdf(args: {
   search: string;
 }): Promise<string> {
   const { week, items, periodLabel, search } = args;
+  const allDivisions = week.divisionId === null;
   if (week.isFuture) throw new Error("Minggu belum dimulai — belum ada yang bisa dicetak.");
   if (items.length === 0) throw new Error("Tidak ada peserta yang dinilai pada minggu ini.");
 
@@ -296,23 +300,26 @@ export async function exportChallengeWeekPdf(args: {
     periodLabel,
     search,
     isRunning: week.isRunning,
+    divisionNama: week.divisionNama,
   });
 
   const lolos = items.filter((i) => i.lolos).length;
   const gugur = items.length - lolos;
   y = drawSummaryCards(doc, margin, pageWidth, y, [
     { label: "Peserta Dinilai", value: `${items.length} pegawai`, kind: "neutral" },
-    { label: "Lolos", value: `${lolos} peserta`, kind: "success" },
-    { label: "Gugur", value: `${gugur} peserta`, kind: "danger" },
+    { label: allDivisions ? "Lengkap" : "Lolos", value: `${lolos} peserta`, kind: "success" },
+    { label: allDivisions ? "Belum Lengkap" : "Gugur", value: `${gugur} peserta`, kind: "danger" },
   ]);
 
   autoTable(doc as never, {
     startY: y,
     head: [[
-      "Rank", "Pegawai", "Kehadiran Wajib", "Hadir", "Telat", "Izin", "Sakit", "Cuti", "Alpha", "Libur",
-      "Manual", "Rata-rata Jam", "Status",
+      ...(!allDivisions ? ["Rank"] : []), "Pegawai",
+      ...(!allDivisions ? [`Kehadiran ${week.divisionNama}`] : []),
+      "Total Kehadiran", "Hadir", "Telat", "Izin", "Sakit", "Cuti", "Alpha", "Libur",
+      "Manual", ...(!allDivisions ? ["Rata-rata Jam"] : []), "Status",
     ]],
-    body: buildChallengePdfRows(items),
+    body: buildChallengePdfRows(items, allDivisions),
     theme: "grid",
     styles: {
       fontSize: 7.5,
@@ -324,21 +331,7 @@ export async function exportChallengeWeekPdf(args: {
     },
     headStyles: { fillColor: BLUE, textColor: 255, fontStyle: "bold", halign: "center", fontSize: 7.5 },
     alternateRowStyles: { fillColor: LIGHT },
-    columnStyles: {
-      0: { halign: "center", cellWidth: 11 },
-      1: { cellWidth: 42 },
-      2: { halign: "center", cellWidth: 20 },
-      3: { halign: "center", cellWidth: 13 },
-      4: { halign: "center", cellWidth: 14 },
-      5: { halign: "center", cellWidth: 13 },
-      6: { halign: "center", cellWidth: 13 },
-      7: { halign: "center", cellWidth: 13 },
-      8: { halign: "center", cellWidth: 14 },
-      9: { halign: "center", cellWidth: 13 },
-      10: { halign: "center", cellWidth: 14 },
-      11: { halign: "center", cellWidth: 18 },
-      12: { halign: "left" },
-    },
+    columnStyles: allDivisions ? { 0: { cellWidth: 42 } } : { 0: { cellWidth: 11, halign: "center" }, 1: { cellWidth: 38 }, 13: { cellWidth: 42 } },
     margin: { left: margin, right: margin, bottom: 16 },
     showHead: "everyPage",
     rowPageBreak: "avoid",
@@ -348,7 +341,7 @@ export async function exportChallengeWeekPdf(args: {
       const item = items[data.row.index] as ChallengeEmployeeResult | undefined;
       if (!item) return;
       const col = data.column.index as number;
-      if (col === 0) {
+      if (!allDivisions && col === 0) {
         const medal = challengeMedalColor(item.rank);
         if (medal) {
           data.cell.styles.fillColor = medal;
@@ -357,18 +350,18 @@ export async function exportChallengeWeekPdf(args: {
         } else {
           data.cell.styles.textColor = FAINT;
         }
-      } else if (col === 1) {
+      } else if (col === (allDivisions ? 0 : 1)) {
         data.cell.styles.fontStyle = "bold";
-      } else if (col === 2) {
+      } else if (col === (allDivisions ? 1 : 3)) {
         data.cell.styles.fontStyle = "bold";
         data.cell.styles.textColor = item.lolos ? GREEN : RED;
-      } else if (col >= 3 && col <= 9) {
+      } else if (col >= (allDivisions ? 2 : 4) && col <= (allDivisions ? 8 : 10)) {
         const count = item.statusCounts[
-          ["hadir", "terlambat", "izin", "sakit", "cuti", "alpha", "libur"][col - 3] as keyof ChallengeEmployeeResult["statusCounts"]
+          ["hadir", "terlambat", "izin", "sakit", "cuti", "alpha", "libur"][col - (allDivisions ? 2 : 4)] as keyof ChallengeEmployeeResult["statusCounts"]
         ];
         if (count === 0) data.cell.styles.textColor = FAINT;
         else data.cell.styles.fontStyle = "bold";
-      } else if (col === 10) {
+      } else if (col === (allDivisions ? 9 : 11)) {
         if (item.manual === 0) data.cell.styles.textColor = FAINT;
         else if (item.manual === 1) {
           data.cell.styles.textColor = GOLD_BRIGHT;
@@ -377,7 +370,7 @@ export async function exportChallengeWeekPdf(args: {
           data.cell.styles.textColor = RED;
           data.cell.styles.fontStyle = "bold";
         }
-      } else if (col === 12) {
+      } else if (col === (allDivisions ? 10 : 13)) {
         if (item.lolos) {
           data.cell.styles.textColor = GREEN;
           data.cell.styles.fontStyle = "bold";
@@ -389,8 +382,8 @@ export async function exportChallengeWeekPdf(args: {
     },
   });
 
-  addReportFooter(doc, week.label);
-  const filename = buildChallengePdfFilename(week.weekStart, week.weekEnd);
+  addReportFooter(doc, week);
+  const filename = buildChallengePdfFilename(week.weekStart, week.weekEnd, week.divisionNama);
   doc.save(filename);
   return filename;
 }

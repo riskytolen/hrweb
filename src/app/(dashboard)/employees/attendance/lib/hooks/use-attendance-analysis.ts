@@ -80,7 +80,7 @@ function combineMetrics(base: AnalysisMetrics, status: string) {
   }
 }
 
-export function useAttendanceAnalysis(employees: EmployeeLite[]) {
+export function useAttendanceAnalysis(employees: EmployeeLite[], divisionFilter = "semua") {
   const [periodKey, setPeriodKey] = useState(getSummaryCurrentPeriodKey);
   const [loading, setLoading] = useState(false);
 
@@ -140,8 +140,14 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
         out.push({ id: r.division_id, nama: div.nama, color: div.color });
       }
     });
+    challengeRecords.forEach((r) => {
+      if (r.division_id !== null && r.divisionNama && !seen.has(r.division_id)) {
+        seen.add(r.division_id);
+        out.push({ id: r.division_id, nama: r.divisionNama, color: r.divisionColor || "#6b7280" });
+      }
+    });
     return out.sort((a, b) => a.nama.localeCompare(b.nama));
-  }, [currRecords, prevRecords]);
+  }, [currRecords, prevRecords, challengeRecords]);
 
   /** Divisi yang absen manualnya tidak dihitung (Back Office), konsisten dengan Report Manual. */
   const manualDivIds = useMemo(() => {
@@ -287,16 +293,20 @@ export function useAttendanceAnalysis(employees: EmployeeLite[]) {
   );
 
   /**
-   * Challenge Mingguan CP Suka per minggu Senin–Minggu melintasi periode.
+    * Challenge per divisi per minggu Senin–Minggu melintasi periode.
    * Hari mendatang pada minggu berjalan belum dinilai (status sementara).
    */
   const jakartaToday = useMemo(() => getJakartaToday(), []);
   const empNamaMap = useMemo(() => new Map(employees.map((e) => [e.id, e.nama])), [employees]);
   const challengeWeeks: ChallengeWeek[] = useMemo(
     () => listPeriodWeeks(currPeriod.start, currPeriod.end).map((w) =>
-      computeWeeklyChallenge(challengeRecords, w.weekStart, jakartaToday, empNamaMap),
+      computeWeeklyChallenge(challengeRecords, w.weekStart, jakartaToday, empNamaMap,
+        divisionFilter === "semua" ? null : {
+          id: Number(divisionFilter),
+          nama: divisionList.find((d) => d.id === Number(divisionFilter))?.nama ?? "Divisi",
+        }),
     ),
-    [currPeriod, challengeRecords, jakartaToday, empNamaMap],
+    [currPeriod, challengeRecords, jakartaToday, empNamaMap, divisionFilter, divisionList],
   );
 
   return {

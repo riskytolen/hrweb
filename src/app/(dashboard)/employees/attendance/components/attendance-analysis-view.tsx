@@ -99,12 +99,13 @@ function KpiCard({
 }
 
 export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
+  const [divisionFilter, setDivisionFilter] = useState("semua");
+  const allDivisions = divisionFilter === "semua";
   const {
     loading, periodKey, setPeriodKey, currPeriod, global, globalPrev,
     divisions, individuals, dailyTrend, challengeWeeks, divisionList,
-  } = useAttendanceAnalysis(employees);
+  } = useAttendanceAnalysis(employees, divisionFilter);
 
-  const [divisionFilter, setDivisionFilter] = useState("semua");
   const [scope, setScope] = useState<"global" | "division" | "individual">("global");
   const [search, setSearch] = useState("");
   /** Pilihan minggu challenge manual; null = ikuti default (minggu terbaru yang sudah dimulai). */
@@ -177,7 +178,7 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
     selectedWeek ? challengeWeeks.findIndex((w) => w.weekStart === selectedWeek.weekStart) : -1,
     [challengeWeeks, selectedWeek]);
 
-  // Item tabel mengikuti pencarian; filter divisi tidak berlaku (scope sudah CP Suka).
+  // Filter divisi sudah diterapkan pada perhitungan; pencarian mempertahankan rank.
   const selectedItems = useMemo(() => {
     if (!selectedWeek) return [];
     if (!search) return selectedWeek.items;
@@ -427,12 +428,12 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
 
           {scope === "individual" && (
             <>
-            {/* ─── Challenge Mingguan (divisi CP Suka) dengan pemilih minggu ─── */}
+            {/* ─── Challenge Mingguan per divisi dengan pemilih minggu ─── */}
             {selectedWeek ? (
               <div className="bg-card rounded-2xl border border-border overflow-hidden">
                 <div className="px-5 py-3 border-b border-border flex flex-wrap items-center gap-2">
                   <Trophy className="w-4 h-4 text-amber-500" />
-                  <h3 className="text-sm font-bold text-foreground">Challenge Mingguan</h3>
+                  <h3 className="text-sm font-bold text-foreground">Challenge Mingguan — {selectedWeek.divisionNama}</h3>
                   <div className="flex items-center gap-0.5 bg-muted rounded-xl px-1.5 py-0.5">
                     <button
                       type="button"
@@ -468,7 +469,7 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Belum mulai</span>
                   )}
                   <span className="text-[10px] text-muted-foreground ml-auto">
-                    {selectedItems.filter((i) => i.lolos).length} lolos • {selectedItems.filter((i) => !i.lolos).length} gugur
+                    {selectedItems.filter((i) => i.lolos).length} {allDivisions ? "lengkap" : "lolos"} • {selectedItems.filter((i) => !i.lolos).length} {allDivisions ? "belum lengkap" : "gugur"}
                   </span>
                   <button
                     type="button"
@@ -496,21 +497,22 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-border bg-muted/50">
-                            <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Rank</th>
+                            {!allDivisions && <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3 w-14">Rank</th>}
                             <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Pegawai</th>
-                            <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Kehadiran Wajib</th>
+                            {!allDivisions && <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Kehadiran {selectedWeek.divisionNama}</th>}
+                            <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Total Kehadiran</th>
                             {CHALLENGE_STATUS_COLUMNS.map((col) => (
                               <th key={col.key} className="text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2.5 py-3" title={`Jumlah hari ${col.label.toLowerCase()} pada minggu ini`}>{col.label}</th>
                             ))}
                             <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Jumlah input absen manual oleh admin">Manual</th>
-                            <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title="Rata-rata jam masuk pada divisi CP Suka (record hadir & terlambat, presisi detik)">Rata-rata Jam</th>
+                            {!allDivisions && <th className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3" title={`Rata-rata jam masuk ${selectedWeek.divisionNama}, satu jam paling awal per tanggal`}>Rata-rata Jam</th>}
                             <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Status</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/50">
                           {selectedItems.map((row) => (
                             <tr key={row.employee_id} className={cn("hover:bg-muted/30", row.rank === 1 && "bg-amber-500/5", !row.lolos && "bg-destructive/5")}>
-                              <td className="px-4 py-3 text-center">
+                              {!allDivisions && <td className="px-4 py-3 text-center">
                                 {row.rank !== null && row.rank <= 3 ? (
                                   <span className={cn("inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold text-white",
                                     row.rank === 1 ? "bg-amber-500" : row.rank === 2 ? "bg-slate-400" : "bg-amber-700")}>
@@ -521,10 +523,12 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                                 ) : (
                                   <span className="text-xs text-muted-foreground">—</span>
                                 )}
-                              </td>
+                              </td>}
                               <td className="px-4 py-3">
                                 <p className="text-sm font-semibold text-foreground">{row.nama}</p>
+                                {row.lintasDivisi && <p className="text-xs text-muted-foreground">Lintas Divisi • tanpa peringkat</p>}
                               </td>
+                              {!allDivisions && <td className="px-4 py-3 text-center text-sm font-bold tabular-nums">{row.hadirDivisi}/{row.totalWajib}</td>}
                               <td className="px-4 py-3 text-center">
                                 <span className={cn("text-sm font-bold tabular-nums",
                                   !row.lolos ? "text-destructive" : "text-success")}>
@@ -548,14 +552,14 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                                   {row.manual}
                                 </span>
                               </td>
-                              <td className="px-4 py-3 text-center text-sm font-semibold text-foreground tabular-nums">
+                              {!allDivisions && <td className="px-4 py-3 text-center text-sm font-semibold text-foreground tabular-nums">
                                 {row.avgJamMasuk ?? "—"}
-                              </td>
+                              </td>}
                               <td className="px-4 py-3">
                                 {row.lolos ? (
-                                  <span className="text-xs font-bold px-2 py-1 rounded-md bg-success/10 text-success">Lolos</span>
+                                  <span className="text-xs font-bold px-2 py-1 rounded-md bg-success/10 text-success">{allDivisions ? "Lengkap" : selectedWeek.isRunning ? "Lolos sementara" : "Lolos"}</span>
                                 ) : (
-                                  <span className="text-xs font-medium text-destructive leading-snug">{row.alasanGugur.join(" • ")}</span>
+                                  <span className="text-xs font-medium text-destructive leading-snug">{allDivisions ? "Belum lengkap • " : "Gugur • "}{row.alasanGugur.join(" • ")}</span>
                                 )}
                               </td>
                             </tr>
@@ -565,8 +569,8 @@ export function AttendanceAnalysisView({ employees }: AnalysisViewProps) {
                     </div>
                     <div className="px-5 py-2.5 border-t border-border bg-muted/20">
                       <p className="text-[10px] text-muted-foreground">
-                        Peserta: pegawai dengan divisi dominan CP Suka minggu ini. Wajib hadir semua hari wajib Senin–Minggu
-                        (libur terjadwal netral; hari mendatang belum dinilai) • maksimal 1 absen manual • seri diputuskan rata-rata jam masuk paling awal.
+                        Total Kehadiran mengakui kerja di semua divisi. Target normal: 6 hari kerja + 1 Libur; mengikuti record Libur, hari mendatang belum dinilai.
+                        {allDivisions ? " Semua Divisi tanpa peringkat dan rata-rata jam; manual hanya informasi." : " Kehadiran, manual, dan jam pada filter ini hanya dari divisi terpilih. Peringkat untuk divisi dominan mingguan; lintas divisi tanpa peringkat. Maksimal 1 manual; urutan manual tersedikit lalu rata-rata jam paling awal."}
                       </p>
                     </div>
                   </>

@@ -22,7 +22,7 @@ import {
   minutesToHHMM,
   computeAvgJamMasuk,
   compareRankingEntries,
-  computeWeeklyChallenge,
+  computeWeeklyChallenge as computeChallenge,
   mondayOfWeek,
   listPeriodWeeks,
   formatWeekLabel,
@@ -662,6 +662,10 @@ describe("attendance-helpers", () => {
 
     const CP = { id: 9, nama: "Cp Suka", color: "#0ea5e9" };
     const LAIN = { id: 3, nama: "Divisi Lain", color: "#111111" };
+    const computeWeeklyChallenge = (
+      records: Parameters<typeof computeChallenge>[0], start: string, today: string,
+      names?: Map<string, string>, target: { id: number; nama: string } | null = CP,
+    ) => computeChallenge(records, start, today, names, target);
 
     /** Record absensi: default divisi CP Suka status Hadir pagi. */
     const rec = (
@@ -684,6 +688,45 @@ describe("attendance-helpers", () => {
     const fullHadir = (eid: string) => D.map((t) => rec(eid, t));
 
     const names = new Map<string, string>([[SATU, "Andi"], [DUA, "Budi"]]);
+
+    it("Nindin: CP 4/5, Gudang 1/5, total 5/5; manual dan jam terpisah", () => {
+      const times = ["02:55:32", "06:32:00", "02:57:05", "02:34:56", "02:47:07"];
+      const records = D.slice(0, 5).map((date, i) => rec(SATU, date, "Hadir", {
+        div: i === 1 ? LAIN : CP, isManual: i === 1, jam: times[i],
+      }));
+      const cp = computeWeeklyChallenge(records, WS, D[4], names).items[0];
+      expect(cp).toMatchObject({ hadirDivisi: 4, hadirWajib: 5, totalWajib: 5, manual: 0, avgJamMasuk: "02:48:40", lolos: true, rank: 1, lintasDivisi: false });
+      expect(cp.statusCounts.hadir).toBe(4);
+      const gudang = computeWeeklyChallenge(records, WS, D[4], names, LAIN).items[0];
+      expect(gudang).toMatchObject({ hadirDivisi: 1, hadirWajib: 5, totalWajib: 5, manual: 1, avgJamMasuk: "06:32:00", lolos: true, rank: null, lintasDivisi: true });
+      expect(gudang.statusCounts.hadir).toBe(1);
+      expect(computeWeeklyChallenge(records, WS, D[4], names, null).items[0]).toMatchObject({ hadirWajib: 5, totalWajib: 5, avgJamMasuk: null, rank: null });
+    });
+
+    it("pekan lengkap lintas divisi: 5/6 CP, total 6/6, 1 Libur", () => {
+      const records = D.map((date, i) => rec(SATU, date, i === 6 ? "Libur" : "Hadir", { div: i === 1 ? LAIN : CP }));
+      expect(computeWeeklyChallenge(records, WS, TODAY, names).items[0]).toMatchObject({ hadirDivisi: 5, hadirWajib: 6, totalWajib: 6, lolos: true, statusCounts: { libur: 1 } });
+    });
+
+    it("duplikat dan record mendatang tidak mengubah dominan, manual, jumlah hari, atau rata-rata", () => {
+      const records = [rec(SATU, D[0], "Hadir", { jam: "03:00", isManual: true }), rec(SATU, D[1], "Hadir", { jam: "05:00" })];
+      const baseline = computeWeeklyChallenge(records, WS, D[1], names);
+      const duplicates = [records[0], records[0], ...records, ...D.slice(2).map((date) => rec(SATU, date, "Hadir", { div: LAIN, isManual: true }))];
+      expect(computeWeeklyChallenge(duplicates, WS, D[1], names)).toEqual(baseline);
+      expect(baseline.items[0].avgJamMasuk).toBe("04:00:00");
+    });
+
+    it("divisi selain CP memiliki ranking sendiri; lintas divisi tidak mengambil rank", () => {
+      const records = [...fullHadir(DUA).map((r) => ({ ...r, division_id: LAIN.id, divisionNama: LAIN.nama })), ...fullHadir(SATU), rec(SATU, D[0], "Hadir", { div: LAIN })];
+      const result = computeWeeklyChallenge(records, WS, TODAY, names, LAIN);
+      expect(result.items.find((r) => r.employee_id === DUA)?.rank).toBe(1);
+      expect(result.items.find((r) => r.employee_id === SATU)).toMatchObject({ lintasDivisi: true, rank: null, lolos: true });
+    });
+
+    it("Semua Divisi mengabaikan batas manual untuk kelengkapan", () => {
+      const records = fullHadir(SATU).map((r) => ({ ...r, is_manual: true }));
+      expect(computeWeeklyChallenge(records, WS, TODAY, names, null).items[0]).toMatchObject({ manual: 7, lolos: true, rank: null, avgJamMasuk: null });
+    });
 
     it("full hadir 7/7 tanpa manual → lolos rank 1", () => {
       const w = computeWeeklyChallenge(fullHadir(SATU), WS, TODAY, names);
