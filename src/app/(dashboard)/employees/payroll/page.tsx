@@ -55,6 +55,7 @@ import WorksheetSheetFullscreen from "./components/WorksheetSheetFullscreen";
 import { PENDAPATAN_FIELDS, POTONGAN_FIELDS, inputClass, parseCurrencyInput, formatInputCurrency, type PayrollRow, type AbsenBreakdownItem, type LemburBreakdownItem } from "./constants";
 import { exportPayrollRecapPdf, exportPayrollRecapXlsx, exportPayrollSlipPdf, getPayrollEmployeeSnapshot } from "./payroll-export";
 import { calculateBackupLiburByEmployee, getBackupLiburPayrollValues, type BackupLiburPoint } from "./backup-libur";
+import { filterPayrollPoints } from "./payroll-points";
 import {
   GAPOK_PRORATA_DIVISOR,
   computeGapokProrata,
@@ -473,7 +474,7 @@ export default function PayrollPage() {
           status: emp.status,
         });
       };
-      const activeDpData = dpData.filter((d) => d.employee_id && d.tanggal && isActiveFor(d.employee_id, d.tanggal));
+      const activeDpData = filterPayrollPoints(dpData, empMap);
       const titikTotals = new Map<string, number>();
       activeDpData.forEach((d) => {
         if (!d.employee_id) return;
@@ -2032,7 +2033,7 @@ const wsSaveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new M
         if (!emp || !tanggal) return false;
         return isEmployeeActiveOnDate(tanggal, emp);
       };
-      const activeDpData = dpData.filter((d) => d.employee_id && d.tanggal && isActiveFor(d.employee_id, d.tanggal));
+      const activeDpData = filterPayrollPoints(dpData, empMap);
       const dpTotals = new Map<string, number>();
       activeDpData.forEach((d) => {
         if (!d.employee_id) return;

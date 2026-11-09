@@ -1193,6 +1193,10 @@ export default function RecruitmentPage() {
                   <label className="text-xs font-semibold text-foreground mb-1.5 block">Tanggal Mulai Aktif <span className="text-danger">*</span></label>
                   <DatePicker value={acceptDate} onChange={setAcceptDate} placeholder="Pilih tanggal" />
                   <p className="text-[10px] text-muted-foreground mt-1.5">Default: hari ini. Boleh dimundurkan jika pegawai sebenarnya sudah mulai kerja sebelum admin klik tombol ini.</p>
+                  <p className="text-[10px] text-muted-foreground mt-1.5">Titik sebelum tanggal mulai aktif tidak masuk payroll karena dibayar cash saat Training.</p>
+                  {acceptDate && list.some((r) => r.id === acceptModal.id && r.tanggal_training_selesai && acceptDate <= r.tanggal_training_selesai) && (
+                    <p role="alert" className="mt-2 rounded-lg bg-warning/10 p-2 text-xs text-warning">Tanggal mulai aktif berada pada atau sebelum akhir Training. Pastikan tanggal ini benar: titik mulai tanggal tersebut akan masuk payroll setelah pegawai Aktif.</p>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-3 px-6 pb-6">
