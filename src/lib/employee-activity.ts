@@ -39,6 +39,8 @@ export function isInNonActivePeriod(
 /** True jika pegawai aktif pada tanggal YYYY-MM-DD tertentu. */
 export function isEmployeeActiveOnDate(date: string, emp: EmployeeActivity): boolean {
   if (!isValidDateStr(date)) return false;
+  if (emp.status === "Training") return false;
+  if (emp.status === "Tidak Aktif" && !emp.tanggal_bergabung) return false;
   // Pegawai Tanpa tanggal keluar tetapi status Tidak Aktif dianggap tidak aktif
   // di semua tanggal (data belum lengkap, harus dilengkapi tanggalnya).
   if (emp.status === "Tidak Aktif" && !emp.tanggal_keluar) return false;
@@ -76,6 +78,8 @@ export function hasActiveDayInPeriod(
   periodEnd: string,
 ): boolean {
   if (!periodStart || !periodEnd || periodEnd < periodStart) return false;
+  if (emp.status === "Training") return false;
+  if (emp.status === "Tidak Aktif" && !emp.tanggal_bergabung) return false;
   // Fast path tanpa enumerasi untuk kasus umum.
   if (emp.tanggal_bergabung && emp.tanggal_bergabung > periodEnd) return false;
   if (emp.tanggal_keluar && emp.tanggal_keluar <= periodStart) return false;

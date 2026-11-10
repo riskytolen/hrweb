@@ -556,7 +556,7 @@ export default function RecruitmentPage() {
       if (existingEmp) {
         // Penolakan bukan penghapusan: DELETE akan cascade ke payroll lama,
         // termasuk Final. Simpan identitas dan tanggal bergabung untuk riwayat.
-        const { error } = await deactivateRejectedEmployee(supabase, existingEmp, localDateStr());
+        const { error } = await deactivateRejectedEmployee(supabase, existingEmp, localDateStr(), rec.tanggal_training_selesai);
         if (error) return { ok: false, toast: { type: "error", title: "Gagal Menonaktifkan Pegawai", message: error.message } };
         return { ok: true, toast: { type: "success", title: "Ditolak", message: `${rec.nama} dinonaktifkan. Riwayat penggajian dan rekap titik tetap tersimpan.` } };
       }

@@ -11,6 +11,18 @@ function mockDb(error: { message: string } | null = null) {
 }
 
 describe("penolakan pelamar dengan riwayat payroll", () => {
+  it.each(["Training", "Tidak Aktif"])("%s yang belum pernah aktif keluar sehari setelah Training", async (status) => {
+    const mock = mockDb();
+    await deactivateRejectedEmployee(mock.db, { id: "ID68945", status, tanggal_bergabung: null, tanggal_keluar: "2026-11-10" }, "2026-11-10", "2026-10-09");
+    expect(mock.update).toHaveBeenCalledWith(expect.objectContaining({ status: "Tidak Aktif", tanggal_keluar: "2026-10-10" }));
+  });
+
+  it("akhir Training pada akhir tahun menggunakan tanggal kalender berikutnya", async () => {
+    const mock = mockDb();
+    await deactivateRejectedEmployee(mock.db, { id: "emp", status: "Training", tanggal_keluar: null }, "2027-01-05", "2026-12-31");
+    expect(mock.update).toHaveBeenCalledWith(expect.objectContaining({ tanggal_keluar: "2027-01-01" }));
+  });
+
   it("menonaktifkan pegawai Training tanpa menghapus atau mengubah slip periode mana pun", async () => {
     const mock = mockDb();
     const result = await deactivateRejectedEmployee(mock.db, { id: "ID68945", status: "Training", tanggal_keluar: null }, "2026-11-10");

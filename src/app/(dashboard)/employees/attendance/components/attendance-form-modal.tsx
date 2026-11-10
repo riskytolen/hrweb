@@ -42,6 +42,7 @@ import {
   computeDenda,
   computeDendaAlpha,
   isWeeklyOffDay,
+  isEmployeeActiveOnDate,
 } from "../lib/attendance-helpers";
 import type {
   EmployeeLite,
@@ -281,8 +282,19 @@ export const AttendanceFormModal = forwardRef<AttendanceFormModalHandle, Attenda
       return;
     }
 
-    if (!editingId && form.employee_id && form.tanggal) {
-      const emp = employees.find((e) => e.id === form.employee_id);
+    if (form.employee_id && form.tanggal) {
+      // Read current status: a modal may stay open while recruitment changes.
+      const { data: emp, error: employeeError } = await supabase.from("pegawai")
+        .select("nama, status, tanggal_bergabung, tanggal_keluar, non_active_periods")
+        .eq("id", form.employee_id).single();
+      if (employeeError || !emp) {
+        setError("Gagal memeriksa status pegawai. Silakan coba lagi.");
+        return;
+      }
+      if (!isEmployeeActiveOnDate(form.tanggal, emp)) {
+        setError("Pegawai tidak aktif pada tanggal ini. Masa Training tidak mengikuti absensi.");
+        return;
+      }
       if (emp?.tanggal_bergabung && form.tanggal < emp.tanggal_bergabung) {
         const tglBergabung = new Date(emp.tanggal_bergabung + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
         setError(`${emp.nama} baru bergabung tanggal ${tglBergabung}. Tanggal absen harus pada atau setelah tanggal bergabung.`);

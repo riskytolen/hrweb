@@ -9,6 +9,23 @@ import {
 } from "@/lib/employee-activity";
 
 describe("employee activity contract (tanggal_keluar = first inactive)", () => {
+  it("Training dan penolakan tanpa tanggal bergabung tidak memiliki hari aktif", () => {
+    for (const emp of [
+      { status: "Training", tanggal_bergabung: null, tanggal_keluar: null },
+      { status: "Training", tanggal_bergabung: "2026-10-01", tanggal_keluar: null },
+      { status: "Tidak Aktif", tanggal_bergabung: null, tanggal_keluar: "2026-10-10" },
+    ]) {
+      for (const day of ["2026-10-06", "2026-10-07", "2026-10-09", "2026-10-10", "2026-11-03"]) {
+        expect(isEmployeeActiveOnDate(day, emp)).toBe(false);
+      }
+      expect(hasActiveDayInPeriod(emp, "2026-10-01", "2026-11-07")).toBe(false);
+      expect(countActiveDaysInPeriod(emp, "2026-10-01", "2026-11-07")).toBe(0);
+    }
+    const accepted = { status: "Aktif", tanggal_bergabung: "2026-11-11", tanggal_keluar: null };
+    expect(isEmployeeActiveOnDate("2026-11-10", accepted)).toBe(false);
+    expect(isEmployeeActiveOnDate("2026-11-11", accepted)).toBe(true);
+  });
+
   it("counts join date as active and exit date as inactive", () => {
     const emp = { tanggal_bergabung: "2026-05-10", tanggal_keluar: "2026-05-20", non_active_periods: [] };
     expect(isEmployeeActiveOnDate("2026-05-10", emp)).toBe(true);

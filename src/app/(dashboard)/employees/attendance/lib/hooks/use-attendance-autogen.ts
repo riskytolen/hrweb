@@ -7,7 +7,7 @@ import {
   AUTO_NOTE_PREFIXES,
   DEFAULT_DENDA_ALPHA,
 } from "../attendance-constants";
-import { localDateStr, computeDendaAlpha, isInNonActivePeriod, isWeeklyOffDay, isAutoRestorableToLibur } from "../attendance-helpers";
+import { localDateStr, computeDendaAlpha, isEmployeeActiveOnDate, isWeeklyOffDay, isAutoRestorableToLibur } from "../attendance-helpers";
 import type { EmployeeLite, PenaltyLite, PublicHoliday, OffDayEntry } from "../attendance-types";
 
 type AutoGenArgs = {
@@ -70,9 +70,12 @@ export function useAttendanceAutoGen({
     const restoreToLiburIds: number[] = [];
 
     for (const emp of employees) {
-      if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
-      if (emp.tanggal_keluar && dateFilter >= emp.tanggal_keluar) continue;
-      if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;
+      if (!isEmployeeActiveOnDate(dateFilter, emp)) {
+        const stale = existingMap.get(emp.id);
+        if (stale && !stale.is_manual && stale.status === "Libur" &&
+          (stale.catatan === AUTO_NOTES.HARI_LIBUR || stale.catatan?.startsWith(AUTO_NOTE_PREFIXES.LIBUR_NASIONAL))) staleLiburIds.push(stale.id);
+        continue;
+      }
 
       const override = overrideMap.get(emp.id);
 
@@ -177,9 +180,12 @@ export function useAttendanceAutoGen({
     const staleAlphaIds: number[] = [];
 
     for (const emp of employees) {
-      if (emp.tanggal_bergabung && dateFilter < emp.tanggal_bergabung) continue;
-      if (emp.tanggal_keluar && dateFilter >= emp.tanggal_keluar) continue;
-      if (isInNonActivePeriod(dateFilter, emp.non_active_periods)) continue;
+      if (!isEmployeeActiveOnDate(dateFilter, emp)) {
+        const stale = existingRecs?.find((r) => r.employee_id === emp.id);
+        if (stale && !stale.is_manual && stale.status === "Alpha" &&
+          (stale.catatan || "").startsWith(AUTO_NOTE_PREFIXES.ALPHA)) staleAlphaIds.push(stale.id);
+        continue;
+      }
 
       const override = overrideMap.get(emp.id);
       const applicableHoliday = holidaysForDate.find((h) =>
@@ -191,21 +197,7 @@ export function useAttendanceAutoGen({
       const isMasukOverride = override === "masuk";
       const shouldBeLibur = isLibur && !isMasukOverride;
 
-      const existing = existingRecs?.find((r) => r.employee_id === emp.id);
-
-      if (existing) {
-        const isNonRelevant = emp.status === "Tidak Aktif" || (emp.tanggal_keluar && dateFilter >= emp.tanggal_keluar);
-        if (
-          isNonRelevant &&
-          !existing.is_manual &&
-          existing.status === "Alpha" &&
-          (existing.catatan || "").startsWith(AUTO_NOTE_PREFIXES.ALPHA)
-        ) {
-          staleAlphaIds.push(existing.id);
-          continue;
-        }
-        if (existingSet.has(emp.id)) continue;
-      }
+      if (existingSet.has(emp.id)) continue;
 
       const leave = leaveMap.get(emp.id);
       const primaryLeave = leave?.[0];
