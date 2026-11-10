@@ -20,6 +20,7 @@ import { compressFile } from "@/lib/file-compression";
 import { useAuth } from "@/components/AuthProvider";
 import RouteGuard from "@/components/RouteGuard";
 import DatePicker from "@/components/ui/DatePicker";
+import { deactivateRejectedEmployee } from "./reject-employee";
 
 const PAGE_SIZE = 10;
 const inputClass = "w-full px-3 py-2.5 rounded-xl border border-border bg-muted/30 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground/50 text-foreground";
@@ -482,12 +483,15 @@ export default function RecruitmentPage() {
     joinDate?: string,
   ): Promise<{ ok: true; toast: { type: "success"; title: string; message: string } } | { ok: false; toast: { type: "error"; title: string; message: string } }> => {
     // Cek apakah sudah ada pegawai dari recruitment ini
-    const { data: existingEmp } = await supabase
+    const { data: existingEmp, error: employeeLookupError } = await supabase
       .from("pegawai")
-      .select("id, status, tanggal_keluar, non_active_periods")
+      .select("id, status, tanggal_bergabung, tanggal_keluar, non_active_periods")
       .eq("recruitment_id", rec.id)
       .limit(1)
       .maybeSingle();
+    if (employeeLookupError) {
+      return { ok: false, toast: { type: "error", title: "Gagal Memuat Pegawai", message: employeeLookupError.message } };
+    }
 
     if (newStatus === "Training") {
       if (!existingEmp) {
@@ -498,7 +502,7 @@ export default function RecruitmentPage() {
         return { ok: false, toast: { type: "error", title: "Gagal Buat Pegawai", message: result.error } };
       }
       const jabatanIdForTraining = await resolveJabatanIdFromPosisi(rec.posisi_dilamar || "");
-      const { error } = await supabase.from("pegawai").update({ status: "Training", tanggal_bergabung: null, ...(jabatanIdForTraining ? { jabatan_id: jabatanIdForTraining } : {}) }).eq("recruitment_id", rec.id);
+      const { error } = await supabase.from("pegawai").update({ status: "Training", tanggal_bergabung: null, tanggal_keluar: null, ...(jabatanIdForTraining ? { jabatan_id: jabatanIdForTraining } : {}) }).eq("recruitment_id", rec.id);
       if (error) return { ok: false, toast: { type: "error", title: "Gagal Update Pegawai", message: error.message } };
       return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status diubah ke Training.` } };
     }
@@ -517,7 +521,7 @@ export default function RecruitmentPage() {
         const oldKeluar = existingEmp.tanggal_keluar;
         const oldPeriods = (existingEmp.non_active_periods || []) as NonActivePeriod[];
 
-        if (oldStatus === "Training") {
+        if (oldStatus === "Training" || !existingEmp.tanggal_bergabung) {
           updates.tanggal_bergabung = effectiveJoinDate;
         } else if (oldStatus === "Tidak Aktif" && oldKeluar) {
           // Kontrak: tanggal_keluar = hari pertama TIDAK aktif.
@@ -550,9 +554,11 @@ export default function RecruitmentPage() {
 
     if (newStatus === "Ditolak") {
       if (existingEmp) {
-        const { error } = await supabase.from("pegawai").delete().eq("recruitment_id", rec.id);
-        if (error) return { ok: false, toast: { type: "error", title: "Gagal Hapus Pegawai", message: error.message } };
-        return { ok: true, toast: { type: "success", title: "Ditolak", message: `${rec.nama} dihapus dari daftar pegawai. Data rekap titik tetap tersimpan.` } };
+        // Penolakan bukan penghapusan: DELETE akan cascade ke payroll lama,
+        // termasuk Final. Simpan identitas dan tanggal bergabung untuk riwayat.
+        const { error } = await deactivateRejectedEmployee(supabase, existingEmp, localDateStr());
+        if (error) return { ok: false, toast: { type: "error", title: "Gagal Menonaktifkan Pegawai", message: error.message } };
+        return { ok: true, toast: { type: "success", title: "Ditolak", message: `${rec.nama} dinonaktifkan. Riwayat penggajian dan rekap titik tetap tersimpan.` } };
       }
       return { ok: true, toast: { type: "success", title: "Status Diperbarui", message: `Status diubah ke Ditolak.` } };
     }

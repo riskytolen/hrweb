@@ -13,6 +13,16 @@ const points = [
 ];
 
 describe("titik payroll dan pembayaran cash Training", () => {
+  it("Training → Ditolak/Tidak Aktif → diterima: titik cash tetap di luar payroll", () => {
+    const employee: EmployeeActivity = { status: "Training", tanggal_bergabung: null, tanggal_keluar: null };
+    const employees = new Map([["faisal", employee]]);
+    expect(filterPayrollPoints(points, employees)).toEqual([]);
+    employees.set("faisal", { ...employee, status: "Tidak Aktif", tanggal_keluar: "2026-11-10" });
+    expect(filterPayrollPoints(points, employees)).toEqual([]);
+    employees.set("faisal", { status: "Aktif", tanggal_bergabung: "2026-11-11", tanggal_keluar: null });
+    const firstActivePoint = { employee_id: "faisal", tanggal: "2026-11-11", total: 60000 };
+    expect(filterPayrollPoints([...points, firstActivePoint], employees)).toEqual([firstActivePoint]);
+  });
   it.each([null, "2026-10-01"])("Training dikecualikan walaupun tanggal bergabung %s", (join) => {
     const employees = new Map<string, EmployeeActivity>([
       ["faisal", { status: "Training", tanggal_bergabung: join, tanggal_keluar: null }],
