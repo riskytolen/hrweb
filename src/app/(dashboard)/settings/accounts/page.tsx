@@ -151,6 +151,7 @@ const PERMISSION_SECTIONS: PermissionSection[] = [
     title: "Lainnya",
     options: [
       { key: "legalitas", label: "Legalitas" },
+      { key: "route-in-out", label: "Rekap In-Out Unit" },
       { key: "settings", label: "Pengaturan" },
     ],
   },

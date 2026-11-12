@@ -25,6 +25,7 @@ export const ROUTE_BY_PERMISSION: { permission: string; href: string }[] = [
   { permission: "inventory-aset", href: "/general-affair/inventory-aset" },
   { permission: "finance", href: "/finance" },
   { permission: "legalitas", href: "/legalitas" },
+  { permission: "route-in-out", href: "/route-in-out" },
   { permission: "purchase", href: "/purchase" },
   // Entri `tms` harus tetap lebih dulu agar role TMS lama mendarat di Live View.
   { permission: "tms", href: "/tms/live-view" },

@@ -180,6 +180,14 @@ const allSections: MenuSection[] = [
         permission: "legalitas",
       },
       {
+        kind: "link",
+        key: "route-in-out",
+        label: "Rekap In-Out Unit",
+        href: "/route-in-out",
+        icon: Clock,
+        permission: "route-in-out",
+      },
+      {
         // Purchase memakai kewenangan berbasis jabatan pegawai (diperiksa di
         // halaman + API), sehingga menu tampil untuk seluruh akun internal.
         kind: "link",
