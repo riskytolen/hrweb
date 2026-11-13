@@ -1395,6 +1395,7 @@ export default function EmployeesPage() {
               <thead>
                 <tr className="border-b border-border bg-muted/50">
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">ID</th>
+                  <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5 whitespace-nowrap">No. KTP</th>
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Nama Pegawai</th>
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">Jabatan</th>
                   <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3.5">No. Telepon</th>
@@ -1408,6 +1409,7 @@ export default function EmployeesPage() {
                   Array.from({ length: 6 }).map((_, i) => (
                     <tr key={i}>
                       <td className="px-5 py-4"><Skeleton className="h-4 w-16 rounded-md" /></td>
+                      <td className="px-5 py-4"><Skeleton className="h-4 w-36 rounded-md" /></td>
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
                           <Skeleton className="w-9 h-9 rounded-full" />
@@ -1429,6 +1431,9 @@ export default function EmployeesPage() {
                     <tr key={emp.id} className="hover:bg-muted/30">
                       <td className="px-5 py-4">
                         <span className="text-xs font-mono text-muted-foreground">{emp.id}</span>
+                      </td>
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <span className="text-xs font-mono text-muted-foreground">{emp.no_ktp || "-"}</span>
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
